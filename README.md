@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.0.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.1.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
@@ -194,6 +194,64 @@ lanxin_upstream: "https://your-api.example.com"
 │          （安全检测、路由、审计 — 通道无关）            │
 └─────────────────────────────────────────────────────┘
 ```
+
+### Bridge Mode（v3.1 长连接桥接）
+
+飞书和钉钉支持 WebSocket 长连接模式（无需公网 IP）。lobster-guard 可以主动连接平台拉取消息，安检后转为 Webhook 格式推给 Agent——**对 Agent 完全透明**。
+
+```yaml
+channel: "feishu"
+mode: "bridge"       # 加这一行，从 Webhook 切到长连接
+```
+
+```
+Webhook 模式:   平台 ──POST──► :8443 ──► 安检 ──► Agent
+Bridge 模式:    lobster-guard ══WSS══► 平台（拉消息）──► 安检 ──► POST Agent
+                                       对 Agent 来说完全一样 ↑
+```
+
+| 通道 | Webhook | Bridge | Bridge 特性 |
+|------|---------|--------|------------|
+| 🔵 蓝信 | ✅ | ❌ | 蓝信仅支持 Webhook |
+| 🟢 飞书 | ✅ | ✅ | WSS + token 自动刷新（2h）+ 事件确认 |
+| 🔷 钉钉 | ✅ | ✅ | Stream + ticket 自动获取 + ping/pong |
+| 🟠 企微 | ✅ | ❌ | 企微仅支持 Webhook |
+| ⚪ 通用 | ✅ | ❌ | — |
+
+<details>
+<summary>🟢 飞书 Bridge 配置</summary>
+
+```yaml
+channel: "feishu"
+mode: "bridge"
+feishu_app_id: "cli_xxx"
+feishu_app_secret: "xxx"
+# 无需 encrypt_key（长连接消息不加密）
+# 无需公网 IP
+```
+
+</details>
+
+<details>
+<summary>🔷 钉钉 Bridge 配置</summary>
+
+```yaml
+channel: "dingtalk"
+mode: "bridge"
+dingtalk_client_id: "xxx"
+dingtalk_client_secret: "xxx"
+# 无需 aes_key/token（Stream 模式不加密）
+# 无需公网 IP
+```
+
+</details>
+
+Bridge 特性：
+- 🔄 **自动重连** — 断线指数退避（1s → 2s → 4s → ... → 60s max）
+- 🔑 **Token 自动刷新** — 飞书 token 每 100 分钟自动刷新
+- 💓 **心跳保活** — 自动处理 ping/pong
+- 📊 **状态监控** — `/healthz` 展示连接状态、重连次数、消息计数
+- 🔀 **混合模式** — Bridge 模式下 `:8443` 仍然监听，可同时接收 Webhook
 
 ---
 
@@ -646,17 +704,19 @@ CGO_ENABLED=1 go test -v -count=1 ./...
 
 ```
 lobster-guard/
-├── main.go                 # 全部源码（~2335 行，含 5 个通道插件）
+├── main.go                 # 全部源码（~3073 行，含 5 通道插件 + Bridge Mode）
 ├── main_test.go            # 单元测试（33 用例）
 ├── integration_test.go     # 集成测试（20 用例）
 ├── dashboard.html          # 管理后台（27KB 单文件）
-├── config.yaml.example     # 配置模板（含 5 种通道示例）
+├── config.yaml.example     # 配置模板（含 5 种通道 + Bridge 示例）
+├── ROADMAP.md              # 版本迭代路线图
 ├── Makefile                # 构建和管理命令
 ├── lobster-guard.service   # Systemd 服务文件
 ├── go.mod / go.sum         # Go 依赖
 ├── docs/
 │   ├── design-v2.md        # v2.0 设计文档
 │   ├── channel-plugin-design.md  # 通道插件设计文档
+│   ├── bridge-mode-design.md     # Bridge Mode 设计文档
 │   └── screenshots/        # 截图
 └── LICENSE                 # MIT License
 ```
@@ -721,13 +781,14 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 ## 🗺️ Roadmap
 
 - [x] 多通道插件（蓝信/飞书/钉钉/企微/通用）
+- [x] Bridge Mode（飞书/钉钉 WebSocket 长连接桥接）
+- [ ] 企微 GET 验证 + 各通道集成测试补充
 - [ ] Rate limiting（请求限流）
 - [ ] Prometheus metrics 导出
-- [ ] WebSocket 支持
-- [ ] 规则引擎可视化编辑
-- [ ] 多租户隔离
 - [ ] 入站规则热更新
-- [ ] Slack / Teams 通道插件
+- [ ] 规则引擎增强（AND/OR 组合、优先级、误报反馈）
+- [ ] 多租户隔离
+- [ ] Slack / Teams / Telegram 通道插件
 
 ---
 

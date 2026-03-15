@@ -217,7 +217,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 	inbound := NewInboundProxy(cfg, channel, engine, loggerInst, pool, routes)
 	outbound, _ := NewOutboundProxy(cfg, channel, engine, outboundEngine, loggerInst)
-	mgmtAPI := NewManagementAPI(cfg, "", pool, routes, loggerInst, outboundEngine)
+	mgmtAPI := NewManagementAPI(cfg, "", pool, routes, loggerInst, outboundEngine, inbound)
 
 	return &testEnv{
 		upstream:  upstream,

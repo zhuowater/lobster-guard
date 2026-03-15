@@ -527,7 +527,10 @@ func setupMgmtAPI(t *testing.T) (*ManagementAPI, func()) {
 	routes := NewRouteTable(db, false)
 	logger, _ := NewAuditLogger(db)
 	outEngine := NewOutboundRuleEngine(nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, outEngine)
+	engine := NewRuleEngine()
+	channel := NewGenericPlugin("", "")
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, outEngine, inbound)
 	cleanup := func() { logger.Close(); db.Close(); os.Remove(tmpDB) }
 	return api, cleanup
 }

@@ -36,13 +36,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	_ "github.com/mattn/go-sqlite3"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.0.0"
+	AppVersion = "3.1.0"
 )
 
 var startTime = time.Now()
@@ -56,7 +57,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 多通道支持
+        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -67,13 +68,18 @@ func printBanner() {
 
 type Config struct {
 	Channel              string               `yaml:"channel"` // "lanxin" (default) | "feishu" | "generic"
+	Mode                 string               `yaml:"mode"`    // "webhook" (default) | "bridge"
 	CallbackKey          string               `yaml:"callbackKey"`
 	CallbackSignToken    string               `yaml:"callbackSignToken"`
 	FeishuEncryptKey        string            `yaml:"feishu_encrypt_key"`
 	FeishuVerificationToken string            `yaml:"feishu_verification_token"`
+	FeishuAppID             string            `yaml:"feishu_app_id"`
+	FeishuAppSecret         string            `yaml:"feishu_app_secret"`
 	DingtalkToken           string            `yaml:"dingtalk_token"`
 	DingtalkAesKey          string            `yaml:"dingtalk_aes_key"`
 	DingtalkCorpId          string            `yaml:"dingtalk_corp_id"`
+	DingtalkClientID        string            `yaml:"dingtalk_client_id"`
+	DingtalkClientSecret    string            `yaml:"dingtalk_client_secret"`
 	WecomToken              string            `yaml:"wecom_token"`
 	WecomEncodingAesKey     string            `yaml:"wecom_encoding_aes_key"`
 	WecomCorpId             string            `yaml:"wecom_corp_id"`
@@ -409,6 +415,28 @@ type ChannelPlugin interface {
 	ShouldAuditOutbound(path string) bool
 	BlockResponse() (int, []byte)
 	OutboundBlockResponse(reason, ruleName string) (int, []byte)
+	SupportsBridge() bool
+	NewBridgeConnector(cfg *Config) (BridgeConnector, error)
+}
+
+// ============================================================
+// Bridge Mode 接口（v3.1 长连接桥接）
+// ============================================================
+
+type BridgeStatus struct {
+	Connected    bool      `json:"connected"`
+	ConnectedAt  time.Time `json:"connected_at,omitempty"`
+	Reconnects   int       `json:"reconnects"`
+	LastError    string    `json:"last_error,omitempty"`
+	LastMessage  time.Time `json:"last_message,omitempty"`
+	MessageCount int64     `json:"message_count"`
+}
+
+type BridgeConnector interface {
+	Name() string
+	Start(ctx context.Context, onMessage func(msg InboundMessage)) error
+	Stop() error
+	Status() BridgeStatus
 }
 
 // ============================================================
@@ -558,6 +586,12 @@ func (lp *LanxinPlugin) OutboundBlockResponse(reason, ruleName string) (int, []b
 	return 403, resp
 }
 
+func (lp *LanxinPlugin) SupportsBridge() bool { return false }
+
+func (lp *LanxinPlugin) NewBridgeConnector(cfg *Config) (BridgeConnector, error) {
+	return nil, fmt.Errorf("蓝信通道不支持桥接模式")
+}
+
 // ============================================================
 // FeishuPlugin — 飞书通道插件
 // ============================================================
@@ -705,6 +739,260 @@ func (fp *FeishuPlugin) OutboundBlockResponse(reason, ruleName string) (int, []b
 	return 403, resp
 }
 
+func (fp *FeishuPlugin) SupportsBridge() bool { return true }
+
+func (fp *FeishuPlugin) NewBridgeConnector(cfg *Config) (BridgeConnector, error) {
+	if cfg.FeishuAppID == "" || cfg.FeishuAppSecret == "" {
+		return nil, fmt.Errorf("飞书桥接模式需要配置 feishu_app_id 和 feishu_app_secret")
+	}
+	return &FeishuBridge{
+		appID:     cfg.FeishuAppID,
+		appSecret: cfg.FeishuAppSecret,
+		plugin:    fp,
+	}, nil
+}
+
+// ============================================================
+// FeishuBridge — 飞书长连接桥接
+// ============================================================
+
+type FeishuBridge struct {
+	appID     string
+	appSecret string
+	conn      *websocket.Conn
+	status    BridgeStatus
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	plugin    *FeishuPlugin
+}
+
+func (fb *FeishuBridge) Name() string { return "feishu-bridge" }
+
+func (fb *FeishuBridge) Status() BridgeStatus {
+	fb.mu.RLock()
+	defer fb.mu.RUnlock()
+	return fb.status
+}
+
+func (fb *FeishuBridge) getTenantAccessToken() (string, error) {
+	body, _ := json.Marshal(map[string]string{
+		"app_id":     fb.appID,
+		"app_secret": fb.appSecret,
+	})
+	resp, err := http.Post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("获取 tenant_access_token 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
+		Expire            int    `json:"expire"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("解析 token 响应失败: %w", err)
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("获取 token 失败: code=%d msg=%s", result.Code, result.Msg)
+	}
+	return result.TenantAccessToken, nil
+}
+
+func (fb *FeishuBridge) connect(token string) (*websocket.Conn, error) {
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+	conn, _, err := dialer.Dial("wss://open.feishu.cn/callback/ws/endpoint", header)
+	if err != nil {
+		return nil, fmt.Errorf("WebSocket 连接失败: %w", err)
+	}
+	return conn, nil
+}
+
+func (fb *FeishuBridge) Start(ctx context.Context, onMessage func(msg InboundMessage)) error {
+	fb.ctx, fb.cancel = context.WithCancel(ctx)
+	backoff := time.Second
+	maxBackoff := 60 * time.Second
+
+	for {
+		select {
+		case <-fb.ctx.Done():
+			return fb.ctx.Err()
+		default:
+		}
+
+		// 获取 token
+		token, err := fb.getTenantAccessToken()
+		if err != nil {
+			log.Printf("[飞书桥接] 获取 token 失败: %v, %v 后重试", err, backoff)
+			fb.mu.Lock()
+			fb.status.LastError = err.Error()
+			fb.status.Connected = false
+			fb.mu.Unlock()
+			select {
+			case <-fb.ctx.Done():
+				return fb.ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		// 建立连接
+		conn, err := fb.connect(token)
+		if err != nil {
+			log.Printf("[飞书桥接] 连接失败: %v, %v 后重试", err, backoff)
+			fb.mu.Lock()
+			fb.status.LastError = err.Error()
+			fb.status.Connected = false
+			fb.mu.Unlock()
+			select {
+			case <-fb.ctx.Done():
+				return fb.ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		fb.mu.Lock()
+		fb.conn = conn
+		fb.status.Connected = true
+		fb.status.ConnectedAt = time.Now()
+		fb.status.LastError = ""
+		fb.mu.Unlock()
+		backoff = time.Second // 重置退避
+		log.Printf("[飞书桥接] WebSocket 连接成功")
+
+		// 设置 ping/pong
+		conn.SetPongHandler(func(appData string) error {
+			return nil
+		})
+		conn.SetPingHandler(func(appData string) error {
+			return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+		})
+
+		// Token 刷新定时器 (每 100 分钟刷新一次，token 有效期 2 小时)
+		tokenRefreshTicker := time.NewTicker(100 * time.Minute)
+
+		// 读取消息循环
+		connClosed := make(chan struct{})
+		go func() {
+			defer close(connClosed)
+			for {
+				_, message, err := conn.ReadMessage()
+				if err != nil {
+					if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+						log.Printf("[飞书桥接] 读取消息错误: %v", err)
+						fb.mu.Lock()
+						fb.status.LastError = err.Error()
+						fb.mu.Unlock()
+					}
+					return
+				}
+
+				fb.mu.Lock()
+				fb.status.LastMessage = time.Now()
+				fb.status.MessageCount++
+				fb.mu.Unlock()
+
+				// 解析飞书事件
+				var event map[string]interface{}
+				if json.Unmarshal(message, &event) != nil {
+					continue
+				}
+
+				// 发送确认
+				if header, ok := event["header"].(map[string]interface{}); ok {
+					if eventID, ok := header["event_id"].(string); ok && eventID != "" {
+						ack, _ := json.Marshal(map[string]interface{}{
+							"headers": map[string]string{"X-Request-Id": eventID},
+						})
+						conn.WriteMessage(websocket.TextMessage, ack)
+					}
+				}
+
+				// 解析为 InboundMessage（复用 FeishuPlugin 的解析逻辑）
+				msg, err := fb.plugin.ParseInbound(message)
+				if err != nil {
+					log.Printf("[飞书桥接] 解析消息失败: %v", err)
+					continue
+				}
+
+				// URL Verification 在桥接模式不需要处理
+				if msg.EventType == "url_verification" {
+					continue
+				}
+
+				onMessage(msg)
+			}
+		}()
+
+		// 等待连接断开或 context 取消
+		select {
+		case <-fb.ctx.Done():
+			tokenRefreshTicker.Stop()
+			conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			conn.Close()
+			return fb.ctx.Err()
+		case <-connClosed:
+			tokenRefreshTicker.Stop()
+			fb.mu.Lock()
+			fb.status.Connected = false
+			fb.status.Reconnects++
+			fb.mu.Unlock()
+			log.Printf("[飞书桥接] 连接断开，%v 后重连 (第 %d 次)", backoff, fb.status.Reconnects)
+			select {
+			case <-fb.ctx.Done():
+				return fb.ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		case <-tokenRefreshTicker.C:
+			// Token 即将过期，关闭当前连接以触发重连（使用新 token）
+			tokenRefreshTicker.Stop()
+			log.Printf("[飞书桥接] Token 刷新，重建连接")
+			conn.Close()
+			<-connClosed
+			fb.mu.Lock()
+			fb.status.Connected = false
+			fb.status.Reconnects++
+			fb.mu.Unlock()
+		}
+	}
+}
+
+func (fb *FeishuBridge) Stop() error {
+	if fb.cancel != nil {
+		fb.cancel()
+	}
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if fb.conn != nil {
+		fb.conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		fb.conn.Close()
+		fb.conn = nil
+	}
+	fb.status.Connected = false
+	return nil
+}
+
 // ============================================================
 // GenericPlugin — 通用 HTTP 通道插件
 // ============================================================
@@ -765,6 +1053,12 @@ func (gp *GenericPlugin) OutboundBlockResponse(reason, ruleName string) (int, []
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
+}
+
+func (gp *GenericPlugin) SupportsBridge() bool { return false }
+
+func (gp *GenericPlugin) NewBridgeConnector(cfg *Config) (BridgeConnector, error) {
+	return nil, fmt.Errorf("通用通道不支持桥接模式")
 }
 
 // ============================================================
@@ -932,6 +1226,271 @@ func (dp *DingtalkPlugin) OutboundBlockResponse(reason, ruleName string) (int, [
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
+}
+
+func (dp *DingtalkPlugin) SupportsBridge() bool { return true }
+
+func (dp *DingtalkPlugin) NewBridgeConnector(cfg *Config) (BridgeConnector, error) {
+	if cfg.DingtalkClientID == "" || cfg.DingtalkClientSecret == "" {
+		return nil, fmt.Errorf("钉钉桥接模式需要配置 dingtalk_client_id 和 dingtalk_client_secret")
+	}
+	return &DingtalkBridge{
+		clientID:     cfg.DingtalkClientID,
+		clientSecret: cfg.DingtalkClientSecret,
+		plugin:       dp,
+	}, nil
+}
+
+// ============================================================
+// DingtalkBridge — 钉钉长连接桥接
+// ============================================================
+
+type DingtalkBridge struct {
+	clientID     string
+	clientSecret string
+	conn         *websocket.Conn
+	status       BridgeStatus
+	mu           sync.RWMutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	plugin       *DingtalkPlugin
+}
+
+func (db *DingtalkBridge) Name() string { return "dingtalk-bridge" }
+
+func (db *DingtalkBridge) Status() BridgeStatus {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	return db.status
+}
+
+func (db *DingtalkBridge) getConnectionTicket() (endpoint, ticket string, err error) {
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"clientId":     db.clientID,
+		"clientSecret": db.clientSecret,
+	})
+	req, err := http.NewRequest("POST", "https://api.dingtalk.com/v1.0/gateway/connections/open",
+		bytes.NewReader(reqBody))
+	if err != nil {
+		return "", "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("获取连接票据失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Endpoint string `json:"endpoint"`
+		Ticket   string `json:"ticket"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", fmt.Errorf("解析票据响应失败: %w", err)
+	}
+	if result.Endpoint == "" || result.Ticket == "" {
+		return "", "", fmt.Errorf("票据响应为空")
+	}
+	return result.Endpoint, result.Ticket, nil
+}
+
+func (db *DingtalkBridge) connect(endpoint, ticket string) (*websocket.Conn, error) {
+	wsURL := endpoint + "?ticket=" + url.QueryEscape(ticket)
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+	conn, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("WebSocket 连接失败: %w", err)
+	}
+	return conn, nil
+}
+
+func (db *DingtalkBridge) Start(ctx context.Context, onMessage func(msg InboundMessage)) error {
+	db.ctx, db.cancel = context.WithCancel(ctx)
+	backoff := time.Second
+	maxBackoff := 60 * time.Second
+
+	for {
+		select {
+		case <-db.ctx.Done():
+			return db.ctx.Err()
+		default:
+		}
+
+		// 获取票据
+		endpoint, ticket, err := db.getConnectionTicket()
+		if err != nil {
+			log.Printf("[钉钉桥接] 获取票据失败: %v, %v 后重试", err, backoff)
+			db.mu.Lock()
+			db.status.LastError = err.Error()
+			db.status.Connected = false
+			db.mu.Unlock()
+			select {
+			case <-db.ctx.Done():
+				return db.ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		// 建立连接
+		conn, err := db.connect(endpoint, ticket)
+		if err != nil {
+			log.Printf("[钉钉桥接] 连接失败: %v, %v 后重试", err, backoff)
+			db.mu.Lock()
+			db.status.LastError = err.Error()
+			db.status.Connected = false
+			db.mu.Unlock()
+			select {
+			case <-db.ctx.Done():
+				return db.ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		db.mu.Lock()
+		db.conn = conn
+		db.status.Connected = true
+		db.status.ConnectedAt = time.Now()
+		db.status.LastError = ""
+		db.mu.Unlock()
+		backoff = time.Second // 重置退避
+		log.Printf("[钉钉桥接] WebSocket 连接成功")
+
+		// 设置 ping/pong
+		conn.SetPingHandler(func(appData string) error {
+			return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+		})
+
+		// 读取消息循环
+		connClosed := make(chan struct{})
+		go func() {
+			defer close(connClosed)
+			for {
+				_, message, err := conn.ReadMessage()
+				if err != nil {
+					if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+						log.Printf("[钉钉桥接] 读取消息错误: %v", err)
+						db.mu.Lock()
+						db.status.LastError = err.Error()
+						db.mu.Unlock()
+					}
+					return
+				}
+
+				// 解析钉钉 Stream 消息
+				var streamMsg struct {
+					SpecVersion string                 `json:"specVersion"`
+					Type        string                 `json:"type"`
+					Headers     map[string]string      `json:"headers"`
+					Data        string                 `json:"data"`
+				}
+				if json.Unmarshal(message, &streamMsg) != nil {
+					continue
+				}
+
+				// 系统心跳
+				if streamMsg.Type == "SYSTEM" {
+					if topic, ok := streamMsg.Headers["topic"]; ok && topic == "/ping" {
+						pong, _ := json.Marshal(map[string]interface{}{
+							"code":    200,
+							"headers": streamMsg.Headers,
+							"message": "pong",
+							"data":    streamMsg.Data,
+						})
+						conn.WriteMessage(websocket.TextMessage, pong)
+						continue
+					}
+				}
+
+				// 回调消息
+				if streamMsg.Type == "CALLBACK" {
+					db.mu.Lock()
+					db.status.LastMessage = time.Now()
+					db.status.MessageCount++
+					db.mu.Unlock()
+
+					// 发送确认
+					ack, _ := json.Marshal(map[string]interface{}{
+						"response": map[string]interface{}{
+							"statusCode": 200,
+							"headers":    map[string]string{},
+							"body":       "",
+						},
+					})
+					conn.WriteMessage(websocket.TextMessage, ack)
+
+					// 解析 data JSON
+					var dataBody []byte
+					if streamMsg.Data != "" {
+						dataBody = []byte(streamMsg.Data)
+					} else {
+						continue
+					}
+
+					// 使用 DingtalkPlugin 解析消息
+					msg, err := db.plugin.ParseInbound(dataBody)
+					if err != nil {
+						log.Printf("[钉钉桥接] 解析消息失败: %v", err)
+						continue
+					}
+
+					onMessage(msg)
+				}
+			}
+		}()
+
+		// 等待连接断开或 context 取消
+		select {
+		case <-db.ctx.Done():
+			conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			conn.Close()
+			return db.ctx.Err()
+		case <-connClosed:
+			db.mu.Lock()
+			db.status.Connected = false
+			db.status.Reconnects++
+			db.mu.Unlock()
+			log.Printf("[钉钉桥接] 连接断开，%v 后重连 (第 %d 次)", backoff, db.status.Reconnects)
+			select {
+			case <-db.ctx.Done():
+				return db.ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+func (db *DingtalkBridge) Stop() error {
+	if db.cancel != nil {
+		db.cancel()
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.conn != nil {
+		db.conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		db.conn.Close()
+		db.conn = nil
+	}
+	db.status.Connected = false
+	return nil
 }
 
 // ============================================================
@@ -1109,6 +1668,12 @@ func (wp *WecomPlugin) OutboundBlockResponse(reason, ruleName string) (int, []by
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
+}
+
+func (wp *WecomPlugin) SupportsBridge() bool { return false }
+
+func (wp *WecomPlugin) NewBridgeConnector(cfg *Config) (BridgeConnector, error) {
+	return nil, fmt.Errorf("企业微信通道不支持桥接模式")
 }
 
 // ============================================================
@@ -1551,16 +2116,145 @@ type InboundProxy struct {
 	timeout    time.Duration
 	whitelist  map[string]bool
 	policy     string
+	mode       string          // "webhook" | "bridge"
+	bridge     BridgeConnector // bridge 模式下非 nil
+	cfg        *Config
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable) *InboundProxy {
 	wl := make(map[string]bool)
 	for _, id := range cfg.Whitelist { wl[id] = true }
+	mode := cfg.Mode
+	if mode == "" { mode = "webhook" }
 	return &InboundProxy{
 		channel: channel, engine: engine, logger: logger, pool: pool, routes: routes,
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
-		whitelist: wl, policy: cfg.RouteDefaultPolicy,
+		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg,
 	}
+}
+
+func (ip *InboundProxy) startBridge(ctx context.Context) error {
+	bridge, err := ip.channel.NewBridgeConnector(ip.cfg)
+	if err != nil {
+		return err
+	}
+	ip.bridge = bridge
+
+	go bridge.Start(ctx, func(msg InboundMessage) {
+		start := time.Now()
+		senderID := msg.SenderID
+		msgText := msg.Text
+		rh := fmt.Sprintf("%x", sha256.Sum256(msg.Raw))
+
+		// 路由决策
+		var upstreamID string
+		if senderID != "" {
+			uid, found := ip.routes.Lookup(senderID)
+			if found {
+				if ip.pool.IsHealthy(uid) {
+					upstreamID = uid
+				} else {
+					newUID := ip.pool.SelectUpstream(ip.policy)
+					if newUID != "" && newUID != uid {
+						ip.pool.IncrUserCount(uid, -1)
+						ip.pool.IncrUserCount(newUID, 1)
+						ip.routes.Migrate(senderID, uid, newUID)
+						upstreamID = newUID
+						log.Printf("[桥接路由] 故障转移 sender=%s: %s -> %s", senderID, uid, newUID)
+					} else {
+						upstreamID = uid
+					}
+				}
+			} else {
+				upstreamID = ip.pool.SelectUpstream(ip.policy)
+				if upstreamID != "" {
+					ip.routes.Bind(senderID, upstreamID)
+					ip.pool.IncrUserCount(upstreamID, 1)
+					log.Printf("[桥接路由] 新用户绑定 sender=%s -> %s", senderID, upstreamID)
+				}
+			}
+		}
+
+		// 白名单检查
+		skipDetect := !ip.enabled || ip.whitelist[senderID] || msgText == ""
+
+		// 安检
+		var detectResult DetectResult
+		if !skipDetect {
+			ch := make(chan DetectResult, 1)
+			go func() {
+				defer func() {
+					if rv := recover(); rv != nil {
+						ch <- DetectResult{Action: "pass"}
+					}
+				}()
+				ch <- ip.engine.Detect(msgText)
+			}()
+			select {
+			case detectResult = <-ch:
+			case <-time.After(ip.timeout):
+				detectResult = DetectResult{Action: "pass", Reasons: []string{"timeout"}}
+			}
+		}
+
+		// 审计日志
+		latMs := float64(time.Since(start).Microseconds()) / 1000.0
+		reason := strings.Join(detectResult.Reasons, ",")
+		if len(detectResult.PIIs) > 0 {
+			if reason != "" {
+				reason += ","
+			}
+			reason += "pii:" + strings.Join(detectResult.PIIs, "+")
+		}
+		act := detectResult.Action
+		if act == "" {
+			act = "pass"
+		}
+		ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID)
+
+		// 拦截
+		if detectResult.Action == "block" {
+			log.Printf("[桥接入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
+			return
+		}
+		if detectResult.Action == "warn" {
+			log.Printf("[桥接入站] 告警放行 sender=%s reasons=%v", senderID, detectResult.Reasons)
+		}
+
+		// 获取上游地址
+		var targetURL string
+		func() {
+			ip.pool.mu.RLock()
+			defer ip.pool.mu.RUnlock()
+			if upstreamID != "" {
+				if up, ok := ip.pool.upstreams[upstreamID]; ok {
+					targetURL = fmt.Sprintf("http://%s:%d", up.Address, up.Port)
+				}
+			}
+			if targetURL == "" {
+				for _, up := range ip.pool.upstreams {
+					targetURL = fmt.Sprintf("http://%s:%d", up.Address, up.Port)
+					break
+				}
+			}
+		}()
+
+		if targetURL == "" {
+			log.Printf("[桥接入站] 无可用上游，丢弃消息 sender=%s", senderID)
+			return
+		}
+
+		// 构建 HTTP POST 转发
+		httpResp, err := http.Post(targetURL, "application/json", bytes.NewReader(msg.Raw))
+		if err != nil {
+			log.Printf("[桥接入站] 转发失败: %v", err)
+			return
+		}
+		defer httpResp.Body.Close()
+		io.Copy(io.Discard, httpResp.Body)
+	})
+
+	return nil
 }
 
 func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1804,13 +2498,15 @@ type ManagementAPI struct {
 	cfgPath        string
 	managementToken string
 	registrationToken string
+	inbound        *InboundProxy
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, outboundEngine *OutboundRuleEngine) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, outboundEngine *OutboundRuleEngine, inbound *InboundProxy) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger, outboundEngine: outboundEngine,
 		cfg: cfg, cfgPath: cfgPath,
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
+		inbound: inbound,
 	}
 }
 
@@ -1905,15 +2601,35 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 			"last_heartbeat": up.LastHeartbeat.Format(time.RFC3339),
 		})
 	}
-	jsonResponse(w, 200, map[string]interface{}{
+	result := map[string]interface{}{
 		"status": "healthy", "version": AppVersion,
 		"uptime": time.Since(startTime).String(),
+		"mode":   api.inbound.mode,
 		"upstreams": map[string]interface{}{
 			"total": len(upstreams), "healthy": healthyCount, "list": upstreamList,
 		},
 		"routes": map[string]interface{}{"total": api.routes.Count()},
 		"audit":  api.logger.Stats(),
-	})
+	}
+	if api.inbound.mode == "bridge" && api.inbound.bridge != nil {
+		bs := api.inbound.bridge.Status()
+		bridgeInfo := map[string]interface{}{
+			"connected":     bs.Connected,
+			"reconnects":    bs.Reconnects,
+			"message_count": bs.MessageCount,
+		}
+		if !bs.ConnectedAt.IsZero() {
+			bridgeInfo["connected_at"] = bs.ConnectedAt.Format(time.RFC3339)
+		}
+		if !bs.LastMessage.IsZero() {
+			bridgeInfo["last_message"] = bs.LastMessage.Format(time.RFC3339)
+		}
+		if bs.LastError != "" {
+			bridgeInfo["last_error"] = bs.LastError
+		}
+		result["bridge"] = bridgeInfo
+	}
+	jsonResponse(w, 200, result)
 }
 
 func (api *ManagementAPI) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -2192,10 +2908,15 @@ func main() {
 	// 配置摘要
 	channelName := cfg.Channel
 	if channelName == "" { channelName = "lanxin" }
+	modeName := cfg.Mode
+	if modeName == "" { modeName = "webhook" }
+	modeDesc := modeName
+	if modeName == "bridge" { modeDesc = "bridge (长连接)" }
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.0                   │")
+	fmt.Println("│                  配置摘要 v3.1                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
+	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
 	fmt.Printf("│ 入站监听:    %-35s│\n", cfg.InboundListen)
 	fmt.Printf("│ 出站监听:    %-35s│\n", cfg.OutboundListen)
 	fmt.Printf("│ 管理API:     %-35s│\n", cfg.ManagementListen)
@@ -2275,14 +2996,27 @@ func main() {
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
 	// 创建管理 API
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, outboundEngine)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, outboundEngine, inbound)
 
 	// 启动健康检查
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go pool.HealthCheck(ctx)
 
-	// 启动入站服务
+	// Bridge 模式启动
+	if cfg.Mode == "bridge" {
+		if !channel.SupportsBridge() {
+			log.Fatalf("[错误] %s 通道不支持 bridge 模式", channel.Name())
+		}
+		go func() {
+			if err := inbound.startBridge(ctx); err != nil && err != context.Canceled {
+				log.Fatalf("[错误] 启动桥接失败: %v", err)
+			}
+		}()
+		log.Printf("[桥接] %s 长连接桥接已启动", channel.Name())
+	}
+
+	// 启动入站服务（webhook 模式和 bridge 模式都启动，兼容混合场景）
 	inSrv := &http.Server{Addr: cfg.InboundListen, Handler: inbound,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
@@ -2312,7 +3046,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.0 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.1 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)
@@ -2322,7 +3056,10 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
-	cancel() // 停止健康检查
+	cancel() // 停止健康检查 + 桥接连接
+	if inbound.bridge != nil {
+		inbound.bridge.Stop()
+	}
 	inSrv.Shutdown(shutdownCtx)
 	outSrv.Shutdown(shutdownCtx)
 	mgmtSrv.Shutdown(shutdownCtx)
@@ -2333,3 +3070,4 @@ func main() {
 var _ = strconv.Atoi
 var _ = atomic.AddUint64
 var _ = context.Background
+var _ = websocket.DefaultDialer

@@ -10,6 +10,13 @@
 # channel: "lanxin"
 
 # ============================================================
+# 接入模式（v3.1 新增）
+# webhook: 传统 Webhook 回调（需要公网 IP，所有平台支持）
+# bridge:  长连接桥接（无需公网 IP，飞书/钉钉支持）
+# ============================================================
+# mode: "webhook"
+
+# ============================================================
 # 蓝信通道配置 (channel: lanxin)
 # ============================================================
 callbackKey: "YOUR_CALLBACK_KEY_BASE64"
@@ -21,6 +28,9 @@ callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
 # ============================================================
 # feishu_encrypt_key: "YOUR_FEISHU_ENCRYPT_KEY"
 # feishu_verification_token: "YOUR_FEISHU_VERIFICATION_TOKEN"
+# --- Bridge 模式额外配置 (mode: bridge) ---
+# feishu_app_id: "cli_YOUR_APP_ID"
+# feishu_app_secret: "YOUR_APP_SECRET"
 
 # ============================================================
 # 钉钉通道配置 (channel: dingtalk)
@@ -29,6 +39,9 @@ callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
 # dingtalk_token: "YOUR_DINGTALK_TOKEN"
 # dingtalk_aes_key: "YOUR_DINGTALK_AES_KEY"       # 43字符 base64
 # dingtalk_corp_id: "YOUR_DINGTALK_CORP_ID"
+# --- Bridge 模式额外配置 (mode: bridge) ---
+# dingtalk_client_id: "YOUR_CLIENT_ID"
+# dingtalk_client_secret: "YOUR_CLIENT_SECRET"
 
 # ============================================================
 # 企业微信通道配置 (channel: wecom)
