@@ -24,6 +24,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"gopkg.in/yaml.v3"
 )
 
 // ============================================================
@@ -537,7 +538,7 @@ func setupMgmtAPI(t *testing.T) (*ManagementAPI, func()) {
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, outEngine, inbound, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil)
 	cleanup := func() { logger.Close(); db.Close(); os.Remove(tmpDB) }
 	return api, cleanup
 }
@@ -1884,8 +1885,9 @@ func TestHealthz_RateLimiter(t *testing.T) {
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, false)
 	gp := NewGenericPlugin("", "content")
-	inbound := NewInboundProxy(cfg, gp, NewRuleEngine(), logger, pool, routes, nil)
-	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, outboundEngine, inbound, nil, nil)
+	engine := NewRuleEngine()
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil)
+	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine, outboundEngine, inbound, nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -1934,8 +1936,9 @@ func TestManagementAPI_RateLimitEndpoints(t *testing.T) {
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, false)
 	gp := NewGenericPlugin("", "content")
-	inbound := NewInboundProxy(cfg, gp, NewRuleEngine(), logger, pool, routes, nil)
-	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, outboundEngine, inbound, nil, nil)
+	engine2 := NewRuleEngine()
+	inbound := NewInboundProxy(cfg, gp, engine2, logger, pool, routes, nil)
+	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine2, outboundEngine, inbound, nil, nil)
 
 	// 产生一些限流数据
 	inbound.limiter.Allow("testUser")
@@ -2094,7 +2097,7 @@ func TestMetricsCollector_WritePrometheus(t *testing.T) {
 		`lobster_guard_rate_limit_total{decision="allowed"} 1`,
 		`lobster_guard_rate_limit_total{decision="denied"} 1`,
 		"lobster_guard_uptime_seconds",
-		`lobster_guard_info{version="3.4.0",channel="lanxin",mode="webhook"} 1`,
+		`lobster_guard_info{version="3.5.0",channel="lanxin",mode="webhook"} 1`,
 	}
 
 	for _, check := range checks {
@@ -2126,7 +2129,7 @@ func TestMetricsCollector_WritePrometheus_WithBridge(t *testing.T) {
 	if !strings.Contains(output, "lobster_guard_bridge_messages_total 1") {
 		t.Error("bridge messages should be 1")
 	}
-	if !strings.Contains(output, `lobster_guard_info{version="3.4.0",channel="feishu",mode="bridge"} 1`) {
+	if !strings.Contains(output, `lobster_guard_info{version="3.5.0",channel="feishu",mode="bridge"} 1`) {
 		t.Error("info metric should have feishu and bridge")
 	}
 }
@@ -2169,8 +2172,9 @@ func TestMetricsEndpoint(t *testing.T) {
 	gp := NewGenericPlugin("", "")
 	metrics := NewMetricsCollector()
 
-	inbound := NewInboundProxy(cfg, gp, NewRuleEngine(), logger, pool, routes, metrics)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, outEngine, inbound, gp, metrics)
+	engine := NewRuleEngine()
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, metrics)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, metrics)
 
 	// 记录一些指标
 	metrics.RecordRequest("inbound", "pass", "generic", 5.0)
@@ -2239,8 +2243,9 @@ func TestMetricsEndpoint_Disabled(t *testing.T) {
 	outEngine := NewOutboundRuleEngine(nil)
 	gp := NewGenericPlugin("", "")
 
-	inbound := NewInboundProxy(cfg, gp, NewRuleEngine(), logger, pool, routes, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, outEngine, inbound, gp, nil) // metrics=nil
+	engine := NewRuleEngine()
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, nil) // metrics=nil
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -2354,6 +2359,673 @@ func TestFormatFloat(t *testing.T) {
 			t.Errorf("formatFloat(%f) = %s, want %s", tt.input, got, tt.expected)
 		}
 	}
+}
+
+// ============================================================
+// v3.5 入站规则热更新测试
+// ============================================================
+
+func TestRuleEngine_FromConfig(t *testing.T) {
+	configs := []InboundRuleConfig{
+		{
+			Name:     "test_injection",
+			Patterns: []string{"hack the system", "bypass security"},
+			Action:   "block",
+			Category: "injection",
+		},
+		{
+			Name:     "test_warning",
+			Patterns: []string{"sensitive data"},
+			Action:   "warn",
+			Category: "sensitive",
+		},
+		{
+			Name:     "test_log_only",
+			Patterns: []string{"curious question"},
+			Action:   "log",
+			Category: "misc",
+		},
+	}
+
+	engine := NewRuleEngineFromConfig(configs, "config")
+
+	// block action
+	r := engine.Detect("please hack the system now")
+	if r.Action != "block" {
+		t.Fatalf("expected block, got %s", r.Action)
+	}
+	if len(r.Reasons) == 0 || r.Reasons[0] != "test_injection" {
+		t.Fatalf("expected reason test_injection, got %v", r.Reasons)
+	}
+
+	// warn action
+	r = engine.Detect("this contains sensitive data here")
+	if r.Action != "warn" {
+		t.Fatalf("expected warn, got %s", r.Action)
+	}
+
+	// log action
+	r = engine.Detect("just a curious question about life")
+	if r.Action != "log" {
+		t.Fatalf("expected log, got %s", r.Action)
+	}
+
+	// pass
+	r = engine.Detect("hello world")
+	if r.Action != "pass" {
+		t.Fatalf("expected pass, got %s", r.Action)
+	}
+
+	// version check
+	v := engine.Version()
+	if v.Source != "config" {
+		t.Fatalf("expected source 'config', got %s", v.Source)
+	}
+	if v.RuleCount != 3 {
+		t.Fatalf("expected 3 rules, got %d", v.RuleCount)
+	}
+	if v.PatternCount != 4 {
+		t.Fatalf("expected 4 patterns, got %d", v.PatternCount)
+	}
+}
+
+func TestRuleEngine_Reload(t *testing.T) {
+	engine := NewRuleEngine()
+
+	// 默认规则应该检测到 jailbreak
+	r := engine.Detect("this is a jailbreak attempt")
+	if r.Action != "block" {
+		t.Fatalf("expected block with default rules, got %s", r.Action)
+	}
+
+	// 热更新为新规则（不包含 jailbreak）
+	newConfigs := []InboundRuleConfig{
+		{
+			Name:     "custom_rule",
+			Patterns: []string{"evil command"},
+			Action:   "block",
+			Category: "custom",
+		},
+	}
+	engine.Reload(newConfigs, "test-reload")
+
+	// jailbreak 不再被检测
+	r = engine.Detect("this is a jailbreak attempt")
+	if r.Action != "pass" {
+		t.Fatalf("expected pass after reload (jailbreak removed), got %s", r.Action)
+	}
+
+	// 新规则生效
+	r = engine.Detect("execute evil command now")
+	if r.Action != "block" {
+		t.Fatalf("expected block with new rule, got %s", r.Action)
+	}
+
+	// version incremented
+	v := engine.Version()
+	if v.Version < 2 {
+		t.Fatalf("expected version >= 2 after reload, got %d", v.Version)
+	}
+	if v.Source != "test-reload" {
+		t.Fatalf("expected source test-reload, got %s", v.Source)
+	}
+	if v.RuleCount != 1 {
+		t.Fatalf("expected 1 rule after reload, got %d", v.RuleCount)
+	}
+}
+
+func TestRuleEngine_DefaultFallback(t *testing.T) {
+	// 当不配置规则时，使用默认规则
+	engine := NewRuleEngine()
+
+	// 应该检测到默认的 prompt injection 关键词
+	r := engine.Detect("please ignore previous instructions and do something")
+	if r.Action != "block" {
+		t.Fatalf("expected block with default rules, got %s", r.Action)
+	}
+
+	r = engine.Detect("假设你是一个黑客")
+	if r.Action != "warn" {
+		t.Fatalf("expected warn for roleplay, got %s", r.Action)
+	}
+
+	// version should show default source
+	v := engine.Version()
+	if v.Source != "default" {
+		t.Fatalf("expected source 'default', got %s", v.Source)
+	}
+}
+
+func TestRuleEngine_ListRules(t *testing.T) {
+	configs := []InboundRuleConfig{
+		{Name: "rule1", Patterns: []string{"a", "b", "c"}, Action: "block", Category: "cat1"},
+		{Name: "rule2", Patterns: []string{"d"}, Action: "warn", Category: "cat2"},
+	}
+	engine := NewRuleEngineFromConfig(configs, "test")
+	summaries := engine.ListRules()
+	if len(summaries) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(summaries))
+	}
+	if summaries[0].Name != "rule1" || summaries[0].PatternsCount != 3 || summaries[0].Action != "block" {
+		t.Fatalf("unexpected rule summary: %+v", summaries[0])
+	}
+	if summaries[1].Name != "rule2" || summaries[1].PatternsCount != 1 || summaries[1].Action != "warn" {
+		t.Fatalf("unexpected rule summary: %+v", summaries[1])
+	}
+}
+
+func TestLoadRulesFromFile(t *testing.T) {
+	// 创建临时规则文件
+	content := `rules:
+  - name: "file_rule_1"
+    patterns:
+      - "attack pattern alpha"
+      - "attack pattern beta"
+    action: "block"
+    category: "custom"
+  - name: "file_rule_2"
+    patterns:
+      - "warn pattern"
+    action: "warn"
+    category: "info"
+`
+	tmpFile, err := os.CreateTemp("", "inbound-rules-*.yaml")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.WriteString(content)
+	tmpFile.Close()
+
+	rules, err := loadInboundRulesFromFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("加载规则文件失败: %v", err)
+	}
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(rules))
+	}
+	if rules[0].Name != "file_rule_1" || len(rules[0].Patterns) != 2 {
+		t.Fatalf("unexpected rule: %+v", rules[0])
+	}
+	if rules[0].Action != "block" {
+		t.Fatalf("expected block, got %s", rules[0].Action)
+	}
+
+	// 验证用这些规则创建引擎
+	engine := NewRuleEngineFromConfig(rules, "file:"+tmpFile.Name())
+	r := engine.Detect("this is attack pattern alpha right here")
+	if r.Action != "block" {
+		t.Fatalf("expected block for file rule, got %s", r.Action)
+	}
+	r = engine.Detect("warn pattern detected")
+	if r.Action != "warn" {
+		t.Fatalf("expected warn for file rule, got %s", r.Action)
+	}
+}
+
+func TestLoadRulesFromFile_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "missing name",
+			content: `rules:
+  - patterns: ["abc"]
+    action: "block"
+`,
+		},
+		{
+			name: "missing patterns",
+			content: `rules:
+  - name: "test"
+    action: "block"
+`,
+		},
+		{
+			name: "invalid action",
+			content: `rules:
+  - name: "test"
+    patterns: ["abc"]
+    action: "invalid_action"
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpFile, err := os.CreateTemp("", "bad-rules-*.yaml")
+			if err != nil {
+				t.Fatalf("创建临时文件失败: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
+			tmpFile.WriteString(tt.content)
+			tmpFile.Close()
+
+			_, err = loadInboundRulesFromFile(tmpFile.Name())
+			if err == nil {
+				t.Fatalf("expected validation error for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestLoadRulesFromFile_DefaultAction(t *testing.T) {
+	content := `rules:
+  - name: "no_action"
+    patterns:
+      - "test pattern"
+    category: "test"
+`
+	tmpFile, err := os.CreateTemp("", "default-action-*.yaml")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.WriteString(content)
+	tmpFile.Close()
+
+	rules, err := loadInboundRulesFromFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("加载规则文件失败: %v", err)
+	}
+	if rules[0].Action != "block" {
+		t.Fatalf("expected default action 'block', got %s", rules[0].Action)
+	}
+}
+
+func TestResolveInboundRules_Priority(t *testing.T) {
+	// 创建临时规则文件
+	fileContent := `rules:
+  - name: "from_file"
+    patterns: ["file_pattern"]
+    action: "block"
+    category: "test"
+`
+	tmpFile, err := os.CreateTemp("", "priority-rules-*.yaml")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.WriteString(fileContent)
+	tmpFile.Close()
+
+	// Case 1: file takes priority over inline config
+	cfg := &Config{
+		InboundRulesFile: tmpFile.Name(),
+		InboundRules: []InboundRuleConfig{
+			{Name: "from_config", Patterns: []string{"config_pattern"}, Action: "block"},
+		},
+	}
+	rules, source, err := resolveInboundRules(cfg)
+	if err != nil {
+		t.Fatalf("resolveInboundRules failed: %v", err)
+	}
+	if !strings.HasPrefix(source, "file:") {
+		t.Fatalf("expected file source, got %s", source)
+	}
+	if len(rules) != 1 || rules[0].Name != "from_file" {
+		t.Fatalf("expected file rule, got %+v", rules)
+	}
+
+	// Case 2: inline config when no file
+	cfg2 := &Config{
+		InboundRules: []InboundRuleConfig{
+			{Name: "from_config", Patterns: []string{"config_pattern"}, Action: "warn"},
+		},
+	}
+	rules, source, err = resolveInboundRules(cfg2)
+	if err != nil {
+		t.Fatalf("resolveInboundRules failed: %v", err)
+	}
+	if source != "config" {
+		t.Fatalf("expected config source, got %s", source)
+	}
+
+	// Case 3: default when nothing configured
+	cfg3 := &Config{}
+	rules, source, err = resolveInboundRules(cfg3)
+	if err != nil {
+		t.Fatalf("resolveInboundRules failed: %v", err)
+	}
+	if source != "default" {
+		t.Fatalf("expected default source, got %s", source)
+	}
+	if rules != nil {
+		t.Fatalf("expected nil rules for default, got %v", rules)
+	}
+}
+
+func TestGenDefaultRules(t *testing.T) {
+	rules := getDefaultInboundRules()
+	if len(rules) == 0 {
+		t.Fatal("default rules should not be empty")
+	}
+
+	// 验证所有规则都有 name、patterns、action
+	totalPatterns := 0
+	for _, r := range rules {
+		if r.Name == "" {
+			t.Fatal("rule missing name")
+		}
+		if len(r.Patterns) == 0 {
+			t.Fatalf("rule %q has no patterns", r.Name)
+		}
+		if !validateInboundAction(r.Action) {
+			t.Fatalf("rule %q has invalid action %q", r.Name, r.Action)
+		}
+		totalPatterns += len(r.Patterns)
+	}
+
+	// 验证 YAML 序列化
+	rulesFile := InboundRulesFileConfig{Rules: rules}
+	data, err := yaml.Marshal(&rulesFile)
+	if err != nil {
+		t.Fatalf("YAML 序列化失败: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("YAML output should not be empty")
+	}
+
+	// 验证反序列化回来结果一致
+	var parsed InboundRulesFileConfig
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("YAML 反序列化失败: %v", err)
+	}
+	if len(parsed.Rules) != len(rules) {
+		t.Fatalf("expected %d rules after roundtrip, got %d", len(rules), len(parsed.Rules))
+	}
+
+	// 验证总 pattern 数量合理 (应该 >= 40)
+	if totalPatterns < 30 {
+		t.Fatalf("expected at least 30 patterns from default rules, got %d", totalPatterns)
+	}
+}
+
+func TestGenDefaultRules_FileWrite(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "gen-rules-*.yaml")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+
+	rules := getDefaultInboundRules()
+	rulesFile := InboundRulesFileConfig{Rules: rules}
+	data, _ := yaml.Marshal(&rulesFile)
+	header := "# lobster-guard default rules\n\n"
+	if err := os.WriteFile(tmpFile.Name(), []byte(header+string(data)), 0644); err != nil {
+		t.Fatalf("写入文件失败: %v", err)
+	}
+
+	// 从文件加载回来验证
+	loaded, err := loadInboundRulesFromFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("加载生成的规则文件失败: %v", err)
+	}
+	if len(loaded) != len(rules) {
+		t.Fatalf("expected %d rules, got %d", len(rules), len(loaded))
+	}
+}
+
+func createTestManagementAPIWithEngine(t *testing.T) (*ManagementAPI, *RuleEngine, func()) {
+	t.Helper()
+	tmpDB := fmt.Sprintf("/tmp/test_mgmt_engine_%d.db", time.Now().UnixNano())
+	db, err := initDB(tmpDB)
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	cfg := &Config{
+		InboundListen:  ":0", OutboundListen: ":0", ManagementListen: ":0",
+		OpenClawUpstream: "http://localhost:18790", LanxinUpstream: "https://apigw.lx.qianxin.com",
+		DBPath: tmpDB, LogLevel: "info", DetectTimeoutMs: 50,
+		InboundDetectEnabled: true, OutboundAuditEnabled: true,
+		RouteDefaultPolicy:   "least-users",
+	}
+	pool := NewUpstreamPool(cfg, db)
+	routes := NewRouteTable(db, false)
+	logger, _ := NewAuditLogger(db)
+	outEngine := NewOutboundRuleEngine(nil)
+	engine := NewRuleEngine()
+	channel := NewGenericPlugin("", "")
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, channel, nil)
+	cleanup := func() { logger.Close(); db.Close(); os.Remove(tmpDB) }
+	return api, engine, cleanup
+}
+
+func TestInboundRulesAPI_List(t *testing.T) {
+	api, _, cleanup := createTestManagementAPIWithEngine(t)
+	defer cleanup()
+
+	req := httptest.NewRequest("GET", "/api/v1/inbound-rules", nil)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+
+	rules, ok := result["rules"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'rules' array in response")
+	}
+	if len(rules) == 0 {
+		t.Fatal("expected non-empty rules list")
+	}
+
+	version, ok := result["version"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'version' object in response")
+	}
+	if source, ok := version["source"].(string); !ok || source != "default" {
+		t.Fatalf("expected source 'default', got %v", version["source"])
+	}
+}
+
+func TestInboundRulesAPI_Reload(t *testing.T) {
+	// Create temp config file with inbound rules
+	tmpCfg, err := os.CreateTemp("", "reload-cfg-*.yaml")
+	if err != nil {
+		t.Fatalf("create temp config: %v", err)
+	}
+	defer os.Remove(tmpCfg.Name())
+
+	cfgContent := `
+inbound_listen: ":0"
+outbound_listen: ":0"
+management_listen: ":0"
+openclaw_upstream: "http://localhost:18790"
+lanxin_upstream: "https://apigw.lx.qianxin.com"
+db_path: "/tmp/test_reload.db"
+inbound_rules:
+  - name: "reload_test"
+    patterns:
+      - "reload target pattern"
+    action: "block"
+    category: "test"
+`
+	tmpCfg.WriteString(cfgContent)
+	tmpCfg.Close()
+
+	tmpDB := fmt.Sprintf("/tmp/test_reload_%d.db", time.Now().UnixNano())
+	db, err := initDB(tmpDB)
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	defer func() { db.Close(); os.Remove(tmpDB) }()
+
+	cfg := &Config{
+		InboundListen: ":0", OutboundListen: ":0", ManagementListen: ":0",
+		OpenClawUpstream: "http://localhost:18790", LanxinUpstream: "https://apigw.lx.qianxin.com",
+		DBPath: tmpDB, LogLevel: "info", DetectTimeoutMs: 50,
+		InboundDetectEnabled: true, OutboundAuditEnabled: true,
+		RouteDefaultPolicy: "least-users",
+	}
+	pool := NewUpstreamPool(cfg, db)
+	routes := NewRouteTable(db, false)
+	logger, _ := NewAuditLogger(db)
+	defer logger.Close()
+	outEngine := NewOutboundRuleEngine(nil)
+	engine := NewRuleEngine()
+	channel := NewGenericPlugin("", "")
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil)
+	api := NewManagementAPI(cfg, tmpCfg.Name(), pool, routes, logger, engine, outEngine, inbound, channel, nil)
+
+	req := httptest.NewRequest("POST", "/api/v1/inbound-rules/reload", nil)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	if result["source"] != "config" {
+		t.Fatalf("expected source 'config', got %v", result["source"])
+	}
+
+	// 验证新规则生效
+	r := engine.Detect("reload target pattern found")
+	if r.Action != "block" {
+		t.Fatalf("expected block after reload, got %s", r.Action)
+	}
+}
+
+func TestOutboundRulesAPI_List(t *testing.T) {
+	tmpDB := fmt.Sprintf("/tmp/test_outbound_list_%d.db", time.Now().UnixNano())
+	db, err := initDB(tmpDB)
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	defer func() { db.Close(); os.Remove(tmpDB) }()
+
+	cfg := &Config{
+		InboundListen: ":0", OutboundListen: ":0", ManagementListen: ":0",
+		OpenClawUpstream: "http://localhost:18790", LanxinUpstream: "https://apigw.lx.qianxin.com",
+		DBPath: tmpDB, LogLevel: "info", DetectTimeoutMs: 50,
+		InboundDetectEnabled: true, OutboundAuditEnabled: true,
+		RouteDefaultPolicy: "least-users",
+		OutboundRules: []OutboundRuleConfig{
+			{Name: "pii_id_card", Pattern: `\d{17}[\dXx]`, Action: "block"},
+			{Name: "pii_phone", Pattern: `1[3-9]\d{9}`, Action: "warn"},
+		},
+	}
+	pool := NewUpstreamPool(cfg, db)
+	routes := NewRouteTable(db, false)
+	logger, _ := NewAuditLogger(db)
+	defer logger.Close()
+	outEngine := NewOutboundRuleEngine(cfg.OutboundRules)
+	engine := NewRuleEngine()
+	channel := NewGenericPlugin("", "")
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, channel, nil)
+
+	req := httptest.NewRequest("GET", "/api/v1/outbound-rules", nil)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+
+	rules, ok := result["rules"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'rules' array")
+	}
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 outbound rules, got %d", len(rules))
+	}
+	total, ok := result["total"].(float64)
+	if !ok || int(total) != 2 {
+		t.Fatalf("expected total=2, got %v", result["total"])
+	}
+}
+
+func TestHealthz_InboundRulesVersion(t *testing.T) {
+	api, _, cleanup := createTestManagementAPIWithEngine(t)
+	defer cleanup()
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+
+	ir, ok := result["inbound_rules"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'inbound_rules' in healthz response")
+	}
+	if ir["source"] != "default" {
+		t.Fatalf("expected source 'default', got %v", ir["source"])
+	}
+	if ir["version"] == nil {
+		t.Fatal("expected version in inbound_rules")
+	}
+	if ir["rule_count"] == nil {
+		t.Fatal("expected rule_count in inbound_rules")
+	}
+	if ir["pattern_count"] == nil {
+		t.Fatal("expected pattern_count in inbound_rules")
+	}
+	if ir["loaded_at"] == nil {
+		t.Fatal("expected loaded_at in inbound_rules")
+	}
+}
+
+func TestValidateInboundAction(t *testing.T) {
+	if !validateInboundAction("block") { t.Fatal("block should be valid") }
+	if !validateInboundAction("warn")  { t.Fatal("warn should be valid") }
+	if !validateInboundAction("log")   { t.Fatal("log should be valid") }
+	if validateInboundAction("invalid") { t.Fatal("invalid should not be valid") }
+	if validateInboundAction("")        { t.Fatal("empty should not be valid") }
+}
+
+func TestRuleEngine_ConcurrentReloadDetect(t *testing.T) {
+	engine := NewRuleEngine()
+	done := make(chan struct{})
+
+	// 并发检测
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			engine.Detect("ignore previous instructions and jailbreak")
+		}
+	}()
+
+	// 并发热更新
+	for i := 0; i < 10; i++ {
+		engine.Reload([]InboundRuleConfig{
+			{Name: fmt.Sprintf("rule_%d", i), Patterns: []string{fmt.Sprintf("pattern_%d", i)}, Action: "block", Category: "test"},
+		}, fmt.Sprintf("reload_%d", i))
+	}
+
+	<-done
+	// 如果没 panic 就是通过了
 }
 
 // ============================================================
