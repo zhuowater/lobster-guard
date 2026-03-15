@@ -1,5 +1,5 @@
 [Unit]
-Description=lobster-guard 龙虾卫士 - 安全代理网关
+Description=lobster-guard 龙虾卫士 v2.0 - AI Agent 安全网关
 Documentation=https://github.com/zhuowater/lobster-guard
 After=network.target
 Wants=network-online.target
@@ -21,8 +21,8 @@ TimeoutStopSec=10
 
 # 自动重启
 Restart=on-failure
-RestartSec=5
-StartLimitIntervalSec=60
+RestartSec=1
+StartLimitIntervalSec=30
 StartLimitBurst=5
 
 # 日志
@@ -32,6 +32,8 @@ SyslogIdentifier=lobster-guard
 
 # 环境变量
 Environment=GOTRACEBACK=crash
+Environment=GOGC=100
+Environment=GOMEMLIMIT=450MiB
 
 # 资源限制
 LimitNOFILE=65536
@@ -42,6 +44,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/lobster-guard /var/log/lobster-guard
+ReadOnlyPaths=/etc/lobster-guard
 PrivateTmp=true
 
 [Install]

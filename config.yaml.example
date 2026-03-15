@@ -1,14 +1,18 @@
-# 蓝信加解密配置（替换为你的实际值）
-callbackKey: "YOUR_CALLBACK_KEY_HERE"
-callbackSignToken: "YOUR_SIGN_TOKEN_HERE"
+# ============================================================
+# 龙虾卫士 lobster-guard v2.0 配置文件（示例）
+# ============================================================
+
+# 蓝信加解密配置
+callbackKey: "YOUR_CALLBACK_KEY_BASE64"
+callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
 
 # 入站代理：接收蓝信 Webhook，检测后转发到 OpenClaw
 inbound_listen: ":8443"
 
-# 出站代理：接收 OpenClaw 的蓝信 API 调用，审计后转发到蓝信
+# 出站代理：接收 OpenClaw 的蓝信 API 调用，检测/拦截后转发到蓝信
 outbound_listen: ":8444"
 
-# OpenClaw 上游地址
+# v1.0 兼容：单上游模式（如果没有配置 static_upstreams，则使用此地址）
 openclaw_upstream: "http://localhost:18790"
 
 # 蓝信 API 上游地址
@@ -26,5 +30,60 @@ detect_timeout_ms: 50
 # 是否启用入站检测
 inbound_detect_enabled: true
 
-# 是否启用出站审计
+# 是否启用出站审计/拦截
 outbound_audit_enabled: true
+
+# ============================================================
+# v2.0 新增配置
+# ============================================================
+
+# 管理 API
+management_listen: ":9090"
+management_token: "YOUR_MANAGEMENT_TOKEN"
+
+# 服务注册
+registration_enabled: true
+registration_token: "YOUR_REGISTRATION_TOKEN"
+heartbeat_interval_sec: 10
+heartbeat_timeout_count: 3
+
+# 路由
+route_default_policy: "least-users"    # least-users / round-robin
+route_persist: true
+
+# 出站规则（block/warn/log）
+outbound_rules:
+  - name: "pii_id_card"
+    pattern: '(?:^|\D)\d{17}[\dXx](?:\D|$)'
+    action: "block"
+  - name: "pii_bank_card"
+    pattern: '(?:^|\D)[3-6]\d{15,18}(?:\D|$)'
+    action: "block"
+  - name: "credential_apikey"
+    patterns:
+      - 'sk-[a-zA-Z0-9]{20,}'
+      - 'ghp_[a-zA-Z0-9]{36}'
+    action: "block"
+  - name: "credential_private_key"
+    patterns:
+      - '-----BEGIN .* PRIVATE KEY-----'
+    action: "block"
+  - name: "system_prompt_leak"
+    patterns:
+      - 'SOUL\.md'
+      - 'AGENTS\.md'
+      - 'MEMORY\.md'
+    action: "warn"
+  - name: "malicious_command"
+    pattern: '(rm\s+-rf\s+/|curl\s+.*\|\s*bash|wget\s+.*\|\s*sh)'
+    action: "block"
+
+# 白名单（跳过入站检测的 sender_id）
+whitelist:
+  - "YOUR_ADMIN_SENDER_ID"
+
+# 静态上游（单机模式，与动态注册并存）
+static_upstreams:
+  - id: "openclaw-local"
+    address: "127.0.0.1"
+    port: 18790
