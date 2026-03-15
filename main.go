@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -1189,6 +1190,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
 
+	// Dashboard（无需鉴权，页面内输入 Token）
+	if path == "/" || path == "/dashboard" {
+		api.handleDashboard(w, r)
+		return
+	}
+
 	// 健康检查（无需鉴权）
 	if path == "/healthz" {
 		api.handleHealthz(w, r)
@@ -1417,6 +1424,50 @@ func (api *ManagementAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats["version"] = AppVersion
 	stats["uptime"] = time.Since(startTime).String()
 	jsonResponse(w, 200, stats)
+}
+
+func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	// 尝试读取同目录下的 dashboard.html
+	htmlPath := "dashboard.html"
+	if api.cfgPath != "" {
+		if idx := strings.LastIndex(api.cfgPath, "/"); idx >= 0 {
+			htmlPath = api.cfgPath[:idx] + "/dashboard.html"
+		}
+	}
+	data, err := os.ReadFile(htmlPath)
+	if err != nil {
+		// 尝试可执行文件所在目录
+		if exe, err2 := os.Executable(); err2 == nil {
+			if idx := strings.LastIndex(exe, "/"); idx >= 0 {
+				data2, err3 := os.ReadFile(exe[:idx] + "/dashboard.html")
+				if err3 == nil { data = data2; err = nil }
+			}
+		}
+	}
+	if err != nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(200)
+		w.Write([]byte(`<!DOCTYPE html><html><head><title>🦞 Lobster Guard</title></head><body style="background:#0a0e27;color:#00d4ff;font-family:monospace;text-align:center;padding:100px"><h1>🦞 龙虾卫士 v` + AppVersion + `</h1><p>dashboard.html not found</p><p>Place dashboard.html in the same directory as the config file or executable.</p><p><a href="/healthz" style="color:#00ff88">/healthz</a></p></body></html>`))
+		return
+	}
+	// gzip 压缩（HTML 文本压缩率通常 70-80%）
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		var buf bytes.Buffer
+		gz, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		gz.Write(data)
+		gz.Close()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.WriteHeader(200)
+		w.Write(buf.Bytes())
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(200)
+	w.Write(data)
 }
 
 // ============================================================
