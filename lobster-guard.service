@@ -1,0 +1,48 @@
+[Unit]
+Description=lobster-guard 龙虾卫士 - 安全代理网关
+Documentation=https://github.com/zhuowater/lobster-guard
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# 工作目录
+WorkingDirectory=/etc/lobster-guard
+
+# 启动命令
+ExecStart=/usr/local/bin/lobster-guard -config /etc/lobster-guard/config.yaml
+
+# 优雅停止
+ExecStop=/bin/kill -SIGTERM $MAINPID
+TimeoutStopSec=10
+
+# 自动重启
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lobster-guard
+
+# 环境变量
+Environment=GOTRACEBACK=crash
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lobster-guard /var/log/lobster-guard
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

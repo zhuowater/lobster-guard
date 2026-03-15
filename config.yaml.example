@@ -1,0 +1,30 @@
+# 蓝信加解密配置（替换为你的实际值）
+callbackKey: "YOUR_CALLBACK_KEY_HERE"
+callbackSignToken: "YOUR_SIGN_TOKEN_HERE"
+
+# 入站代理：接收蓝信 Webhook，检测后转发到 OpenClaw
+inbound_listen: ":8443"
+
+# 出站代理：接收 OpenClaw 的蓝信 API 调用，审计后转发到蓝信
+outbound_listen: ":8444"
+
+# OpenClaw 上游地址
+openclaw_upstream: "http://localhost:18790"
+
+# 蓝信 API 上游地址
+lanxin_upstream: "https://apigw.lx.qianxin.com"
+
+# 审计日志数据库路径
+db_path: "/var/lib/lobster-guard/audit.db"
+
+# 日志级别: debug, info, warn, error
+log_level: "info"
+
+# 检测超时（毫秒），超时则 fail-open 放行
+detect_timeout_ms: 50
+
+# 是否启用入站检测
+inbound_detect_enabled: true
+
+# 是否启用出站审计
+outbound_audit_enabled: true

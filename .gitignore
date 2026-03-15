@@ -1,0 +1,25 @@
+# 二进制
+lobster-guard
+*.exe
+
+# 数据库
+*.db
+*.db-wal
+*.db-shm
+
+# TLS 证书（绝不提交）
+tls/
+*.pem
+*.key
+*.crt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+config.yaml
