@@ -79,16 +79,21 @@
         入站检测 | 出站拦截 | 亲和路由 | 多通道插件 | Bridge Mode
 
 ┌─────────────────────────────────────────────────┐
-│                  配置摘要 v2.0                   │
+│                  配置摘要 v3.6                   │
 ├─────────────────────────────────────────────────┤
+│ 消息通道:    lanxin                             │
+│ 接入模式:    webhook                            │
 │ 入站监听:    :8443                              │
 │ 出站监听:    :8444                              │
 │ 管理API:     :9090                              │
 │ 入站检测:    true                               │
 │ 出站审计:    true                               │
-│ 路由策略:    least-users                        │
-│ 静态上游:    3                                  │
+│ 入站规则:    40 patterns (内置默认)              │
 │ 出站规则:    6                                  │
+│ 路由策略:    least-users                        │
+│ 限流:        100 rps (全局) / 5 rps (每用户)    │
+│ Metrics:     :9090/metrics (Prometheus)          │
+│ 静态上游:    3                                  │
 │ 检测超时:    50ms                               │
 └─────────────────────────────────────────────────┘
 ```
@@ -633,7 +638,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY main.go ./
-RUN CGO_ENABLED=1 go build -o lobster-guard .
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o lobster-guard .
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
@@ -743,8 +748,9 @@ lobster-guard/
 |------|------|
 | `github.com/mattn/go-sqlite3` | SQLite 驱动 |
 | `gopkg.in/yaml.v3` | YAML 配置解析 |
+| `github.com/gorilla/websocket` | WebSocket（Bridge Mode 长连接）|
 
-仅两个外部依赖，其余全部使用 Go 标准库。
+仅三个外部依赖，其余全部使用 Go 标准库。
 
 ---
 
@@ -771,40 +777,74 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `callbackKey` | string | - | 蓝信回调加密密钥（必填） |
-| `callbackSignToken` | string | - | 蓝信回调签名令牌（必填） |
+| **通道** | | | |
+| `channel` | string | `lanxin` | 消息通道：lanxin / feishu / dingtalk / wecom / generic |
+| `mode` | string | `webhook` | 接入模式：webhook / bridge |
+| `callbackKey` | string | - | 蓝信回调加密密钥 |
+| `callbackSignToken` | string | - | 蓝信回调签名令牌 |
+| `feishu_encrypt_key` | string | - | 飞书 Encrypt Key |
+| `feishu_verification_token` | string | - | 飞书 Verification Token |
+| `feishu_app_id` | string | - | 飞书 App ID（Bridge 模式）|
+| `feishu_app_secret` | string | - | 飞书 App Secret（Bridge 模式）|
+| `dingtalk_token` | string | - | 钉钉 Token |
+| `dingtalk_aes_key` | string | - | 钉钉 AES Key（43 字符 base64）|
+| `dingtalk_client_id` | string | - | 钉钉 Client ID（Bridge 模式）|
+| `dingtalk_client_secret` | string | - | 钉钉 Client Secret（Bridge 模式）|
+| `wecom_token` | string | - | 企微 Token |
+| `wecom_encoding_aes_key` | string | - | 企微 Encoding AES Key |
+| `wecom_corp_id` | string | - | 企微 Corp ID |
+| **代理** | | | |
 | `inbound_listen` | string | `:8443` | 入站代理监听 |
 | `outbound_listen` | string | `:8444` | 出站代理监听 |
-| `management_listen` | string | `:9090` | 管理 API + Dashboard |
-| `openclaw_upstream` | string | - | OpenClaw 上游地址（单机模式） |
-| `lanxin_upstream` | string | - | 蓝信 API 地址 |
+| `openclaw_upstream` | string | - | AI Agent 上游地址（单机模式）|
+| `lanxin_upstream` | string | - | 消息平台 API 上游地址 |
+| `management_listen` | string | `:9090` | 管理 API + Dashboard + Metrics |
 | `management_token` | string | - | 管理 API Token |
-| `registration_token` | string | - | 容器注册 Token |
-| `db_path` | string | `./audit.db` | SQLite 数据库路径 |
-| `detect_timeout_ms` | int | `50` | 检测超时（毫秒） |
+| **检测** | | | |
 | `inbound_detect_enabled` | bool | `true` | 启用入站检测 |
 | `outbound_audit_enabled` | bool | `true` | 启用出站审计 |
-| `route_default_policy` | string | `least-users` | 路由策略 |
+| `detect_timeout_ms` | int | `50` | 检测超时（毫秒）|
+| `db_path` | string | `./audit.db` | SQLite 数据库路径 |
+| `inbound_rules_file` | string | - | 入站规则 YAML 文件路径 |
+| `inbound_rules` | list | `[]` | 入站规则（内联配置）|
+| `outbound_rules` | list | `[]` | 出站检测规则 |
+| `whitelist` | list | `[]` | 入站白名单（sender_id）|
+| **路由** | | | |
+| `route_default_policy` | string | `least-users` | 路由策略：least-users / round-robin |
 | `route_persist` | bool | `true` | 路由持久化到 SQLite |
+| `static_upstreams` | list | `[]` | 静态上游列表 |
+| **注册** | | | |
+| `registration_enabled` | bool | `true` | 启用容器自动注册 |
+| `registration_token` | string | - | 容器注册 Token |
 | `heartbeat_interval_sec` | int | `10` | 心跳间隔 |
 | `heartbeat_timeout_count` | int | `3` | 心跳超时次数 |
-| `static_upstreams` | list | `[]` | 静态上游列表 |
-| `outbound_rules` | list | `[]` | 出站检测规则 |
-| `whitelist` | list | `[]` | 入站白名单 |
+| **限流** | | | |
+| `rate_limit.global_rps` | float | `0` | 全局 QPS 限制（0=不限）|
+| `rate_limit.global_burst` | int | `0` | 全局突发容量 |
+| `rate_limit.per_sender_rps` | float | `0` | 每用户 QPS 限制（0=不限）|
+| `rate_limit.per_sender_burst` | int | `0` | 每用户突发容量 |
+| `rate_limit.exempt_senders` | list | `[]` | 限流白名单 |
+| **Metrics** | | | |
+| `metrics_enabled` | bool | `true` | 启用 Prometheus /metrics |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] 多通道插件（蓝信/飞书/钉钉/企微/通用）
-- [x] Bridge Mode（飞书/钉钉 WebSocket 长连接桥接）
-- [ ] 企微 GET 验证 + 各通道集成测试补充
-- [ ] Rate limiting（请求限流）
-- [ ] Prometheus metrics 导出
-- [ ] 入站规则热更新
-- [ ] 规则引擎增强（AND/OR 组合、优先级、误报反馈）
-- [ ] 多租户隔离
+- [x] v2.0 — 出站 block/warn/log 三级策略 + 用户亲和路由 + 管理 Dashboard
+- [x] v3.0 — 多通道插件（蓝信/飞书/钉钉/企微/通用HTTP）
+- [x] v3.1 — Bridge Mode（飞书/钉钉 WebSocket 长连接，无需公网 IP）
+- [x] v3.2 — 企微 GET 验证 + 健壮性增强（panic recovery / body 限制 / 超时保护）
+- [x] v3.3 — Rate Limiting（令牌桶 + 全局/每用户限流 + 白名单）
+- [x] v3.4 — Prometheus Metrics（13 指标族，零依赖手工生成）
+- [x] v3.5 — 入站规则热更新（外部 YAML + AC 自动机在线重建）
+- [x] v3.6 — 规则引擎增强（优先级权重 + 自定义拦截消息 + 命中率统计）
+- [ ] v4.0 — 多租户隔离（不同 app 走不同规则集）
+- [ ] v4.1 — WebSocket 代理（Agent 实时对话场景）
+- [ ] v4.2 — 高可用（多实例 active-active + PostgreSQL）
 - [ ] Slack / Teams / Telegram 通道插件
+- [ ] 基于 LLM 的语义级攻击检测
+- [ ] 审计日志导出（CSV/JSON/S3）
 
 ---
 
