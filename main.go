@@ -1,5 +1,6 @@
-// lobster-guard - 高性能安全代理网关 v2.0
+// lobster-guard - 高性能安全代理网关 v3.0
 // 支持入站检测拦截、出站内容检测/拦截、用户ID亲和路由、服务自动注册
+// 支持多消息通道: 蓝信(lanxin)、飞书(feishu)、钉钉(dingtalk)、企微(wecom)、通用HTTP(generic)
 package main
 
 import (
@@ -8,12 +9,14 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"io"
@@ -39,7 +42,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "2.0.0"
+	AppVersion = "3.0.0"
 )
 
 var startTime = time.Now()
@@ -53,7 +56,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 服务注册
+        入站检测 | 出站拦截 | 亲和路由 | 多通道支持
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -63,8 +66,19 @@ func printBanner() {
 // ============================================================
 
 type Config struct {
+	Channel              string               `yaml:"channel"` // "lanxin" (default) | "feishu" | "generic"
 	CallbackKey          string               `yaml:"callbackKey"`
 	CallbackSignToken    string               `yaml:"callbackSignToken"`
+	FeishuEncryptKey        string            `yaml:"feishu_encrypt_key"`
+	FeishuVerificationToken string            `yaml:"feishu_verification_token"`
+	DingtalkToken           string            `yaml:"dingtalk_token"`
+	DingtalkAesKey          string            `yaml:"dingtalk_aes_key"`
+	DingtalkCorpId          string            `yaml:"dingtalk_corp_id"`
+	WecomToken              string            `yaml:"wecom_token"`
+	WecomEncodingAesKey     string            `yaml:"wecom_encoding_aes_key"`
+	WecomCorpId             string            `yaml:"wecom_corp_id"`
+	GenericSenderHeader  string               `yaml:"generic_sender_header"`
+	GenericTextField     string               `yaml:"generic_text_field"`
 	InboundListen        string               `yaml:"inbound_listen"`
 	OutboundListen       string               `yaml:"outbound_listen"`
 	OpenClawUpstream     string               `yaml:"openclaw_upstream"`
@@ -378,6 +392,26 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 }
 
 // ============================================================
+// Channel Plugin 接口（v3.0 消息通道抽象）
+// ============================================================
+
+type InboundMessage struct {
+	Text      string
+	SenderID  string
+	EventType string
+	Raw       []byte
+}
+
+type ChannelPlugin interface {
+	Name() string
+	ParseInbound(body []byte) (InboundMessage, error)
+	ExtractOutbound(path string, body []byte) (string, bool)
+	ShouldAuditOutbound(path string) bool
+	BlockResponse() (int, []byte)
+	OutboundBlockResponse(reason, ruleName string) (int, []byte)
+}
+
+// ============================================================
 // 蓝信加解密
 // ============================================================
 
@@ -452,6 +486,629 @@ func extractMessageText(data []byte) (text, senderID, eventType string) {
 	}
 	if c, ok := msg["content"].(string); ok { text = c }
 	return
+}
+
+// ============================================================
+// LanxinPlugin — 蓝信通道插件
+// ============================================================
+
+type LanxinPlugin struct {
+	crypto *LanxinCrypto
+}
+
+func NewLanxinPlugin(crypto *LanxinCrypto) *LanxinPlugin {
+	return &LanxinPlugin{crypto: crypto}
+}
+
+func (lp *LanxinPlugin) Name() string { return "lanxin" }
+
+func (lp *LanxinPlugin) ParseInbound(body []byte) (InboundMessage, error) {
+	var wb LanxinWebhookBody
+	if err := json.Unmarshal(body, &wb); err != nil || wb.DataEncrypt == "" {
+		return InboundMessage{}, fmt.Errorf("非蓝信 webhook 格式")
+	}
+	if !lp.crypto.VerifySignature(&wb) {
+		return InboundMessage{}, fmt.Errorf("签名验证失败")
+	}
+	dec, err := lp.crypto.Decrypt(wb.DataEncrypt)
+	if err != nil {
+		return InboundMessage{}, fmt.Errorf("解密失败: %w", err)
+	}
+	text, senderID, eventType := extractMessageText(dec)
+	return InboundMessage{Text: text, SenderID: senderID, EventType: eventType, Raw: dec}, nil
+}
+
+var lanxinAuditPaths = map[string]bool{
+	"/v1/bot/messages/create": true,
+	"/v1/bot/sendGroupMsg":    true,
+	"/v1/bot/sendPrivateMsg":  true,
+}
+
+func (lp *LanxinPlugin) ShouldAuditOutbound(path string) bool {
+	return lanxinAuditPaths[path]
+}
+
+func (lp *LanxinPlugin) ExtractOutbound(path string, body []byte) (string, bool) {
+	var msg map[string]interface{}
+	if json.Unmarshal(body, &msg) != nil {
+		return string(body), true
+	}
+	if md, ok := msg["msgData"].(map[string]interface{}); ok {
+		if to, ok := md["text"].(map[string]interface{}); ok {
+			if c, ok := to["content"].(string); ok {
+				return c, true
+			}
+		}
+	}
+	if c, ok := msg["content"].(string); ok {
+		return c, true
+	}
+	return string(body), true
+}
+
+func (lp *LanxinPlugin) BlockResponse() (int, []byte) {
+	return 200, []byte(`{"errcode":0,"errmsg":"ok"}`)
+}
+
+func (lp *LanxinPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 403, "errmsg": "Message blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+// ============================================================
+// FeishuPlugin — 飞书通道插件
+// ============================================================
+
+type FeishuPlugin struct {
+	encryptKey        []byte
+	verificationToken string
+}
+
+func NewFeishuPlugin(encryptKey, verificationToken string) *FeishuPlugin {
+	return &FeishuPlugin{
+		encryptKey:        []byte(encryptKey),
+		verificationToken: verificationToken,
+	}
+}
+
+func (fp *FeishuPlugin) Name() string { return "feishu" }
+
+func (fp *FeishuPlugin) feishuDecrypt(encrypted string) ([]byte, error) {
+	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return nil, fmt.Errorf("base64 解码失败: %w", err)
+	}
+	if len(ciphertext) < aes.BlockSize {
+		return nil, fmt.Errorf("密文过短")
+	}
+	keyHash := sha256.Sum256(fp.encryptKey)
+	key := keyHash[:32]
+	iv := ciphertext[:aes.BlockSize]
+	ciphertext = ciphertext[aes.BlockSize:]
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("密文长度不合法")
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("AES 失败: %w", err)
+	}
+	plaintext := make([]byte, len(ciphertext))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plaintext, ciphertext)
+	// PKCS7 unpadding
+	if n := len(plaintext); n > 0 {
+		pad := int(plaintext[n-1])
+		if pad > 0 && pad <= aes.BlockSize && pad <= n {
+			ok := true
+			for i := n - pad; i < n; i++ {
+				if plaintext[i] != byte(pad) { ok = false; break }
+			}
+			if ok { plaintext = plaintext[:n-pad] }
+		}
+	}
+	return plaintext, nil
+}
+
+func (fp *FeishuPlugin) ParseInbound(body []byte) (InboundMessage, error) {
+	// 尝试解密
+	var encBody struct {
+		Encrypt string `json:"encrypt"`
+	}
+	var plainBody []byte
+	if json.Unmarshal(body, &encBody) == nil && encBody.Encrypt != "" {
+		dec, err := fp.feishuDecrypt(encBody.Encrypt)
+		if err != nil {
+			return InboundMessage{}, fmt.Errorf("飞书解密失败: %w", err)
+		}
+		plainBody = dec
+	} else {
+		plainBody = body
+	}
+
+	// 解析 JSON
+	var msg map[string]interface{}
+	if err := json.Unmarshal(plainBody, &msg); err != nil {
+		return InboundMessage{}, fmt.Errorf("JSON 解析失败: %w", err)
+	}
+
+	// URL Verification
+	if tp, ok := msg["type"].(string); ok && tp == "url_verification" {
+		challenge, _ := msg["challenge"].(string)
+		resp, _ := json.Marshal(map[string]string{"challenge": challenge})
+		return InboundMessage{EventType: "url_verification", Raw: resp}, nil
+	}
+
+	// 提取消息
+	var text, senderID, eventType string
+	if header, ok := msg["header"].(map[string]interface{}); ok {
+		if et, ok := header["event_type"].(string); ok {
+			eventType = et
+		}
+	}
+	if event, ok := msg["event"].(map[string]interface{}); ok {
+		// 提取发送者
+		if sender, ok := event["sender"].(map[string]interface{}); ok {
+			if senderIdMap, ok := sender["sender_id"].(map[string]interface{}); ok {
+				if openID, ok := senderIdMap["open_id"].(string); ok {
+					senderID = openID
+				}
+			}
+		}
+		// 提取消息文本
+		if message, ok := event["message"].(map[string]interface{}); ok {
+			if content, ok := message["content"].(string); ok {
+				var contentObj map[string]interface{}
+				if json.Unmarshal([]byte(content), &contentObj) == nil {
+					if t, ok := contentObj["text"].(string); ok {
+						text = t
+					}
+				}
+			}
+		}
+	}
+
+	return InboundMessage{Text: text, SenderID: senderID, EventType: eventType, Raw: plainBody}, nil
+}
+
+func (fp *FeishuPlugin) ShouldAuditOutbound(path string) bool {
+	return strings.HasPrefix(path, "/open-apis/im/v1/messages")
+}
+
+func (fp *FeishuPlugin) ExtractOutbound(path string, body []byte) (string, bool) {
+	var msg map[string]interface{}
+	if json.Unmarshal(body, &msg) != nil {
+		return string(body), true
+	}
+	if content, ok := msg["content"].(string); ok {
+		var contentObj map[string]interface{}
+		if json.Unmarshal([]byte(content), &contentObj) == nil {
+			if t, ok := contentObj["text"].(string); ok {
+				return t, true
+			}
+		}
+		return content, true
+	}
+	return string(body), true
+}
+
+func (fp *FeishuPlugin) BlockResponse() (int, []byte) {
+	return 200, []byte(`{"code":0,"msg":"ok"}`)
+}
+
+func (fp *FeishuPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
+	resp, _ := json.Marshal(map[string]interface{}{
+		"code": 403, "msg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+// ============================================================
+// GenericPlugin — 通用 HTTP 通道插件
+// ============================================================
+
+type GenericPlugin struct {
+	senderHeader string
+	textField    string
+}
+
+func NewGenericPlugin(senderHeader, textField string) *GenericPlugin {
+	if senderHeader == "" {
+		senderHeader = "X-Sender-Id"
+	}
+	if textField == "" {
+		textField = "content"
+	}
+	return &GenericPlugin{senderHeader: senderHeader, textField: textField}
+}
+
+func (gp *GenericPlugin) Name() string { return "generic" }
+
+func (gp *GenericPlugin) ParseInbound(body []byte) (InboundMessage, error) {
+	var msg map[string]interface{}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		return InboundMessage{}, fmt.Errorf("JSON 解析失败: %w", err)
+	}
+	text, _ := msg[gp.textField].(string)
+	senderID, _ := msg["sender_id"].(string)
+	if senderID == "" {
+		senderID, _ = msg["sender"].(string)
+	}
+	eventType, _ := msg["event_type"].(string)
+	return InboundMessage{Text: text, SenderID: senderID, EventType: eventType, Raw: body}, nil
+}
+
+func (gp *GenericPlugin) ShouldAuditOutbound(path string) bool {
+	return true // 通用插件审计所有路径
+}
+
+func (gp *GenericPlugin) ExtractOutbound(path string, body []byte) (string, bool) {
+	var msg map[string]interface{}
+	if json.Unmarshal(body, &msg) != nil {
+		return string(body), true
+	}
+	if text, ok := msg[gp.textField].(string); ok {
+		return text, true
+	}
+	return string(body), true
+}
+
+func (gp *GenericPlugin) BlockResponse() (int, []byte) {
+	return 200, []byte(`{"code":0,"msg":"ok"}`)
+}
+
+func (gp *GenericPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
+	resp, _ := json.Marshal(map[string]interface{}{
+		"code": 403, "msg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+// ============================================================
+// DingtalkPlugin — 钉钉通道插件
+// ============================================================
+
+type DingtalkPlugin struct {
+	token  string
+	aesKey []byte
+	corpId string
+}
+
+func NewDingtalkPlugin(token, aesKeyBase64, corpId string) *DingtalkPlugin {
+	var aesKey []byte
+	if aesKeyBase64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(aesKeyBase64 + "=")
+		if err == nil && len(decoded) >= 32 {
+			aesKey = decoded[:32]
+		}
+	}
+	return &DingtalkPlugin{token: token, aesKey: aesKey, corpId: corpId}
+}
+
+func (dp *DingtalkPlugin) Name() string { return "dingtalk" }
+
+func (dp *DingtalkPlugin) dingtalkVerifySign(timestamp, sign string) bool {
+	if dp.token == "" || timestamp == "" {
+		return true // 未配置 token 则跳过签名校验
+	}
+	stringToSign := timestamp + "\n" + dp.token
+	mac := hmac.New(sha256.New, []byte(dp.token))
+	mac.Write([]byte(stringToSign))
+	expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	return sign == expected
+}
+
+func (dp *DingtalkPlugin) dingtalkDecrypt(encrypted string) ([]byte, error) {
+	if dp.aesKey == nil {
+		return nil, fmt.Errorf("钉钉 AES key 未配置")
+	}
+	ct, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return nil, fmt.Errorf("base64 解码失败: %w", err)
+	}
+	if len(ct) < aes.BlockSize || len(ct)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("密文长度不合法")
+	}
+	block, err := aes.NewCipher(dp.aesKey)
+	if err != nil {
+		return nil, fmt.Errorf("AES 失败: %w", err)
+	}
+	iv := dp.aesKey[:16]
+	pt := make([]byte, len(ct))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(pt, ct)
+	// PKCS7 unpadding
+	if n := len(pt); n > 0 {
+		pad := int(pt[n-1])
+		if pad > 0 && pad <= aes.BlockSize && pad <= n {
+			ok := true
+			for i := n - pad; i < n; i++ {
+				if pt[i] != byte(pad) { ok = false; break }
+			}
+			if ok { pt = pt[:n-pad] }
+		}
+	}
+	// 明文格式: random(16) + msg_len(4) + msg + corpId
+	if len(pt) < 20 {
+		return nil, fmt.Errorf("数据过短: %d", len(pt))
+	}
+	msgLen := binary.BigEndian.Uint32(pt[16:20])
+	if int(msgLen) > len(pt)-20 {
+		return nil, fmt.Errorf("消息长度不合法")
+	}
+	return pt[20 : 20+msgLen], nil
+}
+
+func (dp *DingtalkPlugin) ParseInbound(body []byte) (InboundMessage, error) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return InboundMessage{}, fmt.Errorf("JSON 解析失败: %w", err)
+	}
+
+	// 尝试解密（如果有 encrypt 字段）
+	var plainBody []byte
+	if encrypted, ok := raw["encrypt"].(string); ok && encrypted != "" {
+		dec, err := dp.dingtalkDecrypt(encrypted)
+		if err != nil {
+			return InboundMessage{}, fmt.Errorf("钉钉解密失败: %w", err)
+		}
+		plainBody = dec
+		// 重新解析
+		raw = nil
+		if json.Unmarshal(plainBody, &raw) != nil {
+			return InboundMessage{}, fmt.Errorf("解密后 JSON 解析失败")
+		}
+	} else {
+		plainBody = body
+	}
+
+	// 提取消息
+	var text, senderID, eventType string
+
+	// msgtype 字段
+	if mt, ok := raw["msgtype"].(string); ok {
+		eventType = mt
+	}
+
+	// 发送者
+	if sid, ok := raw["senderStaffId"].(string); ok {
+		senderID = sid
+	} else if sid, ok := raw["senderId"].(string); ok {
+		senderID = sid
+	}
+
+	// 文本提取
+	if textObj, ok := raw["text"].(map[string]interface{}); ok {
+		if c, ok := textObj["content"].(string); ok {
+			text = strings.TrimSpace(c)
+		}
+	}
+
+	return InboundMessage{Text: text, SenderID: senderID, EventType: eventType, Raw: plainBody}, nil
+}
+
+var dingtalkAuditPaths = map[string]bool{
+	"/robot/send": true,
+	"/topapi/message/corpconversation/asyncsend_v2": true,
+	"/v1.0/robot/oToMessages/batchSend":             true,
+}
+
+func (dp *DingtalkPlugin) ShouldAuditOutbound(path string) bool {
+	return dingtalkAuditPaths[path]
+}
+
+func (dp *DingtalkPlugin) ExtractOutbound(path string, body []byte) (string, bool) {
+	var msg map[string]interface{}
+	if json.Unmarshal(body, &msg) != nil {
+		return string(body), true
+	}
+	// text.content
+	if textObj, ok := msg["text"].(map[string]interface{}); ok {
+		if c, ok := textObj["content"].(string); ok {
+			return c, true
+		}
+	}
+	// markdown.text
+	if mdObj, ok := msg["markdown"].(map[string]interface{}); ok {
+		if t, ok := mdObj["text"].(string); ok {
+			return t, true
+		}
+	}
+	if c, ok := msg["content"].(string); ok {
+		return c, true
+	}
+	return string(body), true
+}
+
+func (dp *DingtalkPlugin) BlockResponse() (int, []byte) {
+	return 200, []byte(`{"errcode":0,"errmsg":"ok"}`)
+}
+
+func (dp *DingtalkPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 403, "errmsg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+// ============================================================
+// WecomPlugin — 企业微信通道插件
+// ============================================================
+
+type WecomPlugin struct {
+	token          string
+	encodingAesKey []byte
+	corpId         string
+}
+
+func NewWecomPlugin(token, encodingAesKeyBase64, corpId string) *WecomPlugin {
+	var aesKey []byte
+	if encodingAesKeyBase64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(encodingAesKeyBase64 + "=")
+		if err == nil && len(decoded) >= 32 {
+			aesKey = decoded[:32]
+		}
+	}
+	return &WecomPlugin{token: token, encodingAesKey: aesKey, corpId: corpId}
+}
+
+func (wp *WecomPlugin) Name() string { return "wecom" }
+
+// wecomVerifySignature: SHA1(sort(token, timestamp, nonce, encrypt_msg))
+func (wp *WecomPlugin) wecomVerifySignature(signature, timestamp, nonce, encryptMsg string) bool {
+	if wp.token == "" {
+		return true // 未配置 token 则跳过
+	}
+	parts := []string{wp.token, timestamp, nonce, encryptMsg}
+	sort.Strings(parts)
+	h := sha1.Sum([]byte(strings.Join(parts, "")))
+	return fmt.Sprintf("%x", h) == signature
+}
+
+func (wp *WecomPlugin) wecomDecrypt(encrypted string) ([]byte, error) {
+	if wp.encodingAesKey == nil {
+		return nil, fmt.Errorf("企微 AES key 未配置")
+	}
+	ct, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return nil, fmt.Errorf("base64 解码失败: %w", err)
+	}
+	if len(ct) < aes.BlockSize || len(ct)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("密文长度不合法")
+	}
+	block, err := aes.NewCipher(wp.encodingAesKey)
+	if err != nil {
+		return nil, fmt.Errorf("AES 失败: %w", err)
+	}
+	iv := wp.encodingAesKey[:16]
+	pt := make([]byte, len(ct))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(pt, ct)
+	// PKCS7 unpadding
+	if n := len(pt); n > 0 {
+		pad := int(pt[n-1])
+		if pad > 0 && pad <= aes.BlockSize && pad <= n {
+			ok := true
+			for i := n - pad; i < n; i++ {
+				if pt[i] != byte(pad) { ok = false; break }
+			}
+			if ok { pt = pt[:n-pad] }
+		}
+	}
+	// 明文格式: random(16) + msg_len(4) + msg + corp_id
+	if len(pt) < 20 {
+		return nil, fmt.Errorf("数据过短: %d", len(pt))
+	}
+	msgLen := binary.BigEndian.Uint32(pt[16:20])
+	if int(msgLen) > len(pt)-20 {
+		return nil, fmt.Errorf("消息长度不合法")
+	}
+	return pt[20 : 20+msgLen], nil
+}
+
+// wecomXMLEncrypt 用于解析企微入站的 XML 信封
+type wecomXMLEncrypt struct {
+	XMLName    xml.Name `xml:"xml"`
+	Encrypt    string   `xml:"Encrypt"`
+	ToUserName string   `xml:"ToUserName"`
+	AgentID    string   `xml:"AgentID"`
+}
+
+// wecomXMLMessage 用于解析企微解密后的消息 XML
+type wecomXMLMessage struct {
+	XMLName      xml.Name `xml:"xml"`
+	ToUserName   string   `xml:"ToUserName"`
+	FromUserName string   `xml:"FromUserName"`
+	CreateTime   int64    `xml:"CreateTime"`
+	MsgType      string   `xml:"MsgType"`
+	Content      string   `xml:"Content"`
+	MsgId        int64    `xml:"MsgId"`
+	AgentID      int64    `xml:"AgentID"`
+}
+
+func (wp *WecomPlugin) ParseInbound(body []byte) (InboundMessage, error) {
+	// 企微入站是 XML 格式
+	var envelope wecomXMLEncrypt
+	if err := xml.Unmarshal(body, &envelope); err != nil {
+		// 回退：尝试 JSON 格式（某些测试场景）
+		var jsonBody map[string]interface{}
+		if json.Unmarshal(body, &jsonBody) == nil {
+			text, _ := jsonBody["content"].(string)
+			sender, _ := jsonBody["from_user"].(string)
+			return InboundMessage{Text: text, SenderID: sender, EventType: "text", Raw: body}, nil
+		}
+		return InboundMessage{}, fmt.Errorf("XML 解析失败: %w", err)
+	}
+
+	if envelope.Encrypt == "" {
+		return InboundMessage{}, fmt.Errorf("空加密消息")
+	}
+
+	// 解密
+	dec, err := wp.wecomDecrypt(envelope.Encrypt)
+	if err != nil {
+		return InboundMessage{}, fmt.Errorf("企微解密失败: %w", err)
+	}
+
+	// 解析消息 XML
+	var msg wecomXMLMessage
+	if err := xml.Unmarshal(dec, &msg); err != nil {
+		return InboundMessage{}, fmt.Errorf("消息 XML 解析失败: %w", err)
+	}
+
+	return InboundMessage{
+		Text:      msg.Content,
+		SenderID:  msg.FromUserName,
+		EventType: msg.MsgType,
+		Raw:       dec,
+	}, nil
+}
+
+var wecomAuditPaths = map[string]bool{
+	"/cgi-bin/message/send":          true,
+	"/cgi-bin/appchat/send":          true,
+	"/cgi-bin/message/send_markdown": true,
+}
+
+func (wp *WecomPlugin) ShouldAuditOutbound(path string) bool {
+	return wecomAuditPaths[path]
+}
+
+func (wp *WecomPlugin) ExtractOutbound(path string, body []byte) (string, bool) {
+	var msg map[string]interface{}
+	if json.Unmarshal(body, &msg) != nil {
+		return string(body), true
+	}
+	// text.content
+	if textObj, ok := msg["text"].(map[string]interface{}); ok {
+		if c, ok := textObj["content"].(string); ok {
+			return c, true
+		}
+	}
+	// markdown.content
+	if mdObj, ok := msg["markdown"].(map[string]interface{}); ok {
+		if c, ok := mdObj["content"].(string); ok {
+			return c, true
+		}
+	}
+	if c, ok := msg["content"].(string); ok {
+		return c, true
+	}
+	return string(body), true
+}
+
+func (wp *WecomPlugin) BlockResponse() (int, []byte) {
+	return 200, []byte("success")
+}
+
+func (wp *WecomPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 403, "errmsg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
 }
 
 // ============================================================
@@ -885,7 +1542,7 @@ func (al *AuditLogger) Stats() map[string]interface{} {
 // ============================================================
 
 type InboundProxy struct {
-	crypto     *LanxinCrypto
+	channel    ChannelPlugin
 	engine     *RuleEngine
 	logger     *AuditLogger
 	pool       *UpstreamPool
@@ -896,11 +1553,11 @@ type InboundProxy struct {
 	policy     string
 }
 
-func NewInboundProxy(cfg *Config, crypto *LanxinCrypto, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable) *InboundProxy {
+func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable) *InboundProxy {
 	wl := make(map[string]bool)
 	for _, id := range cfg.Whitelist { wl[id] = true }
 	return &InboundProxy{
-		crypto: crypto, engine: engine, logger: logger, pool: pool, routes: routes,
+		channel: channel, engine: engine, logger: logger, pool: pool, routes: routes,
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
 		whitelist: wl, policy: cfg.RouteDefaultPolicy,
 	}
@@ -928,23 +1585,26 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	rh := fmt.Sprintf("%x", sha256.Sum256(body))
 
-	// 解密并提取消息内容
+	// 使用通道插件解析入站消息
 	var msgText, senderID, eventType string
 	var decryptOK bool
 	func() {
 		defer func() { recover() }()
-		var wb LanxinWebhookBody
-		if json.Unmarshal(body, &wb) != nil || wb.DataEncrypt == "" { return }
-		if !ip.crypto.VerifySignature(&wb) {
-			log.Printf("[入站] 签名验证失败，fail-open")
-			return
-		}
-		dec, err := ip.crypto.Decrypt(wb.DataEncrypt)
+		msg, err := ip.channel.ParseInbound(body)
 		if err != nil {
-			log.Printf("[入站] 解密失败: %v", err)
+			log.Printf("[入站] 解析失败: %v，fail-open", err)
 			return
 		}
-		msgText, senderID, eventType = extractMessageText(dec)
+		// 飞书 URL Verification 特殊处理
+		if msg.EventType == "url_verification" && msg.Raw != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			w.Write(msg.Raw)
+			return
+		}
+		msgText = msg.Text
+		senderID = msg.SenderID
+		eventType = msg.EventType
 		decryptOK = true
 	}()
 
@@ -1023,9 +1683,10 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 执行决策
 	if detectResult.Action == "block" {
 		log.Printf("[入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
+		code, respBody := ip.channel.BlockResponse()
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+		w.WriteHeader(code)
+		w.Write(respBody)
 		return
 	}
 	if detectResult.Action == "warn" {
@@ -1038,16 +1699,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
-// 出站代理 v2.0
+// 出站代理 v3.0
 // ============================================================
 
-var auditPaths = map[string]bool{
-	"/v1/bot/messages/create": true,
-	"/v1/bot/sendGroupMsg":    true,
-	"/v1/bot/sendPrivateMsg":  true,
-}
-
 type OutboundProxy struct {
+	channel        ChannelPlugin
 	inboundEngine  *RuleEngine
 	outboundEngine *OutboundRuleEngine
 	logger         *AuditLogger
@@ -1055,7 +1711,7 @@ type OutboundProxy struct {
 	enabled        bool
 }
 
-func NewOutboundProxy(cfg *Config, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger) (*OutboundProxy, error) {
+func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger) (*OutboundProxy, error) {
 	up, err := url.Parse(cfg.LanxinUpstream)
 	if err != nil { return nil, err }
 	p := httputil.NewSingleHostReverseProxy(up)
@@ -1072,14 +1728,14 @@ func NewOutboundProxy(cfg *Config, inboundEngine *RuleEngine, outboundEngine *Ou
 		w.Write([]byte(`{"errcode":502,"errmsg":"lanxin api unavailable"}`))
 	}
 	return &OutboundProxy{
-		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
+		channel: channel, inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		logger: logger, proxy: p, enabled: cfg.OutboundAuditEnabled,
 	}, nil
 }
 
 func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	if !op.enabled || !auditPaths[r.URL.Path] {
+	if !op.enabled || !op.channel.ShouldAuditOutbound(r.URL.Path) {
 		op.proxy.ServeHTTP(w, r)
 		return
 	}
@@ -1088,19 +1744,12 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil { op.proxy.ServeHTTP(w, r); return }
 	rh := fmt.Sprintf("%x", sha256.Sum256(body))
 
-	// 提取出站消息文本
+	// 使用通道插件提取出站消息文本
 	var text string
 	func() {
 		defer func() { recover() }()
-		var msg map[string]interface{}
-		if json.Unmarshal(body, &msg) != nil { return }
-		if md, ok := msg["msgData"].(map[string]interface{}); ok {
-			if to, ok := md["text"].(map[string]interface{}); ok {
-				if c, ok := to["content"].(string); ok { text = c; return }
-			}
-		}
-		if c, ok := msg["content"].(string); ok { text = c; return }
-		text = string(body)
+		t, ok := op.channel.ExtractOutbound(r.URL.Path, body)
+		if ok { text = t }
 	}()
 
 	// 出站规则检测
@@ -1116,13 +1765,10 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "block":
 		log.Printf("[出站] 拦截 path=%s rule=%s", r.URL.Path, result.RuleName)
 		op.logger.Log("outbound", "", "block", result.Reason, pv, rh, latMs, upstreamID)
+		code, respBody := op.channel.OutboundBlockResponse(result.Reason, result.RuleName)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(403)
-		resp, _ := json.Marshal(map[string]interface{}{
-			"errcode": 403, "errmsg": "Message blocked by security policy",
-			"detail": result.Reason, "rule": result.RuleName,
-		})
-		w.Write(resp)
+		w.WriteHeader(code)
+		w.Write(respBody)
 		return
 	case "warn":
 		log.Printf("[出站] 告警放行 path=%s rule=%s", r.URL.Path, result.RuleName)
@@ -1544,9 +2190,12 @@ func main() {
 	if err != nil { log.Fatalf("加载配置失败: %v", err) }
 
 	// 配置摘要
+	channelName := cfg.Channel
+	if channelName == "" { channelName = "lanxin" }
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v2.0                   │")
+	fmt.Println("│                  配置摘要 v3.0                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
+	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 入站监听:    %-35s│\n", cfg.InboundListen)
 	fmt.Printf("│ 出站监听:    %-35s│\n", cfg.OutboundListen)
 	fmt.Printf("│ 管理API:     %-35s│\n", cfg.ManagementListen)
@@ -1562,10 +2211,27 @@ func main() {
 	fmt.Printf("│ 检测超时:    %-35s│\n", fmt.Sprintf("%dms", cfg.DetectTimeoutMs))
 	fmt.Println("└─────────────────────────────────────────────────┘")
 
-	// 初始化加解密
-	crypto, err := NewLanxinCrypto(cfg.CallbackKey, cfg.CallbackSignToken)
-	if err != nil { log.Fatalf("初始化加解密失败: %v", err) }
-	log.Println("[初始化] 蓝信加解密引擎就绪")
+	// 初始化通道插件
+	var channel ChannelPlugin
+	switch cfg.Channel {
+	case "feishu":
+		channel = NewFeishuPlugin(cfg.FeishuEncryptKey, cfg.FeishuVerificationToken)
+		log.Printf("[初始化] 飞书通道插件就绪")
+	case "dingtalk":
+		channel = NewDingtalkPlugin(cfg.DingtalkToken, cfg.DingtalkAesKey, cfg.DingtalkCorpId)
+		log.Printf("[初始化] 钉钉通道插件就绪")
+	case "wecom":
+		channel = NewWecomPlugin(cfg.WecomToken, cfg.WecomEncodingAesKey, cfg.WecomCorpId)
+		log.Printf("[初始化] 企业微信通道插件就绪")
+	case "generic":
+		channel = NewGenericPlugin(cfg.GenericSenderHeader, cfg.GenericTextField)
+		log.Printf("[初始化] 通用HTTP通道插件就绪")
+	default: // "lanxin" 或空
+		crypto, err := NewLanxinCrypto(cfg.CallbackKey, cfg.CallbackSignToken)
+		if err != nil { log.Fatalf("初始化蓝信加解密失败: %v", err) }
+		channel = NewLanxinPlugin(crypto)
+		log.Printf("[初始化] 蓝信通道插件就绪")
+	}
 
 	// 初始化入站规则引擎
 	engine := NewRuleEngine()
@@ -1602,10 +2268,10 @@ func main() {
 	}
 
 	// 创建入站代理
-	inbound := NewInboundProxy(cfg, crypto, engine, logger, pool, routes)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes)
 
 	// 创建出站代理
-	outbound, err := NewOutboundProxy(cfg, engine, outboundEngine, logger)
+	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
 	// 创建管理 API
@@ -1646,7 +2312,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v2.0 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.0 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)

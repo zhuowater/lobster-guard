@@ -1,22 +1,73 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v2.0 配置文件（示例）
+# 龙虾卫士 lobster-guard v3.0 配置文件（示例）
 # ============================================================
 
-# 蓝信加解密配置
+# ============================================================
+# 消息通道选择（v3.0 新增）
+# 支持: lanxin | feishu | dingtalk | wecom | generic
+# 不配置则默认 lanxin（向后兼容）
+# ============================================================
+# channel: "lanxin"
+
+# ============================================================
+# 蓝信通道配置 (channel: lanxin)
+# ============================================================
 callbackKey: "YOUR_CALLBACK_KEY_BASE64"
 callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
 
-# 入站代理：接收蓝信 Webhook，检测后转发到 OpenClaw
+# ============================================================
+# 飞书通道配置 (channel: feishu)
+# 从飞书开放平台 → 应用 → 事件订阅 获取
+# ============================================================
+# feishu_encrypt_key: "YOUR_FEISHU_ENCRYPT_KEY"
+# feishu_verification_token: "YOUR_FEISHU_VERIFICATION_TOKEN"
+
+# ============================================================
+# 钉钉通道配置 (channel: dingtalk)
+# 从钉钉开放平台 → 应用 → 事件订阅 获取
+# ============================================================
+# dingtalk_token: "YOUR_DINGTALK_TOKEN"
+# dingtalk_aes_key: "YOUR_DINGTALK_AES_KEY"       # 43字符 base64
+# dingtalk_corp_id: "YOUR_DINGTALK_CORP_ID"
+
+# ============================================================
+# 企业微信通道配置 (channel: wecom)
+# 从企业微信管理后台 → 应用 → 接收消息 获取
+# ============================================================
+# wecom_token: "YOUR_WECOM_TOKEN"
+# wecom_encoding_aes_key: "YOUR_WECOM_ENCODING_AES_KEY"  # 43字符 base64
+# wecom_corp_id: "YOUR_WECOM_CORP_ID"
+
+# ============================================================
+# 通用HTTP通道配置 (channel: generic)
+# 适用于自定义 webhook 对接，无加密
+# ============================================================
+# generic_sender_header: "X-Sender-Id"    # 从哪个 header 取发送者ID
+# generic_text_field: "content"            # 从 body JSON 的哪个字段取文本
+
+# ============================================================
+# 代理配置（通用）
+# ============================================================
+
+# 入站代理：接收消息平台 Webhook，检测后转发到 AI Agent
 inbound_listen: ":8443"
 
-# 出站代理：接收 OpenClaw 的蓝信 API 调用，检测/拦截后转发到蓝信
+# 出站代理：接收 AI Agent 的 API 调用，检测后转发到消息平台
 outbound_listen: ":8444"
 
-# v1.0 兼容：单上游模式（如果没有配置 static_upstreams，则使用此地址）
+# 消息平台 API 上游地址（出站代理转发目标）
+# 蓝信:    https://apigw.lx.qianxin.com
+# 飞书:    https://open.feishu.cn
+# 钉钉:    https://oapi.dingtalk.com
+# 企微:    https://qyapi.weixin.qq.com
+lanxin_upstream: "https://apigw.lx.qianxin.com"
+
+# AI Agent 上游地址（v1.0 兼容：单上游模式）
 openclaw_upstream: "http://localhost:18790"
 
-# 蓝信 API 上游地址
-lanxin_upstream: "https://apigw.lx.qianxin.com"
+# ============================================================
+# 安全检测
+# ============================================================
 
 # 审计日志数据库路径
 db_path: "/var/lib/lobster-guard/audit.db"
@@ -34,55 +85,73 @@ inbound_detect_enabled: true
 outbound_audit_enabled: true
 
 # ============================================================
-# v2.0 新增配置
+# 管理 API + Dashboard
 # ============================================================
-
-# 管理 API
 management_listen: ":9090"
 management_token: "YOUR_MANAGEMENT_TOKEN"
 
-# 服务注册
+# ============================================================
+# 服务注册（多容器负载均衡）
+# ============================================================
 registration_enabled: true
 registration_token: "YOUR_REGISTRATION_TOKEN"
 heartbeat_interval_sec: 10
 heartbeat_timeout_count: 3
 
-# 路由
-route_default_policy: "least-users"    # least-users / round-robin
+# ============================================================
+# 路由策略
+# ============================================================
+route_default_policy: "least-users"    # least-users | round-robin
 route_persist: true
 
-# 出站规则（block/warn/log）
+# ============================================================
+# 出站规则（block/warn/log 三级策略）
+# ============================================================
 outbound_rules:
+  # PII 泄露
   - name: "pii_id_card"
     pattern: '(?:^|\D)\d{17}[\dXx](?:\D|$)'
     action: "block"
+
   - name: "pii_bank_card"
     pattern: '(?:^|\D)[3-6]\d{15,18}(?:\D|$)'
     action: "block"
+
+  # 凭据泄露
   - name: "credential_apikey"
     patterns:
       - 'sk-[a-zA-Z0-9]{20,}'
       - 'ghp_[a-zA-Z0-9]{36}'
+      - 'AKIA[0-9A-Z]{16}'
     action: "block"
+
   - name: "credential_private_key"
     patterns:
       - '-----BEGIN .* PRIVATE KEY-----'
     action: "block"
+
+  # 系统提示词泄露
   - name: "system_prompt_leak"
     patterns:
       - 'SOUL\.md'
       - 'AGENTS\.md'
       - 'MEMORY\.md'
     action: "warn"
+
+  # 恶意命令
   - name: "malicious_command"
     pattern: '(rm\s+-rf\s+/|curl\s+.*\|\s*bash|wget\s+.*\|\s*sh)'
     action: "block"
 
+# ============================================================
 # 白名单（跳过入站检测的 sender_id）
+# ============================================================
 whitelist:
   - "YOUR_ADMIN_SENDER_ID"
 
-# 静态上游（单机模式，与动态注册并存）
+# ============================================================
+# 静态上游（多容器模式）
+# ============================================================
 static_upstreams:
   - id: "openclaw-local"
     address: "127.0.0.1"

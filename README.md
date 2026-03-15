@@ -11,10 +11,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.0.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
+  <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
 
@@ -26,7 +27,7 @@
 
 ## 🎯 这是什么
 
-**lobster-guard** 是一个轻量级安全代理网关，专为 AI Agent（如 [OpenClaw](https://github.com/openclaw/openclaw)）设计。它部署在蓝信等消息平台与 AI Agent 之间，提供双向安全检测、智能路由和全量审计。
+**lobster-guard** 是一个轻量级安全代理网关，专为 AI Agent（如 [OpenClaw](https://github.com/openclaw/openclaw)）设计。它部署在消息平台与 AI Agent 之间，提供双向安全检测、智能路由和全量审计。**支持蓝信、飞书、钉钉、企业微信等 5 种消息通道，通过插件机制一行配置切换。**
 
 **一句话：用户的消息进来之前先安检，Agent 的回复出去之前再安检。**
 
@@ -40,6 +41,7 @@
 | 📦 **服务注册** | 容器启动自动注册，心跳保活，故障自动转移 |
 | 📊 **全量审计** | SQLite 持久化每一条请求的检测结果、延迟和路由决策 |
 | 🖥️ **管理后台** | 内置 Web Dashboard，深色科技主题，实时监控 |
+| 🔌 **多通道插件** | 蓝信/飞书/钉钉/企微/通用HTTP，一行配置切换 |
 
 ### 🏗️ 设计哲学
 
@@ -73,8 +75,8 @@
  | |_| (_) | |_) \__ \ ||  __/ | |_____| (_| | |_| | (_| | |  | |_
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
-        龙虾卫士 - AI Agent 安全网关 v2.0.0
-        入站检测 | 出站拦截 | 亲和路由 | 服务注册
+        龙虾卫士 - AI Agent 安全网关 v3.0.0
+        入站检测 | 出站拦截 | 亲和路由 | 多通道插件
 
 ┌─────────────────────────────────────────────────┐
 │                  配置摘要 v2.0                   │
@@ -93,6 +95,108 @@
 
 ---
 
+## 🔌 多通道支持（v3.0）
+
+通过 Channel Plugin 机制，一行配置切换消息平台：
+
+```yaml
+channel: "feishu"    # lanxin | feishu | dingtalk | wecom | generic
+```
+
+| 通道 | 入站加密 | 消息格式 | 出站审计路径 | 状态 |
+|------|---------|---------|------------|------|
+| 🔵 **蓝信** (LanXin) | AES-256-CBC + SHA1 签名 | JSON | `/v1/bot/messages/create` | ✅ 生产可用 |
+| 🟢 **飞书** (Feishu/Lark) | AES-256-CBC + SHA256 签名 | JSON + URL Verification | `/open-apis/im/v1/messages` | ✅ 已实现 |
+| 🔷 **钉钉** (DingTalk) | AES-256-CBC + HMAC-SHA256 | JSON | `/robot/send` | ✅ 已实现 |
+| 🟠 **企业微信** (WeCom) | AES-256-CBC + SHA1 签名 | **XML** 入站 / JSON 出站 | `/cgi-bin/message/send` | ✅ 已实现 |
+| ⚪ **通用 HTTP** (Generic) | 无加密 | JSON（字段可配置） | 所有 POST | ✅ 已实现 |
+
+### 配置示例
+
+<details>
+<summary>🔵 蓝信（默认，向后兼容）</summary>
+
+```yaml
+# channel: "lanxin"    # 可省略，默认就是蓝信
+callbackKey: "YOUR_CALLBACK_KEY_BASE64"
+callbackSignToken: "YOUR_SIGN_TOKEN"
+lanxin_upstream: "https://apigw.lx.qianxin.com"
+```
+
+</details>
+
+<details>
+<summary>🟢 飞书</summary>
+
+```yaml
+channel: "feishu"
+feishu_encrypt_key: "YOUR_ENCRYPT_KEY"
+feishu_verification_token: "YOUR_VERIFICATION_TOKEN"
+lanxin_upstream: "https://open.feishu.cn"     # 出站转发到飞书 API
+```
+
+飞书 URL Verification 自动处理：收到 `{"type":"url_verification","challenge":"xxx"}` 时自动返回 challenge。
+
+</details>
+
+<details>
+<summary>🔷 钉钉</summary>
+
+```yaml
+channel: "dingtalk"
+dingtalk_token: "YOUR_TOKEN"
+dingtalk_aes_key: "YOUR_AES_KEY_43CHARS"      # 43 字符 base64
+dingtalk_corp_id: "YOUR_CORP_ID"
+lanxin_upstream: "https://oapi.dingtalk.com"
+```
+
+</details>
+
+<details>
+<summary>🟠 企业微信</summary>
+
+```yaml
+channel: "wecom"
+wecom_token: "YOUR_TOKEN"
+wecom_encoding_aes_key: "YOUR_ENCODING_AES_KEY_43CHARS"
+wecom_corp_id: "YOUR_CORP_ID"
+lanxin_upstream: "https://qyapi.weixin.qq.com"
+```
+
+注意：企微入站是 XML 格式，lobster-guard 自动处理 XML↔JSON 转换。
+
+</details>
+
+<details>
+<summary>⚪ 通用 HTTP（自定义 webhook）</summary>
+
+```yaml
+channel: "generic"
+generic_sender_header: "X-Sender-Id"   # 从 HTTP header 取发送者 ID
+generic_text_field: "content"           # 从 JSON body 的哪个字段取消息文本
+lanxin_upstream: "https://your-api.example.com"
+```
+
+适用于自建消息系统或其他未内置支持的平台。
+
+</details>
+
+### 插件架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  ChannelPlugin 接口                   │
+├──────────┬──────────┬──────────┬──────────┬──────────┤
+│ 🔵 蓝信  │ 🟢 飞书  │ 🔷 钉钉  │ 🟠 企微  │ ⚪ 通用  │
+│ AES+SHA1 │ AES+SHA2 │ AES+HMAC │ AES+XML  │ 明文JSON │
+├──────────┴──────────┴──────────┴──────────┴──────────┤
+│              InboundProxy / OutboundProxy             │
+│          （安全检测、路由、审计 — 通道无关）            │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 🏛️ 架构
 
 ```
@@ -100,9 +204,12 @@
                         │         lobster-guard 🦞             │
                         │                                      │
                         │  ┌──────────┐    ┌──────────────┐    │
- 蓝信/消息平台 ────────────►│ :8443    │───►│ 入站规则引擎  │    │
-   (Webhook)            │  │ 入站代理  │    │ AC自动机+正则 │    │
-                        │  └────┬─────┘    └──────────────┘    │
+ 消息平台 ─────────────────►│ :8443    │───►│ 入站规则引擎  │    │
+ (蓝信/飞书/钉钉/企微)  │  │ 入站代理  │    │ AC自动机+正则 │    │
+                        │  │          │    │              │    │
+                        │  │ Channel  │    └──────────────┘    │
+                        │  │ Plugin   │                        │
+                        │  └────┬─────┘                        │
                         │       │                              │
                         │       ▼                              │
                         │  ┌──────────┐    ┌──────────────┐    │
@@ -539,16 +646,17 @@ CGO_ENABLED=1 go test -v -count=1 ./...
 
 ```
 lobster-guard/
-├── main.go                 # 全部源码（~1650 行）
+├── main.go                 # 全部源码（~2335 行，含 5 个通道插件）
 ├── main_test.go            # 单元测试（33 用例）
 ├── integration_test.go     # 集成测试（20 用例）
 ├── dashboard.html          # 管理后台（27KB 单文件）
-├── config.yaml.example     # 配置模板
+├── config.yaml.example     # 配置模板（含 5 种通道示例）
 ├── Makefile                # 构建和管理命令
 ├── lobster-guard.service   # Systemd 服务文件
 ├── go.mod / go.sum         # Go 依赖
 ├── docs/
-│   ├── design-v2.md        # 设计文档（17 章，79KB）
+│   ├── design-v2.md        # v2.0 设计文档
+│   ├── channel-plugin-design.md  # 通道插件设计文档
 │   └── screenshots/        # 截图
 └── LICENSE                 # MIT License
 ```
@@ -612,12 +720,14 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 ## 🗺️ Roadmap
 
+- [x] 多通道插件（蓝信/飞书/钉钉/企微/通用）
 - [ ] Rate limiting（请求限流）
 - [ ] Prometheus metrics 导出
 - [ ] WebSocket 支持
 - [ ] 规则引擎可视化编辑
 - [ ] 多租户隔离
 - [ ] 入站规则热更新
+- [ ] Slack / Teams 通道插件
 
 ---
 

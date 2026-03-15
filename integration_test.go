@@ -202,6 +202,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("初始化加密失败: %v", err)
 	}
+	channel := NewLanxinPlugin(crypto)
 
 	db, err := initDB(dbPath)
 	if err != nil {
@@ -214,8 +215,8 @@ func setupTestEnv(t *testing.T) *testEnv {
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, true)
 
-	inbound := NewInboundProxy(cfg, crypto, engine, loggerInst, pool, routes)
-	outbound, _ := NewOutboundProxy(cfg, engine, outboundEngine, loggerInst)
+	inbound := NewInboundProxy(cfg, channel, engine, loggerInst, pool, routes)
+	outbound, _ := NewOutboundProxy(cfg, channel, engine, outboundEngine, loggerInst)
 	mgmtAPI := NewManagementAPI(cfg, "", pool, routes, loggerInst, outboundEngine)
 
 	return &testEnv{
@@ -710,6 +711,7 @@ func TestInboundNoUpstream(t *testing.T) {
 	}
 
 	crypto, _ := NewLanxinCrypto(cfg.CallbackKey, cfg.CallbackSignToken)
+	channel := NewLanxinPlugin(crypto)
 	db, _ := initDB(dbPath)
 	defer db.Close()
 	engine := NewRuleEngine()
@@ -718,7 +720,7 @@ func TestInboundNoUpstream(t *testing.T) {
 	pool := NewUpstreamPool(cfg, nil) // 无上游
 	routes := NewRouteTable(nil, false)
 
-	inbound := NewInboundProxy(cfg, crypto, engine, logger, pool, routes)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes)
 
 	body := buildEncryptedWebhook("user-no-upstream", "你好")
 	req := httptest.NewRequest("POST", "/lxappbot", bytes.NewReader(body))
