@@ -98,10 +98,23 @@ inbound_detect_enabled: true
 outbound_audit_enabled: true
 
 # ============================================================
-# 管理 API + Dashboard
+# 管理 API + Dashboard + Metrics
 # ============================================================
 management_listen: ":9090"
 management_token: "YOUR_MANAGEMENT_TOKEN"
+# metrics_enabled: true       # Prometheus /metrics 端点（默认启用）
+
+# ============================================================
+# 限流（v3.3+）
+# 不配置或 rps=0 表示不启用限流
+# ============================================================
+# rate_limit:
+#   global_rps: 100          # 全局每秒最多 100 个请求
+#   global_burst: 200        # 突发允许 200 个
+#   per_sender_rps: 5        # 每用户每秒最多 5 个请求
+#   per_sender_burst: 10     # 每用户突发允许 10 个
+#   exempt_senders:          # 白名单用户（不限流）
+#     - "admin-sender-id"
 
 # ============================================================
 # 服务注册（多容器负载均衡）
@@ -118,6 +131,20 @@ route_default_policy: "least-users"    # least-users | round-robin
 route_persist: true
 
 # ============================================================
+# 入站规则（v3.5+）
+# 不配置则使用内置默认规则（40+ Prompt Injection 检测模式）
+# 运行 ./lobster-guard -gen-rules rules.yaml 可导出默认规则
+# ============================================================
+# inbound_rules_file: "/etc/lobster-guard/inbound-rules.yaml"
+# inbound_rules:
+#   - name: "custom_block"
+#     patterns: ["恶意关键词1", "恶意关键词2"]
+#     action: "block"
+#     priority: 100              # 优先级（数字越大越优先，默认0）
+#     message: "自定义拦截提示"    # 可选，为空则用默认提示
+#     category: "custom"
+
+# ============================================================
 # 出站规则（block/warn/log 三级策略）
 # ============================================================
 outbound_rules:
@@ -125,10 +152,13 @@ outbound_rules:
   - name: "pii_id_card"
     pattern: '(?:^|\D)\d{17}[\dXx](?:\D|$)'
     action: "block"
+    priority: 100
+    message: "消息中包含身份证号，已被安全策略拦截。"
 
   - name: "pii_bank_card"
     pattern: '(?:^|\D)[3-6]\d{15,18}(?:\D|$)'
     action: "block"
+    priority: 100
 
   # 凭据泄露
   - name: "credential_apikey"
