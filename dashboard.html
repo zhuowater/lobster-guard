@@ -285,12 +285,16 @@ function esc(s) {
 }
 
 /* ========== 1. System Health ========== */
+/* /healthz 返回: { status, version, uptime: "1m30s", upstreams: {total, healthy, list}, routes: {total}, audit: {total, breakdown} } */
 function loadHealth() {
   api('/healthz').then(function(d) {
     document.getElementById('bannerVersion').textContent = 'v' + (d.version || '2.0');
-    document.getElementById('bannerUptime').textContent = '\u8fd0\u884c\u65f6\u95f4: ' + fmtDur(d.uptime_seconds);
+    document.getElementById('bannerUptime').textContent = '\u8fd0\u884c\u65f6\u95f4: ' + (d.uptime || '--');
 
-    var tot = d.total_upstreams || 0, hp = d.healthy_upstreams || 0;
+    var ups = d.upstreams || {};
+    var tot = ups.total || 0, hp = ups.healthy || 0;
+    var routeTotal = (d.routes && d.routes.total) || 0;
+    var auditTotal = (d.audit && d.audit.total) || 0;
     var pct = tot > 0 ? Math.round(hp / tot * 100) : 100;
     var C = 2 * Math.PI * 40, off = C - pct / 100 * C;
     var rc = pct >= 80 ? 'var(--neon-green)' : (pct >= 50 ? 'var(--neon-yellow)' : 'var(--neon-red)');
@@ -304,11 +308,11 @@ function loadHealth() {
       + '</svg><span class="ring-label" style="color:' + rc + '">' + pct + '%</span></div>'
       + '<div class="status-info">'
       + '<div class="status-row"><span class="status-key">\u7248\u672c</span><span class="status-val">' + esc(d.version) + '</span></div>'
-      + '<div class="status-row"><span class="status-key">\u8fd0\u884c\u65f6\u95f4</span><span class="status-val">' + fmtDur(d.uptime_seconds) + '</span></div>'
+      + '<div class="status-row"><span class="status-key">\u8fd0\u884c\u65f6\u95f4</span><span class="status-val">' + esc(d.uptime || '--') + '</span></div>'
       + '<div class="status-row"><span class="status-key">\u4e0a\u6e38\u603b\u6570</span><span class="status-val">' + tot + '</span></div>'
       + '<div class="status-row"><span class="status-key">\u5065\u5eb7\u4e0a\u6e38</span><span class="status-val" style="color:var(--neon-green)">' + hp + '</span></div>'
-      + '<div class="status-row"><span class="status-key">\u8def\u7531\u6570</span><span class="status-val">' + (d.total_routes || 0) + '</span></div>'
-      + '<div class="status-row"><span class="status-key">\u5ba1\u8ba1\u65e5\u5fd7</span><span class="status-val">' + (d.total_audit_logs || 0) + '</span></div>'
+      + '<div class="status-row"><span class="status-key">\u8def\u7531\u6570</span><span class="status-val">' + routeTotal + '</span></div>'
+      + '<div class="status-row"><span class="status-key">\u5ba1\u8ba1\u65e5\u5fd7</span><span class="status-val">' + auditTotal + '</span></div>'
       + '</div></div>';
 
     var el = document.getElementById('healthContent');
@@ -411,11 +415,18 @@ function migrateRoute() {
 }
 
 /* ========== 4. Stats ========== */
+/* /api/v1/stats 返回: { total, breakdown: {inbound_block:5, inbound_pass:6, ...}, upstreams_total, routes_total, version, uptime } */
 function loadStats() {
   api('/api/v1/stats').then(function(d) {
-    var total = d.total_requests || d.total || 0;
-    var blocked = d.total_blocked || d.blocked || 0;
-    var warned = d.total_warned || d.warned || 0;
+    var total = d.total || 0;
+    var breakdown = d.breakdown || {};
+    // 从 breakdown 中汇总 block 和 warn
+    var blocked = 0, warned = 0;
+    var keys = Object.keys(breakdown);
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].indexOf('block') >= 0) blocked += breakdown[keys[i]];
+      if (keys[i].indexOf('warn') >= 0) warned += breakdown[keys[i]];
+    }
 
     var h = '<div class="stat-big">'
       + '<div class="stat-item"><div class="stat-num blue">' + total + '</div><div class="stat-label">\u603b\u8bf7\u6c42</div></div>'
@@ -424,8 +435,6 @@ function loadStats() {
       + '</div>';
 
     // Bar chart by direction_action
-    var breakdown = d.by_direction_action || d.breakdown || d.counters || {};
-    var keys = Object.keys(breakdown);
     if (keys.length > 0) {
       var maxVal = 1;
       for (var i = 0; i < keys.length; i++) {
