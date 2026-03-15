@@ -44,7 +44,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.2.0"
+	AppVersion = "3.3.0"
 )
 
 var startTime = time.Now()
@@ -58,7 +58,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | GET验证
+        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | 请求限流
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -106,6 +106,7 @@ type Config struct {
 	OutboundRules        []OutboundRuleConfig `yaml:"outbound_rules"`
 	Whitelist            []string             `yaml:"whitelist"`
 	StaticUpstreams      []StaticUpstreamConfig `yaml:"static_upstreams"`
+	RateLimit            RateLimiterConfig    `yaml:"rate_limit"`
 }
 
 type OutboundRuleConfig struct {
@@ -2123,6 +2124,247 @@ func (al *AuditLogger) Stats() map[string]interface{} {
 }
 
 // ============================================================
+// 辅助函数
+// ============================================================
+
+func truncate(s string, maxRunes int) string {
+	rs := []rune(s)
+	if len(rs) <= maxRunes {
+		return s
+	}
+	return string(rs[:maxRunes]) + "..."
+}
+
+// ============================================================
+// Rate Limiter（v3.3 令牌桶限流）
+// ============================================================
+
+type RateLimiterConfig struct {
+	GlobalRPS      float64  `yaml:"global_rps"`
+	GlobalBurst    int      `yaml:"global_burst"`
+	PerSenderRPS   float64  `yaml:"per_sender_rps"`
+	PerSenderBurst int      `yaml:"per_sender_burst"`
+	ExemptSenders  []string `yaml:"exempt_senders"`
+}
+
+type TokenBucket struct {
+	rate       float64
+	burst      int
+	tokens     float64
+	lastRefill time.Time
+	lastAccess time.Time
+	mu         sync.Mutex
+}
+
+func NewTokenBucket(rate float64, burst int) *TokenBucket {
+	return &TokenBucket{
+		rate:       rate,
+		burst:      burst,
+		tokens:     float64(burst),
+		lastRefill: time.Now(),
+		lastAccess: time.Now(),
+	}
+}
+
+func (tb *TokenBucket) Allow() bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+	tb.lastAccess = now
+
+	// 补充 token
+	elapsed := now.Sub(tb.lastRefill).Seconds()
+	tb.tokens += elapsed * tb.rate
+	if tb.tokens > float64(tb.burst) {
+		tb.tokens = float64(tb.burst)
+	}
+	tb.lastRefill = now
+
+	// 尝试消费
+	if tb.tokens >= 1.0 {
+		tb.tokens -= 1.0
+		return true
+	}
+	return false
+}
+
+type RateLimiterStats struct {
+	TotalAllowed int64            `json:"total_allowed"`
+	TotalLimited int64            `json:"total_limited"`
+	LimitRate    float64          `json:"limit_rate_percent"`
+	TopLimited   []SenderLimitInfo `json:"top_limited"`
+}
+
+type SenderLimitInfo struct {
+	SenderID string `json:"sender_id"`
+	Count    int64  `json:"count"`
+}
+
+type RateLimiter struct {
+	cfg           RateLimiterConfig
+	globalBucket  *TokenBucket
+	senderBuckets map[string]*TokenBucket
+	exemptSet     map[string]bool
+	mu            sync.RWMutex
+
+	totalAllowed  int64
+	totalLimited  int64
+	senderLimited map[string]int64
+}
+
+func NewRateLimiter(cfg RateLimiterConfig) *RateLimiter {
+	rl := &RateLimiter{
+		cfg:           cfg,
+		senderBuckets: make(map[string]*TokenBucket),
+		exemptSet:     make(map[string]bool),
+		senderLimited: make(map[string]int64),
+	}
+	for _, s := range cfg.ExemptSenders {
+		rl.exemptSet[s] = true
+	}
+	if cfg.GlobalRPS > 0 {
+		burst := cfg.GlobalBurst
+		if burst <= 0 {
+			burst = int(cfg.GlobalRPS)
+		}
+		rl.globalBucket = NewTokenBucket(cfg.GlobalRPS, burst)
+	}
+	return rl
+}
+
+func (rl *RateLimiter) Allow(senderID string) (bool, string) {
+	// 白名单豁免
+	if rl.exemptSet[senderID] {
+		atomic.AddInt64(&rl.totalAllowed, 1)
+		return true, ""
+	}
+
+	// 全局限流检查
+	if rl.globalBucket != nil {
+		if !rl.globalBucket.Allow() {
+			atomic.AddInt64(&rl.totalLimited, 1)
+			rl.mu.Lock()
+			rl.senderLimited[senderID]++
+			rl.mu.Unlock()
+			return false, "global rate limit exceeded"
+		}
+	}
+
+	// 按发送者限流检查
+	if rl.cfg.PerSenderRPS > 0 && senderID != "" {
+		rl.mu.RLock()
+		bucket, exists := rl.senderBuckets[senderID]
+		rl.mu.RUnlock()
+
+		if !exists {
+			burst := rl.cfg.PerSenderBurst
+			if burst <= 0 {
+				burst = int(rl.cfg.PerSenderRPS)
+			}
+			bucket = NewTokenBucket(rl.cfg.PerSenderRPS, burst)
+			rl.mu.Lock()
+			// double check after acquiring write lock
+			if existing, ok := rl.senderBuckets[senderID]; ok {
+				bucket = existing
+			} else {
+				rl.senderBuckets[senderID] = bucket
+			}
+			rl.mu.Unlock()
+		}
+
+		if !bucket.Allow() {
+			atomic.AddInt64(&rl.totalLimited, 1)
+			rl.mu.Lock()
+			rl.senderLimited[senderID]++
+			rl.mu.Unlock()
+			return false, fmt.Sprintf("per-sender rate limit exceeded (sender=%s)", senderID)
+		}
+	}
+
+	atomic.AddInt64(&rl.totalAllowed, 1)
+	return true, ""
+}
+
+func (rl *RateLimiter) Stats() RateLimiterStats {
+	allowed := atomic.LoadInt64(&rl.totalAllowed)
+	limited := atomic.LoadInt64(&rl.totalLimited)
+	total := allowed + limited
+	var limitRate float64
+	if total > 0 {
+		limitRate = float64(limited) / float64(total) * 100.0
+	}
+
+	rl.mu.RLock()
+	// 构建 top limited
+	type kv struct {
+		key string
+		val int64
+	}
+	var sorted []kv
+	for k, v := range rl.senderLimited {
+		sorted = append(sorted, kv{k, v})
+	}
+	rl.mu.RUnlock()
+
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].val > sorted[j].val })
+	topN := 10
+	if len(sorted) < topN {
+		topN = len(sorted)
+	}
+	topLimited := make([]SenderLimitInfo, topN)
+	for i := 0; i < topN; i++ {
+		topLimited[i] = SenderLimitInfo{SenderID: sorted[i].key, Count: sorted[i].val}
+	}
+
+	return RateLimiterStats{
+		TotalAllowed: allowed,
+		TotalLimited: limited,
+		LimitRate:    limitRate,
+		TopLimited:   topLimited,
+	}
+}
+
+func (rl *RateLimiter) Reset() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.senderBuckets = make(map[string]*TokenBucket)
+	rl.senderLimited = make(map[string]int64)
+	atomic.StoreInt64(&rl.totalAllowed, 0)
+	atomic.StoreInt64(&rl.totalLimited, 0)
+	if rl.cfg.GlobalRPS > 0 {
+		burst := rl.cfg.GlobalBurst
+		if burst <= 0 {
+			burst = int(rl.cfg.GlobalRPS)
+		}
+		rl.globalBucket = NewTokenBucket(rl.cfg.GlobalRPS, burst)
+	}
+}
+
+func (rl *RateLimiter) startCleanup(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for sid, bucket := range rl.senderBuckets {
+				bucket.mu.Lock()
+				idle := now.Sub(bucket.lastAccess)
+				bucket.mu.Unlock()
+				if idle > 10*time.Minute {
+					delete(rl.senderBuckets, sid)
+				}
+			}
+			rl.mu.Unlock()
+		}
+	}
+}
+
+// ============================================================
 // 入站代理 v2.0
 // ============================================================
 
@@ -2139,6 +2381,7 @@ type InboundProxy struct {
 	mode       string          // "webhook" | "bridge"
 	bridge     BridgeConnector // bridge 模式下非 nil
 	cfg        *Config
+	limiter    *RateLimiter    // v3.3 限流器，nil 表示不限流
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable) *InboundProxy {
@@ -2146,10 +2389,14 @@ func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, log
 	for _, id := range cfg.Whitelist { wl[id] = true }
 	mode := cfg.Mode
 	if mode == "" { mode = "webhook" }
+	var limiter *RateLimiter
+	if cfg.RateLimit.GlobalRPS > 0 || cfg.RateLimit.PerSenderRPS > 0 {
+		limiter = NewRateLimiter(cfg.RateLimit)
+	}
 	return &InboundProxy{
 		channel: channel, engine: engine, logger: logger, pool: pool, routes: routes,
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
-		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg,
+		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg, limiter: limiter,
 	}
 }
 
@@ -2192,6 +2439,15 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					ip.pool.IncrUserCount(upstreamID, 1)
 					log.Printf("[桥接路由] 新用户绑定 sender=%s -> %s", senderID, upstreamID)
 				}
+			}
+		}
+
+		// 限流检查（安检之前）
+		if ip.limiter != nil {
+			allowed, reason := ip.limiter.Allow(msg.SenderID)
+			if !allowed {
+				ip.logger.Log("inbound", msg.SenderID, "rate_limited", reason, truncate(msg.Text, 200), rh, 0, "")
+				return // 丢弃消息
 			}
 		}
 
@@ -2392,6 +2648,23 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 如果是验证请求，已在闭包中直接响应，不再继续
 	if isVerify {
 		return
+	}
+
+	// 限流检查（安检之前）
+	if ip.limiter != nil {
+		allowed, reason := ip.limiter.Allow(senderID)
+		if !allowed {
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(429)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"errcode": 429,
+				"errmsg":  "rate limited",
+				"detail":  reason,
+			})
+			ip.logger.Log("inbound", senderID, "rate_limited", reason, truncate(msgText, 200), rh, 0, "")
+			return
+		}
 	}
 
 	// 路由决策
@@ -2685,6 +2958,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAuditLogs(w, r)
 	case path == "/api/v1/stats" && method == "GET":
 		api.handleStats(w, r)
+	case path == "/api/v1/rate-limit/stats" && method == "GET":
+		api.handleRateLimitStats(w, r)
+	case path == "/api/v1/rate-limit/reset" && method == "POST":
+		api.handleRateLimitReset(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -2729,6 +3006,20 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 			bridgeInfo["last_error"] = bs.LastError
 		}
 		result["bridge"] = bridgeInfo
+	}
+	// Rate limiter info
+	if api.inbound.limiter != nil {
+		stats := api.inbound.limiter.Stats()
+		result["rate_limiter"] = map[string]interface{}{
+			"enabled":            true,
+			"global_rps":         api.cfg.RateLimit.GlobalRPS,
+			"per_sender_rps":     api.cfg.RateLimit.PerSenderRPS,
+			"total_allowed":      stats.TotalAllowed,
+			"total_limited":      stats.TotalLimited,
+			"limit_rate_percent": stats.LimitRate,
+		}
+	} else {
+		result["rate_limiter"] = map[string]interface{}{"enabled": false}
 	}
 	jsonResponse(w, 200, result)
 }
@@ -2889,6 +3180,24 @@ func (api *ManagementAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, stats)
 }
 
+func (api *ManagementAPI) handleRateLimitStats(w http.ResponseWriter, r *http.Request) {
+	if api.inbound.limiter == nil {
+		jsonResponse(w, 200, map[string]interface{}{"enabled": false})
+		return
+	}
+	stats := api.inbound.limiter.Stats()
+	jsonResponse(w, 200, stats)
+}
+
+func (api *ManagementAPI) handleRateLimitReset(w http.ResponseWriter, r *http.Request) {
+	if api.inbound.limiter == nil {
+		jsonResponse(w, 200, map[string]interface{}{"status": "rate limiter not enabled"})
+		return
+	}
+	api.inbound.limiter.Reset()
+	jsonResponse(w, 200, map[string]string{"status": "reset"})
+}
+
 func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// 尝试读取同目录下的 dashboard.html
 	htmlPath := "dashboard.html"
@@ -3013,8 +3322,19 @@ func main() {
 	if modeName == "" { modeName = "webhook" }
 	modeDesc := modeName
 	if modeName == "bridge" { modeDesc = "bridge (长连接)" }
+	rateLimitDesc := "关闭"
+	if cfg.RateLimit.GlobalRPS > 0 || cfg.RateLimit.PerSenderRPS > 0 {
+		parts := []string{}
+		if cfg.RateLimit.GlobalRPS > 0 {
+			parts = append(parts, fmt.Sprintf("%.0f rps (全局)", cfg.RateLimit.GlobalRPS))
+		}
+		if cfg.RateLimit.PerSenderRPS > 0 {
+			parts = append(parts, fmt.Sprintf("%.0f rps (每用户)", cfg.RateLimit.PerSenderRPS))
+		}
+		rateLimitDesc = strings.Join(parts, " / ")
+	}
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.2                   │")
+	fmt.Println("│                  配置摘要 v3.3                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
@@ -3027,6 +3347,7 @@ func main() {
 	fmt.Printf("│ 出站审计:    %-35v│\n", cfg.OutboundAuditEnabled)
 	fmt.Printf("│ 服务注册:    %-35v│\n", cfg.RegistrationEnabled)
 	fmt.Printf("│ 路由策略:    %-35s│\n", cfg.RouteDefaultPolicy)
+	fmt.Printf("│ 限流:        %-35s│\n", rateLimitDesc)
 	fmt.Printf("│ 静态上游:    %-35d│\n", len(cfg.StaticUpstreams))
 	fmt.Printf("│ 出站规则:    %-35d│\n", len(cfg.OutboundRules))
 	fmt.Printf("│ 白名单:      %-35d│\n", len(cfg.Whitelist))
@@ -3104,6 +3425,12 @@ func main() {
 	defer cancel()
 	go pool.HealthCheck(ctx)
 
+	// 启动限流清理
+	if inbound.limiter != nil {
+		go inbound.limiter.startCleanup(ctx)
+		log.Printf("[初始化] 限流器就绪 (全局=%.0f rps, 每用户=%.0f rps)", cfg.RateLimit.GlobalRPS, cfg.RateLimit.PerSenderRPS)
+	}
+
 	// Bridge 模式启动
 	if cfg.Mode == "bridge" {
 		if !channel.SupportsBridge() {
@@ -3147,7 +3474,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.2 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.3 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)
