@@ -1,7 +1,7 @@
-// lobster-guard - 高性能安全代理网关 v3.5
+// lobster-guard - 高性能安全代理网关 v3.6
 // 支持入站检测拦截、出站内容检测/拦截、用户ID亲和路由、服务自动注册
 // 支持多消息通道: 蓝信(lanxin)、飞书(feishu)、钉钉(dingtalk)、企微(wecom)、通用HTTP(generic)
-// v3.5: 入站规则热更新 + 出站规则热更新增强
+// v3.6: 规则引擎增强 — 规则优先级权重、自定义响应、命中率统计
 package main
 
 import (
@@ -45,7 +45,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.5.0"
+	AppVersion = "3.6.0"
 )
 
 var startTime = time.Now()
@@ -59,7 +59,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 规则热更新
+        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 规则热更新 | 规则引擎增强
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -74,6 +74,8 @@ type InboundRuleConfig struct {
 	Patterns []string `yaml:"patterns"`
 	Action   string   `yaml:"action"`   // block / warn / log
 	Category string   `yaml:"category"` // prompt_injection / jailbreak / command_injection / pii 等
+	Priority int      `yaml:"priority"` // v3.6 优先级权重，数字越大越高，默认 0
+	Message  string   `yaml:"message"`  // v3.6 自定义拦截提示，为空则用默认
 }
 
 // InboundRulesFileConfig 入站规则文件格式
@@ -131,6 +133,8 @@ type OutboundRuleConfig struct {
 	Pattern  string   `yaml:"pattern"`
 	Patterns []string `yaml:"patterns"`
 	Action   string   `yaml:"action"`
+	Priority int      `yaml:"priority"` // v3.6 优先级权重，数字越大越高，默认 0
+	Message  string   `yaml:"message"`  // v3.6 自定义拦截提示，为空则用默认
 }
 
 type StaticUpstreamConfig struct {
@@ -354,7 +358,7 @@ const (
 	LevelMedium
 	LevelLow
 )
-type Rule struct { Name string; Level RuleLevel; Category string }
+type Rule struct { Name string; Level RuleLevel; Category string; Priority int; Message string }
 
 // RuleVersion 规则版本信息
 type RuleVersion struct {
@@ -371,6 +375,8 @@ type InboundRuleSummary struct {
 	PatternsCount int    `json:"patterns_count"`
 	Action        string `json:"action"`
 	Category      string `json:"category"`
+	Priority      int    `json:"priority"`
+	Message       string `json:"message,omitempty"`
 }
 
 type RuleEngine struct {
@@ -406,7 +412,7 @@ func buildACFromConfigs(configs []InboundRuleConfig) (*AhoCorasick, []Rule) {
 		level := actionToLevel(cfg.Action)
 		for _, p := range cfg.Patterns {
 			patterns = append(patterns, p)
-			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category})
+			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message})
 		}
 	}
 	if len(patterns) == 0 {
@@ -501,12 +507,42 @@ func (re *RuleEngine) ListRules() []InboundRuleSummary {
 		summaries[i] = InboundRuleSummary{
 			Name: cfg.Name, PatternsCount: len(cfg.Patterns),
 			Action: cfg.Action, Category: cfg.Category,
+			Priority: cfg.Priority, Message: cfg.Message,
 		}
 	}
 	return summaries
 }
 
-type DetectResult struct { Action string; Reasons []string; PIIs []string }
+type DetectResult struct { Action string; Reasons []string; PIIs []string; Message string; MatchedRules []string }
+
+// actionWeight returns a numeric weight for action precedence (higher = more severe)
+// Used when multiple rules have the same priority: block > warn > log
+func actionWeight(action string) int {
+	switch action {
+	case "block":
+		return 3
+	case "warn":
+		return 2
+	case "log":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// levelToAction converts RuleLevel back to action string
+func levelToAction(level RuleLevel) string {
+	switch level {
+	case LevelHigh:
+		return "block"
+	case LevelMedium:
+		return "warn"
+	case LevelLow:
+		return "log"
+	default:
+		return "block"
+	}
+}
 
 func (re *RuleEngine) Detect(text string) DetectResult {
 	r := DetectResult{Action: "pass"}
@@ -516,23 +552,76 @@ func (re *RuleEngine) Detect(text string) DetectResult {
 	rules := re.rules
 	compositeKeyword := re.compositeKeyword
 	re.mu.RUnlock()
+
+	// Collect all matched rules (deduplicate by rule name, keep highest priority match)
+	type matchedRule struct {
+		Name     string
+		Level    RuleLevel
+		Priority int
+		Message  string
+		Action   string
+	}
+	matchesByName := make(map[string]*matchedRule)
+
 	for _, idx := range ac.Search(text) {
 		if idx < 0 || idx >= len(rules) { continue }
 		rule := rules[idx]
-		switch rule.Level {
-		case LevelHigh:
-			r.Action = "block"; r.Reasons = append(r.Reasons, rule.Name)
-		case LevelMedium:
-			if r.Action != "block" { r.Action = "warn" }
-			r.Reasons = append(r.Reasons, rule.Name)
-		case LevelLow:
-			if r.Action == "pass" { r.Action = "log" }
-			r.Reasons = append(r.Reasons, rule.Name)
+		action := levelToAction(rule.Level)
+		if existing, ok := matchesByName[rule.Name]; ok {
+			// Same rule name (different pattern), keep if higher priority or higher action weight
+			if rule.Priority > existing.Priority ||
+				(rule.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
+				existing.Level = rule.Level
+				existing.Priority = rule.Priority
+				existing.Message = rule.Message
+				existing.Action = action
+			}
+		} else {
+			matchesByName[rule.Name] = &matchedRule{
+				Name: rule.Name, Level: rule.Level,
+				Priority: rule.Priority, Message: rule.Message,
+				Action: action,
+			}
 		}
 	}
+
+	// Composite check
 	if strings.Contains(strings.ToLower(text), "你现在是") && len(compositeKeyword.Search(text)) > 0 {
-		r.Action = "block"; r.Reasons = append(r.Reasons, "prompt_injection_composite_cn")
+		matchesByName["prompt_injection_composite_cn"] = &matchedRule{
+			Name: "prompt_injection_composite_cn", Level: LevelHigh,
+			Priority: 0, Action: "block",
+		}
 	}
+
+	// Determine final action based on priority
+	if len(matchesByName) > 0 {
+		// Collect all matches into a slice
+		var matches []*matchedRule
+		for _, m := range matchesByName {
+			matches = append(matches, m)
+		}
+
+		// Sort: highest priority first, then by action weight (block > warn > log)
+		sort.Slice(matches, func(i, j int) bool {
+			if matches[i].Priority != matches[j].Priority {
+				return matches[i].Priority > matches[j].Priority
+			}
+			return actionWeight(matches[i].Action) > actionWeight(matches[j].Action)
+		})
+
+		// The winning rule determines the action
+		winner := matches[0]
+		r.Action = winner.Action
+		r.Message = winner.Message
+
+		// Collect all matched rule names as reasons
+		for _, m := range matches {
+			r.Reasons = append(r.Reasons, m.Name)
+			r.MatchedRules = append(r.MatchedRules, m.Name)
+		}
+	}
+
+	// PII detection
 	for i, pat := range re.piiRe {
 		if pat.MatchString(text) { r.PIIs = append(r.PIIs, re.piiNames[i]) }
 	}
@@ -555,9 +644,11 @@ func (re *RuleEngine) DetectPII(text string) []string {
 // ============================================================
 
 type OutboundRule struct {
-	Name    string
-	Regexps []*regexp.Regexp
-	Action  string
+	Name     string
+	Regexps  []*regexp.Regexp
+	Action   string
+	Priority int
+	Message  string
 }
 
 type OutboundRuleEngine struct {
@@ -572,7 +663,7 @@ func NewOutboundRuleEngine(configs []OutboundRuleConfig) *OutboundRuleEngine {
 func compileOutboundRules(configs []OutboundRuleConfig) []OutboundRule {
 	var rules []OutboundRule
 	for _, c := range configs {
-		rule := OutboundRule{Name: c.Name, Action: c.Action}
+		rule := OutboundRule{Name: c.Name, Action: c.Action, Priority: c.Priority, Message: c.Message}
 		if rule.Action == "" { rule.Action = "log" }
 		var patterns []string
 		if c.Pattern != "" { patterns = append(patterns, c.Pattern) }
@@ -600,29 +691,135 @@ type OutboundDetectResult struct {
 	Action   string
 	RuleName string
 	Reason   string
+	Message  string // v3.6 自定义拦截提示
 }
 
 func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 	ore.mu.RLock(); defer ore.mu.RUnlock()
 	result := OutboundDetectResult{Action: "pass"}
 	if text == "" { return result }
+
+	// v3.6: collect all matching rules and pick the one with highest priority
+	type matchedOutbound struct {
+		Action   string
+		RuleName string
+		Reason   string
+		Message  string
+		Priority int
+	}
+	var matches []matchedOutbound
+
 	for _, rule := range ore.rules {
 		for _, compiled := range rule.Regexps {
 			if compiled.MatchString(text) {
-				if rule.Action == "block" {
-					return OutboundDetectResult{Action: "block", RuleName: rule.Name, Reason: "outbound_block:" + rule.Name}
-				}
-				if rule.Action == "warn" && result.Action != "block" {
-					result = OutboundDetectResult{Action: "warn", RuleName: rule.Name, Reason: "outbound_warn:" + rule.Name}
-				}
-				if rule.Action == "log" && result.Action == "pass" {
-					result = OutboundDetectResult{Action: "log", RuleName: rule.Name, Reason: "outbound_log:" + rule.Name}
-				}
-				break
+				matches = append(matches, matchedOutbound{
+					Action:   rule.Action,
+					RuleName: rule.Name,
+					Reason:   "outbound_" + rule.Action + ":" + rule.Name,
+					Message:  rule.Message,
+					Priority: rule.Priority,
+				})
+				break // one match per rule is enough
 			}
 		}
 	}
-	return result
+
+	if len(matches) == 0 {
+		return result
+	}
+
+	// Sort by priority desc, then by action weight desc
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].Priority != matches[j].Priority {
+			return matches[i].Priority > matches[j].Priority
+		}
+		return actionWeight(matches[i].Action) > actionWeight(matches[j].Action)
+	})
+
+	winner := matches[0]
+	return OutboundDetectResult{
+		Action:   winner.Action,
+		RuleName: winner.RuleName,
+		Reason:   winner.Reason,
+		Message:  winner.Message,
+	}
+}
+
+// ============================================================
+// 规则命中率统计（v3.6）
+// ============================================================
+
+// RuleHitDetail 单条规则命中详情
+type RuleHitDetail struct {
+	Name    string `json:"name"`
+	Hits    int64  `json:"hits"`
+	LastHit string `json:"last_hit,omitempty"`
+}
+
+// RuleHitStats 规则命中率统计（线程安全）
+type RuleHitStats struct {
+	mu      sync.RWMutex
+	hits    map[string]int64     // key: rule_name, value: hit count
+	lastHit map[string]time.Time // key: rule_name, value: last hit time
+}
+
+func NewRuleHitStats() *RuleHitStats {
+	return &RuleHitStats{
+		hits:    make(map[string]int64),
+		lastHit: make(map[string]time.Time),
+	}
+}
+
+func (rhs *RuleHitStats) Record(ruleName string) {
+	rhs.mu.Lock()
+	rhs.hits[ruleName]++
+	rhs.lastHit[ruleName] = time.Now()
+	rhs.mu.Unlock()
+}
+
+func (rhs *RuleHitStats) Get() map[string]int64 {
+	rhs.mu.RLock()
+	defer rhs.mu.RUnlock()
+	cp := make(map[string]int64, len(rhs.hits))
+	for k, v := range rhs.hits {
+		cp[k] = v
+	}
+	return cp
+}
+
+func (rhs *RuleHitStats) GetDetails() []RuleHitDetail {
+	rhs.mu.RLock()
+	defer rhs.mu.RUnlock()
+	details := make([]RuleHitDetail, 0, len(rhs.hits))
+	for name, count := range rhs.hits {
+		d := RuleHitDetail{Name: name, Hits: count}
+		if t, ok := rhs.lastHit[name]; ok {
+			d.LastHit = t.UTC().Format(time.RFC3339)
+		}
+		details = append(details, d)
+	}
+	// Sort by hits descending
+	sort.Slice(details, func(i, j int) bool {
+		return details[i].Hits > details[j].Hits
+	})
+	return details
+}
+
+func (rhs *RuleHitStats) TotalHits() int64 {
+	rhs.mu.RLock()
+	defer rhs.mu.RUnlock()
+	var total int64
+	for _, v := range rhs.hits {
+		total += v
+	}
+	return total
+}
+
+func (rhs *RuleHitStats) Reset() {
+	rhs.mu.Lock()
+	rhs.hits = make(map[string]int64)
+	rhs.lastHit = make(map[string]time.Time)
+	rhs.mu.Unlock()
 }
 
 // ============================================================
@@ -644,7 +841,9 @@ type ChannelPlugin interface {
 	ExtractOutbound(path string, body []byte) (string, bool)
 	ShouldAuditOutbound(path string) bool
 	BlockResponse() (int, []byte)
+	BlockResponseWithMessage(customMsg string) (int, []byte) // v3.6: 自定义拦截消息
 	OutboundBlockResponse(reason, ruleName string) (int, []byte)
+	OutboundBlockResponseWithMessage(reason, ruleName, customMsg string) (int, []byte) // v3.6
 	SupportsBridge() bool
 	NewBridgeConnector(cfg *Config) (BridgeConnector, error)
 }
@@ -808,9 +1007,30 @@ func (lp *LanxinPlugin) BlockResponse() (int, []byte) {
 	return 200, []byte(`{"errcode":0,"errmsg":"ok"}`)
 }
 
+func (lp *LanxinPlugin) BlockResponseWithMessage(customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return lp.BlockResponse()
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 0, "errmsg": "ok", "message": customMsg,
+	})
+	return 200, resp
+}
+
 func (lp *LanxinPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
 	resp, _ := json.Marshal(map[string]interface{}{
 		"errcode": 403, "errmsg": "Message blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+func (lp *LanxinPlugin) OutboundBlockResponseWithMessage(reason, ruleName, customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return lp.OutboundBlockResponse(reason, ruleName)
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 403, "errmsg": customMsg,
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
@@ -961,9 +1181,30 @@ func (fp *FeishuPlugin) BlockResponse() (int, []byte) {
 	return 200, []byte(`{"code":0,"msg":"ok"}`)
 }
 
+func (fp *FeishuPlugin) BlockResponseWithMessage(customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return fp.BlockResponse()
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"code": 0, "msg": "ok", "message": customMsg,
+	})
+	return 200, resp
+}
+
 func (fp *FeishuPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
 	resp, _ := json.Marshal(map[string]interface{}{
 		"code": 403, "msg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+func (fp *FeishuPlugin) OutboundBlockResponseWithMessage(reason, ruleName, customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return fp.OutboundBlockResponse(reason, ruleName)
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"code": 403, "msg": customMsg,
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
@@ -1277,9 +1518,30 @@ func (gp *GenericPlugin) BlockResponse() (int, []byte) {
 	return 200, []byte(`{"code":0,"msg":"ok"}`)
 }
 
+func (gp *GenericPlugin) BlockResponseWithMessage(customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return gp.BlockResponse()
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"code": 0, "msg": "ok", "message": customMsg,
+	})
+	return 200, resp
+}
+
 func (gp *GenericPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
 	resp, _ := json.Marshal(map[string]interface{}{
 		"code": 403, "msg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+func (gp *GenericPlugin) OutboundBlockResponseWithMessage(reason, ruleName, customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return gp.OutboundBlockResponse(reason, ruleName)
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"code": 403, "msg": customMsg,
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
@@ -1450,9 +1712,30 @@ func (dp *DingtalkPlugin) BlockResponse() (int, []byte) {
 	return 200, []byte(`{"errcode":0,"errmsg":"ok"}`)
 }
 
+func (dp *DingtalkPlugin) BlockResponseWithMessage(customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return dp.BlockResponse()
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 0, "errmsg": "ok", "message": customMsg,
+	})
+	return 200, resp
+}
+
 func (dp *DingtalkPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
 	resp, _ := json.Marshal(map[string]interface{}{
 		"errcode": 403, "errmsg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+func (dp *DingtalkPlugin) OutboundBlockResponseWithMessage(reason, ruleName, customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return dp.OutboundBlockResponse(reason, ruleName)
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 403, "errmsg": customMsg,
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
@@ -1892,9 +2175,27 @@ func (wp *WecomPlugin) BlockResponse() (int, []byte) {
 	return 200, []byte("success")
 }
 
+func (wp *WecomPlugin) BlockResponseWithMessage(customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return wp.BlockResponse()
+	}
+	return 200, []byte(customMsg)
+}
+
 func (wp *WecomPlugin) OutboundBlockResponse(reason, ruleName string) (int, []byte) {
 	resp, _ := json.Marshal(map[string]interface{}{
 		"errcode": 403, "errmsg": "blocked by security policy",
+		"detail": reason, "rule": ruleName,
+	})
+	return 403, resp
+}
+
+func (wp *WecomPlugin) OutboundBlockResponseWithMessage(reason, ruleName, customMsg string) (int, []byte) {
+	if customMsg == "" {
+		return wp.OutboundBlockResponse(reason, ruleName)
+	}
+	resp, _ := json.Marshal(map[string]interface{}{
+		"errcode": 403, "errmsg": customMsg,
 		"detail": reason, "rule": ruleName,
 	})
 	return 403, resp
@@ -2698,7 +2999,7 @@ func (mc *MetricsCollector) RecordBridgeMessage() {
 	mc.bridgeMessages++
 }
 
-func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string) {
+func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string, ruleHits *RuleHitStats, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine) {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
 
@@ -2792,6 +3093,60 @@ func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstrea
 	fmt.Fprintln(w, "# HELP lobster_guard_info Build and configuration info")
 	fmt.Fprintln(w, "# TYPE lobster_guard_info gauge")
 	fmt.Fprintf(w, "lobster_guard_info{version=%q,channel=%q,mode=%q} 1\n", AppVersion, channelName, mode)
+
+	// v3.6 lobster_guard_rule_hits_total
+	if ruleHits != nil {
+		fmt.Fprintln(w, "# HELP lobster_guard_rule_hits_total Rule hit count by rule name and action")
+		fmt.Fprintln(w, "# TYPE lobster_guard_rule_hits_total counter")
+
+		hits := ruleHits.Get()
+
+		// Build a map of rule name -> action and direction
+		type ruleInfo struct {
+			action    string
+			direction string
+		}
+		ruleInfoMap := make(map[string]ruleInfo)
+
+		// Inbound rules
+		if inboundEngine != nil {
+			inboundEngine.mu.RLock()
+			for _, cfg := range inboundEngine.ruleConfigs {
+				action := cfg.Action
+				if action == "" {
+					action = "block"
+				}
+				ruleInfoMap[cfg.Name] = ruleInfo{action: action, direction: "inbound"}
+			}
+			inboundEngine.mu.RUnlock()
+		}
+
+		// Outbound rules
+		if outboundEngine != nil {
+			outboundEngine.mu.RLock()
+			for _, rule := range outboundEngine.rules {
+				ruleInfoMap[rule.Name] = ruleInfo{action: rule.Action, direction: "outbound"}
+			}
+			outboundEngine.mu.RUnlock()
+		}
+
+		// Sort keys for deterministic output
+		hitKeys := make([]string, 0, len(hits))
+		for k := range hits {
+			hitKeys = append(hitKeys, k)
+		}
+		sort.Strings(hitKeys)
+
+		for _, name := range hitKeys {
+			count := hits[name]
+			info, ok := ruleInfoMap[name]
+			if !ok {
+				info = ruleInfo{action: "unknown", direction: "unknown"}
+			}
+			fmt.Fprintf(w, "lobster_guard_rule_hits_total{rule=%q,action=%q,direction=%q} %d\n",
+				name, info.action, info.direction, count)
+		}
+	}
 }
 
 // formatFloat formats a float for Prometheus le labels (integer-like floats without decimal)
@@ -2821,9 +3176,10 @@ type InboundProxy struct {
 	cfg        *Config
 	limiter    *RateLimiter    // v3.3 限流器，nil 表示不限流
 	metrics    *MetricsCollector // v3.4 指标采集器
+	ruleHits   *RuleHitStats   // v3.6 规则命中统计
 }
 
-func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector) *InboundProxy {
+func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats) *InboundProxy {
 	wl := make(map[string]bool)
 	for _, id := range cfg.Whitelist { wl[id] = true }
 	mode := cfg.Mode
@@ -2836,7 +3192,7 @@ func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, log
 		channel: channel, engine: engine, logger: logger, pool: pool, routes: routes,
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
 		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg, limiter: limiter,
-		metrics: metrics,
+		metrics: metrics, ruleHits: ruleHits,
 	}
 }
 
@@ -2938,6 +3294,13 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		// 指标采集
 		if ip.metrics != nil {
 			ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
+		}
+
+		// v3.6 规则命中统计
+		if ip.ruleHits != nil && len(detectResult.MatchedRules) > 0 {
+			for _, ruleName := range detectResult.MatchedRules {
+				ip.ruleHits.Record(ruleName)
+			}
 		}
 
 		// 拦截
@@ -3203,10 +3566,17 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
 	}
 
+	// v3.6 规则命中统计
+	if ip.ruleHits != nil && len(detectResult.MatchedRules) > 0 {
+		for _, ruleName := range detectResult.MatchedRules {
+			ip.ruleHits.Record(ruleName)
+		}
+	}
+
 	// 执行决策
 	if detectResult.Action == "block" {
 		log.Printf("[入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
-		code, respBody := ip.channel.BlockResponse()
+		code, respBody := ip.channel.BlockResponseWithMessage(detectResult.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
 		w.Write(respBody)
@@ -3233,9 +3603,10 @@ type OutboundProxy struct {
 	proxy          *httputil.ReverseProxy
 	enabled        bool
 	metrics        *MetricsCollector // v3.4 指标采集器
+	ruleHits       *RuleHitStats     // v3.6 规则命中统计
 }
 
-func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector) (*OutboundProxy, error) {
+func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats) (*OutboundProxy, error) {
 	up, err := url.Parse(cfg.LanxinUpstream)
 	if err != nil { return nil, err }
 	p := httputil.NewSingleHostReverseProxy(up)
@@ -3254,7 +3625,7 @@ func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEng
 	return &OutboundProxy{
 		channel: channel, inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		logger: logger, proxy: p, enabled: cfg.OutboundAuditEnabled,
-		metrics: metrics,
+		metrics: metrics, ruleHits: ruleHits,
 	}, nil
 }
 
@@ -3295,6 +3666,11 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
 
+	// v3.6 规则命中统计
+	if op.ruleHits != nil && result.RuleName != "" {
+		op.ruleHits.Record(result.RuleName)
+	}
+
 	switch result.Action {
 	case "block":
 		log.Printf("[出站] 拦截 path=%s rule=%s", r.URL.Path, result.RuleName)
@@ -3302,7 +3678,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "block", op.channel.Name(), latMs)
 		}
-		code, respBody := op.channel.OutboundBlockResponse(result.Reason, result.RuleName)
+		code, respBody := op.channel.OutboundBlockResponseWithMessage(result.Reason, result.RuleName, result.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
 		w.Write(respBody)
@@ -3354,15 +3730,16 @@ type ManagementAPI struct {
 	inbound        *InboundProxy
 	channel        ChannelPlugin       // v3.4 通道引用
 	metrics        *MetricsCollector   // v3.4 指标采集器
+	ruleHits       *RuleHitStats       // v3.6 规则命中统计
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger,
 		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		cfg: cfg, cfgPath: cfgPath,
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
-		inbound: inbound, channel: channel, metrics: metrics,
+		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
 	}
 }
 
@@ -3461,6 +3838,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleRateLimitStats(w, r)
 	case path == "/api/v1/rate-limit/reset" && method == "POST":
 		api.handleRateLimitReset(w, r)
+	case path == "/api/v1/rules/hits" && method == "GET":
+		api.handleRuleHits(w, r)
+	case path == "/api/v1/rules/hits/reset" && method == "POST":
+		api.handleRuleHitsReset(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -3491,22 +3872,44 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 	// v3.5 入站规则信息
 	if api.inboundEngine != nil {
 		rv := api.inboundEngine.Version()
-		result["inbound_rules"] = map[string]interface{}{
+		inboundRulesInfo := map[string]interface{}{
 			"version":       rv.Version,
 			"source":        rv.Source,
 			"rule_count":    rv.RuleCount,
 			"pattern_count": rv.PatternCount,
 			"loaded_at":     rv.LoadedAt.Format(time.RFC3339),
 		}
+		// v3.6 添加 total_hits
+		if api.ruleHits != nil {
+			inboundRulesInfo["total_hits"] = api.ruleHits.TotalHits()
+		}
+		result["inbound_rules"] = inboundRulesInfo
 	}
 	// v3.5 出站规则信息
 	if api.outboundEngine != nil {
 		api.outboundEngine.mu.RLock()
 		outRuleCount := len(api.outboundEngine.rules)
 		api.outboundEngine.mu.RUnlock()
-		result["outbound_rules"] = map[string]interface{}{
+		outboundRulesInfo := map[string]interface{}{
 			"rule_count": outRuleCount,
 		}
+		// v3.6 出站命中数 — 从 ruleHits 中统计出站规则的命中总数
+		// 注意：ruleHits 是入站和出站共享的，这里简单返回总数
+		// 如果需要区分，可以在未来使用前缀区分
+		if api.ruleHits != nil {
+			// 统计出站规则的命中总数
+			api.outboundEngine.mu.RLock()
+			var outboundHits int64
+			hits := api.ruleHits.Get()
+			for _, rule := range api.outboundEngine.rules {
+				if h, ok := hits[rule.Name]; ok {
+					outboundHits += h
+				}
+			}
+			api.outboundEngine.mu.RUnlock()
+			outboundRulesInfo["total_hits"] = outboundHits
+		}
+		result["outbound_rules"] = outboundRulesInfo
 	}
 	if api.inbound.mode == "bridge" && api.inbound.bridge != nil {
 		bs := api.inbound.bridge.Status()
@@ -3717,6 +4120,26 @@ func (api *ManagementAPI) handleRateLimitReset(w http.ResponseWriter, r *http.Re
 	jsonResponse(w, 200, map[string]string{"status": "reset"})
 }
 
+// handleRuleHits GET /api/v1/rules/hits — 查看规则命中率排行
+func (api *ManagementAPI) handleRuleHits(w http.ResponseWriter, r *http.Request) {
+	if api.ruleHits == nil {
+		jsonResponse(w, 200, []RuleHitDetail{})
+		return
+	}
+	details := api.ruleHits.GetDetails()
+	jsonResponse(w, 200, details)
+}
+
+// handleRuleHitsReset POST /api/v1/rules/hits/reset — 重置命中统计
+func (api *ManagementAPI) handleRuleHitsReset(w http.ResponseWriter, r *http.Request) {
+	if api.ruleHits == nil {
+		jsonResponse(w, 200, map[string]string{"status": "no stats"})
+		return
+	}
+	api.ruleHits.Reset()
+	jsonResponse(w, 200, map[string]string{"status": "reset"})
+}
+
 // handleListInboundRules GET /api/v1/inbound-rules — 列出当前入站规则
 func (api *ManagementAPI) handleListInboundRules(w http.ResponseWriter, r *http.Request) {
 	rules := api.inboundEngine.ListRules()
@@ -3802,7 +4225,7 @@ func (api *ManagementAPI) handleMetrics(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 生成 Prometheus text format
-	api.metrics.WritePrometheus(w, upstreamsTotal, upstreamsHealthy, routesTotal, bridgeStatus, channelName, mode)
+	api.metrics.WritePrometheus(w, upstreamsTotal, upstreamsHealthy, routesTotal, bridgeStatus, channelName, mode, api.ruleHits, api.inboundEngine, api.outboundEngine)
 }
 
 func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -3963,7 +4386,7 @@ func main() {
 		metricsDesc = cfg.ManagementListen + "/metrics (Prometheus)"
 	}
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.5                   │")
+	fmt.Println("│                  配置摘要 v3.6                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
@@ -4067,15 +4490,19 @@ func main() {
 		log.Println("[初始化] Prometheus 指标采集器就绪")
 	}
 
+	// v3.6 初始化规则命中统计
+	ruleHits := NewRuleHitStats()
+	log.Println("[初始化] 规则命中统计器就绪")
+
 	// 创建入站代理
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits)
 
 	// 创建出站代理
-	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics)
+	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
 	// 创建管理 API
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits)
 
 	// 启动健康检查
 	ctx, cancel := context.WithCancel(context.Background())
@@ -4131,7 +4558,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.5 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.6 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)

@@ -50,20 +50,19 @@
 - [x] 429 响应 + Retry-After header
 - [x] sender bucket 自动清理 (71 → 85 tests)
 
-### v3.4 — Prometheus Metrics
-- [ ] /metrics 端点（Prometheus 格式）
-- [ ] 核心指标：请求量/延迟/拦截率/审计量
-- [ ] 按通道/方向/动作分类的指标
-- [ ] 上游健康度指标
-- [ ] Bridge 连接状态指标
-- [ ] Grafana Dashboard 模板（JSON）
+### v3.4 — Prometheus Metrics ✅
+- [x] /metrics 端点（Prometheus 格式，手工生成无依赖）
+- [x] 13 个指标族：请求量/延迟直方图/上游健康/路由/桥接/限流/运行时间
+- [x] 按通道/方向/动作分类
+- [x] 默认启用，可关闭 (85 → 96 tests)
 
-### v3.5 — 入站规则热更新
-- [ ] 入站规则配置文件分离（rules.yaml）
-- [ ] /api/v1/inbound-rules/reload 端点
-- [ ] AC 自动机在线重建（不停服务）
-- [ ] 规则版本管理 + 回滚
-- [ ] Dashboard 入站规则编辑界面
+### v3.5 — 入站规则热更新 ✅
+- [x] 入站规则配置文件分离（inbound_rules_file YAML）
+- [x] /api/v1/inbound-rules/reload 端点
+- [x] AC 自动机在线重建（RWMutex 保护，不停服务）
+- [x] 规则版本管理（version/source/loaded_at）
+- [x] -gen-rules 导出默认规则为 YAML
+- [x] GET /api/v1/inbound-rules + /outbound-rules 列出规则 (96 → 112 tests)
 
 ### v3.6 — 规则引擎增强
 - [ ] 正则规则组（AND/OR 逻辑组合）
