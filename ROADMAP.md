@@ -34,20 +34,21 @@
 
 ## 计划
 
-### v3.2 — 企微 GET 验证 + 健壮性
-- [ ] 企微入站 GET 请求验证（首次回调配置时的 echostr 校验）
-- [ ] 飞书 URL Verification 回调优化
-- [ ] 各通道插件的集成测试补充
-- [ ] Bridge Mode 集成测试（mock WSS server）
-- [ ] 错误恢复和重试机制增强
+### v3.2 — 企微 GET 验证 + 健壮性 ✅
+- [x] 企微入站 GET 请求验证（echostr 校验）
+- [x] 飞书 URL Verification 回调优化
+- [x] 各通道插件的单元测试补充 (53 → 71)
+- [x] 入站超时保护 (30s)、出站 body 大小限制 (10MB)
+- [x] Panic recovery、审计日志截断 (500 chars)
 
-### v3.3 — Rate Limiting（请求限流）
-- [ ] 全局 QPS 限流（令牌桶算法）
-- [ ] 按 sender_id 限流（防单用户滥用）
-- [ ] 按上游容器限流（保护后端）
-- [ ] 限流配置热更新
-- [ ] 限流统计面板（Dashboard）
-- [ ] 429 响应 + Retry-After header
+### v3.3 — Rate Limiting ✅
+- [x] 全局 QPS 限流（令牌桶算法）
+- [x] 按 sender_id 限流（防单用户滥用）
+- [x] 白名单豁免
+- [x] 限流统计 API + reset
+- [x] /healthz 限流状态
+- [x] 429 响应 + Retry-After header
+- [x] sender bucket 自动清理 (71 → 85 tests)
 
 ### v3.4 — Prometheus Metrics
 - [ ] /metrics 端点（Prometheus 格式）

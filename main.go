@@ -44,7 +44,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.3.0"
+	AppVersion = "3.4.0"
 )
 
 var startTime = time.Now()
@@ -58,7 +58,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | 请求限流
+        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 指标导出
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -107,6 +107,7 @@ type Config struct {
 	Whitelist            []string             `yaml:"whitelist"`
 	StaticUpstreams      []StaticUpstreamConfig `yaml:"static_upstreams"`
 	RateLimit            RateLimiterConfig    `yaml:"rate_limit"`
+	MetricsEnabled       *bool                `yaml:"metrics_enabled"`       // 默认 true
 }
 
 type OutboundRuleConfig struct {
@@ -139,6 +140,13 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
 	return cfg, nil
+}
+
+func (cfg *Config) IsMetricsEnabled() bool {
+	if cfg.MetricsEnabled == nil {
+		return true // 默认启用
+	}
+	return *cfg.MetricsEnabled
 }
 
 // ============================================================
@@ -1912,6 +1920,19 @@ func (pool *UpstreamPool) IncrUserCount(id string, delta int) {
 	if up, ok := pool.upstreams[id]; ok { up.UserCount += delta }
 }
 
+// Count returns total and healthy upstream counts
+func (pool *UpstreamPool) Count() (total, healthy int) {
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	for _, u := range pool.upstreams {
+		total++
+		if u.Healthy {
+			healthy++
+		}
+	}
+	return
+}
+
 // ListUpstreams 列出所有上游
 func (pool *UpstreamPool) ListUpstreams() []Upstream {
 	pool.mu.RLock(); defer pool.mu.RUnlock()
@@ -2365,6 +2386,205 @@ func (rl *RateLimiter) startCleanup(ctx context.Context) {
 }
 
 // ============================================================
+// Prometheus Metrics（v3.4 指标导出）
+// ============================================================
+
+type LatencyHistogram struct {
+	buckets []float64 // bucket boundaries in ms: 1, 5, 10, 25, 50, 100, 250, 500, 1000
+	counts  []int64   // count for each bucket
+	sum     float64   // total latency sum
+	count   int64     // total count
+}
+
+func NewLatencyHistogram() *LatencyHistogram {
+	buckets := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
+	return &LatencyHistogram{
+		buckets: buckets,
+		counts:  make([]int64, len(buckets)),
+	}
+}
+
+func (h *LatencyHistogram) Observe(valueMs float64) {
+	h.sum += valueMs
+	h.count++
+	for i, b := range h.buckets {
+		if valueMs <= b {
+			h.counts[i]++
+			return
+		}
+	}
+	// value exceeds all bucket boundaries, only counted in +Inf
+}
+
+type MetricsCollector struct {
+	mu sync.RWMutex
+
+	// 请求计数器 (by direction, action, channel)
+	requestsTotal map[string]int64 // key: "direction:action:channel"
+
+	// 请求延迟直方图桶
+	latencyBuckets map[string]*LatencyHistogram // key: "direction"
+
+	// Bridge 状态
+	bridgeReconnects int64
+	bridgeMessages   int64
+
+	// 限流
+	rateLimitAllowed int64
+	rateLimitDenied  int64
+
+	// 系统
+	startTime time.Time
+}
+
+func NewMetricsCollector() *MetricsCollector {
+	return &MetricsCollector{
+		requestsTotal:  make(map[string]int64),
+		latencyBuckets: make(map[string]*LatencyHistogram),
+		startTime:      time.Now(),
+	}
+}
+
+func (mc *MetricsCollector) RecordRequest(direction, action, channel string, latencyMs float64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	key := direction + ":" + action + ":" + channel
+	mc.requestsTotal[key]++
+	h, ok := mc.latencyBuckets[direction]
+	if !ok {
+		h = NewLatencyHistogram()
+		mc.latencyBuckets[direction] = h
+	}
+	h.Observe(latencyMs)
+}
+
+func (mc *MetricsCollector) RecordRateLimit(allowed bool) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if allowed {
+		mc.rateLimitAllowed++
+	} else {
+		mc.rateLimitDenied++
+	}
+}
+
+func (mc *MetricsCollector) RecordBridgeReconnect() {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.bridgeReconnects++
+}
+
+func (mc *MetricsCollector) RecordBridgeMessage() {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.bridgeMessages++
+}
+
+func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string) {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+
+	// lobster_guard_requests_total
+	fmt.Fprintln(w, "# HELP lobster_guard_requests_total Total number of requests processed")
+	fmt.Fprintln(w, "# TYPE lobster_guard_requests_total counter")
+	// Sort keys for deterministic output
+	reqKeys := make([]string, 0, len(mc.requestsTotal))
+	for k := range mc.requestsTotal {
+		reqKeys = append(reqKeys, k)
+	}
+	sort.Strings(reqKeys)
+	for _, key := range reqKeys {
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		fmt.Fprintf(w, "lobster_guard_requests_total{direction=%q,action=%q,channel=%q} %d\n",
+			parts[0], parts[1], parts[2], mc.requestsTotal[key])
+	}
+
+	// lobster_guard_request_duration_ms (histogram)
+	fmt.Fprintln(w, "# HELP lobster_guard_request_duration_ms Request processing duration in milliseconds")
+	fmt.Fprintln(w, "# TYPE lobster_guard_request_duration_ms histogram")
+	histKeys := make([]string, 0, len(mc.latencyBuckets))
+	for k := range mc.latencyBuckets {
+		histKeys = append(histKeys, k)
+	}
+	sort.Strings(histKeys)
+	for _, dir := range histKeys {
+		h := mc.latencyBuckets[dir]
+		var cumulative int64
+		for i, b := range h.buckets {
+			cumulative += h.counts[i]
+			fmt.Fprintf(w, "lobster_guard_request_duration_ms_bucket{direction=%q,le=\"%s\"} %d\n",
+				dir, formatFloat(b), cumulative)
+		}
+		fmt.Fprintf(w, "lobster_guard_request_duration_ms_bucket{direction=%q,le=\"+Inf\"} %d\n",
+			dir, h.count)
+		fmt.Fprintf(w, "lobster_guard_request_duration_ms_sum{direction=%q} %.2f\n", dir, h.sum)
+		fmt.Fprintf(w, "lobster_guard_request_duration_ms_count{direction=%q} %d\n", dir, h.count)
+	}
+
+	// lobster_guard_upstreams_total
+	fmt.Fprintln(w, "# HELP lobster_guard_upstreams_total Total number of registered upstreams")
+	fmt.Fprintln(w, "# TYPE lobster_guard_upstreams_total gauge")
+	fmt.Fprintf(w, "lobster_guard_upstreams_total %d\n", upstreamsTotal)
+
+	// lobster_guard_upstreams_healthy
+	fmt.Fprintln(w, "# HELP lobster_guard_upstreams_healthy Number of healthy upstreams")
+	fmt.Fprintln(w, "# TYPE lobster_guard_upstreams_healthy gauge")
+	fmt.Fprintf(w, "lobster_guard_upstreams_healthy %d\n", upstreamsHealthy)
+
+	// lobster_guard_routes_total
+	fmt.Fprintln(w, "# HELP lobster_guard_routes_total Number of active user-upstream route bindings")
+	fmt.Fprintln(w, "# TYPE lobster_guard_routes_total gauge")
+	fmt.Fprintf(w, "lobster_guard_routes_total %d\n", routesTotal)
+
+	// lobster_guard_bridge_connected
+	bridgeConnected := 0
+	if bridgeStatus != nil && bridgeStatus.Connected {
+		bridgeConnected = 1
+	}
+	fmt.Fprintln(w, "# HELP lobster_guard_bridge_connected Whether bridge mode is connected (1=yes, 0=no)")
+	fmt.Fprintln(w, "# TYPE lobster_guard_bridge_connected gauge")
+	fmt.Fprintf(w, "lobster_guard_bridge_connected %d\n", bridgeConnected)
+
+	// lobster_guard_bridge_reconnects_total
+	fmt.Fprintln(w, "# HELP lobster_guard_bridge_reconnects_total Total bridge reconnection attempts")
+	fmt.Fprintln(w, "# TYPE lobster_guard_bridge_reconnects_total counter")
+	fmt.Fprintf(w, "lobster_guard_bridge_reconnects_total %d\n", mc.bridgeReconnects)
+
+	// lobster_guard_bridge_messages_total
+	fmt.Fprintln(w, "# HELP lobster_guard_bridge_messages_total Total messages received via bridge")
+	fmt.Fprintln(w, "# TYPE lobster_guard_bridge_messages_total counter")
+	fmt.Fprintf(w, "lobster_guard_bridge_messages_total %d\n", mc.bridgeMessages)
+
+	// lobster_guard_rate_limit_total
+	fmt.Fprintln(w, "# HELP lobster_guard_rate_limit_total Rate limit decisions")
+	fmt.Fprintln(w, "# TYPE lobster_guard_rate_limit_total counter")
+	fmt.Fprintf(w, "lobster_guard_rate_limit_total{decision=\"allowed\"} %d\n", mc.rateLimitAllowed)
+	fmt.Fprintf(w, "lobster_guard_rate_limit_total{decision=\"denied\"} %d\n", mc.rateLimitDenied)
+
+	// lobster_guard_uptime_seconds
+	uptime := time.Since(mc.startTime).Seconds()
+	fmt.Fprintln(w, "# HELP lobster_guard_uptime_seconds Time since lobster-guard started")
+	fmt.Fprintln(w, "# TYPE lobster_guard_uptime_seconds gauge")
+	fmt.Fprintf(w, "lobster_guard_uptime_seconds %.1f\n", uptime)
+
+	// lobster_guard_info
+	fmt.Fprintln(w, "# HELP lobster_guard_info Build and configuration info")
+	fmt.Fprintln(w, "# TYPE lobster_guard_info gauge")
+	fmt.Fprintf(w, "lobster_guard_info{version=%q,channel=%q,mode=%q} 1\n", AppVersion, channelName, mode)
+}
+
+// formatFloat formats a float for Prometheus le labels (integer-like floats without decimal)
+func formatFloat(f float64) string {
+	if f == float64(int64(f)) {
+		return fmt.Sprintf("%d", int64(f))
+	}
+	return fmt.Sprintf("%g", f)
+}
+
+// ============================================================
 // 入站代理 v2.0
 // ============================================================
 
@@ -2382,9 +2602,10 @@ type InboundProxy struct {
 	bridge     BridgeConnector // bridge 模式下非 nil
 	cfg        *Config
 	limiter    *RateLimiter    // v3.3 限流器，nil 表示不限流
+	metrics    *MetricsCollector // v3.4 指标采集器
 }
 
-func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable) *InboundProxy {
+func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector) *InboundProxy {
 	wl := make(map[string]bool)
 	for _, id := range cfg.Whitelist { wl[id] = true }
 	mode := cfg.Mode
@@ -2397,6 +2618,7 @@ func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, log
 		channel: channel, engine: engine, logger: logger, pool: pool, routes: routes,
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
 		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg, limiter: limiter,
+		metrics: metrics,
 	}
 }
 
@@ -2446,8 +2668,15 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		if ip.limiter != nil {
 			allowed, reason := ip.limiter.Allow(msg.SenderID)
 			if !allowed {
+				if ip.metrics != nil {
+					ip.metrics.RecordRateLimit(false)
+					ip.metrics.RecordRequest("inbound", "rate_limited", ip.channel.Name(), 0)
+				}
 				ip.logger.Log("inbound", msg.SenderID, "rate_limited", reason, truncate(msg.Text, 200), rh, 0, "")
 				return // 丢弃消息
+			}
+			if ip.metrics != nil {
+				ip.metrics.RecordRateLimit(true)
 			}
 		}
 
@@ -2487,6 +2716,11 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			act = "pass"
 		}
 		ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID)
+
+		// 指标采集
+		if ip.metrics != nil {
+			ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
+		}
 
 		// 拦截
 		if detectResult.Action == "block" {
@@ -2654,6 +2888,10 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ip.limiter != nil {
 		allowed, reason := ip.limiter.Allow(senderID)
 		if !allowed {
+			if ip.metrics != nil {
+				ip.metrics.RecordRateLimit(false)
+				ip.metrics.RecordRequest("inbound", "rate_limited", ip.channel.Name(), 0)
+			}
 			w.Header().Set("Retry-After", "1")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
@@ -2664,6 +2902,9 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 			ip.logger.Log("inbound", senderID, "rate_limited", reason, truncate(msgText, 200), rh, 0, "")
 			return
+		}
+		if ip.metrics != nil {
+			ip.metrics.RecordRateLimit(true)
 		}
 	}
 
@@ -2739,6 +2980,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = eventType
 	ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID)
 
+	// 指标采集
+	if ip.metrics != nil {
+		ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
+	}
+
 	// 执行决策
 	if detectResult.Action == "block" {
 		log.Printf("[入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
@@ -2768,9 +3014,10 @@ type OutboundProxy struct {
 	logger         *AuditLogger
 	proxy          *httputil.ReverseProxy
 	enabled        bool
+	metrics        *MetricsCollector // v3.4 指标采集器
 }
 
-func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger) (*OutboundProxy, error) {
+func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector) (*OutboundProxy, error) {
 	up, err := url.Parse(cfg.LanxinUpstream)
 	if err != nil { return nil, err }
 	p := httputil.NewSingleHostReverseProxy(up)
@@ -2789,6 +3036,7 @@ func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEng
 	return &OutboundProxy{
 		channel: channel, inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		logger: logger, proxy: p, enabled: cfg.OutboundAuditEnabled,
+		metrics: metrics,
 	}, nil
 }
 
@@ -2833,6 +3081,9 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "block":
 		log.Printf("[出站] 拦截 path=%s rule=%s", r.URL.Path, result.RuleName)
 		op.logger.Log("outbound", "", "block", result.Reason, pv, rh, latMs, upstreamID)
+		if op.metrics != nil {
+			op.metrics.RecordRequest("outbound", "block", op.channel.Name(), latMs)
+		}
 		code, respBody := op.channel.OutboundBlockResponse(result.Reason, result.RuleName)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
@@ -2841,8 +3092,14 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "warn":
 		log.Printf("[出站] 告警放行 path=%s rule=%s", r.URL.Path, result.RuleName)
 		op.logger.Log("outbound", "", "warn", result.Reason, pv, rh, latMs, upstreamID)
+		if op.metrics != nil {
+			op.metrics.RecordRequest("outbound", "warn", op.channel.Name(), latMs)
+		}
 	case "log":
 		op.logger.Log("outbound", "", "log", result.Reason, pv, rh, latMs, upstreamID)
+		if op.metrics != nil {
+			op.metrics.RecordRequest("outbound", "log", op.channel.Name(), latMs)
+		}
 	default:
 		// v1.0 兼容：PII 检测
 		piis := op.inboundEngine.DetectPII(text)
@@ -2852,6 +3109,9 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[出站] PII path=%s piis=%v", r.URL.Path, piis)
 		}
 		op.logger.Log("outbound", "", action, reason, pv, rh, latMs, upstreamID)
+		if op.metrics != nil {
+			op.metrics.RecordRequest("outbound", action, op.channel.Name(), latMs)
+		}
 	}
 
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -2873,14 +3133,16 @@ type ManagementAPI struct {
 	managementToken string
 	registrationToken string
 	inbound        *InboundProxy
+	channel        ChannelPlugin       // v3.4 通道引用
+	metrics        *MetricsCollector   // v3.4 指标采集器
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, outboundEngine *OutboundRuleEngine, inbound *InboundProxy) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger, outboundEngine: outboundEngine,
 		cfg: cfg, cfgPath: cfgPath,
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
-		inbound: inbound,
+		inbound: inbound, channel: channel, metrics: metrics,
 	}
 }
 
@@ -2915,6 +3177,17 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 健康检查（无需鉴权）
 	if path == "/healthz" {
 		api.handleHealthz(w, r)
+		return
+	}
+
+	// Prometheus 指标（默认无需鉴权）
+	if path == "/metrics" {
+		if api.metrics != nil {
+			api.handleMetrics(w, r)
+		} else {
+			w.WriteHeader(404)
+			w.Write([]byte("metrics disabled"))
+		}
 		return
 	}
 
@@ -3198,6 +3471,33 @@ func (api *ManagementAPI) handleRateLimitReset(w http.ResponseWriter, r *http.Re
 	jsonResponse(w, 200, map[string]string{"status": "reset"})
 }
 
+func (api *ManagementAPI) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	// 动态获取 gauge 数据
+	upstreamsTotal, upstreamsHealthy := api.pool.Count()
+	routesTotal := api.routes.Count()
+
+	// 从 bridge 获取状态（如果有）
+	var bridgeStatus *BridgeStatus
+	if api.inbound != nil && api.inbound.bridge != nil {
+		s := api.inbound.bridge.Status()
+		bridgeStatus = &s
+	}
+
+	channelName := ""
+	if api.channel != nil {
+		channelName = api.channel.Name()
+	}
+	mode := api.cfg.Mode
+	if mode == "" {
+		mode = "webhook"
+	}
+
+	// 生成 Prometheus text format
+	api.metrics.WritePrometheus(w, upstreamsTotal, upstreamsHealthy, routesTotal, bridgeStatus, channelName, mode)
+}
+
 func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// 尝试读取同目录下的 dashboard.html
 	htmlPath := "dashboard.html"
@@ -3333,8 +3633,12 @@ func main() {
 		}
 		rateLimitDesc = strings.Join(parts, " / ")
 	}
+	metricsDesc := "关闭"
+	if cfg.IsMetricsEnabled() {
+		metricsDesc = cfg.ManagementListen + "/metrics (Prometheus)"
+	}
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.3                   │")
+	fmt.Println("│                  配置摘要 v3.4                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
@@ -3348,6 +3652,7 @@ func main() {
 	fmt.Printf("│ 服务注册:    %-35v│\n", cfg.RegistrationEnabled)
 	fmt.Printf("│ 路由策略:    %-35s│\n", cfg.RouteDefaultPolicy)
 	fmt.Printf("│ 限流:        %-35s│\n", rateLimitDesc)
+	fmt.Printf("│ Metrics:     %-35s│\n", metricsDesc)
 	fmt.Printf("│ 静态上游:    %-35d│\n", len(cfg.StaticUpstreams))
 	fmt.Printf("│ 出站规则:    %-35d│\n", len(cfg.OutboundRules))
 	fmt.Printf("│ 白名单:      %-35d│\n", len(cfg.Whitelist))
@@ -3410,15 +3715,22 @@ func main() {
 		pool.IncrUserCount(up.ID, cnt)
 	}
 
+	// 初始化指标采集器
+	var metrics *MetricsCollector
+	if cfg.IsMetricsEnabled() {
+		metrics = NewMetricsCollector()
+		log.Println("[初始化] Prometheus 指标采集器就绪")
+	}
+
 	// 创建入站代理
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics)
 
 	// 创建出站代理
-	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger)
+	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
 	// 创建管理 API
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, outboundEngine, inbound)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, outboundEngine, inbound, channel, metrics)
 
 	// 启动健康检查
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3474,7 +3786,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.3 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.4 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)
