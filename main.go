@@ -1,4 +1,4 @@
-// lobster-guard - 高性能安全代理网关 v3.0
+// lobster-guard - 高性能安全代理网关 v3.2
 // 支持入站检测拦截、出站内容检测/拦截、用户ID亲和路由、服务自动注册
 // 支持多消息通道: 蓝信(lanxin)、飞书(feishu)、钉钉(dingtalk)、企微(wecom)、通用HTTP(generic)
 package main
@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,7 +44,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.1.0"
+	AppVersion = "3.2.0"
 )
 
 var startTime = time.Now()
@@ -57,7 +58,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式
+        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | GET验证
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -402,10 +403,12 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 // ============================================================
 
 type InboundMessage struct {
-	Text      string
-	SenderID  string
-	EventType string
-	Raw       []byte
+	Text         string
+	SenderID     string
+	EventType    string
+	Raw          []byte
+	IsVerify     bool   // URL verification / echostr 验证请求
+	VerifyReply  []byte // 验证请求的响应内容
 }
 
 type ChannelPlugin interface {
@@ -671,7 +674,7 @@ func (fp *FeishuPlugin) ParseInbound(body []byte) (InboundMessage, error) {
 	if tp, ok := msg["type"].(string); ok && tp == "url_verification" {
 		challenge, _ := msg["challenge"].(string)
 		resp, _ := json.Marshal(map[string]string{"challenge": challenge})
-		return InboundMessage{EventType: "url_verification", Raw: resp}, nil
+		return InboundMessage{EventType: "url_verification", Raw: resp, IsVerify: true, VerifyReply: resp}, nil
 	}
 
 	// 提取消息
@@ -1676,6 +1679,23 @@ func (wp *WecomPlugin) NewBridgeConnector(cfg *Config) (BridgeConnector, error) 
 	return nil, fmt.Errorf("企业微信通道不支持桥接模式")
 }
 
+// VerifyURL 处理企微 GET 验证回调
+// 企微首次配置回调 URL 时会发 GET 请求: ?msg_signature=xxx&timestamp=xxx&nonce=xxx&echostr=xxx
+// 1. 验签: SHA1(sort(token, timestamp, nonce, echostr)) == msg_signature
+// 2. AES 解密 echostr → 返回解密后的明文
+func (wp *WecomPlugin) VerifyURL(msgSignature, timestamp, nonce, echostr string) (string, error) {
+	// 验证签名
+	if !wp.wecomVerifySignature(msgSignature, timestamp, nonce, echostr) {
+		return "", fmt.Errorf("签名验证失败")
+	}
+	// AES 解密 echostr
+	dec, err := wp.wecomDecrypt(echostr)
+	if err != nil {
+		return "", fmt.Errorf("解密 echostr 失败: %w", err)
+	}
+	return string(dec), nil
+}
+
 // ============================================================
 // 上游容器管理
 // ============================================================
@@ -2257,8 +2277,59 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 	return nil
 }
 
+func (ip *InboundProxy) handleWecomVerify(w http.ResponseWriter, r *http.Request, wp *WecomPlugin) {
+	q := r.URL.Query()
+	msgSignature := q.Get("msg_signature")
+	timestamp := q.Get("timestamp")
+	nonce := q.Get("nonce")
+	echostr := q.Get("echostr")
+
+	if msgSignature == "" || timestamp == "" || nonce == "" || echostr == "" {
+		http.Error(w, "Bad Request: missing parameters", 400)
+		return
+	}
+
+	plainEchoStr, err := wp.VerifyURL(msgSignature, timestamp, nonce, echostr)
+	if err != nil {
+		log.Printf("[企微验证] 验证失败: %v", err)
+		http.Error(w, "Forbidden: verification failed", 403)
+		return
+	}
+
+	log.Printf("[企微验证] GET 验证成功，返回明文 echostr")
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(200)
+	w.Write([]byte(plainEchoStr))
+}
+
 func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// panic recovery
+	defer func() {
+		if rv := recover(); rv != nil {
+			log.Printf("[PANIC] InboundProxy: %v\n%s", rv, debug.Stack())
+			http.Error(w, "Internal Server Error", 500)
+		}
+	}()
+
 	start := time.Now()
+
+	// 企微 GET 验证回调
+	if r.Method == "GET" {
+		if wp, ok := ip.channel.(*WecomPlugin); ok {
+			ip.handleWecomVerify(w, r, wp)
+			return
+		}
+		// 非企微通道的 GET 请求，转发到上游
+		proxy, _ := ip.pool.GetAnyHealthyProxy()
+		if proxy != nil {
+			proxy.ServeHTTP(w, r)
+		} else {
+			w.WriteHeader(502)
+			w.Write([]byte(`{"errcode":502,"errmsg":"no upstream"}`))
+		}
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		// 非POST直接转发到任意健康上游
 		proxy, _ := ip.pool.GetAnyHealthyProxy()
@@ -2267,6 +2338,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// 入站超时保护：整个入站处理不超过 30 秒
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 
 	body, err := io.ReadAll(r.Body); r.Body.Close()
 	if err != nil {
@@ -2282,6 +2358,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 使用通道插件解析入站消息
 	var msgText, senderID, eventType string
 	var decryptOK bool
+	var isVerify bool
 	func() {
 		defer func() { recover() }()
 		msg, err := ip.channel.ParseInbound(body)
@@ -2289,11 +2366,21 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[入站] 解析失败: %v，fail-open", err)
 			return
 		}
-		// 飞书 URL Verification 特殊处理
+		// URL Verification / echostr 验证特殊处理（飞书等）
+		if msg.IsVerify && msg.VerifyReply != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			w.Write(msg.VerifyReply)
+			isVerify = true
+			log.Printf("[入站] URL Verification 处理完成")
+			return
+		}
+		// 兼容旧逻辑：飞书 URL Verification
 		if msg.EventType == "url_verification" && msg.Raw != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(200)
 			w.Write(msg.Raw)
+			isVerify = true
 			return
 		}
 		msgText = msg.Text
@@ -2301,6 +2388,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		eventType = msg.EventType
 		decryptOK = true
 	}()
+
+	// 如果是验证请求，已在闭包中直接响应，不再继续
+	if isVerify {
+		return
+	}
 
 	// 路由决策
 	var upstreamID string
@@ -2428,13 +2520,22 @@ func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEng
 }
 
 func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// panic recovery
+	defer func() {
+		if rv := recover(); rv != nil {
+			log.Printf("[PANIC] OutboundProxy: %v\n%s", rv, debug.Stack())
+			http.Error(w, "Internal Server Error", 500)
+		}
+	}()
+
 	start := time.Now()
 	if !op.enabled || !op.channel.ShouldAuditOutbound(r.URL.Path) {
 		op.proxy.ServeHTTP(w, r)
 		return
 	}
 
-	body, err := io.ReadAll(r.Body); r.Body.Close()
+	// 出站 body 大小限制：最大 10MB，防止 OOM
+	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)); r.Body.Close()
 	if err != nil { op.proxy.ServeHTTP(w, r); return }
 	rh := fmt.Sprintf("%x", sha256.Sum256(body))
 
@@ -2453,7 +2554,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 获取来源容器 ID（从 X-Upstream-Id header 或来源 IP）
 	upstreamID := r.Header.Get("X-Upstream-Id")
 
-	pv := text; if rs := []rune(pv); len(rs) > 200 { pv = string(rs[:200]) }
+	pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
 
 	switch result.Action {
 	case "block":
@@ -2913,7 +3014,7 @@ func main() {
 	modeDesc := modeName
 	if modeName == "bridge" { modeDesc = "bridge (长连接)" }
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.1                   │")
+	fmt.Println("│                  配置摘要 v3.2                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
@@ -3046,7 +3147,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.1 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.2 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)
@@ -3071,3 +3172,4 @@ var _ = strconv.Atoi
 var _ = atomic.AddUint64
 var _ = context.Background
 var _ = websocket.DefaultDialer
+var _ = debug.Stack

@@ -25,13 +25,12 @@
 
 ## 进行中
 
-### v3.1 — Bridge Mode（长连接桥接）
-- [ ] BridgeConnector 接口
-- [ ] 飞书 WSS 长连接桥接（token 刷新、断线重连、事件确认）
-- [ ] 钉钉 Stream 长连接桥接（ticket 获取、心跳、消息确认）
-- [ ] bridge/webhook 混合模式
-- [ ] /healthz 桥接状态展示
-- [ ] Dashboard 桥接状态面板
+### v3.1 — Bridge Mode（长连接桥接）✅
+- [x] BridgeConnector 接口
+- [x] 飞书 WSS 长连接桥接（token 刷新、断线重连、事件确认）
+- [x] 钉钉 Stream 长连接桥接（ticket 获取、心跳、消息确认）
+- [x] bridge/webhook 混合模式
+- [x] /healthz 桥接状态展示
 
 ## 计划
 
