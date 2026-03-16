@@ -48,7 +48,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.10.0"
+	AppVersion = "3.11.0"
 )
 
 var startTime = time.Now()
@@ -79,6 +79,20 @@ type InboundRuleConfig struct {
 	Category string   `yaml:"category"` // prompt_injection / jailbreak / command_injection / pii 等
 	Priority int      `yaml:"priority"` // v3.6 优先级权重，数字越大越高，默认 0
 	Message  string   `yaml:"message"`  // v3.6 自定义拦截提示，为空则用默认
+	Type     string   `yaml:"type"`     // v3.11 规则类型: "keyword"（默认，AC 自动机）或 "regex"（正则）
+	Group    string   `yaml:"group"`    // v3.11 规则分组标签（如 "jailbreak"/"injection"/"social_engineering"/"pii"）
+}
+
+// RuleBindingConfig 规则绑定配置（v3.11 按 app_id 绑定规则组）
+type RuleBindingConfig struct {
+	AppID  string   `yaml:"app_id"`
+	Groups []string `yaml:"groups"`
+}
+
+// OutboundPIIPatternConfig 出站 PII 正则模式配置（v3.11 可配置化）
+type OutboundPIIPatternConfig struct {
+	Name    string `yaml:"name"`
+	Pattern string `yaml:"pattern"`
 }
 
 // InboundRulesFileConfig 入站规则文件格式
@@ -138,6 +152,9 @@ type Config struct {
 	AlertWebhook         string               `yaml:"alert_webhook"`         // v3.10 告警 webhook URL
 	AlertMinInterval     int                  `yaml:"alert_min_interval"`    // v3.10 最小告警间隔秒数，默认 60
 	AlertFormat          string               `yaml:"alert_format"`          // v3.10 告警格式: "generic" (默认) 或 "lanxin"
+	// v3.11 正则规则 + 规则分组
+	RuleBindings         []RuleBindingConfig        `yaml:"rule_bindings"`          // v3.11 按 app_id 绑定规则组
+	OutboundPIIPatterns  []OutboundPIIPatternConfig `yaml:"outbound_pii_patterns"`  // v3.11 出站 PII 正则可配置化
 }
 
 type OutboundRuleConfig struct {
@@ -229,6 +246,10 @@ func loadInboundRulesFromFile(path string) ([]InboundRuleConfig, error) {
 		} else if !validateInboundAction(rule.Action) {
 			return nil, fmt.Errorf("规则 %q 的 action %q 无效，必须是 block/warn/log", rule.Name, rule.Action)
 		}
+		// v3.11: 验证 type 字段
+		if rule.Type != "" && rule.Type != "keyword" && rule.Type != "regex" {
+			return nil, fmt.Errorf("规则 %q 的 type %q 无效，必须是 keyword 或 regex", rule.Name, rule.Type)
+		}
 	}
 	return rulesFile.Rules, nil
 }
@@ -258,6 +279,10 @@ func resolveInboundRules(cfg *Config) (rules []InboundRuleConfig, source string,
 				cfg.InboundRules[i].Action = "block"
 			} else if !validateInboundAction(rule.Action) {
 				return nil, "", fmt.Errorf("入站规则 %q 的 action %q 无效", rule.Name, rule.Action)
+			}
+			// v3.11: 验证 type 字段
+			if rule.Type != "" && rule.Type != "keyword" && rule.Type != "regex" {
+				return nil, "", fmt.Errorf("入站规则 %q 的 type %q 无效，必须是 keyword 或 regex", rule.Name, rule.Type)
 			}
 		}
 		return cfg.InboundRules, "config", nil
@@ -385,7 +410,7 @@ const (
 	LevelMedium
 	LevelLow
 )
-type Rule struct { Name string; Level RuleLevel; Category string; Priority int; Message string }
+type Rule struct { Name string; Level RuleLevel; Category string; Priority int; Message string; Group string }
 
 // RuleVersion 规则版本信息
 type RuleVersion struct {
@@ -404,6 +429,19 @@ type InboundRuleSummary struct {
 	Category      string `json:"category"`
 	Priority      int    `json:"priority"`
 	Message       string `json:"message,omitempty"`
+	Type          string `json:"type,omitempty"`  // v3.11 规则类型
+	Group         string `json:"group,omitempty"` // v3.11 规则分组
+}
+
+// RegexRule v3.11 正则规则（独立于 AC 自动机）
+type RegexRule struct {
+	Name     string
+	Pattern  *regexp.Regexp
+	Level    RuleLevel
+	Category string
+	Priority int
+	Message  string
+	Group    string
 }
 
 type RuleEngine struct {
@@ -415,6 +453,8 @@ type RuleEngine struct {
 	compositeKeyword *AhoCorasick
 	version          RuleVersion
 	ruleConfigs      []InboundRuleConfig // 保存原始配置用于 API 展示
+	regexRules       []RegexRule         // v3.11 正则规则列表
+	ruleBindings     []RuleBindingConfig // v3.11 规则绑定配置
 }
 
 // actionToLevel 将 action 字符串映射到 RuleLevel
@@ -432,20 +472,54 @@ func actionToLevel(action string) RuleLevel {
 }
 
 // buildACFromConfigs 从 InboundRuleConfig 列表构建 AC 自动机和 Rule 列表
+// v3.11: 只处理 keyword 类型规则（type 为空或 "keyword"），跳过 regex 类型
 func buildACFromConfigs(configs []InboundRuleConfig) (*AhoCorasick, []Rule) {
 	var patterns []string
 	var rules []Rule
 	for _, cfg := range configs {
+		// v3.11: 跳过 regex 类型规则
+		if cfg.Type == "regex" {
+			continue
+		}
 		level := actionToLevel(cfg.Action)
 		for _, p := range cfg.Patterns {
 			patterns = append(patterns, p)
-			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message})
+			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message, Group: cfg.Group})
 		}
 	}
 	if len(patterns) == 0 {
 		return NewAhoCorasick([]string{}), nil
 	}
 	return NewAhoCorasick(patterns), rules
+}
+
+// buildRegexRules 从 InboundRuleConfig 列表构建正则规则（v3.11）
+// 只处理 type == "regex" 的规则
+func buildRegexRules(configs []InboundRuleConfig) []RegexRule {
+	var regexRules []RegexRule
+	for _, cfg := range configs {
+		if cfg.Type != "regex" {
+			continue
+		}
+		level := actionToLevel(cfg.Action)
+		for _, p := range cfg.Patterns {
+			compiled, err := regexp.Compile(p)
+			if err != nil {
+				log.Printf("[入站规则] 正则编译失败 rule=%s pattern=%q: %v（跳过）", cfg.Name, p, err)
+				continue
+			}
+			regexRules = append(regexRules, RegexRule{
+				Name:     cfg.Name,
+				Pattern:  compiled,
+				Level:    level,
+				Category: cfg.Category,
+				Priority: cfg.Priority,
+				Message:  cfg.Message,
+				Group:    cfg.Group,
+			})
+		}
+	}
+	return regexRules
 }
 
 // countPatterns 统计规则配置中的 pattern 总数
@@ -457,56 +531,110 @@ func countPatterns(configs []InboundRuleConfig) int {
 	return n
 }
 
+// defaultPIIPatterns 返回默认的 PII 正则模式
+func defaultPIIPatterns() ([]*regexp.Regexp, []string) {
+	return []*regexp.Regexp{
+		regexp.MustCompile(`\d{17}[\dXx]`),
+		regexp.MustCompile(`(?:^|\D)1[3-9]\d{9}(?:\D|$)`),
+		regexp.MustCompile(`(?:^|\D)\d{16,19}(?:\D|$)`),
+	}, []string{"身份证号", "手机号", "银行卡号"}
+}
+
+// buildPIIPatterns 从配置构建 PII 正则模式（v3.11 可配置化）
+func buildPIIPatterns(configs []OutboundPIIPatternConfig) ([]*regexp.Regexp, []string) {
+	if len(configs) == 0 {
+		return defaultPIIPatterns()
+	}
+	var piiRe []*regexp.Regexp
+	var piiNames []string
+	for _, c := range configs {
+		compiled, err := regexp.Compile(c.Pattern)
+		if err != nil {
+			log.Printf("[出站PII] 正则编译失败 name=%s pattern=%q: %v（跳过）", c.Name, c.Pattern, err)
+			continue
+		}
+		piiRe = append(piiRe, compiled)
+		piiNames = append(piiNames, c.Name)
+	}
+	if len(piiRe) == 0 {
+		// 配置了但全部编译失败，回退到默认
+		log.Printf("[出站PII] 所有自定义模式编译失败，回退到默认模式")
+		return defaultPIIPatterns()
+	}
+	return piiRe, piiNames
+}
+
 // NewRuleEngine 使用默认硬编码规则创建 RuleEngine（向后兼容）
 func NewRuleEngine() *RuleEngine {
 	defaultConfigs := getDefaultInboundRules()
 	ac, rules := buildACFromConfigs(defaultConfigs)
+	regexRules := buildRegexRules(defaultConfigs)
 	patternCount := countPatterns(defaultConfigs)
+	piiRe, piiNames := defaultPIIPatterns()
 	return &RuleEngine{
 		ac: ac, rules: rules,
-		piiRe: []*regexp.Regexp{
-			regexp.MustCompile(`\d{17}[\dXx]`),
-			regexp.MustCompile(`(?:^|\D)1[3-9]\d{9}(?:\D|$)`),
-			regexp.MustCompile(`(?:^|\D)\d{16,19}(?:\D|$)`),
-		},
-		piiNames:         []string{"身份证号", "手机号", "银行卡号"},
+		piiRe:            piiRe,
+		piiNames:         piiNames,
 		compositeKeyword: NewAhoCorasick([]string{"没有限制", "不受约束"}),
 		version: RuleVersion{
 			Version: 1, LoadedAt: time.Now(), Source: "default",
 			RuleCount: len(defaultConfigs), PatternCount: patternCount,
 		},
 		ruleConfigs: defaultConfigs,
+		regexRules:  regexRules,
 	}
 }
 
 // NewRuleEngineFromConfig 从配置构建 RuleEngine
 func NewRuleEngineFromConfig(configs []InboundRuleConfig, source string) *RuleEngine {
 	ac, rules := buildACFromConfigs(configs)
+	regexRules := buildRegexRules(configs)
 	patternCount := countPatterns(configs)
+	piiRe, piiNames := defaultPIIPatterns()
 	return &RuleEngine{
 		ac: ac, rules: rules,
-		piiRe: []*regexp.Regexp{
-			regexp.MustCompile(`\d{17}[\dXx]`),
-			regexp.MustCompile(`(?:^|\D)1[3-9]\d{9}(?:\D|$)`),
-			regexp.MustCompile(`(?:^|\D)\d{16,19}(?:\D|$)`),
-		},
-		piiNames:         []string{"身份证号", "手机号", "银行卡号"},
+		piiRe:            piiRe,
+		piiNames:         piiNames,
 		compositeKeyword: NewAhoCorasick([]string{"没有限制", "不受约束"}),
 		version: RuleVersion{
 			Version: 1, LoadedAt: time.Now(), Source: source,
 			RuleCount: len(configs), PatternCount: patternCount,
 		},
 		ruleConfigs: configs,
+		regexRules:  regexRules,
+	}
+}
+
+// NewRuleEngineWithPII 从配置构建 RuleEngine，支持自定义 PII 模式（v3.11）
+func NewRuleEngineWithPII(configs []InboundRuleConfig, source string, piiPatterns []OutboundPIIPatternConfig, bindings []RuleBindingConfig) *RuleEngine {
+	ac, rules := buildACFromConfigs(configs)
+	regexRules := buildRegexRules(configs)
+	patternCount := countPatterns(configs)
+	piiRe, piiNames := buildPIIPatterns(piiPatterns)
+	return &RuleEngine{
+		ac: ac, rules: rules,
+		piiRe:            piiRe,
+		piiNames:         piiNames,
+		compositeKeyword: NewAhoCorasick([]string{"没有限制", "不受约束"}),
+		version: RuleVersion{
+			Version: 1, LoadedAt: time.Now(), Source: source,
+			RuleCount: len(configs), PatternCount: patternCount,
+		},
+		ruleConfigs:  configs,
+		regexRules:   regexRules,
+		ruleBindings: bindings,
 	}
 }
 
 // Reload 热更新入站规则（并发安全）
 func (re *RuleEngine) Reload(configs []InboundRuleConfig, source string) {
 	ac, rules := buildACFromConfigs(configs)
+	regexRules := buildRegexRules(configs)
 	patternCount := countPatterns(configs)
 	re.mu.Lock()
 	re.ac = ac
 	re.rules = rules
+	re.regexRules = regexRules
 	re.ruleConfigs = configs
 	re.version.Version++
 	re.version.LoadedAt = time.Now()
@@ -514,8 +642,110 @@ func (re *RuleEngine) Reload(configs []InboundRuleConfig, source string) {
 	re.version.RuleCount = len(configs)
 	re.version.PatternCount = patternCount
 	re.mu.Unlock()
-	log.Printf("[入站规则] 热更新完成 v%d，加载 %d 条规则 %d 个 pattern (source=%s)",
-		re.version.Version, len(configs), patternCount, source)
+	log.Printf("[入站规则] 热更新完成 v%d，加载 %d 条规则 %d 个 pattern (source=%s, regex_rules=%d)",
+		re.version.Version, len(configs), patternCount, source, len(regexRules))
+}
+
+// ReloadWithBindings 热更新入站规则和绑定配置（v3.11）
+func (re *RuleEngine) ReloadWithBindings(configs []InboundRuleConfig, source string, bindings []RuleBindingConfig) {
+	ac, rules := buildACFromConfigs(configs)
+	regexRules := buildRegexRules(configs)
+	patternCount := countPatterns(configs)
+	re.mu.Lock()
+	re.ac = ac
+	re.rules = rules
+	re.regexRules = regexRules
+	re.ruleConfigs = configs
+	re.ruleBindings = bindings
+	re.version.Version++
+	re.version.LoadedAt = time.Now()
+	re.version.Source = source
+	re.version.RuleCount = len(configs)
+	re.version.PatternCount = patternCount
+	re.mu.Unlock()
+	log.Printf("[入站规则] 热更新完成 v%d，加载 %d 条规则 %d 个 pattern (source=%s, regex_rules=%d, bindings=%d)",
+		re.version.Version, len(configs), patternCount, source, len(regexRules), len(bindings))
+}
+
+// SetRuleBindings 设置规则绑定配置（v3.11）
+func (re *RuleEngine) SetRuleBindings(bindings []RuleBindingConfig) {
+	re.mu.Lock()
+	re.ruleBindings = bindings
+	re.mu.Unlock()
+}
+
+// GetRuleBindings 获取规则绑定配置（v3.11）
+func (re *RuleEngine) GetRuleBindings() []RuleBindingConfig {
+	re.mu.RLock()
+	defer re.mu.RUnlock()
+	cp := make([]RuleBindingConfig, len(re.ruleBindings))
+	copy(cp, re.ruleBindings)
+	return cp
+}
+
+// GetApplicableGroups 根据 app_id 获取适用的规则组列表（v3.11）
+// 返回 nil 表示所有规则都适用（无绑定配置或未匹配）
+func (re *RuleEngine) GetApplicableGroups(appID string) []string {
+	re.mu.RLock()
+	bindings := re.ruleBindings
+	re.mu.RUnlock()
+
+	if len(bindings) == 0 {
+		return nil // 没有绑定配置，所有规则生效
+	}
+
+	// 精确匹配
+	for _, b := range bindings {
+		if b.AppID == appID {
+			return b.Groups
+		}
+	}
+	// 通配符匹配
+	for _, b := range bindings {
+		if b.AppID == "*" {
+			return b.Groups
+		}
+	}
+	return nil // 无匹配，所有规则生效
+}
+
+// isRuleApplicable 判断规则是否适用于当前 app_id（v3.11）
+func isRuleApplicable(ruleGroup string, applicableGroups []string) bool {
+	if applicableGroups == nil {
+		return true // 无绑定配置，所有规则生效
+	}
+	if ruleGroup == "" {
+		return true // 未分组的规则始终生效
+	}
+	for _, g := range applicableGroups {
+		if g == ruleGroup {
+			return true
+		}
+	}
+	return false
+}
+
+// GetRulesForAppID 获取某个 app_id 适用的规则列表（v3.11，用于 API 测试）
+func (re *RuleEngine) GetRulesForAppID(appID string) []InboundRuleSummary {
+	re.mu.RLock()
+	defer re.mu.RUnlock()
+	groups := re.GetApplicableGroups(appID)
+	var summaries []InboundRuleSummary
+	for _, cfg := range re.ruleConfigs {
+		if isRuleApplicable(cfg.Group, groups) {
+			ruleType := cfg.Type
+			if ruleType == "" {
+				ruleType = "keyword"
+			}
+			summaries = append(summaries, InboundRuleSummary{
+				Name: cfg.Name, PatternsCount: len(cfg.Patterns),
+				Action: cfg.Action, Category: cfg.Category,
+				Priority: cfg.Priority, Message: cfg.Message,
+				Type: ruleType, Group: cfg.Group,
+			})
+		}
+	}
+	return summaries
 }
 
 // Version 返回当前规则版本信息（并发安全）
@@ -531,10 +761,15 @@ func (re *RuleEngine) ListRules() []InboundRuleSummary {
 	defer re.mu.RUnlock()
 	summaries := make([]InboundRuleSummary, len(re.ruleConfigs))
 	for i, cfg := range re.ruleConfigs {
+		ruleType := cfg.Type
+		if ruleType == "" {
+			ruleType = "keyword"
+		}
 		summaries[i] = InboundRuleSummary{
 			Name: cfg.Name, PatternsCount: len(cfg.Patterns),
 			Action: cfg.Action, Category: cfg.Category,
 			Priority: cfg.Priority, Message: cfg.Message,
+			Type: ruleType, Group: cfg.Group,
 		}
 	}
 	return summaries
@@ -572,13 +807,22 @@ func levelToAction(level RuleLevel) string {
 }
 
 func (re *RuleEngine) Detect(text string) DetectResult {
+	return re.DetectWithAppID(text, "")
+}
+
+// DetectWithAppID 入站检测（v3.11 支持 app_id 规则绑定）
+func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 	r := DetectResult{Action: "pass"}
 	if text == "" { return r }
 	re.mu.RLock()
 	ac := re.ac
 	rules := re.rules
 	compositeKeyword := re.compositeKeyword
+	regexRules := re.regexRules
 	re.mu.RUnlock()
+
+	// v3.11: 获取适用的规则组
+	applicableGroups := re.GetApplicableGroups(appID)
 
 	// Collect all matched rules (deduplicate by rule name, keep highest priority match)
 	type matchedRule struct {
@@ -593,6 +837,10 @@ func (re *RuleEngine) Detect(text string) DetectResult {
 	for _, idx := range ac.Search(text) {
 		if idx < 0 || idx >= len(rules) { continue }
 		rule := rules[idx]
+		// v3.11: 检查规则组是否适用
+		if !isRuleApplicable(rule.Group, applicableGroups) {
+			continue
+		}
 		action := levelToAction(rule.Level)
 		if existing, ok := matchesByName[rule.Name]; ok {
 			// Same rule name (different pattern), keep if higher priority or higher action weight
@@ -607,6 +855,50 @@ func (re *RuleEngine) Detect(text string) DetectResult {
 			matchesByName[rule.Name] = &matchedRule{
 				Name: rule.Name, Level: rule.Level,
 				Priority: rule.Priority, Message: rule.Message,
+				Action: action,
+			}
+		}
+	}
+
+	// v3.11: 正则规则匹配（在 AC 自动机之后）
+	for _, rr := range regexRules {
+		// 检查规则组是否适用
+		if !isRuleApplicable(rr.Group, applicableGroups) {
+			continue
+		}
+		// 正则匹配超时保护（100ms）
+		matched := false
+		done := make(chan bool, 1)
+		go func() {
+			defer func() {
+				if rv := recover(); rv != nil {
+					done <- false
+				}
+			}()
+			done <- rr.Pattern.MatchString(text)
+		}()
+		select {
+		case matched = <-done:
+		case <-time.After(100 * time.Millisecond):
+			log.Printf("[入站规则] 正则匹配超时 rule=%s（100ms），跳过", rr.Name)
+			continue
+		}
+		if !matched {
+			continue
+		}
+		action := levelToAction(rr.Level)
+		if existing, ok := matchesByName[rr.Name]; ok {
+			if rr.Priority > existing.Priority ||
+				(rr.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
+				existing.Level = rr.Level
+				existing.Priority = rr.Priority
+				existing.Message = rr.Message
+				existing.Action = action
+			}
+		} else {
+			matchesByName[rr.Name] = &matchedRule{
+				Name: rr.Name, Level: rr.Level,
+				Priority: rr.Priority, Message: rr.Message,
 				Action: action,
 			}
 		}
@@ -656,6 +948,21 @@ func (re *RuleEngine) Detect(text string) DetectResult {
 		r.Action = "warn"; r.Reasons = append(r.Reasons, "pii_detected")
 	}
 	return r
+}
+
+// ListPIIPatterns 返回当前 PII 模式列表（v3.11 API 展示用）
+func (re *RuleEngine) ListPIIPatterns() []map[string]string {
+	re.mu.RLock()
+	defer re.mu.RUnlock()
+	patterns := make([]map[string]string, len(re.piiNames))
+	for i, name := range re.piiNames {
+		p := ""
+		if i < len(re.piiRe) {
+			p = re.piiRe[i].String()
+		}
+		patterns[i] = map[string]string{"name": name, "pattern": p}
+	}
+	return patterns
 }
 
 func (re *RuleEngine) DetectPII(text string) []string {
@@ -781,19 +1088,22 @@ type RuleHitDetail struct {
 	Name    string `json:"name"`
 	Hits    int64  `json:"hits"`
 	LastHit string `json:"last_hit,omitempty"`
+	Group   string `json:"group,omitempty"` // v3.11 规则分组标签
 }
 
 // RuleHitStats 规则命中率统计（线程安全）
 type RuleHitStats struct {
-	mu      sync.RWMutex
-	hits    map[string]int64     // key: rule_name, value: hit count
-	lastHit map[string]time.Time // key: rule_name, value: last hit time
+	mu       sync.RWMutex
+	hits     map[string]int64     // key: rule_name, value: hit count
+	lastHit  map[string]time.Time // key: rule_name, value: last hit time
+	groups   map[string]string    // key: rule_name, value: group (v3.11)
 }
 
 func NewRuleHitStats() *RuleHitStats {
 	return &RuleHitStats{
 		hits:    make(map[string]int64),
 		lastHit: make(map[string]time.Time),
+		groups:  make(map[string]string),
 	}
 }
 
@@ -801,6 +1111,24 @@ func (rhs *RuleHitStats) Record(ruleName string) {
 	rhs.mu.Lock()
 	rhs.hits[ruleName]++
 	rhs.lastHit[ruleName] = time.Now()
+	rhs.mu.Unlock()
+}
+
+// RecordWithGroup 记录命中并关联分组（v3.11）
+func (rhs *RuleHitStats) RecordWithGroup(ruleName, group string) {
+	rhs.mu.Lock()
+	rhs.hits[ruleName]++
+	rhs.lastHit[ruleName] = time.Now()
+	if group != "" {
+		rhs.groups[ruleName] = group
+	}
+	rhs.mu.Unlock()
+}
+
+// SetRuleGroup 设置规则的分组信息（v3.11）
+func (rhs *RuleHitStats) SetRuleGroup(ruleName, group string) {
+	rhs.mu.Lock()
+	rhs.groups[ruleName] = group
 	rhs.mu.Unlock()
 }
 
@@ -823,9 +1151,34 @@ func (rhs *RuleHitStats) GetDetails() []RuleHitDetail {
 		if t, ok := rhs.lastHit[name]; ok {
 			d.LastHit = t.UTC().Format(time.RFC3339)
 		}
+		if g, ok := rhs.groups[name]; ok {
+			d.Group = g
+		}
 		details = append(details, d)
 	}
 	// Sort by hits descending
+	sort.Slice(details, func(i, j int) bool {
+		return details[i].Hits > details[j].Hits
+	})
+	return details
+}
+
+// GetDetailsByGroup 按分组筛选规则命中详情（v3.11）
+func (rhs *RuleHitStats) GetDetailsByGroup(group string) []RuleHitDetail {
+	rhs.mu.RLock()
+	defer rhs.mu.RUnlock()
+	details := make([]RuleHitDetail, 0)
+	for name, count := range rhs.hits {
+		g := rhs.groups[name]
+		if g != group {
+			continue
+		}
+		d := RuleHitDetail{Name: name, Hits: count, Group: g}
+		if t, ok := rhs.lastHit[name]; ok {
+			d.LastHit = t.UTC().Format(time.RFC3339)
+		}
+		details = append(details, d)
+	}
 	sort.Slice(details, func(i, j int) bool {
 		return details[i].Hits > details[j].Hits
 	})
@@ -846,6 +1199,7 @@ func (rhs *RuleHitStats) Reset() {
 	rhs.mu.Lock()
 	rhs.hits = make(map[string]int64)
 	rhs.lastHit = make(map[string]time.Time)
+	rhs.groups = make(map[string]string)
 	rhs.mu.Unlock()
 }
 
@@ -4686,7 +5040,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 						ch <- DetectResult{Action: "pass"}
 					}
 				}()
-				ch <- ip.engine.Detect(msgText)
+				ch <- ip.engine.DetectWithAppID(msgText, appID)
 			}()
 			select {
 			case detectResult = <-ch:
@@ -5015,7 +5369,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ch := make(chan DetectResult, 1)
 		go func() {
 			defer func() { if rv := recover(); rv != nil { ch <- DetectResult{Action: "pass"} } }()
-			ch <- ip.engine.Detect(msgText)
+			ch <- ip.engine.DetectWithAppID(msgText, appID)
 		}()
 		select {
 		case detectResult = <-ch:
@@ -5371,6 +5725,11 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListRoutePolicies(w, r)
 	case path == "/api/v1/route-policies/test" && method == "POST":
 		api.handleTestRoutePolicy(w, r)
+	// v3.11 规则绑定 API
+	case path == "/api/v1/rule-bindings" && method == "GET":
+		api.handleListRuleBindings(w, r)
+	case path == "/api/v1/rule-bindings/test" && method == "POST":
+		api.handleTestRuleBindings(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -5827,6 +6186,13 @@ func (api *ManagementAPI) handleRuleHits(w http.ResponseWriter, r *http.Request)
 		jsonResponse(w, 200, []RuleHitDetail{})
 		return
 	}
+	// v3.11: 支持 ?group=xxx 筛选
+	group := r.URL.Query().Get("group")
+	if group != "" {
+		details := api.ruleHits.GetDetailsByGroup(group)
+		jsonResponse(w, 200, details)
+		return
+	}
 	details := api.ruleHits.GetDetails()
 	jsonResponse(w, 200, details)
 }
@@ -5984,13 +6350,54 @@ func (api *ManagementAPI) handleTestRoutePolicy(w http.ResponseWriter, r *http.R
 	})
 }
 
+// ============================================================
+// v3.11 规则绑定 API
+// ============================================================
+
+// handleListRuleBindings GET /api/v1/rule-bindings — 查看规则绑定关系
+func (api *ManagementAPI) handleListRuleBindings(w http.ResponseWriter, r *http.Request) {
+	bindings := api.inboundEngine.GetRuleBindings()
+	jsonResponse(w, 200, map[string]interface{}{
+		"bindings": bindings,
+		"total":    len(bindings),
+	})
+}
+
+// handleTestRuleBindings POST /api/v1/rule-bindings/test — 测试某个 app_id 会应用哪些规则
+func (api *ManagementAPI) handleTestRuleBindings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AppID string `json:"app_id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.AppID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "app_id required"})
+		return
+	}
+	groups := api.inboundEngine.GetApplicableGroups(req.AppID)
+	rules := api.inboundEngine.GetRulesForAppID(req.AppID)
+	jsonResponse(w, 200, map[string]interface{}{
+		"app_id":           req.AppID,
+		"applicable_groups": groups,
+		"all_rules_apply":  groups == nil,
+		"rules":            rules,
+		"rules_count":      len(rules),
+	})
+}
+
 // handleListInboundRules GET /api/v1/inbound-rules — 列出当前入站规则
 func (api *ManagementAPI) handleListInboundRules(w http.ResponseWriter, r *http.Request) {
 	rules := api.inboundEngine.ListRules()
 	version := api.inboundEngine.Version()
+	// v3.11: 统计各分组的规则数
+	groupCounts := make(map[string]int)
+	for _, rule := range rules {
+		if rule.Group != "" {
+			groupCounts[rule.Group]++
+		}
+	}
 	jsonResponse(w, 200, map[string]interface{}{
-		"rules":   rules,
-		"version": version,
+		"rules":        rules,
+		"version":      version,
+		"group_counts": groupCounts,
 	})
 }
 
@@ -6015,7 +6422,8 @@ func (api *ManagementAPI) handleReloadInboundRules(w http.ResponseWriter, r *htt
 		source = "default"
 	}
 
-	api.inboundEngine.Reload(rules, source)
+	// v3.11: 同时更新规则绑定配置
+	api.inboundEngine.ReloadWithBindings(rules, source, newCfg.RuleBindings)
 
 	rv := api.inboundEngine.Version()
 	jsonResponse(w, 200, map[string]interface{}{
@@ -6039,9 +6447,12 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 		}
 	}
 	api.outboundEngine.mu.RUnlock()
+	// v3.11: 包含 PII 模式列表
+	piiPatterns := api.inboundEngine.ListPIIPatterns()
 	jsonResponse(w, 200, map[string]interface{}{
-		"rules": rules,
-		"total": len(rules),
+		"rules":        rules,
+		"total":        len(rules),
+		"pii_patterns": piiPatterns,
 	})
 }
 
@@ -6396,18 +6807,18 @@ func main() {
 		log.Printf("[初始化] 蓝信通道插件就绪")
 	}
 
-	// 初始化入站规则引擎（v3.5 支持外部规则）
+	// 初始化入站规则引擎（v3.5 支持外部规则, v3.11 支持正则和分组）
 	var engine *RuleEngine
 	inboundRules, inboundSource, err := resolveInboundRules(cfg)
 	if err != nil {
 		log.Fatalf("加载入站规则失败: %v", err)
 	}
 	if inboundRules != nil {
-		engine = NewRuleEngineFromConfig(inboundRules, inboundSource)
+		engine = NewRuleEngineWithPII(inboundRules, inboundSource, cfg.OutboundPIIPatterns, cfg.RuleBindings)
 		log.Printf("[初始化] 入站规则引擎就绪 (source=%s, rules:%d, patterns:%d)",
 			inboundSource, len(inboundRules), countPatterns(inboundRules))
 	} else {
-		engine = NewRuleEngine()
+		engine = NewRuleEngineWithPII(getDefaultInboundRules(), "default", cfg.OutboundPIIPatterns, cfg.RuleBindings)
 		log.Printf("[初始化] 入站规则引擎就绪 (内置默认, patterns:%d)", engine.Version().PatternCount)
 	}
 

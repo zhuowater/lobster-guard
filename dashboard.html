@@ -473,21 +473,29 @@ function loadInboundRules(){
   api('/api/v1/inbound-rules').then(function(d){
     var list=d.rules||d||[];if(!Array.isArray(list))list=[];
     if(!list.length){var el=document.getElementById('inboundRulesContent');el.innerHTML='<div class="empty">\u6682\u65e0\u5165\u7ad9\u89c4\u5219</div>';el.className='';return}
-    var h='<div class="table-wrap"><table><thead><tr><th>\u540d\u79f0</th><th>\u52a8\u4f5c</th><th>\u4f18\u5148\u7ea7</th><th>\u6a21\u5f0f\u6570</th><th>\u5206\u7c7b</th></tr></thead><tbody>';
+    var h='<div class="table-wrap"><table><thead><tr><th>\u540d\u79f0</th><th>\u52a8\u4f5c</th><th>\u7c7b\u578b</th><th>\u4f18\u5148\u7ea7</th><th>\u6a21\u5f0f\u6570</th><th>\u5206\u7c7b</th><th>\u5206\u7ec4</th></tr></thead><tbody>';
+    var groupColors={'jailbreak':'#ff6b6b','injection':'#ffa94d','social_engineering':'#69db7c','pii':'#74c0fc','sensitive':'#b197fc','roleplay':'#e599f7','command_injection':'#ff8787'};
     for(var i=0;i<list.length;i++){
       var r=list[i];
+      var typeLabel=r.type||'keyword';
+      var typeCls=typeLabel==='regex'?'tag-warn':'tag-info';
+      var groupTag='--';
+      if(r.group){var gc=groupColors[r.group]||'#868e96';groupTag='<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;background:'+gc+'">'+esc(r.group)+'</span>';}
       h+='<tr><td>'+esc(r.name)+'</td>'
         +'<td><span class="tag '+actTag(r.action)+'">'+esc(r.action)+'</span></td>'
+        +'<td><span class="tag '+typeCls+'">'+esc(typeLabel)+'</span></td>'
         +'<td>'+(r.priority!=null?r.priority:'--')+'</td>'
-        +'<td>'+(r.pattern_count!=null?r.pattern_count:(r.patterns?r.patterns.length:'--'))+'</td>'
-        +'<td>'+esc(r.category||'--')+'</td></tr>';
+        +'<td>'+(r.patterns_count!=null?r.patterns_count:(r.pattern_count!=null?r.pattern_count:'--'))+'</td>'
+        +'<td>'+esc(r.category||'--')+'</td>'
+        +'<td>'+groupTag+'</td></tr>';
     }
     h+='</tbody></table></div>';
-    if(d.version||d.source||d.loaded_at){
+    if(d.version||d.source||d.loaded_at||d.group_counts){
       h+='<div class="rule-meta">';
-      if(d.version)h+='\u7248\u672c: '+esc(d.version)+' ';
-      if(d.source)h+='\u6765\u6e90: '+esc(d.source)+' ';
-      if(d.loaded_at)h+='\u52a0\u8f7d\u65f6\u95f4: '+fmtTime(d.loaded_at);
+      if(d.version)h+='\u7248\u672c: '+esc(typeof d.version==='object'?d.version.version:d.version)+' ';
+      if(d.version&&d.version.source)h+='\u6765\u6e90: '+esc(d.version.source)+' ';
+      if(d.version&&d.version.loaded_at)h+='\u52a0\u8f7d\u65f6\u95f4: '+fmtTime(d.version.loaded_at)+' ';
+      if(d.group_counts){var gc=d.group_counts;var gk=Object.keys(gc);if(gk.length){h+='<br>\u5206\u7ec4: ';for(var g=0;g<gk.length;g++){var gcolor=groupColors[gk[g]]||'#868e96';h+='<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;background:'+gcolor+';margin:2px">'+esc(gk[g])+': '+gc[gk[g]]+'</span> ';}}}
       h+='</div>';
     }
     var el=document.getElementById('inboundRulesContent');el.innerHTML=h;el.className='';

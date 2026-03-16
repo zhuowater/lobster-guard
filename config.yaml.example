@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v3.10 配置文件（示例）
+# 龙虾卫士 lobster-guard v3.11 配置文件（示例）
 # ============================================================
 
 # ============================================================
@@ -207,6 +207,7 @@ route_persist: true
 # 入站规则（v3.5+）
 # 不配置则使用内置默认规则（40+ Prompt Injection 检测模式）
 # 运行 ./lobster-guard -gen-rules rules.yaml 可导出默认规则
+# v3.11: 支持正则模式（type: regex）和规则分组（group）
 # ============================================================
 # inbound_rules_file: "/etc/lobster-guard/inbound-rules.yaml"
 # inbound_rules:
@@ -216,6 +217,52 @@ route_persist: true
 #     priority: 100              # 优先级（数字越大越优先，默认0）
 #     message: "自定义拦截提示"    # 可选，为空则用默认提示
 #     category: "custom"
+#     type: "keyword"            # v3.11 规则类型: "keyword"（默认）或 "regex"
+#     group: "injection"         # v3.11 规则分组标签
+#
+#   # 正则规则示例（v3.11）
+#   - name: "regex_email_detect"
+#     patterns: ["[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"]
+#     action: "warn"
+#     type: "regex"              # 使用正则匹配（而非 AC 自动机关键词匹配）
+#     group: "pii"               # 归属 PII 分组
+#     message: "检测到邮箱地址"
+#
+#   - name: "regex_base64_injection"
+#     patterns: ["(?i)base64[\\s_-]*(decode|encode)\\s*\\("]
+#     action: "block"
+#     type: "regex"
+#     group: "injection"
+#     priority: 50
+
+# ============================================================
+# 规则绑定（v3.11）
+# 按 app_id 绑定不同的规则组，实现多租户规则隔离
+# 未配置或 app_id 无匹配时，所有规则都生效（向后兼容）
+# ============================================================
+# rule_bindings:
+#   - app_id: "bot-internal"           # 内部 Bot：只检测越狱和注入
+#     groups: ["jailbreak", "injection"]
+#   - app_id: "bot-external"           # 外部 Bot：检测所有分组
+#     groups: ["jailbreak", "injection", "social_engineering", "pii"]
+#   - app_id: "*"                      # 默认（未匹配的 app_id 使用此配置）
+#     groups: ["jailbreak", "injection"]
+
+# ============================================================
+# 出站 PII 正则可配置化（v3.11）
+# 自定义身份证/手机号/银行卡等 PII 检测模式
+# 不配置则使用默认模式（身份证号/手机号/银行卡号）
+# 配置后完全替换默认模式
+# ============================================================
+# outbound_pii_patterns:
+#   - name: "身份证号"
+#     pattern: "\\d{17}[\\dXx]"
+#   - name: "手机号"
+#     pattern: "1[3-9]\\d{9}"
+#   - name: "银行卡号"
+#     pattern: "\\d{16,19}"
+#   - name: "邮箱地址"
+#     pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
 
 # ============================================================
 # 出站规则（block/warn/log 三级策略）
