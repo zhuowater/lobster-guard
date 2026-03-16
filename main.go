@@ -18,6 +18,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"flag"
@@ -47,7 +48,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.9.0"
+	AppVersion = "3.10.0"
 )
 
 var startTime = time.Now()
@@ -132,6 +133,11 @@ type Config struct {
 	MetricsEnabled       *bool                `yaml:"metrics_enabled"`       // 默认 true
 	InboundRules         []InboundRuleConfig  `yaml:"inbound_rules"`         // v3.5 自定义入站规则
 	InboundRulesFile     string               `yaml:"inbound_rules_file"`    // v3.5 外部规则文件路径
+	// v3.10 审计日志增强 + 告警通知
+	AuditRetentionDays   int                  `yaml:"audit_retention_days"`  // v3.10 日志保留天数，默认 30
+	AlertWebhook         string               `yaml:"alert_webhook"`         // v3.10 告警 webhook URL
+	AlertMinInterval     int                  `yaml:"alert_min_interval"`    // v3.10 最小告警间隔秒数，默认 60
+	AlertFormat          string               `yaml:"alert_format"`          // v3.10 告警格式: "generic" (默认) 或 "lanxin"
 }
 
 type OutboundRuleConfig struct {
@@ -3759,14 +3765,21 @@ func (al *AuditLogger) Close() {
 }
 
 func (al *AuditLogger) QueryLogs(direction, action, senderID string, limit int) ([]map[string]interface{}, error) {
+	return al.QueryLogsEx(direction, action, senderID, "", "", limit)
+}
+
+// QueryLogsEx 扩展查询：支持 app_id 和全文搜索 q 参数（v3.10）
+func (al *AuditLogger) QueryLogsEx(direction, action, senderID, appID, q string, limit int) ([]map[string]interface{}, error) {
 	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id FROM audit_log WHERE 1=1`
 	var args []interface{}
 	if direction != "" { query += ` AND direction=?`; args = append(args, direction) }
 	if action != "" { query += ` AND action=?`; args = append(args, action) }
 	if senderID != "" { query += ` AND sender_id=?`; args = append(args, senderID) }
+	if appID != "" { query += ` AND app_id=?`; args = append(args, appID) }
+	if q != "" { query += ` AND content_preview LIKE ?`; args = append(args, "%"+q+"%") }
 	query += ` ORDER BY id DESC`
 	if limit <= 0 { limit = 50 }
-	if limit > 500 { limit = 500 }
+	if limit > 10000 { limit = 10000 }
 	query += ` LIMIT ?`; args = append(args, limit)
 
 	rows, err := al.db.Query(query, args...)
@@ -3774,15 +3787,105 @@ func (al *AuditLogger) QueryLogs(direction, action, senderID string, limit int) 
 	defer rows.Close()
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int; var ts, dir, sid, act, reason, preview, uid, appID string; var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &appID) != nil { continue }
+		var id int; var ts, dir, sid, act, reason, preview, uid, aid string; var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid) != nil { continue }
 		results = append(results, map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
-			"latency_ms": latMs, "upstream_id": uid, "app_id": appID,
+			"latency_ms": latMs, "upstream_id": uid, "app_id": aid,
 		})
 	}
 	return results, nil
+}
+
+// CleanupOldLogs 清理超过指定天数的日志（v3.10）
+func (al *AuditLogger) CleanupOldLogs(retentionDays int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
+	result, err := al.db.Exec(`DELETE FROM audit_log WHERE timestamp < ?`, cutoff)
+	if err != nil { return 0, err }
+	return result.RowsAffected()
+}
+
+// AuditStats 返回审计日志统计信息（v3.10）
+func (al *AuditLogger) AuditStats() map[string]interface{} {
+	stats := map[string]interface{}{}
+	var total int
+	al.db.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&total)
+	stats["total"] = total
+
+	var earliest, latest sql.NullString
+	al.db.QueryRow(`SELECT MIN(timestamp) FROM audit_log`).Scan(&earliest)
+	al.db.QueryRow(`SELECT MAX(timestamp) FROM audit_log`).Scan(&latest)
+	if earliest.Valid { stats["earliest"] = earliest.String } else { stats["earliest"] = nil }
+	if latest.Valid { stats["latest"] = latest.String } else { stats["latest"] = nil }
+
+	// 估算磁盘占用（SQLite page_count * page_size）
+	var pageCount, pageSize int
+	al.db.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+	al.db.QueryRow(`PRAGMA page_size`).Scan(&pageSize)
+	stats["disk_bytes"] = int64(pageCount) * int64(pageSize)
+
+	return stats
+}
+
+// Timeline 按小时聚合审计日志（v3.10）
+func (al *AuditLogger) Timeline(hours int) []map[string]interface{} {
+	if hours <= 0 { hours = 24 }
+	if hours > 168 { hours = 168 } // 最多 7 天
+	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+	rows, err := al.db.Query(`
+		SELECT
+			strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour_bucket,
+			action,
+			COUNT(*) as cnt
+		FROM audit_log
+		WHERE timestamp >= ?
+		GROUP BY hour_bucket, action
+		ORDER BY hour_bucket ASC
+	`, since.Format(time.RFC3339))
+	if err != nil { return nil }
+	defer rows.Close()
+
+	// 收集数据
+	type hourAction struct {
+		hour   string
+		action string
+		count  int
+	}
+	var data []hourAction
+	for rows.Next() {
+		var ha hourAction
+		if rows.Scan(&ha.hour, &ha.action, &ha.count) == nil {
+			data = append(data, ha)
+		}
+	}
+
+	// 生成完整的每小时时间线
+	hourMap := map[string]map[string]int{}
+	for _, d := range data {
+		if hourMap[d.hour] == nil { hourMap[d.hour] = map[string]int{} }
+		hourMap[d.hour][d.action] = d.count
+	}
+
+	// 填充所有小时槽
+	var timeline []map[string]interface{}
+	for i := hours - 1; i >= 0; i-- {
+		t := time.Now().UTC().Add(-time.Duration(i) * time.Hour)
+		hourKey := t.Format("2006-01-02T15") + ":00:00Z"
+		entry := map[string]interface{}{
+			"hour":  hourKey,
+			"pass":  0,
+			"block": 0,
+			"warn":  0,
+		}
+		if m, ok := hourMap[hourKey]; ok {
+			for action, cnt := range m {
+				entry[action] = cnt
+			}
+		}
+		timeline = append(timeline, entry)
+	}
+	return timeline
 }
 
 func (al *AuditLogger) Stats() map[string]interface{} {
@@ -3802,6 +3905,124 @@ func (al *AuditLogger) Stats() map[string]interface{} {
 	}
 	stats["breakdown"] = breakdown
 	return stats
+}
+
+// ============================================================
+// v3.10 告警通知器
+// ============================================================
+
+// AlertNotifier 异步发送 block 事件告警到 webhook
+type AlertNotifier struct {
+	webhookURL  string
+	format      string // "generic" 或 "lanxin"
+	minInterval time.Duration
+	lastAlert   time.Time
+	mu          sync.Mutex
+	metrics     *MetricsCollector
+	alertsTotal int64
+	httpClient  *http.Client
+}
+
+// NewAlertNotifier 创建告警通知器
+func NewAlertNotifier(webhookURL, format string, minIntervalSec int, metrics *MetricsCollector) *AlertNotifier {
+	if minIntervalSec <= 0 { minIntervalSec = 60 }
+	if format == "" { format = "generic" }
+	return &AlertNotifier{
+		webhookURL:  webhookURL,
+		format:      format,
+		minInterval: time.Duration(minIntervalSec) * time.Second,
+		metrics:     metrics,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// AlertEvent block 事件数据
+type AlertEvent struct {
+	Event          string `json:"event"`
+	Direction      string `json:"direction"`
+	SenderID       string `json:"sender_id"`
+	Rule           string `json:"rule"`
+	ContentPreview string `json:"content_preview"`
+	Timestamp      string `json:"timestamp"`
+	AppID          string `json:"app_id"`
+}
+
+// Notify 异步发送 block 告警
+func (an *AlertNotifier) Notify(direction, senderID, rule, content, appID string) {
+	an.mu.Lock()
+	now := time.Now()
+	if now.Sub(an.lastAlert) < an.minInterval {
+		an.mu.Unlock()
+		return
+	}
+	an.lastAlert = now
+	an.mu.Unlock()
+
+	atomic.AddInt64(&an.alertsTotal, 1)
+
+	// 记录 metrics
+	if an.metrics != nil {
+		an.metrics.RecordAlert()
+	}
+
+	// 内容预览：前 50 字符
+	preview := content
+	if rs := []rune(preview); len(rs) > 50 { preview = string(rs[:50]) + "..." }
+
+	event := AlertEvent{
+		Event:          "block",
+		Direction:      direction,
+		SenderID:       senderID,
+		Rule:           rule,
+		ContentPreview: preview,
+		Timestamp:      now.UTC().Format(time.RFC3339),
+		AppID:          appID,
+	}
+
+	// 异步发送
+	go func() {
+		defer func() { recover() }()
+
+		var body []byte
+		var err error
+
+		if an.format == "lanxin" {
+			// 蓝信机器人 webhook 格式
+			text := fmt.Sprintf("🚨 [龙虾卫士告警]\n方向: %s\n发送者: %s\n规则: %s\n内容: %s\n时间: %s\nBot: %s",
+				event.Direction, event.SenderID, event.Rule, event.ContentPreview, event.Timestamp, event.AppID)
+			lanxinMsg := map[string]interface{}{
+				"msgType": "text",
+				"msgData": map[string]string{"text": text},
+			}
+			body, err = json.Marshal(lanxinMsg)
+		} else {
+			// 通用 webhook 格式
+			body, err = json.Marshal(event)
+		}
+		if err != nil {
+			log.Printf("[告警] 序列化告警消息失败: %v", err)
+			return
+		}
+
+		resp, err := an.httpClient.Post(an.webhookURL, "application/json", bytes.NewReader(body))
+		if err != nil {
+			log.Printf("[告警] 发送告警失败: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		if resp.StatusCode >= 300 {
+			log.Printf("[告警] 告警 webhook 返回非成功状态码: %d", resp.StatusCode)
+		} else {
+			log.Printf("[告警] 已发送 block 告警: direction=%s sender=%s rule=%s", event.Direction, event.SenderID, event.Rule)
+		}
+	}()
+}
+
+// TotalAlerts 返回告警总数
+func (an *AlertNotifier) TotalAlerts() int64 {
+	return atomic.LoadInt64(&an.alertsTotal)
 }
 
 // ============================================================
@@ -4093,6 +4314,9 @@ type MetricsCollector struct {
 	rateLimitAllowed int64
 	rateLimitDenied  int64
 
+	// v3.10 告警
+	alertsTotal int64
+
 	// 系统
 	startTime time.Time
 }
@@ -4138,6 +4362,13 @@ func (mc *MetricsCollector) RecordBridgeMessage() {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.bridgeMessages++
+}
+
+// RecordAlert 记录告警事件（v3.10）
+func (mc *MetricsCollector) RecordAlert() {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.alertsTotal++
 }
 
 func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string, ruleHits *RuleHitStats, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine) {
@@ -4288,6 +4519,11 @@ func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstrea
 				name, info.action, info.direction, count)
 		}
 	}
+
+	// v3.10 lobster_guard_alerts_total
+	fmt.Fprintln(w, "# HELP lobster_guard_alerts_total Total alert notifications sent")
+	fmt.Fprintln(w, "# TYPE lobster_guard_alerts_total counter")
+	fmt.Fprintf(w, "lobster_guard_alerts_total{type=\"block\"} %d\n", mc.alertsTotal)
 }
 
 // formatFloat formats a float for Prometheus le labels (integer-like floats without decimal)
@@ -4320,6 +4556,7 @@ type InboundProxy struct {
 	ruleHits   *RuleHitStats   // v3.6 规则命中统计
 	userCache  *UserInfoCache  // v3.9 用户信息缓存
 	policyEng  *RoutePolicyEngine // v3.9 路由策略引擎
+	alertNotifier *AlertNotifier // v3.10 告警通知器
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *InboundProxy {
@@ -4488,6 +4725,11 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		// 拦截
 		if detectResult.Action == "block" {
 			log.Printf("[桥接入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
+			// v3.10 告警通知
+			if ip.alertNotifier != nil {
+				rule := strings.Join(detectResult.MatchedRules, ",")
+				ip.alertNotifier.Notify("inbound", senderID, rule, msgText, appID)
+			}
 			return
 		}
 		if detectResult.Action == "warn" {
@@ -4808,6 +5050,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 执行决策
 	if detectResult.Action == "block" {
 		log.Printf("[入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
+		// v3.10 告警通知
+		if ip.alertNotifier != nil {
+			rule := strings.Join(detectResult.MatchedRules, ",")
+			ip.alertNotifier.Notify("inbound", senderID, rule, msgText, appID)
+		}
 		code, respBody := ip.channel.BlockResponseWithMessage(detectResult.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
@@ -4836,6 +5083,7 @@ type OutboundProxy struct {
 	enabled        bool
 	metrics        *MetricsCollector // v3.4 指标采集器
 	ruleHits       *RuleHitStats     // v3.6 规则命中统计
+	alertNotifier  *AlertNotifier    // v3.10 告警通知器
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats) (*OutboundProxy, error) {
@@ -4924,6 +5172,10 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "block", op.channel.Name(), latMs)
 		}
+		// v3.10 告警通知
+		if op.alertNotifier != nil {
+			op.alertNotifier.Notify("outbound", recipient, result.RuleName, text, outAppID)
+		}
 		code, respBody := op.channel.OutboundBlockResponseWithMessage(result.Reason, result.RuleName, result.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
@@ -4979,16 +5231,17 @@ type ManagementAPI struct {
 	ruleHits       *RuleHitStats       // v3.6 规则命中统计
 	userCache      *UserInfoCache      // v3.9 用户信息缓存
 	policyEng      *RoutePolicyEngine  // v3.9 路由策略引擎
+	alertNotifier  *AlertNotifier      // v3.10 告警通知器
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger,
 		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		cfg: cfg, cfgPath: cfgPath,
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
-		userCache: userCache, policyEng: policyEng,
+		userCache: userCache, policyEng: policyEng, alertNotifier: alertNotifier,
 	}
 }
 
@@ -5087,6 +5340,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListOutboundRules(w, r)
 	case path == "/api/v1/audit/logs" && method == "GET":
 		api.handleAuditLogs(w, r)
+	case path == "/api/v1/audit/export" && method == "GET":
+		api.handleAuditExport(w, r)
+	case path == "/api/v1/audit/cleanup" && method == "POST":
+		api.handleAuditCleanup(w, r)
+	case path == "/api/v1/audit/stats" && method == "GET":
+		api.handleAuditStats(w, r)
+	case path == "/api/v1/audit/timeline" && method == "GET":
+		api.handleAuditTimeline(w, r)
 	case path == "/api/v1/stats" && method == "GET":
 		api.handleStats(w, r)
 	case path == "/api/v1/rate-limit/stats" && method == "GET":
@@ -5424,16 +5685,107 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	direction := r.URL.Query().Get("direction")
 	action := r.URL.Query().Get("action")
 	senderID := r.URL.Query().Get("sender_id")
+	appID := r.URL.Query().Get("app_id")
+	q := r.URL.Query().Get("q")
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil { limit = n }
 	}
-	logs, err := api.logger.QueryLogs(direction, action, senderID, limit)
+	logs, err := api.logger.QueryLogsEx(direction, action, senderID, appID, q, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs)})
+}
+
+// handleAuditExport GET /api/v1/audit/export — 导出审计日志为 CSV 或 JSON（v3.10）
+func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Request) {
+	format := r.URL.Query().Get("format")
+	if format != "csv" && format != "json" {
+		jsonResponse(w, 400, map[string]string{"error": "format must be 'csv' or 'json'"})
+		return
+	}
+	direction := r.URL.Query().Get("direction")
+	action := r.URL.Query().Get("action")
+	senderID := r.URL.Query().Get("sender_id")
+	appID := r.URL.Query().Get("app_id")
+	q := r.URL.Query().Get("q")
+	limit := 1000
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil { limit = n }
+	}
+	if limit > 10000 { limit = 10000 }
+
+	logs, err := api.logger.QueryLogsEx(direction, action, senderID, appID, q, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=audit_logs.csv")
+		w.WriteHeader(200)
+		cw := csv.NewWriter(w)
+		// 写表头
+		cw.Write([]string{"id", "timestamp", "direction", "sender_id", "action", "reason", "content_preview", "latency_ms", "upstream_id", "app_id"})
+		for _, log := range logs {
+			cw.Write([]string{
+				fmt.Sprintf("%v", log["id"]),
+				fmt.Sprintf("%v", log["timestamp"]),
+				fmt.Sprintf("%v", log["direction"]),
+				fmt.Sprintf("%v", log["sender_id"]),
+				fmt.Sprintf("%v", log["action"]),
+				fmt.Sprintf("%v", log["reason"]),
+				fmt.Sprintf("%v", log["content_preview"]),
+				fmt.Sprintf("%v", log["latency_ms"]),
+				fmt.Sprintf("%v", log["upstream_id"]),
+				fmt.Sprintf("%v", log["app_id"]),
+			})
+		}
+		cw.Flush()
+	} else {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=audit_logs.json")
+		w.WriteHeader(200)
+		if logs == nil { logs = []map[string]interface{}{} }
+		json.NewEncoder(w).Encode(logs)
+	}
+}
+
+// handleAuditCleanup POST /api/v1/audit/cleanup — 手动触发日志清理（v3.10）
+func (api *ManagementAPI) handleAuditCleanup(w http.ResponseWriter, r *http.Request) {
+	retentionDays := api.cfg.AuditRetentionDays
+	if retentionDays <= 0 { retentionDays = 30 }
+	deleted, err := api.logger.CleanupOldLogs(retentionDays)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[审计] 手动清理了 %d 条过期日志（超过 %d 天）", deleted, retentionDays)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":         "cleaned",
+		"deleted":        deleted,
+		"retention_days": retentionDays,
+	})
+}
+
+// handleAuditStats GET /api/v1/audit/stats — 日志统计信息（v3.10）
+func (api *ManagementAPI) handleAuditStats(w http.ResponseWriter, r *http.Request) {
+	stats := api.logger.AuditStats()
+	jsonResponse(w, 200, stats)
+}
+
+// handleAuditTimeline GET /api/v1/audit/timeline — 时间线统计（v3.10）
+func (api *ManagementAPI) handleAuditTimeline(w http.ResponseWriter, r *http.Request) {
+	hours := 24
+	if h := r.URL.Query().Get("hours"); h != "" {
+		if n, err := strconv.Atoi(h); err == nil && n > 0 { hours = n }
+	}
+	timeline := api.logger.Timeline(hours)
+	if timeline == nil { timeline = []map[string]interface{}{} }
+	jsonResponse(w, 200, map[string]interface{}{"timeline": timeline, "hours": hours})
 }
 
 func (api *ManagementAPI) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -6122,8 +6474,18 @@ func main() {
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
+	// v3.10 初始化告警通知器
+	var alertNotifier *AlertNotifier
+	if cfg.AlertWebhook != "" {
+		alertNotifier = NewAlertNotifier(cfg.AlertWebhook, cfg.AlertFormat, cfg.AlertMinInterval, metrics)
+		inbound.alertNotifier = alertNotifier
+		outbound.alertNotifier = alertNotifier
+		log.Printf("[初始化] 告警通知器就绪 (webhook=%s, format=%s, interval=%ds)",
+			cfg.AlertWebhook, alertNotifier.format, cfg.AlertMinInterval)
+	}
+
 	// 创建管理 API
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier)
 
 	// 启动健康检查
 	ctx, cancel := context.WithCancel(context.Background())
@@ -6135,6 +6497,39 @@ func main() {
 		go inbound.limiter.startCleanup(ctx)
 		log.Printf("[初始化] 限流器就绪 (全局=%.0f rps, 每用户=%.0f rps)", cfg.RateLimit.GlobalRPS, cfg.RateLimit.PerSenderRPS)
 	}
+
+	// v3.10 日志自动轮转
+	retentionDays := cfg.AuditRetentionDays
+	if retentionDays <= 0 { retentionDays = 30 }
+	// 启动时清理一次
+	go func() {
+		defer func() { recover() }()
+		deleted, err := logger.CleanupOldLogs(retentionDays)
+		if err != nil {
+			log.Printf("[审计] 启动清理失败: %v", err)
+		} else if deleted > 0 {
+			log.Printf("[审计] 清理了 %d 条过期日志（超过 %d 天）", deleted, retentionDays)
+		}
+	}()
+	// 每 24 小时清理
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				deleted, err := logger.CleanupOldLogs(retentionDays)
+				if err != nil {
+					log.Printf("[审计] 定时清理失败: %v", err)
+				} else if deleted > 0 {
+					log.Printf("[审计] 清理了 %d 条过期日志（超过 %d 天）", deleted, retentionDays)
+				}
+			}
+		}
+	}()
+	log.Printf("[初始化] 日志自动轮转就绪 (retention=%d 天)", retentionDays)
 
 	// Bridge 模式启动
 	if cfg.Mode == "bridge" {

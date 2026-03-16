@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v3.9 配置文件（示例）
+# 龙虾卫士 lobster-guard v3.10 配置文件（示例）
 # ============================================================
 
 # ============================================================
@@ -105,6 +105,22 @@ outbound_audit_enabled: true
 management_listen: ":9090"
 management_token: "YOUR_MANAGEMENT_TOKEN"
 # metrics_enabled: true       # Prometheus /metrics 端点（默认启用）
+
+# ============================================================
+# 审计日志增强（v3.10）
+# ============================================================
+# audit_retention_days: 30    # 日志保留天数，超过自动清理（默认 30 天）
+
+# ============================================================
+# 告警通知（v3.10）
+# block 事件实时推送到 webhook
+# ============================================================
+# alert_webhook: "https://your-webhook-url/api/notify"
+# alert_min_interval: 60      # 最小告警间隔秒数，防止刷屏（默认 60 秒）
+# alert_format: "generic"     # 告警格式: "generic"（默认）或 "lanxin"（蓝信机器人）
+# 蓝信机器人 webhook 示例:
+# alert_webhook: "https://apigw.lx.qianxin.com/v1/bot/hook/YOUR_HOOK_KEY"
+# alert_format: "lanxin"
 
 # ============================================================
 # 限流（v3.3+）

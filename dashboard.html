@@ -166,7 +166,17 @@ tr.row-warn td{background:rgba(255,204,0,0.10)!important}
   <!-- 8. 规则管理 -->
   <div class="card cd7"><div class="card-header"><span class="card-icon">⚙️</span><span class="card-title">规则管理</span></div><div class="tab-header"><button class="tab-btn active" onclick="switchTab(this,'inbound')">入站规则</button><button class="tab-btn" onclick="switchTab(this,'outbound')">出站规则</button></div><div id="tab-inbound" class="tab-content active"><div id="inboundRulesContent" class="loading">加载中...</div><div style="margin-top:12px"><button class="btn btn-green" onclick="reloadInboundRules()">🔄 热更新入站规则</button></div></div><div id="tab-outbound" class="tab-content"><div id="outboundRulesContent" class="loading">加载中...</div><div style="margin-top:12px"><button class="btn btn-green" onclick="reloadOutboundRules()">🔄 热更新出站规则</button></div></div></div>
   <!-- 9. 审计日志 -->
-  <div class="card card-full cd8"><div class="card-header"><span class="card-icon">📋</span><span class="card-title">审计日志</span></div><div class="filters"><select id="filterDirection" onchange="loadAuditLogs()"><option value="">全部方向</option><option value="inbound">入站</option><option value="outbound">出站</option></select><select id="filterAction" onchange="loadAuditLogs()"><option value="">全部动作</option><option value="pass">Pass</option><option value="block">Block</option><option value="warn">Warn</option></select><input type="text" id="filterSender" placeholder="发送者 ID"/><button class="btn" onclick="loadAuditLogs()">筛选</button></div><div id="auditContent" class="loading">加载中...</div></div>
+  <div class="card card-full cd8"><div class="card-header"><span class="card-icon">📋</span><span class="card-title">审计日志</span></div>
+  <!-- v3.10 时间线图 -->
+  <div id="timelineChart" style="margin-bottom:16px"></div>
+  <div class="filters"><select id="filterDirection" onchange="loadAuditLogs()"><option value="">全部方向</option><option value="inbound">入站</option><option value="outbound">出站</option></select><select id="filterAction" onchange="loadAuditLogs()"><option value="">全部动作</option><option value="pass">Pass</option><option value="block">Block</option><option value="warn">Warn</option></select><input type="text" id="filterSender" placeholder="发送者 ID"/><input type="text" id="filterAppId" placeholder="App ID"/><input type="text" id="filterQ" placeholder="🔍 搜索内容..."/><button class="btn" onclick="loadAuditLogs()">筛选</button><button class="btn btn-green" onclick="exportAudit('csv')">📥 CSV</button><button class="btn btn-green" onclick="exportAudit('json')">📥 JSON</button></div><div id="auditContent" class="loading">加载中...</div>
+  <!-- v3.10 审计统计 -->
+  <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn" onclick="loadAuditStats()">📊 统计</button>
+    <button class="btn" onclick="manualCleanup()" style="background:linear-gradient(135deg,var(--neon-red),#cc3355)">🗑️ 清理过期</button>
+  </div>
+  <div id="auditStatsContent" style="margin-top:8px"></div>
+  </div>
 </main>
 <div class="toast" id="toast"></div>
 <footer class="footer">🦞 龙虾卫士 Lobster Guard v3.6 — 安全网关管理后台<br>Protecting your upstream, one lobster at a time.</footer>
@@ -515,10 +525,14 @@ function loadAuditLogs(){
   var dir=document.getElementById('filterDirection').value;
   var act=document.getElementById('filterAction').value;
   var sid=document.getElementById('filterSender').value.trim();
+  var appId=(document.getElementById('filterAppId')||{}).value||'';appId=appId.trim();
+  var q=(document.getElementById('filterQ')||{}).value||'';q=q.trim();
   var params=[];
   if(dir)params.push('direction='+encodeURIComponent(dir));
   if(act)params.push('action='+encodeURIComponent(act));
   if(sid)params.push('sender_id='+encodeURIComponent(sid));
+  if(appId)params.push('app_id='+encodeURIComponent(appId));
+  if(q)params.push('q='+encodeURIComponent(q));
   var qs=params.length?'?'+params.join('&'):'';
   api('/api/v1/audit/logs'+qs).then(function(d){
     var list=d.logs||d||[];if(!Array.isArray(list))list=[];
@@ -546,6 +560,92 @@ function loadAuditLogs(){
   });
 }
 
+/* ========== v3.10 Export / Stats / Timeline ========== */
+function exportAudit(fmt){
+  var dir=document.getElementById('filterDirection').value;
+  var act=document.getElementById('filterAction').value;
+  var sid=document.getElementById('filterSender').value.trim();
+  var appId=(document.getElementById('filterAppId')||{}).value||'';appId=appId.trim();
+  var q=(document.getElementById('filterQ')||{}).value||'';q=q.trim();
+  var params=['format='+fmt,'limit=10000'];
+  if(dir)params.push('direction='+encodeURIComponent(dir));
+  if(act)params.push('action='+encodeURIComponent(act));
+  if(sid)params.push('sender_id='+encodeURIComponent(sid));
+  if(appId)params.push('app_id='+encodeURIComponent(appId));
+  if(q)params.push('q='+encodeURIComponent(q));
+  var url=location.origin+'/api/v1/audit/export?'+params.join('&');
+  // 通过隐藏 iframe 下载（带 token）
+  var tk=getToken();
+  if(tk){
+    fetch(url,{headers:{'Authorization':'Bearer '+tk}}).then(function(r){return r.blob()}).then(function(blob){
+      var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+      a.download='audit_logs.'+fmt;a.click();URL.revokeObjectURL(a.href);
+      showToast('导出 '+fmt.toUpperCase()+' 成功','success');
+    }).catch(function(e){showToast('导出失败: '+e.message,'error')});
+  } else {
+    window.open(url,'_blank');
+  }
+}
+function loadAuditStats(){
+  api('/api/v1/audit/stats').then(function(d){
+    var h='<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem">';
+    h+='<span>📊 总数: <b style="color:var(--neon-blue)">'+d.total+'</b></span>';
+    h+='<span>📅 最早: <b>'+fmtTime(d.earliest)+'</b></span>';
+    h+='<span>📅 最晚: <b>'+fmtTime(d.latest)+'</b></span>';
+    var kb=d.disk_bytes?Math.round(d.disk_bytes/1024):0;
+    var sizeStr=kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB';
+    h+='<span>💾 磁盘: <b>'+sizeStr+'</b></span>';
+    h+='</div>';
+    document.getElementById('auditStatsContent').innerHTML=h;
+  }).catch(function(e){showToast('获取统计失败: '+e.message,'error')});
+}
+function manualCleanup(){
+  if(!confirm('确认清理过期日志？'))return;
+  api('/api/v1/audit/cleanup',{method:'POST'}).then(function(d){
+    showToast('清理完成：删除 '+d.deleted+' 条（保留 '+d.retention_days+' 天）','success');
+    loadAuditLogs();loadAuditStats();
+  }).catch(function(e){showToast('清理失败: '+e.message,'error')});
+}
+function loadTimeline(){
+  api('/api/v1/audit/timeline?hours=24').then(function(d){
+    var tl=d.timeline||[];
+    if(!tl.length){document.getElementById('timelineChart').innerHTML='';return}
+    var maxVal=1;
+    for(var i=0;i<tl.length;i++){
+      var s=(tl[i].pass||0)+(tl[i].block||0)+(tl[i].warn||0);
+      if(s>maxVal)maxVal=s;
+    }
+    var h='<div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">📈 最近 24 小时趋势</div>';
+    h+='<div style="display:flex;align-items:flex-end;gap:2px;height:80px;padding:0 2px">';
+    for(var i=0;i<tl.length;i++){
+      var p=tl[i].pass||0,b=tl[i].block||0,wa=tl[i].warn||0;
+      var total=p+b+wa;
+      var hPct=Math.max(2,Math.round(total/maxVal*70));
+      var pH=total>0?Math.round(p/total*hPct):0;
+      var bH=total>0?Math.round(b/total*hPct):0;
+      var wH=total>0?Math.round(wa/total*hPct):0;
+      if(pH+bH+wH<hPct&&total>0)pH+=(hPct-pH-bH-wH);
+      var hour=tl[i].hour?tl[i].hour.substring(11,13):'';
+      var tip=hour+'h: pass='+p+' block='+b+' warn='+wa;
+      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;min-width:0" title="'+tip+'">';
+      h+='<div style="width:100%;display:flex;flex-direction:column-reverse">';
+      if(pH>0)h+='<div style="height:'+pH+'px;background:var(--neon-green);border-radius:1px;min-height:1px"></div>';
+      if(wH>0)h+='<div style="height:'+wH+'px;background:var(--neon-yellow);border-radius:1px;min-height:1px"></div>';
+      if(bH>0)h+='<div style="height:'+bH+'px;background:var(--neon-red);border-radius:1px;min-height:1px"></div>';
+      h+='</div>';
+      if(i%4===0)h+='<div style="font-size:.55rem;color:var(--text-dim);margin-top:2px">'+hour+'</div>';
+      h+='</div>';
+    }
+    h+='</div>';
+    h+='<div style="display:flex;gap:12px;margin-top:4px;font-size:.65rem;color:var(--text-dim)">'
+      +'<span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-green);border-radius:2px;margin-right:2px"></span>pass</span>'
+      +'<span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-yellow);border-radius:2px;margin-right:2px"></span>warn</span>'
+      +'<span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-red);border-radius:2px;margin-right:2px"></span>block</span>'
+      +'</div>';
+    document.getElementById('timelineChart').innerHTML=h;
+  }).catch(function(){document.getElementById('timelineChart').innerHTML=''});
+}
+
 /* ========== Refresh All ========== */
 function refreshAll(){
   loadHealth();
@@ -559,6 +659,7 @@ function refreshAll(){
   loadInboundRules();
   loadOutboundRules();
   loadAuditLogs();
+  loadTimeline();
 }
 
 /* ========== Init ========== */
@@ -566,7 +667,7 @@ document.addEventListener('DOMContentLoaded',function(){
   initToken();
   refreshAll();
   setInterval(function(){loadHealth()},10000);
-  setInterval(function(){loadUpstreams();loadRoutes();loadStats();loadRateLimitStats();loadRuleHits();loadAuditLogs()},30000);
+  setInterval(function(){loadUpstreams();loadRoutes();loadStats();loadRateLimitStats();loadRuleHits();loadAuditLogs();loadTimeline()},30000);
 });
 </script>
 </body>
