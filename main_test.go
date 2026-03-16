@@ -375,13 +375,13 @@ func TestExtractMessageText(t *testing.T) {
 func TestRouteTable(t *testing.T) {
 	rt := NewRouteTable(nil, false)
 
-	_, found := rt.Lookup("user1")
+	_, found := rt.Lookup("user1", "")
 	if found {
 		t.Fatal("空表不应找到路由")
 	}
 
-	rt.Bind("user1", "upstream-a")
-	uid, found := rt.Lookup("user1")
+	rt.Bind("user1", "", "upstream-a")
+	uid, found := rt.Lookup("user1", "")
 	if !found || uid != "upstream-a" {
 		t.Fatalf("绑定后查找失败: found=%v uid=%s", found, uid)
 	}
@@ -392,22 +392,22 @@ func TestRouteTable(t *testing.T) {
 		t.Fatal("上游计数错误")
 	}
 
-	ok := rt.Migrate("user1", "upstream-a", "upstream-b")
+	ok := rt.Migrate("user1", "", "upstream-a", "upstream-b")
 	if !ok {
 		t.Fatal("迁移应成功")
 	}
-	uid, _ = rt.Lookup("user1")
+	uid, _ = rt.Lookup("user1", "")
 	if uid != "upstream-b" {
 		t.Fatalf("迁移后应指向 upstream-b，实际 %s", uid)
 	}
 
-	ok = rt.Migrate("user1", "upstream-a", "upstream-c")
+	ok = rt.Migrate("user1", "", "upstream-a", "upstream-c")
 	if ok {
 		t.Fatal("来源不匹配不应成功")
 	}
 
-	rt.Unbind("user1")
-	_, found = rt.Lookup("user1")
+	rt.Unbind("user1", "")
+	_, found = rt.Lookup("user1", "")
 	if found {
 		t.Fatal("解绑后不应找到")
 	}
@@ -415,12 +415,179 @@ func TestRouteTable(t *testing.T) {
 
 func TestRouteTableListRoutes(t *testing.T) {
 	rt := NewRouteTable(nil, false)
-	rt.Bind("u1", "up-a")
-	rt.Bind("u2", "up-b")
-	rt.Bind("u3", "up-a")
+	rt.Bind("u1", "", "up-a")
+	rt.Bind("u2", "", "up-b")
+	rt.Bind("u3", "", "up-a")
 	routes := rt.ListRoutes()
 	if len(routes) != 3 {
 		t.Fatalf("期望3条，实际 %d", len(routes))
+	}
+}
+
+// ============================================================
+// v3.8 多 Bot 亲和路由测试
+// ============================================================
+
+func TestRouteTableCompoundKey(t *testing.T) {
+	rt := NewRouteTable(nil, false)
+
+	// 同一用户绑定到不同 Bot 的不同上游
+	rt.Bind("user1", "app-alpha", "upstream-a")
+	rt.Bind("user1", "app-beta", "upstream-b")
+
+	uid, found := rt.Lookup("user1", "app-alpha")
+	if !found || uid != "upstream-a" {
+		t.Fatalf("(user1, app-alpha) 应指向 upstream-a，实际 found=%v uid=%s", found, uid)
+	}
+
+	uid, found = rt.Lookup("user1", "app-beta")
+	if !found || uid != "upstream-b" {
+		t.Fatalf("(user1, app-beta) 应指向 upstream-b，实际 found=%v uid=%s", found, uid)
+	}
+
+	if rt.Count() != 2 {
+		t.Fatalf("期望2条路由，实际 %d", rt.Count())
+	}
+
+	// 解绑其中一个
+	rt.Unbind("user1", "app-alpha")
+	_, found = rt.Lookup("user1", "app-alpha")
+	if found {
+		t.Fatal("解绑后 (user1, app-alpha) 不应找到")
+	}
+
+	// 另一个仍在
+	uid, found = rt.Lookup("user1", "app-beta")
+	if !found || uid != "upstream-b" {
+		t.Fatal("解绑 alpha 不应影响 beta")
+	}
+}
+
+func TestRouteTableFallback(t *testing.T) {
+	rt := NewRouteTable(nil, false)
+
+	// 绑定 (user1, "") 作为默认路由
+	rt.Bind("user1", "", "upstream-default")
+
+	// 精确匹配 app-alpha 没有，应 fallback 到 ""
+	uid, found := rt.Lookup("user1", "app-alpha")
+	if !found || uid != "upstream-default" {
+		t.Fatalf("fallback 应返回 upstream-default，实际 found=%v uid=%s", found, uid)
+	}
+
+	// 绑定精确路由后，精确匹配优先
+	rt.Bind("user1", "app-alpha", "upstream-alpha")
+	uid, found = rt.Lookup("user1", "app-alpha")
+	if !found || uid != "upstream-alpha" {
+		t.Fatalf("精确匹配应优先，实际 uid=%s", uid)
+	}
+
+	// 其他 appID 仍 fallback
+	uid, found = rt.Lookup("user1", "app-beta")
+	if !found || uid != "upstream-default" {
+		t.Fatalf("app-beta 应 fallback 到 upstream-default，实际 uid=%s", uid)
+	}
+
+	// appID 为空直接匹配 ""
+	uid, found = rt.Lookup("user1", "")
+	if !found || uid != "upstream-default" {
+		t.Fatalf("appID 空应匹配 upstream-default，实际 uid=%s", uid)
+	}
+}
+
+func TestRouteTableBatchBind(t *testing.T) {
+	rt := NewRouteTable(nil, false)
+
+	entries := []RouteEntry{
+		{SenderID: "user-001", AppID: "app-alpha", UpstreamID: "upstream-a", Department: "安全研究院", DisplayName: "张三"},
+		{SenderID: "user-002", AppID: "app-alpha", UpstreamID: "upstream-a", Department: "安全研究院", DisplayName: "李四"},
+		{SenderID: "user-003", AppID: "app-beta", UpstreamID: "upstream-b", Department: "产品中心", DisplayName: "王五"},
+	}
+	rt.BindBatch(entries)
+
+	if rt.Count() != 3 {
+		t.Fatalf("期望3条路由，实际 %d", rt.Count())
+	}
+
+	uid, found := rt.Lookup("user-001", "app-alpha")
+	if !found || uid != "upstream-a" {
+		t.Fatalf("user-001 应绑定到 upstream-a, found=%v uid=%s", found, uid)
+	}
+
+	uid, found = rt.Lookup("user-003", "app-beta")
+	if !found || uid != "upstream-b" {
+		t.Fatalf("user-003 应绑定到 upstream-b, found=%v uid=%s", found, uid)
+	}
+}
+
+func TestRouteTableMigration(t *testing.T) {
+	rt := NewRouteTable(nil, false)
+
+	rt.Bind("user1", "app-alpha", "upstream-a")
+
+	// 迁移，保留 appID
+	ok := rt.Migrate("user1", "app-alpha", "upstream-a", "upstream-b")
+	if !ok {
+		t.Fatal("迁移应成功")
+	}
+
+	uid, found := rt.Lookup("user1", "app-alpha")
+	if !found || uid != "upstream-b" {
+		t.Fatalf("迁移后应指向 upstream-b，实际 uid=%s", uid)
+	}
+
+	// 来源不匹配
+	ok = rt.Migrate("user1", "app-alpha", "upstream-a", "upstream-c")
+	if ok {
+		t.Fatal("来源不匹配不应成功")
+	}
+}
+
+func TestRouteLookupByApp(t *testing.T) {
+	rt := NewRouteTable(nil, false)
+
+	rt.Bind("user1", "app-alpha", "upstream-a")
+	rt.Bind("user2", "app-alpha", "upstream-b")
+	rt.Bind("user3", "app-beta", "upstream-a")
+
+	alphaRoutes := rt.ListByApp("app-alpha")
+	if len(alphaRoutes) != 2 {
+		t.Fatalf("app-alpha 应有2条路由，实际 %d", len(alphaRoutes))
+	}
+
+	betaRoutes := rt.ListByApp("app-beta")
+	if len(betaRoutes) != 1 {
+		t.Fatalf("app-beta 应有1条路由，实际 %d", len(betaRoutes))
+	}
+
+	if rt.CountByApp("app-alpha") != 2 {
+		t.Fatalf("CountByApp(app-alpha) 应为2，实际 %d", rt.CountByApp("app-alpha"))
+	}
+}
+
+func TestRouteStats(t *testing.T) {
+	rt := NewRouteTable(nil, false)
+
+	rt.Bind("user1", "app-alpha", "upstream-a")
+	rt.Bind("user2", "app-alpha", "upstream-a")
+	rt.Bind("user3", "app-beta", "upstream-b")
+	rt.Bind("user1", "app-beta", "upstream-b")
+
+	stats := rt.Stats()
+	if stats.TotalRoutes != 4 {
+		t.Fatalf("TotalRoutes 期望4，实际 %d", stats.TotalRoutes)
+	}
+	if stats.TotalUsers != 3 {
+		t.Fatalf("TotalUsers 期望3，实际 %d", stats.TotalUsers)
+	}
+	if stats.TotalApps != 2 {
+		t.Fatalf("TotalApps 期望2，实际 %d", stats.TotalApps)
+	}
+	if stats.ByUpstream["upstream-a"] != 2 {
+		t.Fatalf("ByUpstream[upstream-a] 期望2，实际 %d", stats.ByUpstream["upstream-a"])
+	}
+	if stats.ByApp["app-alpha"] != 2 {
+		t.Fatalf("ByApp[app-alpha] 期望2，实际 %d", stats.ByApp["app-alpha"])
 	}
 }
 
@@ -649,6 +816,272 @@ func TestManagementAPIStats(t *testing.T) {
 	if resp["version"] != AppVersion {
 		t.Fatalf("version 期望 %s，实际 %v", AppVersion, resp["version"])
 	}
+}
+
+// ============================================================
+// v3.8 API 测试
+// ============================================================
+
+func TestAPIBatchBind(t *testing.T) {
+	api, cleanup := setupMgmtAPI(t)
+	defer cleanup()
+
+	// 批量绑定（按条目列表）
+	body := `{
+		"app_id": "app-alpha",
+		"upstream_id": "up-1",
+		"entries": [
+			{"sender_id": "user-001", "display_name": "张三", "department": "安全研究院"},
+			{"sender_id": "user-002", "display_name": "李四", "department": "安全研究院"}
+		]
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/routes/batch-bind", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("batch-bind 期望 200，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if int(resp["count"].(float64)) != 2 {
+		t.Fatalf("期望绑定2条，实际 %v", resp["count"])
+	}
+
+	// 验证路由
+	req = httptest.NewRequest("GET", "/api/v1/routes?app_id=app-alpha", nil)
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("查询期望 200，实际 %d", rec.Code)
+	}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if int(resp["total"].(float64)) != 2 {
+		t.Fatalf("app-alpha 期望2条路由，实际 %v", resp["total"])
+	}
+}
+
+func TestAPIRouteStats(t *testing.T) {
+	api, cleanup := setupMgmtAPI(t)
+	defer cleanup()
+
+	// 先绑定一些路由
+	for _, body := range []string{
+		`{"sender_id":"u1","app_id":"app-a","upstream_id":"up-1"}`,
+		`{"sender_id":"u2","app_id":"app-a","upstream_id":"up-1"}`,
+		`{"sender_id":"u3","app_id":"app-b","upstream_id":"up-1"}`,
+	} {
+		req := httptest.NewRequest("POST", "/api/v1/routes/bind", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer mgmt-token")
+		rec := httptest.NewRecorder()
+		api.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("绑定失败 %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// 获取统计
+	req := httptest.NewRequest("GET", "/api/v1/routes/stats", nil)
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("stats 期望 200，实际 %d", rec.Code)
+	}
+
+	var stats RouteStats
+	json.Unmarshal(rec.Body.Bytes(), &stats)
+	if stats.TotalRoutes != 3 {
+		t.Fatalf("TotalRoutes 期望3，实际 %d", stats.TotalRoutes)
+	}
+	if stats.TotalUsers != 3 {
+		t.Fatalf("TotalUsers 期望3，实际 %d", stats.TotalUsers)
+	}
+}
+
+func TestAPIUnbindRoute(t *testing.T) {
+	api, cleanup := setupMgmtAPI(t)
+	defer cleanup()
+
+	// 绑定
+	body := `{"sender_id":"user-1","app_id":"app-x","upstream_id":"up-1"}`
+	req := httptest.NewRequest("POST", "/api/v1/routes/bind", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 { t.Fatalf("绑定期望 200，实际 %d", rec.Code) }
+
+	// 解绑
+	body = `{"sender_id":"user-1","app_id":"app-x"}`
+	req = httptest.NewRequest("POST", "/api/v1/routes/unbind", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 { t.Fatalf("解绑期望 200，实际 %d", rec.Code) }
+
+	// 验证已解绑
+	req = httptest.NewRequest("GET", "/api/v1/routes", nil)
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if int(resp["total"].(float64)) != 0 {
+		t.Fatalf("解绑后期望0条路由，实际 %v", resp["total"])
+	}
+}
+
+func TestDBMigration(t *testing.T) {
+	tmpDB := "/tmp/lobster-guard-test-migration-" + fmt.Sprintf("%d", time.Now().UnixNano()) + ".db"
+	defer os.Remove(tmpDB)
+
+	// 创建旧 schema 的数据库
+	db, err := sql.Open("sqlite3", tmpDB+"?_journal_mode=WAL&_busy_timeout=5000")
+	if err != nil { t.Fatal(err) }
+
+	// 创建旧表（只有 sender_id 主键）
+	_, err = db.Exec(`CREATE TABLE user_routes (
+		sender_id TEXT PRIMARY KEY,
+		upstream_id TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	if err != nil { t.Fatal(err) }
+
+	// 插入旧数据
+	now := time.Now().Format(time.RFC3339)
+	db.Exec(`INSERT INTO user_routes (sender_id, upstream_id, created_at, updated_at) VALUES(?,?,?,?)`,
+		"old-user-1", "upstream-a", now, now)
+	db.Exec(`INSERT INTO user_routes (sender_id, upstream_id, created_at, updated_at) VALUES(?,?,?,?)`,
+		"old-user-2", "upstream-b", now, now)
+	db.Close()
+
+	// 重新打开，触发迁移
+	db2, err := sql.Open("sqlite3", tmpDB+"?_journal_mode=WAL&_busy_timeout=5000")
+	if err != nil { t.Fatal(err) }
+	defer db2.Close()
+
+	migrateUserRoutes(db2)
+
+	// 验证新 schema
+	var cnt int
+	err = db2.QueryRow(`SELECT COUNT(*) FROM user_routes`).Scan(&cnt)
+	if err != nil { t.Fatal(err) }
+	if cnt != 2 {
+		t.Fatalf("迁移后应有2条数据，实际 %d", cnt)
+	}
+
+	// 验证 app_id 列存在且默认为空
+	var appID string
+	err = db2.QueryRow(`SELECT app_id FROM user_routes WHERE sender_id='old-user-1'`).Scan(&appID)
+	if err != nil { t.Fatal(err) }
+	if appID != "" {
+		t.Fatalf("旧数据的 app_id 应为空，实际 %q", appID)
+	}
+
+	// 验证复合主键可用（同 sender_id 不同 app_id）
+	db2.Exec(`INSERT INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,'','',?,?)`,
+		"old-user-1", "new-app", "upstream-c", now, now)
+	err = db2.QueryRow(`SELECT COUNT(*) FROM user_routes WHERE sender_id='old-user-1'`).Scan(&cnt)
+	if err != nil { t.Fatal(err) }
+	if cnt != 2 {
+		t.Fatalf("复合主键应允许同 sender_id 不同 app_id，实际 %d", cnt)
+	}
+
+	// 验证 RouteTable 加载
+	rt := NewRouteTable(db2, true)
+	if rt.Count() != 3 {
+		t.Fatalf("RouteTable 应加载3条路由，实际 %d", rt.Count())
+	}
+
+	uid, found := rt.Lookup("old-user-1", "")
+	if !found || uid != "upstream-a" {
+		t.Fatalf("旧数据路由查找失败: found=%v uid=%s", found, uid)
+	}
+
+	uid, found = rt.Lookup("old-user-1", "new-app")
+	if !found || uid != "upstream-c" {
+		t.Fatalf("新数据路由查找失败: found=%v uid=%s", found, uid)
+	}
+}
+
+func TestInboundRoutingWithAppID(t *testing.T) {
+	// 测试入站路由使用复合键
+	rt := NewRouteTable(nil, false)
+
+	// 模拟两个 Bot 的用户路由
+	rt.Bind("sender-001", "bot-alpha", "upstream-a")
+	rt.Bind("sender-001", "bot-beta", "upstream-b")
+
+	// 查找 bot-alpha 的路由
+	uid, found := rt.Lookup("sender-001", "bot-alpha")
+	if !found || uid != "upstream-a" {
+		t.Fatalf("bot-alpha 路由查找失败: found=%v uid=%s", found, uid)
+	}
+
+	// 查找 bot-beta 的路由
+	uid, found = rt.Lookup("sender-001", "bot-beta")
+	if !found || uid != "upstream-b" {
+		t.Fatalf("bot-beta 路由查找失败: found=%v uid=%s", found, uid)
+	}
+
+	// 迁移 bot-alpha 的路由
+	ok := rt.Migrate("sender-001", "bot-alpha", "upstream-a", "upstream-c")
+	if !ok {
+		t.Fatal("迁移应成功")
+	}
+
+	// bot-alpha 已迁移
+	uid, found = rt.Lookup("sender-001", "bot-alpha")
+	if !found || uid != "upstream-c" {
+		t.Fatalf("迁移后 bot-alpha 应指向 upstream-c，实际 uid=%s", uid)
+	}
+
+	// bot-beta 不受影响
+	uid, found = rt.Lookup("sender-001", "bot-beta")
+	if !found || uid != "upstream-b" {
+		t.Fatalf("bot-beta 路由不应受影响，实际 uid=%s", uid)
+	}
+}
+
+func TestRouteTablePersistWithDB(t *testing.T) {
+	tmpDB := "/tmp/lobster-guard-test-persist-" + fmt.Sprintf("%d", time.Now().UnixNano()) + ".db"
+	defer os.Remove(tmpDB)
+
+	db, err := initDB(tmpDB)
+	if err != nil { t.Fatal(err) }
+
+	// 绑定一些路由
+	rt := NewRouteTable(db, true)
+	rt.Bind("user1", "app-alpha", "upstream-a")
+	rt.BindWithMeta("user2", "app-alpha", "upstream-a", "安全研究院", "张三")
+
+	// 重新加载
+	rt2 := NewRouteTable(db, true)
+	if rt2.Count() != 2 {
+		t.Fatalf("从 DB 恢复应有2条路由，实际 %d", rt2.Count())
+	}
+
+	uid, found := rt2.Lookup("user1", "app-alpha")
+	if !found || uid != "upstream-a" {
+		t.Fatalf("恢复后路由查找失败: found=%v uid=%s", found, uid)
+	}
+
+	// 验证 ListRoutes 包含完整信息
+	entries := rt2.ListRoutes()
+	foundMeta := false
+	for _, e := range entries {
+		if e.SenderID == "user2" && e.Department == "安全研究院" && e.DisplayName == "张三" {
+			foundMeta = true
+		}
+	}
+	if !foundMeta {
+		t.Fatal("ListRoutes 应包含部门和显示名信息")
+	}
+
+	db.Close()
 }
 
 // ============================================================
@@ -2097,7 +2530,7 @@ func TestMetricsCollector_WritePrometheus(t *testing.T) {
 		`lobster_guard_rate_limit_total{decision="allowed"} 1`,
 		`lobster_guard_rate_limit_total{decision="denied"} 1`,
 		"lobster_guard_uptime_seconds",
-		`lobster_guard_info{version="3.6.0",channel="lanxin",mode="webhook"} 1`,
+		`lobster_guard_info{version="3.8.0",channel="lanxin",mode="webhook"} 1`,
 	}
 
 	for _, check := range checks {
@@ -2129,7 +2562,7 @@ func TestMetricsCollector_WritePrometheus_WithBridge(t *testing.T) {
 	if !strings.Contains(output, "lobster_guard_bridge_messages_total 1") {
 		t.Error("bridge messages should be 1")
 	}
-	if !strings.Contains(output, `lobster_guard_info{version="3.6.0",channel="feishu",mode="bridge"} 1`) {
+	if !strings.Contains(output, `lobster_guard_info{version="3.8.0",channel="feishu",mode="bridge"} 1`) {
 		t.Error("info metric should have feishu and bridge")
 	}
 }

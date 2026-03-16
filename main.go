@@ -1,7 +1,8 @@
-// lobster-guard - 高性能安全代理网关 v3.6
+// lobster-guard - 高性能安全代理网关 v3.8
 // 支持入站检测拦截、出站内容检测/拦截、用户ID亲和路由、服务自动注册
 // 支持多消息通道: 蓝信(lanxin)、飞书(feishu)、钉钉(dingtalk)、企微(wecom)、通用HTTP(generic)
 // v3.6: 规则引擎增强 — 规则优先级权重、自定义响应、命中率统计
+// v3.8: 多 Bot 亲和路由 — (sender_id, app_id) 复合键路由、批量绑定、按部门分配
 package main
 
 import (
@@ -45,7 +46,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.6.0"
+	AppVersion = "3.8.0"
 )
 
 var startTime = time.Now()
@@ -59,7 +60,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 规则热更新 | 规则引擎增强
+        入站检测 | 出站拦截 | 多Bot亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 规则热更新 | 规则引擎增强
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -2608,12 +2609,28 @@ func (pool *UpstreamPool) HealthCheck(ctx context.Context) {
 }
 
 // ============================================================
-// 路由表
+// 路由表 v3.8 — 复合键 (sender_id, app_id) → upstream_id
 // ============================================================
+
+// RouteEntry 路由条目（v3.8 结构化）
+type RouteEntry struct {
+	SenderID    string `json:"sender_id"`
+	AppID       string `json:"app_id"`
+	UpstreamID  string `json:"upstream_id"`
+	Department  string `json:"department,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+}
+
+// routeKey 生成复合路由键
+func routeKey(senderID, appID string) string {
+	return senderID + "|" + appID
+}
 
 type RouteTable struct {
 	mu    sync.RWMutex
-	exact map[string]string // sender_id -> upstream_id
+	exact map[string]string // "sender_id|app_id" -> upstream_id
 	db    *sql.DB
 }
 
@@ -2626,59 +2643,115 @@ func NewRouteTable(db *sql.DB, persist bool) *RouteTable {
 }
 
 func (rt *RouteTable) loadFromDB() {
-	rows, err := rt.db.Query(`SELECT sender_id, upstream_id FROM user_routes`)
+	rows, err := rt.db.Query(`SELECT sender_id, app_id, upstream_id FROM user_routes`)
 	if err != nil { return }
 	defer rows.Close()
 	for rows.Next() {
-		var sid, uid string
-		if rows.Scan(&sid, &uid) == nil {
-			rt.exact[sid] = uid
+		var sid, appID, uid string
+		if rows.Scan(&sid, &appID, &uid) == nil {
+			rt.exact[routeKey(sid, appID)] = uid
 		}
 	}
 	log.Printf("[路由表] 从数据库恢复 %d 条路由", len(rt.exact))
 }
 
-func (rt *RouteTable) Lookup(senderID string) (string, bool) {
+// Lookup 先精确匹配 (senderID, appID)，没找到再 fallback 到 (senderID, "")
+func (rt *RouteTable) Lookup(senderID, appID string) (string, bool) {
 	rt.mu.RLock(); defer rt.mu.RUnlock()
-	uid, ok := rt.exact[senderID]
+	// 精确匹配
+	if appID != "" {
+		if uid, ok := rt.exact[routeKey(senderID, appID)]; ok {
+			return uid, true
+		}
+	}
+	// fallback 到 (senderID, "")
+	uid, ok := rt.exact[routeKey(senderID, "")]
 	return uid, ok
 }
 
-func (rt *RouteTable) Bind(senderID, upstreamID string) {
+func (rt *RouteTable) Bind(senderID, appID, upstreamID string) {
 	rt.mu.Lock(); defer rt.mu.Unlock()
-	rt.exact[senderID] = upstreamID
+	rt.exact[routeKey(senderID, appID)] = upstreamID
 	if rt.db != nil {
 		now := time.Now().Format(time.RFC3339)
-		rt.db.Exec(`INSERT OR REPLACE INTO user_routes (sender_id, upstream_id, created_at, updated_at) VALUES(?,?,?,?)`,
-			senderID, upstreamID, now, now)
+		rt.db.Exec(`INSERT OR REPLACE INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,'','',?,?)`,
+			senderID, appID, upstreamID, now, now)
 	}
 }
 
-func (rt *RouteTable) Unbind(senderID string) {
+// BindWithMeta 带元数据的绑定（部门、显示名）
+func (rt *RouteTable) BindWithMeta(senderID, appID, upstreamID, department, displayName string) {
 	rt.mu.Lock(); defer rt.mu.Unlock()
-	delete(rt.exact, senderID)
+	rt.exact[routeKey(senderID, appID)] = upstreamID
 	if rt.db != nil {
-		rt.db.Exec(`DELETE FROM user_routes WHERE sender_id = ?`, senderID)
+		now := time.Now().Format(time.RFC3339)
+		rt.db.Exec(`INSERT OR REPLACE INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
+			senderID, appID, upstreamID, department, displayName, now, now)
 	}
 }
 
-func (rt *RouteTable) Migrate(senderID, fromID, toID string) bool {
+func (rt *RouteTable) Unbind(senderID, appID string) {
 	rt.mu.Lock(); defer rt.mu.Unlock()
-	current, ok := rt.exact[senderID]
+	delete(rt.exact, routeKey(senderID, appID))
+	if rt.db != nil {
+		rt.db.Exec(`DELETE FROM user_routes WHERE sender_id = ? AND app_id = ?`, senderID, appID)
+	}
+}
+
+func (rt *RouteTable) Migrate(senderID, appID, fromID, toID string) bool {
+	rt.mu.Lock(); defer rt.mu.Unlock()
+	key := routeKey(senderID, appID)
+	current, ok := rt.exact[key]
 	if !ok || (fromID != "" && current != fromID) { return false }
-	rt.exact[senderID] = toID
+	rt.exact[key] = toID
 	if rt.db != nil {
 		now := time.Now().Format(time.RFC3339)
-		rt.db.Exec(`UPDATE user_routes SET upstream_id=?, updated_at=? WHERE sender_id=?`, toID, now, senderID)
+		rt.db.Exec(`UPDATE user_routes SET upstream_id=?, updated_at=? WHERE sender_id=? AND app_id=?`, toID, now, senderID, appID)
 	}
 	return true
 }
 
-func (rt *RouteTable) ListRoutes() map[string]string {
+// ListRoutes 返回结构化路由列表（v3.8）
+func (rt *RouteTable) ListRoutes() []RouteEntry {
 	rt.mu.RLock(); defer rt.mu.RUnlock()
-	cp := make(map[string]string, len(rt.exact))
-	for k, v := range rt.exact { cp[k] = v }
-	return cp
+	// 如果有 db，从 db 读取完整信息（包含 department/display_name）
+	if rt.db != nil {
+		rows, err := rt.db.Query(`SELECT sender_id, app_id, upstream_id, department, display_name, created_at, updated_at FROM user_routes ORDER BY updated_at DESC`)
+		if err == nil {
+			defer rows.Close()
+			var entries []RouteEntry
+			for rows.Next() {
+				var e RouteEntry
+				if rows.Scan(&e.SenderID, &e.AppID, &e.UpstreamID, &e.Department, &e.DisplayName, &e.CreatedAt, &e.UpdatedAt) == nil {
+					entries = append(entries, e)
+				}
+			}
+			return entries
+		}
+	}
+	// fallback: 从内存 map
+	entries := make([]RouteEntry, 0, len(rt.exact))
+	for k, uid := range rt.exact {
+		parts := strings.SplitN(k, "|", 2)
+		sid := parts[0]
+		appID := ""
+		if len(parts) > 1 { appID = parts[1] }
+		entries = append(entries, RouteEntry{SenderID: sid, AppID: appID, UpstreamID: uid})
+	}
+	return entries
+}
+
+// BindBatch 批量绑定路由条目
+func (rt *RouteTable) BindBatch(entries []RouteEntry) {
+	rt.mu.Lock(); defer rt.mu.Unlock()
+	now := time.Now().Format(time.RFC3339)
+	for _, e := range entries {
+		rt.exact[routeKey(e.SenderID, e.AppID)] = e.UpstreamID
+		if rt.db != nil {
+			rt.db.Exec(`INSERT OR REPLACE INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
+				e.SenderID, e.AppID, e.UpstreamID, e.Department, e.DisplayName, now, now)
+		}
+	}
 }
 
 func (rt *RouteTable) Count() int {
@@ -2693,6 +2766,114 @@ func (rt *RouteTable) CountByUpstream(upstreamID string) int {
 		if uid == upstreamID { n++ }
 	}
 	return n
+}
+
+// CountByApp 统计指定 appID 的路由数
+func (rt *RouteTable) CountByApp(appID string) int {
+	rt.mu.RLock(); defer rt.mu.RUnlock()
+	n := 0
+	suffix := "|" + appID
+	for k := range rt.exact {
+		if strings.HasSuffix(k, suffix) { n++ }
+	}
+	return n
+}
+
+// ListByApp 按 Bot 筛选路由
+func (rt *RouteTable) ListByApp(appID string) []RouteEntry {
+	rt.mu.RLock(); defer rt.mu.RUnlock()
+	if rt.db != nil {
+		rows, err := rt.db.Query(`SELECT sender_id, app_id, upstream_id, department, display_name, created_at, updated_at FROM user_routes WHERE app_id = ? ORDER BY updated_at DESC`, appID)
+		if err == nil {
+			defer rows.Close()
+			var entries []RouteEntry
+			for rows.Next() {
+				var e RouteEntry
+				if rows.Scan(&e.SenderID, &e.AppID, &e.UpstreamID, &e.Department, &e.DisplayName, &e.CreatedAt, &e.UpdatedAt) == nil {
+					entries = append(entries, e)
+				}
+			}
+			return entries
+		}
+	}
+	// fallback: memory
+	suffix := "|" + appID
+	var entries []RouteEntry
+	for k, uid := range rt.exact {
+		if strings.HasSuffix(k, suffix) {
+			parts := strings.SplitN(k, "|", 2)
+			entries = append(entries, RouteEntry{SenderID: parts[0], AppID: appID, UpstreamID: uid})
+		}
+	}
+	return entries
+}
+
+// ListByDepartment 按部门筛选路由（需要 db）
+func (rt *RouteTable) ListByDepartment(department string) []RouteEntry {
+	rt.mu.RLock(); defer rt.mu.RUnlock()
+	if rt.db == nil { return nil }
+	rows, err := rt.db.Query(`SELECT sender_id, app_id, upstream_id, department, display_name, created_at, updated_at FROM user_routes WHERE department = ? ORDER BY updated_at DESC`, department)
+	if err != nil { return nil }
+	defer rows.Close()
+	var entries []RouteEntry
+	for rows.Next() {
+		var e RouteEntry
+		if rows.Scan(&e.SenderID, &e.AppID, &e.UpstreamID, &e.Department, &e.DisplayName, &e.CreatedAt, &e.UpdatedAt) == nil {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
+// RouteStats 路由统计信息
+type RouteStats struct {
+	TotalRoutes int                `json:"total_routes"`
+	TotalUsers  int                `json:"total_users"`
+	TotalApps   int                `json:"total_apps"`
+	ByUpstream  map[string]int     `json:"by_upstream"`
+	ByApp       map[string]int     `json:"by_app"`
+	ByDepartment map[string]int    `json:"by_department"`
+}
+
+// Stats 统计路由信息
+func (rt *RouteTable) Stats() RouteStats {
+	rt.mu.RLock(); defer rt.mu.RUnlock()
+	stats := RouteStats{
+		TotalRoutes:  len(rt.exact),
+		ByUpstream:   make(map[string]int),
+		ByApp:        make(map[string]int),
+		ByDepartment: make(map[string]int),
+	}
+	users := make(map[string]bool)
+	apps := make(map[string]bool)
+	for k, uid := range rt.exact {
+		parts := strings.SplitN(k, "|", 2)
+		sid := parts[0]
+		appID := ""
+		if len(parts) > 1 { appID = parts[1] }
+		users[sid] = true
+		if appID != "" { apps[appID] = true }
+		stats.ByUpstream[uid]++
+		stats.ByApp[appID]++
+	}
+	stats.TotalUsers = len(users)
+	stats.TotalApps = len(apps)
+
+	// 从 db 读取部门统计
+	if rt.db != nil {
+		rows, err := rt.db.Query(`SELECT COALESCE(department,''), COUNT(*) FROM user_routes GROUP BY department`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var dept string
+				var cnt int
+				if rows.Scan(&dept, &cnt) == nil && dept != "" {
+					stats.ByDepartment[dept] = cnt
+				}
+			}
+		}
+	}
+	return stats
 }
 
 // ============================================================
@@ -3323,7 +3504,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		// 路由决策
 		var upstreamID string
 		if senderID != "" {
-			uid, found := ip.routes.Lookup(senderID)
+			uid, found := ip.routes.Lookup(senderID, appID)
 			if found {
 				if ip.pool.IsHealthy(uid) {
 					upstreamID = uid
@@ -3332,9 +3513,9 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					if newUID != "" && newUID != uid {
 						ip.pool.IncrUserCount(uid, -1)
 						ip.pool.IncrUserCount(newUID, 1)
-						ip.routes.Migrate(senderID, uid, newUID)
+						ip.routes.Migrate(senderID, appID, uid, newUID)
 						upstreamID = newUID
-						log.Printf("[桥接路由] 故障转移 sender=%s: %s -> %s", senderID, uid, newUID)
+						log.Printf("[桥接路由] 故障转移 sender=%s app=%s: %s -> %s", senderID, appID, uid, newUID)
 					} else {
 						upstreamID = uid
 					}
@@ -3342,9 +3523,9 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			} else {
 				upstreamID = ip.pool.SelectUpstream(ip.policy)
 				if upstreamID != "" {
-					ip.routes.Bind(senderID, upstreamID)
+					ip.routes.Bind(senderID, appID, upstreamID)
 					ip.pool.IncrUserCount(upstreamID, 1)
-					log.Printf("[桥接路由] 新用户绑定 sender=%s -> %s", senderID, upstreamID)
+					log.Printf("[桥接路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
 				}
 			}
 		}
@@ -3615,7 +3796,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 路由决策
 	var upstreamID string
 	if senderID != "" {
-		uid, found := ip.routes.Lookup(senderID)
+		uid, found := ip.routes.Lookup(senderID, appID)
 		if found {
 			if ip.pool.IsHealthy(uid) {
 				upstreamID = uid
@@ -3625,9 +3806,9 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if newUID != "" && newUID != uid {
 					ip.pool.IncrUserCount(uid, -1)
 					ip.pool.IncrUserCount(newUID, 1)
-					ip.routes.Migrate(senderID, uid, newUID)
+					ip.routes.Migrate(senderID, appID, uid, newUID)
 					upstreamID = newUID
-					log.Printf("[路由] 故障转移 sender=%s: %s -> %s", senderID, uid, newUID)
+					log.Printf("[路由] 故障转移 sender=%s app=%s: %s -> %s", senderID, appID, uid, newUID)
 				} else {
 					upstreamID = uid // failopen: 仍尝试原上游
 				}
@@ -3636,9 +3817,9 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// 新用户分配
 			upstreamID = ip.pool.SelectUpstream(ip.policy)
 			if upstreamID != "" {
-				ip.routes.Bind(senderID, upstreamID)
+				ip.routes.Bind(senderID, appID, upstreamID)
 				ip.pool.IncrUserCount(upstreamID, 1)
-				log.Printf("[路由] 新用户绑定 sender=%s -> %s", senderID, upstreamID)
+				log.Printf("[路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
 			}
 		}
 	}
@@ -3957,8 +4138,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListRoutes(w, r)
 	case path == "/api/v1/routes/bind" && method == "POST":
 		api.handleBindRoute(w, r)
+	case path == "/api/v1/routes/unbind" && method == "POST":
+		api.handleUnbindRoute(w, r)
 	case path == "/api/v1/routes/migrate" && method == "POST":
 		api.handleMigrateRoute(w, r)
+	case path == "/api/v1/routes/batch-bind" && method == "POST":
+		api.handleBatchBindRoute(w, r)
+	case path == "/api/v1/routes/stats" && method == "GET":
+		api.handleRouteStats(w, r)
 	case path == "/api/v1/rules/reload" && method == "POST":
 		api.handleReloadRules(w, r)
 	case path == "/api/v1/inbound-rules" && method == "GET":
@@ -4156,30 +4343,56 @@ func (api *ManagementAPI) handleListUpstreams(w http.ResponseWriter, r *http.Req
 }
 
 func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Request) {
-	routes := api.routes.ListRoutes()
-	list := []map[string]string{}
-	for sid, uid := range routes {
-		list = append(list, map[string]string{"sender_id": sid, "upstream_id": uid})
+	appIDFilter := r.URL.Query().Get("app_id")
+	var entries []RouteEntry
+	if appIDFilter != "" {
+		entries = api.routes.ListByApp(appIDFilter)
+	} else {
+		entries = api.routes.ListRoutes()
 	}
-	jsonResponse(w, 200, map[string]interface{}{"routes": list, "total": len(list)})
+	if entries == nil {
+		entries = []RouteEntry{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"routes": entries, "total": len(entries)})
 }
 
 func (api *ManagementAPI) handleBindRoute(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SenderID   string `json:"sender_id"`
-		UpstreamID string `json:"upstream_id"`
+		SenderID    string `json:"sender_id"`
+		AppID       string `json:"app_id"`
+		UpstreamID  string `json:"upstream_id"`
+		Department  string `json:"department"`
+		DisplayName string `json:"display_name"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.SenderID == "" || req.UpstreamID == "" {
 		jsonResponse(w, 400, map[string]string{"error": "sender_id and upstream_id required"})
 		return
 	}
-	api.routes.Bind(req.SenderID, req.UpstreamID)
-	jsonResponse(w, 200, map[string]string{"status": "bound", "sender_id": req.SenderID, "upstream_id": req.UpstreamID})
+	if req.Department != "" || req.DisplayName != "" {
+		api.routes.BindWithMeta(req.SenderID, req.AppID, req.UpstreamID, req.Department, req.DisplayName)
+	} else {
+		api.routes.Bind(req.SenderID, req.AppID, req.UpstreamID)
+	}
+	jsonResponse(w, 200, map[string]string{"status": "bound", "sender_id": req.SenderID, "app_id": req.AppID, "upstream_id": req.UpstreamID})
+}
+
+func (api *ManagementAPI) handleUnbindRoute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SenderID string `json:"sender_id"`
+		AppID    string `json:"app_id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.SenderID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "sender_id required"})
+		return
+	}
+	api.routes.Unbind(req.SenderID, req.AppID)
+	jsonResponse(w, 200, map[string]string{"status": "unbound", "sender_id": req.SenderID, "app_id": req.AppID})
 }
 
 func (api *ManagementAPI) handleMigrateRoute(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SenderID string `json:"sender_id"`
+		AppID    string `json:"app_id"`
 		From     string `json:"from"`
 		To       string `json:"to"`
 	}
@@ -4187,15 +4400,70 @@ func (api *ManagementAPI) handleMigrateRoute(w http.ResponseWriter, r *http.Requ
 		jsonResponse(w, 400, map[string]string{"error": "sender_id and to required"})
 		return
 	}
-	if api.routes.Migrate(req.SenderID, req.From, req.To) {
+	if api.routes.Migrate(req.SenderID, req.AppID, req.From, req.To) {
 		api.pool.IncrUserCount(req.From, -1)
 		api.pool.IncrUserCount(req.To, 1)
 		jsonResponse(w, 200, map[string]interface{}{
-			"status": "migrated", "sender_id": req.SenderID, "from": req.From, "to": req.To,
+			"status": "migrated", "sender_id": req.SenderID, "app_id": req.AppID, "from": req.From, "to": req.To,
 		})
 	} else {
 		jsonResponse(w, 404, map[string]string{"error": "route not found or mismatch"})
 	}
+}
+
+func (api *ManagementAPI) handleBatchBindRoute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AppID      string       `json:"app_id"`
+		UpstreamID string       `json:"upstream_id"`
+		Department string       `json:"department"`
+		Entries    []RouteEntry `json:"entries"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.UpstreamID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id required"})
+		return
+	}
+	var bound int
+	if len(req.Entries) > 0 {
+		// 模式1: 按条目列表批量绑定
+		entries := make([]RouteEntry, 0, len(req.Entries))
+		for _, e := range req.Entries {
+			if e.SenderID == "" { continue }
+			entries = append(entries, RouteEntry{
+				SenderID:    e.SenderID,
+				AppID:       req.AppID,
+				UpstreamID:  req.UpstreamID,
+				Department:  e.Department,
+				DisplayName: e.DisplayName,
+			})
+		}
+		api.routes.BindBatch(entries)
+		bound = len(entries)
+	} else if req.Department != "" {
+		// 模式2: 按部门批量分配
+		existing := api.routes.ListByDepartment(req.Department)
+		entries := make([]RouteEntry, 0, len(existing))
+		for _, e := range existing {
+			if req.AppID != "" && e.AppID != req.AppID { continue }
+			entries = append(entries, RouteEntry{
+				SenderID:    e.SenderID,
+				AppID:       func() string { if req.AppID != "" { return req.AppID }; return e.AppID }(),
+				UpstreamID:  req.UpstreamID,
+				Department:  e.Department,
+				DisplayName: e.DisplayName,
+			})
+		}
+		api.routes.BindBatch(entries)
+		bound = len(entries)
+	} else {
+		jsonResponse(w, 400, map[string]string{"error": "entries or department required"})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "batch_bound", "count": bound})
+}
+
+func (api *ManagementAPI) handleRouteStats(w http.ResponseWriter, r *http.Request) {
+	stats := api.routes.Stats()
+	jsonResponse(w, 200, stats)
 }
 
 func (api *ManagementAPI) handleReloadRules(w http.ResponseWriter, r *http.Request) {
@@ -4450,14 +4718,6 @@ func initDB(dbPath string) (*sql.DB, error) {
 		tags TEXT DEFAULT '{}',
 		load TEXT DEFAULT '{}'
 	);
-
-	CREATE TABLE IF NOT EXISTS user_routes (
-		sender_id TEXT PRIMARY KEY,
-		upstream_id TEXT NOT NULL,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	);
-	CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -4468,7 +4728,107 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN upstream_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN app_id TEXT DEFAULT ''`)
 
+	// v3.8 user_routes schema migration
+	migrateUserRoutes(db)
+
 	return db, nil
+}
+
+// migrateUserRoutes 处理 user_routes 表的 schema 迁移
+// 检测旧表（只有 sender_id 主键），如果存在则迁移数据到新 schema
+func migrateUserRoutes(db *sql.DB) {
+	// 检查 user_routes 表是否存在
+	var tableName string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='user_routes'`).Scan(&tableName)
+	if err != nil {
+		// 表不存在，直接创建新 schema
+		db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (
+			sender_id TEXT NOT NULL,
+			app_id TEXT NOT NULL DEFAULT '',
+			upstream_id TEXT NOT NULL,
+			department TEXT DEFAULT '',
+			display_name TEXT DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (sender_id, app_id)
+		)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_app ON user_routes(app_id)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_dept ON user_routes(department)`)
+		return
+	}
+
+	// 表存在，检查是否有 app_id 列
+	rows, err := db.Query(`PRAGMA table_info(user_routes)`)
+	if err != nil { return }
+	defer rows.Close()
+	hasAppID := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dfltValue sql.NullString
+		var pk int
+		if rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk) == nil {
+			if name == "app_id" { hasAppID = true }
+		}
+	}
+
+	if hasAppID {
+		// 已经是新 schema，只需确保索引存在
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_app ON user_routes(app_id)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_dept ON user_routes(department)`)
+		return
+	}
+
+	// 旧 schema，需要迁移
+	log.Println("[数据库迁移] 检测到旧版 user_routes 表，开始迁移到 v3.8 schema...")
+
+	// 1. 读取旧数据
+	oldRows, err := db.Query(`SELECT sender_id, upstream_id, created_at, updated_at FROM user_routes`)
+	if err != nil {
+		log.Printf("[数据库迁移] 读取旧数据失败: %v", err)
+		return
+	}
+	type oldRoute struct {
+		senderID, upstreamID, createdAt, updatedAt string
+	}
+	var oldData []oldRoute
+	for oldRows.Next() {
+		var r oldRoute
+		if oldRows.Scan(&r.senderID, &r.upstreamID, &r.createdAt, &r.updatedAt) == nil {
+			oldData = append(oldData, r)
+		}
+	}
+	oldRows.Close()
+
+	// 2. 重建表
+	db.Exec(`ALTER TABLE user_routes RENAME TO user_routes_old`)
+	db.Exec(`CREATE TABLE user_routes (
+		sender_id TEXT NOT NULL,
+		app_id TEXT NOT NULL DEFAULT '',
+		upstream_id TEXT NOT NULL,
+		department TEXT DEFAULT '',
+		display_name TEXT DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (sender_id, app_id)
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_app ON user_routes(app_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_dept ON user_routes(department)`)
+
+	// 3. 迁移数据（旧数据 app_id 设为空字符串）
+	for _, r := range oldData {
+		db.Exec(`INSERT INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,'','',?,?)`,
+			r.senderID, "", r.upstreamID, r.createdAt, r.updatedAt)
+	}
+
+	// 4. 删除旧表
+	db.Exec(`DROP TABLE IF EXISTS user_routes_old`)
+
+	log.Printf("[数据库迁移] 迁移完成，%d 条路由已升级到 v3.8 schema", len(oldData))
 }
 
 // ============================================================
@@ -4525,7 +4885,7 @@ func main() {
 		metricsDesc = cfg.ManagementListen + "/metrics (Prometheus)"
 	}
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.6                   │")
+	fmt.Println("│                  配置摘要 v3.8                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
@@ -4697,7 +5057,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.6 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.8 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)

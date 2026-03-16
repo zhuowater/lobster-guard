@@ -125,10 +125,22 @@ heartbeat_interval_sec: 10
 heartbeat_timeout_count: 3
 
 # ============================================================
-# 路由策略
+# 路由策略（v3.8 增强：多 Bot 亲和路由）
+# 路由键: (sender_id, app_id) → upstream_id
+# 同一用户访问不同 Bot 可路由到不同容器
 # ============================================================
 route_default_policy: "least-users"    # least-users | round-robin
 route_persist: true
+
+# Bot 注册（可选，用于 Dashboard 显示友好名称）
+# 不配置则自动从入站消息中学习
+# bots:
+#   - app_id: "alpha-3588352-9076736"
+#     name: "安全助手"
+#     description: "安全研究院专用 AI 助手"
+#   - app_id: "beta-3588352-1234567"
+#     name: "HR 助手"
+#     description: "人力资源部 AI 助手"
 
 # ============================================================
 # 入站规则（v3.5+）

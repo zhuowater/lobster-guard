@@ -37,7 +37,7 @@
 |------|------|
 | 🛡️ **入站检测** | Aho-Corasick 多模式匹配 + 正则，拦截 Prompt Injection / 命令注入 / 越狱攻击 |
 | 🔒 **出站拦截** | 防止 Agent 泄露身份证号、API Key、私钥、系统提示词等敏感信息 |
-| 🔀 **亲和路由** | 按用户 ID 绑定到固定容器，保持 Agent 会话上下文连续性 |
+| 🔀 **多 Bot 亲和路由** | 按 (用户ID, BotID) 复合键绑定容器，同一用户不同 Bot 可路由到不同实例 |
 | 📦 **服务注册** | 容器启动自动注册，心跳保活，故障自动转移 |
 | 📊 **全量审计** | SQLite 持久化每一条请求的检测结果、延迟和路由决策 |
 | 🖥️ **管理后台** | 内置 Web Dashboard，深色科技主题，实时监控 |
@@ -725,7 +725,7 @@ CGO_ENABLED=1 go test -v -count=1 ./...
 
 ```
 lobster-guard/
-├── main.go                 # 全部源码（~4725 行，含 5 通道插件 + Bridge + Rate Limit + Metrics + 蓝信实战修复）
+├── main.go                 # 全部源码（~5085 行，含 5 通道插件 + Bridge + Rate Limit + Metrics + 多Bot亲和路由）
 ├── main_test.go            # 单元测试（130 用例）
 ├── integration_test.go     # 集成测试（20 用例）
 ├── dashboard.html          # 管理后台（27KB 单文件）

@@ -324,7 +324,7 @@ func TestInboundRouting(t *testing.T) {
 	rec := httptest.NewRecorder()
 	env.inbound.ServeHTTP(rec, req)
 
-	uid, found := env.routes.Lookup("new-user-123")
+	uid, found := env.routes.Lookup("new-user-123", "")
 	if !found {
 		t.Fatal("新用户应自动绑定路由")
 	}
