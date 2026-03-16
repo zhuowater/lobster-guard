@@ -264,7 +264,7 @@ function loadUpstreams(){
 }
 
 /* ========== 4. Routes (v3.8 Multi-Bot Affinity) ========== */
-var _allRoutes=[];
+var _allRoutes=[],_userCache={};
 function loadRouteStats(){
   api('/api/v1/routes/stats').then(function(d){
     var bar=document.getElementById('routeStatsBar');
@@ -272,6 +272,15 @@ function loadRouteStats(){
       +'<span class="tag tag-pass" style="font-size:.8rem">用户数: '+(d.unique_senders||0)+'</span>'
       +'<span class="tag" style="font-size:.8rem;background:var(--neon-cyan);color:#000">上游数: '+(d.by_upstream?Object.keys(d.by_upstream).length:0)+'</span>'
       +'<span class="tag" style="font-size:.8rem;background:var(--neon-yellow);color:#000">路由数: '+(d.total||0)+'</span>';
+  }).catch(function(){});
+}
+function loadUserCache(){
+  api('/api/v1/users').then(function(d){
+    var list=d.users||[];
+    _userCache={};
+    for(var i=0;i<list.length;i++){
+      _userCache[list[i].sender_id]=list[i];
+    }
   }).catch(function(){});
 }
 function loadRoutes(){
@@ -309,13 +318,18 @@ function renderRoutes(){
     filtered.push(r);
   }
   if(!filtered.length){document.getElementById('routesContent').innerHTML='<div class="empty">暂无匹配路由</div>';document.getElementById('routesContent').className='';return}
-  var h='<div class="table-wrap"><table><thead><tr><th>用户 ID</th><th>显示名</th><th>部门</th><th>Bot (App ID)</th><th>上游容器</th><th>操作</th></tr></thead><tbody>';
+  var h='<div class="table-wrap"><table><thead><tr><th>用户 ID</th><th>姓名</th><th>邮箱</th><th>手机</th><th>部门</th><th>Bot (App ID)</th><th>上游容器</th><th>操作</th></tr></thead><tbody>';
   for(var i=0;i<filtered.length;i++){
-    var r=filtered[i],sid=esc(r.sender_id||''),aid=esc(r.app_id||'--'),uid=esc(r.upstream_id||''),nm=esc(r.display_name||'--'),dp=esc(r.department||'--');
-    var aidShort=r.app_id&&r.app_id.length>16?esc(r.app_id.substring(0,16)+'...'):aid;
-    h+='<tr><td style="font-size:.75rem">'+sid+'</td><td>'+nm+'</td><td>'+dp+'</td>'
-      +'<td style="font-size:.75rem" title="'+aid+'">'+aidShort+'</td><td>'+uid+'</td>'
-      +'<td><button class="btn" style="padding:2px 8px;font-size:.7rem" onclick="unbindRoute(\''+sid+'\',\''+esc(r.app_id||'')+'\')">解绑</button></td></tr>';
+    var r=filtered[i],sid=r.sender_id||'',aid=r.app_id||'',uid=r.upstream_id||'';
+    // 从用户缓存补充信息
+    var u=_userCache[sid]||{};
+    var nm=u.name||r.display_name||'--',em=u.email||'--',mb=u.mobile||'--',dp=u.department||r.department||'--';
+    var aidShort=aid.length>16?aid.substring(0,16)+'...':aid;
+    h+='<tr><td style="font-size:.75rem">'+esc(sid)+'</td><td>'+esc(nm)+'</td>'
+      +'<td style="font-size:.75rem">'+esc(em)+'</td><td style="font-size:.75rem">'+esc(mb)+'</td>'
+      +'<td>'+esc(dp)+'</td>'
+      +'<td style="font-size:.75rem" title="'+esc(aid)+'">'+esc(aidShort||'--')+'</td><td>'+esc(uid)+'</td>'
+      +'<td><button class="btn" style="padding:2px 8px;font-size:.7rem" onclick="unbindRoute(\''+esc(sid)+'\',\''+esc(aid)+'\')">解绑</button></td></tr>';
   }
   h+='</tbody></table></div><div style="color:var(--text-dim);font-size:.75rem;margin-top:6px">显示 '+filtered.length+' / '+_allRoutes.length+' 条</div>';
   document.getElementById('routesContent').innerHTML=h;document.getElementById('routesContent').className='';
@@ -538,6 +552,7 @@ function refreshAll(){
   loadUpstreams();
   loadRoutes();
   loadRouteStats();
+  loadUserCache();
   loadStats();
   loadRateLimitStats();
   loadRuleHits();
