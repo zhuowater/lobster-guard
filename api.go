@@ -38,9 +38,11 @@ type ManagementAPI struct {
 	policyEng      *RoutePolicyEngine  // v3.9 路由策略引擎
 	alertNotifier  *AlertNotifier      // v3.10 告警通知器
 	wsProxy        *WSProxyManager     // v4.1 WebSocket 代理管理器
+	store          Store               // v4.2 存储抽象层
+	shutdownMgr    *ShutdownManager    // v4.2 关闭管理器
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger,
 		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
@@ -48,7 +50,7 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
 		userCache: userCache, policyEng: policyEng, alertNotifier: alertNotifier,
-		wsProxy: wsProxy,
+		wsProxy: wsProxy, store: store, shutdownMgr: shutdownMgr,
 	}
 }
 
@@ -190,12 +192,33 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			jsonResponse(w, 200, map[string]interface{}{"connections": []interface{}{}, "active": 0, "total": 0})
 		}
+	// v4.2 备份管理 API
+	case path == "/api/v1/backup" && method == "POST":
+		api.handleCreateBackup(w, r)
+	case path == "/api/v1/backups" && method == "GET":
+		api.handleListBackups(w, r)
+	case strings.HasPrefix(path, "/api/v1/backups/") && method == "DELETE":
+		api.handleDeleteBackup(w, r)
 	default:
 		w.WriteHeader(404)
 	}
 }
 
 func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	// v4.2: 关闭过程中返回 503
+	if api.shutdownMgr != nil && api.shutdownMgr.IsShuttingDown() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(503)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "shutting_down",
+		})
+		return
+	}
+
+	// v4.2: 增强型健康检查
+	healthResult := PerformHealthChecks(api.store, api.pool, api.cfg.DBPath)
+
+	// 同时保留原有的详细信息
 	upstreams := api.pool.ListUpstreams()
 	healthyCount := 0
 	upstreamList := []map[string]interface{}{}
@@ -208,9 +231,11 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	result := map[string]interface{}{
-		"status": "healthy", "version": AppVersion,
-		"uptime": time.Since(startTime).String(),
-		"mode":   api.inbound.mode,
+		"status":  healthResult.Status,
+		"version": AppVersion,
+		"uptime":  time.Since(startTime).String(),
+		"mode":    api.inbound.mode,
+		"checks":  healthResult.Checks,
 		"upstreams": map[string]interface{}{
 			"total": len(upstreams), "healthy": healthyCount, "list": upstreamList,
 		},
@@ -987,5 +1012,83 @@ func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 	w.Write(data)
+}
+
+// ============================================================
+// v4.2 备份管理 API
+// ============================================================
+
+// handleCreateBackup POST /api/v1/backup — 创建数据库备份
+func (api *ManagementAPI) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
+	sqlStore, ok := api.store.(*SQLiteStore)
+	if !ok {
+		jsonResponse(w, 500, map[string]string{"error": "backup only supported for SQLite store"})
+		return
+	}
+
+	backupDir := api.cfg.BackupDir
+	if backupDir == "" {
+		backupDir = "/var/lib/lobster-guard/backups/"
+	}
+
+	path, size, err := sqlStore.Backup(backupDir)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 自动清理旧备份
+	maxCount := api.cfg.BackupMaxCount
+	if maxCount <= 0 {
+		maxCount = 10
+	}
+	CleanupOldBackups(backupDir, maxCount)
+
+	log.Printf("[备份] ✅ 手动创建备份: %s (%.2f MB)", path, float64(size)/1024/1024)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "created",
+		"path":   path,
+		"size":   size,
+	})
+}
+
+// handleListBackups GET /api/v1/backups — 列出已有备份
+func (api *ManagementAPI) handleListBackups(w http.ResponseWriter, r *http.Request) {
+	backupDir := api.cfg.BackupDir
+	if backupDir == "" {
+		backupDir = "/var/lib/lobster-guard/backups/"
+	}
+
+	backups, err := ListBackups(backupDir)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"backups": backups,
+		"total":   len(backups),
+	})
+}
+
+// handleDeleteBackup DELETE /api/v1/backups/:name — 删除指定备份
+func (api *ManagementAPI) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/backups/")
+	if name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "backup name required"})
+		return
+	}
+
+	backupDir := api.cfg.BackupDir
+	if backupDir == "" {
+		backupDir = "/var/lib/lobster-guard/backups/"
+	}
+
+	if err := DeleteBackup(backupDir, name); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+
+	log.Printf("[备份] 已删除备份: %s", name)
+	jsonResponse(w, 200, map[string]string{"status": "deleted", "name": name})
 }
 

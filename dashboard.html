@@ -195,11 +195,13 @@ function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'
 function switchTab(btn,tab){var hdr=btn.parentElement,card=hdr.parentElement,bs=hdr.querySelectorAll('.tab-btn'),cs=card.querySelectorAll('.tab-content');for(var i=0;i<bs.length;i++)bs[i].className='tab-btn';for(var i=0;i<cs.length;i++)cs[i].className='tab-content';btn.className='tab-btn active';var t=document.getElementById('tab-'+tab);if(t)t.className='tab-content active'}
 function actTag(a){a=(a||'').toLowerCase();return a==='block'?'tag-block':a==='warn'?'tag-warn':a==='log'?'tag-log':'tag-pass'}
 
-/* ========== 1. Health (Enhanced) ========== */
+/* ========== 1. Health (Enhanced v4.2) ========== */
+function hcIcon(s){return s==='ok'?'\u2705':s==='warning'?'\u26a0\ufe0f':s==='error'?'\u274c':'\u2754'}
+function hcColor(s){return s==='ok'?'var(--neon-green)':s==='warning'?'var(--neon-yellow)':'var(--neon-red)'}
 function loadHealth(){
   api('/healthz').then(function(d){
     _hc=d;
-    document.getElementById('bannerVersion').textContent='v'+(d.version||'3.6');
+    document.getElementById('bannerVersion').textContent='v'+(d.version||'4.2');
     document.getElementById('bannerUptime').textContent='\u8fd0\u884c\u65f6\u95f4: '+(d.uptime||'--');
     var ups=d.upstreams||{},tot=ups.total||0,hp=ups.healthy||0;
     var routeT=(d.routes&&d.routes.total)||0,auditT=(d.audit&&d.audit.total)||0;
@@ -210,6 +212,10 @@ function loadHealth(){
     var rl=d.rate_limiter||{},rlT;
     if(rl.enabled)rlT=(rl.global_rps||'?')+' rps (\u5168\u5c40) / '+(rl.per_sender_rps||'?')+' rps (\u6bcf\u7528\u6237)';
     else rlT='\u672a\u542f\u7528';
+    // v4.2: Overall status badge
+    var ost=d.status||'healthy';
+    var ostC=ost==='healthy'?'var(--neon-green)':(ost==='degraded'?'var(--neon-yellow)':'var(--neon-red)');
+    var ostT=ost==='healthy'?'\u5065\u5eb7':(ost==='degraded'?'\u964d\u7ea7':(ost==='shutting_down'?'\u5173\u95ed\u4e2d':'\u5f02\u5e38'));
     var h='<div class="status-grid">'
       +'<div class="ring-chart"><svg width="100" height="100" viewBox="0 0 100 100">'
       +'<circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8"/>'
@@ -217,6 +223,7 @@ function loadHealth(){
       +'stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'" stroke-linecap="round" style="transition:stroke-dashoffset .6s"/>'
       +'</svg><span class="ring-label" style="color:'+rc+'">'+pct+'%</span></div>'
       +'<div class="status-info">'
+      +'<div class="status-row"><span class="status-key">\u603b\u4f53\u72b6\u6001</span><span class="status-val" style="color:'+ostC+';font-weight:700">'+ostT+'</span></div>'
       +'<div class="status-row"><span class="status-key">\u7248\u672c</span><span class="status-val">'+esc(d.version)+'</span></div>'
       +'<div class="status-row"><span class="status-key">\u8fd0\u884c\u65f6\u95f4</span><span class="status-val">'+esc(d.uptime||'--')+'</span></div>'
       +'<div class="status-row"><span class="status-key">\u901a\u9053\u7c7b\u578b</span><span class="status-val">'+esc(ch)+'</span></div>'
@@ -228,6 +235,26 @@ function loadHealth(){
       +'<div class="status-row"><span class="status-key">\u9650\u6d41</span><span class="status-val">'+esc(rlT)+'</span></div>'
       +'<div class="status-row"><span class="status-key">Metrics</span><span class="status-val">:9090/metrics</span></div>'
       +'</div></div>';
+    // v4.2: Health check dimensions
+    var chks=d.checks;
+    if(chks){
+      h+='<div style="margin-top:12px;border-top:1px solid rgba(0,212,255,0.1);padding-top:12px">'
+        +'<div style="font-size:.85rem;color:var(--neon-blue);font-weight:600;margin-bottom:8px">\ud83c\udfe5 \u5065\u5eb7\u68c0\u67e5</div>';
+      var dims=[
+        {k:'database',n:'\u6570\u636e\u5e93',fn:function(c){return c.latency_ms!=null?(c.latency_ms.toFixed(1)+'ms'):''}},
+        {k:'upstream',n:'\u4e0a\u6e38\u670d\u52a1',fn:function(c){return c.healthy!=null?(c.healthy+'/'+c.total):''}},
+        {k:'disk',n:'\u78c1\u76d8\u7a7a\u95f4',fn:function(c){return c.used_percent!=null?(c.used_percent.toFixed(1)+'%'):''}},
+        {k:'memory',n:'\u5185\u5b58',fn:function(c){return c.alloc_mb!=null?(c.alloc_mb.toFixed(1)+' MB'):''}},
+        {k:'goroutines',n:'Goroutines',fn:function(c){return c.count!=null?c.count:''}}
+      ];
+      for(var i=0;i<dims.length;i++){
+        var dm=dims[i],c=chks[dm.k];
+        if(!c)continue;
+        h+='<div class="status-row"><span class="status-key">'+hcIcon(c.status)+' '+dm.n+'</span>'
+          +'<span class="status-val" style="color:'+hcColor(c.status)+'">'+dm.fn(c)+'</span></div>';
+      }
+      h+='</div>';
+    }
     var el=document.getElementById('healthContent');el.innerHTML=h;el.className='';
     updateBridge(d);
   }).catch(function(e){

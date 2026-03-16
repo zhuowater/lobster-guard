@@ -27,7 +27,7 @@
 - [x] v3.8 多 Bot 亲和路由（复合键路由 · 批量绑定 · 路由统计 · Dashboard 管理面板）
 - [x] v3.9 IM 用户信息自动获取（4 平台 UserInfoProvider · 邮箱/部门策略路由 · Dashboard 用户展示）
 
-**当前状态**: 15 个源文件 ~8700 行 · 342 个测试 · 38 commit · 3 个依赖
+**当前状态**: 18 个源文件 ~9200 行 · 379 个测试 · 40 commit · 3 个依赖
 
 ---
 
@@ -65,13 +65,21 @@
 - [x] WebSocket 帧级检测（对流式输出做实时敏感信息扫描）
 - [x] 连接生命周期管理（空闲超时 · 最大时长 · 优雅断开）
 
-### v4.2 — 高可用
-> 前提：v4.0 拆分完成后，共享存储替换 SQLite。
+### v4.2 — 高可用（单实例基础设施）
+> 单实例高可用基础设施：优雅关闭、健康检查增强、数据备份/恢复、存储抽象层。
 
-- [ ] PostgreSQL 适配层（替代 SQLite，支持多实例共享）
-- [ ] 路由表跨实例同步（事件驱动 or 轮询）
-- [ ] Leader 选举（Bridge 模式防重复连接）
-- [ ] 健康检查级联（网关集群 → 上游集群）
+- [x] 优雅关闭（SIGINT/SIGTERM · 7步关闭流程 · 可配置超时）
+- [x] 健康检查增强（5维度检查：数据库/上游/磁盘/内存/goroutines）
+- [x] 数据备份与恢复（VACUUM INTO · 自动备份 · API管理 · -restore CLI）
+- [x] Store 存储抽象层（SQLiteStore · 为 PostgresStore 做准备）
+
+### v4.3 — 多实例高可用
+> 前提：v4.2 Store 抽象层完成后，共享存储替换 SQLite。
+
+- [x] Store 抽象层（SQLiteStore 实现，预留 PostgresStore）（PostgresStore 实现 Store 接口）
+- [x] 优雅关闭（7 步 graceful shutdown + SIGINT/SIGTERM）（事件驱动 or 轮询）
+- [x] 健康检查增强（5 维度：DB/upstream/disk/memory/goroutines）（Bridge 模式防重复连接）
+- [x] 数据备份与恢复（VACUUM INTO + 自动轮转 + -restore CLI）（网关集群 → 上游集群）
 
 ### 未来探索
 - [ ] 基于 LLM 的语义级攻击检测（成本/延迟权衡）

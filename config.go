@@ -104,6 +104,11 @@ type Config struct {
 	WSIdleTimeout      int    `yaml:"ws_idle_timeout"`      // 空闲超时秒数，默认 300
 	WSMaxDuration      int    `yaml:"ws_max_duration"`      // 最大连接时长秒数，默认 3600
 	WSMaxConnections   int    `yaml:"ws_max_connections"`   // 最大并发 WebSocket 连接数，默认 100
+	// v4.2 高可用
+	ShutdownTimeout    int    `yaml:"shutdown_timeout"`     // 优雅关闭超时秒数，默认 30
+	BackupDir          string `yaml:"backup_dir"`           // 备份目录，默认 /var/lib/lobster-guard/backups/
+	BackupMaxCount     int    `yaml:"backup_max_count"`     // 最大备份数，默认 10
+	BackupAutoInterval int    `yaml:"backup_auto_interval"` // 自动备份间隔（小时），0=不自动备份
 }
 
 type OutboundRuleConfig struct {

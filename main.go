@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "4.1.0"
+	AppVersion = "4.2.0"
 )
 
 var startTime = time.Now()
@@ -41,6 +41,7 @@ func printBanner() {
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "配置文件路径")
 	genRulesFile := flag.String("gen-rules", "", "生成默认入站规则文件到指定路径")
+	restorePath := flag.String("restore", "", "从备份文件恢复数据库后启动")
 	flag.Parse()
 
 	// -gen-rules: 导出默认规则文件后退出
@@ -67,6 +68,15 @@ func main() {
 	if errs := validateConfig(cfg); len(errs) > 0 {
 		for _, e := range errs { log.Printf("[配置错误] ❌ %s", e) }
 		log.Fatalf("配置验证失败，共 %d 个错误", len(errs))
+	}
+
+	// v4.2: 从备份恢复
+	if *restorePath != "" {
+		log.Printf("[恢复] 从备份文件恢复: %s -> %s", *restorePath, cfg.DBPath)
+		if err := RestoreFromBackup(*restorePath, cfg.DBPath); err != nil {
+			log.Fatalf("恢复备份失败: %v", err)
+		}
+		log.Printf("[恢复] ✅ 数据库已从备份恢复")
 	}
 
 	channelName := cfg.Channel
@@ -115,9 +125,17 @@ func main() {
 	if err != nil { log.Fatalf("初始化数据库失败: %v", err) }
 	defer db.Close()
 
+	// v4.2: 创建 Store 抽象层
+	store := NewSQLiteStore(db, cfg.DBPath)
+
 	logger, err := NewAuditLogger(db)
 	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
+
+	// v4.2: 创建关闭管理器
+	shutdownMgr := NewShutdownManager(cfg)
+	shutdownMgr.SetLogger(logger)
+	shutdownMgr.SetStore(store)
 
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, cfg.RoutePersist)
@@ -189,12 +207,16 @@ func main() {
 		outbound.alertNotifier = alertNotifier
 	}
 
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy, store, shutdownMgr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go pool.HealthCheck(ctx)
 	if inbound.limiter != nil { go inbound.limiter.startCleanup(ctx) }
+
+	// v4.2: 设置关闭管理器的 cancel
+	shutdownMgr.SetCancel(cancel)
+	shutdownMgr.SetWSProxy(wsProxy)
 
 	// 日志轮转
 	go func() { defer func() { recover() }(); logger.CleanupOldLogs(retentionDays) }()
@@ -209,12 +231,43 @@ func main() {
 		go func() {
 			if err := inbound.startBridge(ctx); err != nil && err != context.Canceled { log.Fatalf("[错误] 启动桥接失败: %v", err) }
 		}()
+		shutdownMgr.SetBridge(inbound.bridge)
+	}
+
+	// v4.2: 自动备份
+	if cfg.BackupAutoInterval > 0 {
+		backupDir := cfg.BackupDir
+		if backupDir == "" { backupDir = "/var/lib/lobster-guard/backups/" }
+		maxCount := cfg.BackupMaxCount
+		if maxCount <= 0 { maxCount = 10 }
+		go func() {
+			ticker := time.NewTicker(time.Duration(cfg.BackupAutoInterval) * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					path, size, err := store.Backup(backupDir)
+					if err != nil {
+						log.Printf("[自动备份] 失败: %v", err)
+					} else {
+						log.Printf("[自动备份] ✅ 已创建: %s (%.2f MB)", path, float64(size)/1024/1024)
+						CleanupOldBackups(backupDir, maxCount)
+					}
+				}
+			}
+		}()
+		fmt.Printf("[初始化] ✅ 自动备份: 每 %d 小时, 最多保留 %d 份\n", cfg.BackupAutoInterval, maxCount)
 	}
 
 	// 启动 HTTP 服务
 	inSrv := &http.Server{Addr: cfg.InboundListen, Handler: inbound, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
 	outSrv := &http.Server{Addr: cfg.OutboundListen, Handler: outbound, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second}
 	mgmtSrv := &http.Server{Addr: cfg.ManagementListen, Handler: mgmtAPI, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
+
+	// v4.2: 注册服务器到关闭管理器
+	shutdownMgr.SetServers(inSrv, outSrv, mgmtSrv)
 
 	go func() { if err := inSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("入站代理启动失败: %v", err) } }()
 	go func() { if err := outSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("出站代理启动失败: %v", err) } }()
@@ -227,14 +280,8 @@ func main() {
 	sig := <-quit
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-	cancel()
-	if inbound.bridge != nil { inbound.bridge.Stop() }
-	inSrv.Shutdown(shutdownCtx)
-	outSrv.Shutdown(shutdownCtx)
-	mgmtSrv.Shutdown(shutdownCtx)
-	log.Println("[关闭] 龙虾卫士已停止")
+	// v4.2: 使用 ShutdownManager 优雅关闭
+	shutdownMgr.Shutdown()
 }
 
 // printInboundRuleSummary 打印入站规则摘要

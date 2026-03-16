@@ -649,6 +649,21 @@ func (wm *WSProxyManager) closeConnection(conn *WSConnection, closeCode int, rea
 // WebSocket 连接状态 API
 // ============================================================
 
+// CloseAll 关闭所有活跃 WebSocket 连接（v4.2 优雅关闭用）
+func (wm *WSProxyManager) CloseAll() {
+	wm.mu.Lock()
+	conns := make([]*WSConnection, 0, len(wm.connections))
+	for _, conn := range wm.connections {
+		conns = append(conns, conn)
+	}
+	wm.mu.Unlock()
+
+	for _, conn := range conns {
+		wm.closeConnection(conn, websocket.CloseGoingAway, "server shutting down")
+	}
+	log.Printf("[WebSocket] 已关闭 %d 个活跃连接", len(conns))
+}
+
 // HandleWSConnectionsAPI 处理 GET /api/v1/ws/connections
 func (wm *WSProxyManager) HandleWSConnectionsAPI(w http.ResponseWriter, r *http.Request) {
 	conns := wm.ListConnections()
