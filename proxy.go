@@ -42,6 +42,7 @@ type InboundProxy struct {
 	userCache  *UserInfoCache  // v3.9 用户信息缓存
 	policyEng  *RoutePolicyEngine // v3.9 路由策略引擎
 	alertNotifier *AlertNotifier // v3.10 告警通知器
+	wsProxy    *WSProxyManager // v4.1 WebSocket 代理管理器
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *InboundProxy {
@@ -292,6 +293,21 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	start := time.Now()
+
+	// v4.1: WebSocket Upgrade 检测
+	if IsWebSocketUpgrade(r) && ip.wsProxy != nil {
+		// 从 query 或 header 提取 sender_id / app_id
+		senderID := r.URL.Query().Get("sender_id")
+		if senderID == "" {
+			senderID = r.Header.Get("X-Sender-Id")
+		}
+		appID := r.URL.Query().Get("app_id")
+		if appID == "" {
+			appID = r.Header.Get("X-App-Id")
+		}
+		ip.wsProxy.HandleWebSocket(w, r, senderID, appID)
+		return
+	}
 
 	// 企微 GET 验证回调
 	if r.Method == "GET" {

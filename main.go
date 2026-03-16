@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "4.0.0"
+	AppVersion = "4.1.0"
 )
 
 var startTime = time.Now()
@@ -171,6 +171,17 @@ func main() {
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
+	// v4.1 WebSocket 代理管理器
+	wsProxy := NewWSProxyManager(cfg, engine, outboundEngine, logger, metrics, pool, routes, ruleHits)
+	inbound.wsProxy = wsProxy
+	wsMode := cfg.WSMode
+	if wsMode == "" { wsMode = "inspect" }
+	wsMaxConn := cfg.WSMaxConnections
+	if wsMaxConn <= 0 { wsMaxConn = 100 }
+	fmt.Printf("[初始化] ✅ WebSocket 代理: mode=%s, max_connections=%d, idle_timeout=%ds, max_duration=%ds\n",
+		wsMode, wsMaxConn, func() int { if cfg.WSIdleTimeout <= 0 { return 300 }; return cfg.WSIdleTimeout }(),
+		func() int { if cfg.WSMaxDuration <= 0 { return 3600 }; return cfg.WSMaxDuration }())
+
 	var alertNotifier *AlertNotifier
 	if cfg.AlertWebhook != "" {
 		alertNotifier = NewAlertNotifier(cfg.AlertWebhook, cfg.AlertFormat, cfg.AlertMinInterval, metrics)
@@ -178,7 +189,7 @@ func main() {
 		outbound.alertNotifier = alertNotifier
 	}
 
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

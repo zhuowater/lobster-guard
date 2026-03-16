@@ -99,6 +99,11 @@ type Config struct {
 	// v3.11 正则规则 + 规则分组
 	RuleBindings         []RuleBindingConfig        `yaml:"rule_bindings"`          // v3.11 按 app_id 绑定规则组
 	OutboundPIIPatterns  []OutboundPIIPatternConfig `yaml:"outbound_pii_patterns"`  // v3.11 出站 PII 正则可配置化
+	// v4.1 WebSocket 代理
+	WSMode             string `yaml:"ws_mode"`              // "inspect"（默认）或 "passthrough"
+	WSIdleTimeout      int    `yaml:"ws_idle_timeout"`      // 空闲超时秒数，默认 300
+	WSMaxDuration      int    `yaml:"ws_max_duration"`      // 最大连接时长秒数，默认 3600
+	WSMaxConnections   int    `yaml:"ws_max_connections"`   // 最大并发 WebSocket 连接数，默认 100
 }
 
 type OutboundRuleConfig struct {
@@ -379,6 +384,20 @@ func validateConfig(cfg *Config) []string {
 	}
 	if cfg.RateLimit.PerSenderRPS < 0 {
 		errs = append(errs, "rate_limit.per_sender_rps 不能为负数")
+	}
+
+	// v4.1 WebSocket 配置验证
+	if cfg.WSMode != "" && cfg.WSMode != "inspect" && cfg.WSMode != "passthrough" {
+		errs = append(errs, fmt.Sprintf("ws_mode %q 无效，必须是 inspect 或 passthrough", cfg.WSMode))
+	}
+	if cfg.WSIdleTimeout < 0 {
+		errs = append(errs, "ws_idle_timeout 不能为负数")
+	}
+	if cfg.WSMaxDuration < 0 {
+		errs = append(errs, "ws_max_duration 不能为负数")
+	}
+	if cfg.WSMaxConnections < 0 {
+		errs = append(errs, "ws_max_connections 不能为负数")
 	}
 
 	return errs

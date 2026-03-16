@@ -37,9 +37,10 @@ type ManagementAPI struct {
 	userCache      *UserInfoCache      // v3.9 用户信息缓存
 	policyEng      *RoutePolicyEngine  // v3.9 路由策略引擎
 	alertNotifier  *AlertNotifier      // v3.10 告警通知器
+	wsProxy        *WSProxyManager     // v4.1 WebSocket 代理管理器
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger,
 		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
@@ -47,6 +48,7 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
 		userCache: userCache, policyEng: policyEng, alertNotifier: alertNotifier,
+		wsProxy: wsProxy,
 	}
 }
 
@@ -181,6 +183,13 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListRuleBindings(w, r)
 	case path == "/api/v1/rule-bindings/test" && method == "POST":
 		api.handleTestRuleBindings(w, r)
+	// v4.1 WebSocket 连接状态 API
+	case path == "/api/v1/ws/connections" && method == "GET":
+		if api.wsProxy != nil {
+			api.wsProxy.HandleWSConnectionsAPI(w, r)
+		} else {
+			jsonResponse(w, 200, map[string]interface{}{"connections": []interface{}{}, "active": 0, "total": 0})
+		}
 	default:
 		w.WriteHeader(404)
 	}

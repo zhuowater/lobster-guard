@@ -38,7 +38,7 @@ func setupMgmtAPI(t *testing.T) (*ManagementAPI, func()) {
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 	cleanup := func() { logger.Close(); db.Close(); os.Remove(tmpDB) }
 	return api, cleanup
 }
@@ -447,7 +447,7 @@ func TestAPIRuleBindings(t *testing.T) {
 	)
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 
 	server := httptest.NewServer(api)
 	defer server.Close()
@@ -493,7 +493,7 @@ func TestAPIRuleBindingsTest(t *testing.T) {
 	)
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 
 	server := httptest.NewServer(api)
 	defer server.Close()
@@ -534,7 +534,7 @@ func TestAPIRuleHitsWithGroup(t *testing.T) {
 	ruleHits.RecordWithGroup("rule_c", "jailbreak")
 
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, ruleHits, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, ruleHits, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, ruleHits, nil, nil, nil, nil)
 
 	server := httptest.NewServer(api)
 	defer server.Close()
@@ -570,7 +570,7 @@ func TestAPIOutboundRulesWithPII(t *testing.T) {
 	engine.Reload([]InboundRuleConfig{}, "test")
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 
 	server := httptest.NewServer(api)
 	defer server.Close()
@@ -607,7 +607,7 @@ func TestAPIInboundRulesGroupCounts(t *testing.T) {
 	engine := NewRuleEngineFromConfig(configs, "test")
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 
 	server := httptest.NewServer(api)
 	defer server.Close()

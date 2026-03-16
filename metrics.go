@@ -293,6 +293,12 @@ type MetricsCollector struct {
 	// v3.10 告警
 	alertsTotal int64
 
+	// v4.1 WebSocket 指标
+	wsConnectionsTotal  int64            // 累计 WebSocket 连接总数
+	wsConnectionsActive int64            // 当前活跃连接数
+	wsMessagesTotal     map[string]int64 // key: "direction:action" → count
+	wsMessageBytes      map[string]int64 // key: "direction" → bytes
+
 	// 系统
 	startTime time.Time
 }
@@ -301,6 +307,8 @@ func NewMetricsCollector() *MetricsCollector {
 	return &MetricsCollector{
 		requestsTotal:  make(map[string]int64),
 		latencyBuckets: make(map[string]*LatencyHistogram),
+		wsMessagesTotal: make(map[string]int64),
+		wsMessageBytes:  make(map[string]int64),
 		startTime:      time.Now(),
 	}
 }
@@ -345,6 +353,42 @@ func (mc *MetricsCollector) RecordAlert() {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.alertsTotal++
+}
+
+// RecordWSConnect 记录 WebSocket 新连接（v4.1）
+func (mc *MetricsCollector) RecordWSConnect() {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.wsConnectionsTotal++
+	mc.wsConnectionsActive++
+}
+
+// RecordWSDisconnect 记录 WebSocket 连接断开（v4.1）
+func (mc *MetricsCollector) RecordWSDisconnect() {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.wsConnectionsActive--
+	if mc.wsConnectionsActive < 0 {
+		mc.wsConnectionsActive = 0
+	}
+}
+
+// RecordWSMessage 记录 WebSocket 消息（v4.1）
+func (mc *MetricsCollector) RecordWSMessage(direction, action string, bytes int64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	key := direction + ":" + action
+	mc.wsMessagesTotal[key]++
+	if bytes > 0 {
+		mc.wsMessageBytes[direction] += bytes
+	}
+}
+
+// GetWSMetrics 获取 WebSocket 指标（v4.1）
+func (mc *MetricsCollector) GetWSMetrics() (total int64, active int64) {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	return mc.wsConnectionsTotal, mc.wsConnectionsActive
 }
 
 func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string, ruleHits *RuleHitStats, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine) {
@@ -500,6 +544,42 @@ func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstrea
 	fmt.Fprintln(w, "# HELP lobster_guard_alerts_total Total alert notifications sent")
 	fmt.Fprintln(w, "# TYPE lobster_guard_alerts_total counter")
 	fmt.Fprintf(w, "lobster_guard_alerts_total{type=\"block\"} %d\n", mc.alertsTotal)
+
+	// v4.1 WebSocket 指标
+	fmt.Fprintln(w, "# HELP lobster_guard_ws_connections_total Total WebSocket connections (cumulative)")
+	fmt.Fprintln(w, "# TYPE lobster_guard_ws_connections_total counter")
+	fmt.Fprintf(w, "lobster_guard_ws_connections_total %d\n", mc.wsConnectionsTotal)
+
+	fmt.Fprintln(w, "# HELP lobster_guard_ws_connections_active Current active WebSocket connections")
+	fmt.Fprintln(w, "# TYPE lobster_guard_ws_connections_active gauge")
+	fmt.Fprintf(w, "lobster_guard_ws_connections_active %d\n", mc.wsConnectionsActive)
+
+	fmt.Fprintln(w, "# HELP lobster_guard_ws_messages_total WebSocket messages by direction and action")
+	fmt.Fprintln(w, "# TYPE lobster_guard_ws_messages_total counter")
+	wsMsgKeys := make([]string, 0, len(mc.wsMessagesTotal))
+	for k := range mc.wsMessagesTotal {
+		wsMsgKeys = append(wsMsgKeys, k)
+	}
+	sort.Strings(wsMsgKeys)
+	for _, key := range wsMsgKeys {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		fmt.Fprintf(w, "lobster_guard_ws_messages_total{direction=%q,action=%q} %d\n",
+			parts[0], parts[1], mc.wsMessagesTotal[key])
+	}
+
+	fmt.Fprintln(w, "# HELP lobster_guard_ws_message_bytes_total WebSocket message bytes by direction")
+	fmt.Fprintln(w, "# TYPE lobster_guard_ws_message_bytes_total counter")
+	wsBytesKeys := make([]string, 0, len(mc.wsMessageBytes))
+	for k := range mc.wsMessageBytes {
+		wsBytesKeys = append(wsBytesKeys, k)
+	}
+	sort.Strings(wsBytesKeys)
+	for _, dir := range wsBytesKeys {
+		fmt.Fprintf(w, "lobster_guard_ws_message_bytes_total{direction=%q} %d\n", dir, mc.wsMessageBytes[dir])
+	}
 }
 
 // formatFloat formats a float for Prometheus le labels (integer-like floats without decimal)

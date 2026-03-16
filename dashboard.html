@@ -118,6 +118,8 @@ tr.row-warn td{background:rgba(255,204,0,0.10)!important}
   <div class="card cd0"><div class="card-header"><span class="card-icon">📊</span><span class="card-title">系统状态</span><span style="margin-left:auto;font-size:.7rem;color:var(--text-dim)">每 10s 刷新</span></div><div id="healthContent" class="loading">加载中...</div></div>
   <!-- 2. Bridge 状态 -->
   <div class="card cd1 card-hidden" id="bridgeCard"><div class="card-header"><span class="card-icon">🌉</span><span class="card-title">Bridge 状态</span></div><div id="bridgeContent" class="loading">加载中...</div></div>
+  <!-- 2.5 WebSocket 连接状态 (v4.1) -->
+  <div class="card cd1" id="wsCard"><div class="card-header"><span class="card-icon">🔌</span><span class="card-title">WebSocket 连接</span><span style="margin-left:auto;font-size:.7rem;color:var(--text-dim)">每 10s 刷新</span></div><div id="wsContent" class="loading">加载中...</div></div>
   <!-- 3. 上游管理 -->
   <div class="card cd2"><div class="card-header"><span class="card-icon">🔗</span><span class="card-title">上游管理</span></div><div id="upstreamsContent" class="loading">加载中...</div></div>
   <!-- 4. 亲和路由管理 (v3.8) -->
@@ -668,13 +670,46 @@ function refreshAll(){
   loadOutboundRules();
   loadAuditLogs();
   loadTimeline();
+  loadWSConnections();
+}
+
+/* ========== WebSocket 连接状态 (v4.1) ========== */
+function loadWSConnections(){
+  apiFetch('/api/v1/ws/connections').then(function(d){
+    if(!d)return;
+    var el=document.getElementById('wsContent');
+    var h='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">';
+    h+='<div><span class="text-dim">活跃连接</span><br><span style="font-size:1.6rem;font-weight:700;color:var(--neon-green)">'+d.active+'</span></div>';
+    h+='<div><span class="text-dim">总连接数</span><br><span style="font-size:1.6rem;font-weight:700;color:var(--neon-blue)">'+d.total+'</span></div>';
+    h+='<div><span class="text-dim">最大连接</span><br><span style="font-size:1.6rem;font-weight:700;color:var(--text-dim)">'+d.max+'</span></div>';
+    h+='<div><span class="text-dim">模式</span><br><span style="font-size:1.1rem;font-weight:600;color:'+(d.mode==='inspect'?'var(--neon-yellow)':'var(--text-dim)')+'">'+d.mode+'</span></div>';
+    h+='</div>';
+    if(d.connections&&d.connections.length>0){
+      h+='<div class="table-wrap"><table><tr><th>ID</th><th>Sender</th><th>App</th><th>上游</th><th>路径</th><th>连接时长</th><th>入站消息</th><th>出站消息</th></tr>';
+      for(var i=0;i<d.connections.length;i++){
+        var c=d.connections[i];
+        h+='<tr><td style="font-family:monospace;font-size:.8rem">'+c.id+'</td>';
+        h+='<td>'+c.sender_id+'</td>';
+        h+='<td>'+(c.app_id||'-')+'</td>';
+        h+='<td>'+c.upstream_id+'</td>';
+        h+='<td style="font-family:monospace;font-size:.8rem">'+c.path+'</td>';
+        h+='<td>'+c.duration+'</td>';
+        h+='<td style="text-align:right">'+c.inbound_msgs+'</td>';
+        h+='<td style="text-align:right">'+c.outbound_msgs+'</td></tr>';
+      }
+      h+='</table></div>';
+    }else if(d.active===0){
+      h+='<div style="text-align:center;color:var(--text-dim);padding:16px">暂无活跃 WebSocket 连接</div>';
+    }
+    el.innerHTML=h;
+  }).catch(function(){document.getElementById('wsContent').innerHTML='<span class="text-dim">加载失败</span>'});
 }
 
 /* ========== Init ========== */
 document.addEventListener('DOMContentLoaded',function(){
   initToken();
   refreshAll();
-  setInterval(function(){loadHealth()},10000);
+  setInterval(function(){loadHealth();loadWSConnections()},10000);
   setInterval(function(){loadUpstreams();loadRoutes();loadStats();loadRateLimitStats();loadRuleHits();loadAuditLogs();loadTimeline()},30000);
 });
 </script>

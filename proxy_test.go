@@ -414,7 +414,7 @@ func TestHealthz_RateLimiter(t *testing.T) {
 	gp := NewGenericPlugin("", "content")
 	engine := NewRuleEngine()
 	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil)
-	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine, outboundEngine, inbound, nil, nil, nil, nil, nil, nil)
+	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine, outboundEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -465,7 +465,7 @@ func TestManagementAPI_RateLimitEndpoints(t *testing.T) {
 	gp := NewGenericPlugin("", "content")
 	engine2 := NewRuleEngine()
 	inbound := NewInboundProxy(cfg, gp, engine2, logger, pool, routes, nil, nil, nil, nil)
-	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine2, outboundEngine, inbound, nil, nil, nil, nil, nil, nil)
+	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine2, outboundEngine, inbound, nil, nil, nil, nil, nil, nil, nil)
 
 	// 产生一些限流数据
 	inbound.limiter.Allow("testUser")
