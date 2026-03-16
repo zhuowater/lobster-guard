@@ -15,78 +15,72 @@
 - [x] 容器自动注册/心跳/故障转移
 - [x] 管理 API + Web Dashboard
 
-### v3.0 — 多通道插件架构
-- [x] ChannelPlugin 接口抽象 · 5 通道插件（蓝信/飞书/钉钉/企微/通用HTTP）
-- [x] v3.1 Bridge Mode（飞书/钉钉 WSS 长连接桥接 · 无需公网 IP）
-- [x] v3.2 企微 GET 验证 + 健壮性（panic recovery · body 限制 · 超时保护）
+### v3.x — 多通道 + 规则引擎 + 企业级路由
+- [x] v3.0 多通道插件架构（蓝信/飞书/钉钉/企微/通用HTTP）
+- [x] v3.1 Bridge Mode（飞书/钉钉 WSS 长连接桥接）
+- [x] v3.2 企微 GET 验证 + 健壮性
 - [x] v3.3 Rate Limiting（令牌桶 · 全局/每用户 · 白名单）
-- [x] v3.4 Prometheus Metrics（13 指标族 · 手工生成零依赖）
+- [x] v3.4 Prometheus Metrics（13 指标族 · 零依赖）
 - [x] v3.5 入站规则热更新（外部 YAML · AC 自动机在线重建）
 - [x] v3.6 规则引擎增强（优先级 · 自定义拦截消息 · 命中率统计）
-- [x] v3.7 蓝信实战集成验证（签名/解密/SenderID 修复 · 双向全链路实测通过）
-- [x] v3.8 多 Bot 亲和路由（复合键路由 · 批量绑定 · 路由统计 · Dashboard 管理面板）
-- [x] v3.9 IM 用户信息自动获取（4 平台 UserInfoProvider · 邮箱/部门策略路由 · Dashboard 用户展示）
+- [x] v3.7 蓝信实战集成验证（双向全链路实测）
+- [x] v3.8 多 Bot 亲和路由（复合键路由 · 批量绑定 · 路由统计）
+- [x] v3.9 IM 用户信息自动获取（4 平台 UserInfoProvider · 邮箱/部门策略路由）
+- [x] v3.10 审计日志增强 + 告警通知（导出/轮转/webhook 推送/时间线图/全文搜索）
+- [x] v3.11 正则规则 + 规则分组（按 app_id 绑定规则组 · PII 可配置化）
 
-**当前状态**: 18 个源文件 ~9200 行 · 379 个测试 · 40 commit · 3 个依赖
+### v4.x — 架构演进 + 高可用
+- [x] v4.0 代码拆分 + 插件化（13 文件 · go:embed Dashboard · 配置验证器）
+- [x] v4.1 WebSocket 消息流代理（inspect/passthrough · 帧级检测 · 连接生命周期）
+- [x] v4.2 高可用基础设施（优雅关闭 · 5 维健康检查 · 数据备份/恢复 · Store 抽象层）
+
+**当前状态**: v4.2.0 · 18 个源文件 ~9200 行 · 379 个测试 · 40+ commit · 3 个依赖
 
 ---
 
 ## 计划
 
-### v3.10 — 审计日志增强 + 告警通知
-> 实战暴露的痛点：审计日志只能 API 查，没有主动告警；日志堆积无清理。
+### v5.0 — 可观测性 + 运维增强
+> 生产环境运维必需。从"能用"到"好运维"。
 
-- [x] 审计日志导出（CSV/JSON 下载）
-- [x] 日志自动轮转（按天/按大小，保留 N 天）
-- [x] 告警通知：block 事件实时推送（webhook / 蓝信机器人）
-- [x] Dashboard 审计日志时间线图（按小时/天聚合的攻击趋势）
-- [x] 审计日志全文搜索
+- [ ] 结构化日志（JSON 格式可选，便于日志采集）
+- [ ] 请求追踪（每个请求分配 trace_id，贯穿入站→检测→路由→上游→出站全链路）
+- [ ] 审计日志归档（SQLite → 文件归档 · 按月分文件 · 压缩存储）
+- [ ] Dashboard 实时监控大屏（QPS 曲线 · 延迟分布 · 攻击热力图）
+- [ ] 运维命令行增强（`-check-config` · `-dump-routes` · `-dump-rules` · `-version`）
 
-### v3.11 — 正则规则 + 规则分组
-> 当前入站检测只有 AC 自动机（关键词匹配），缺少正则模式。出站 PII 虽然用了正则，但不可配置。
+### v5.1 — 智能检测
+> 从关键词/正则的"模式匹配"进化到"语义理解"。
 
-- [x] 入站规则支持正则模式（`type: regex` · 编译缓存 · 性能保护）
-- [x] 规则分组 / 标签（按场景组织：越狱/注入/社工/PII）
-- [x] 按 app_id 绑定不同规则组（多租户规则隔离的正确实现）
-- [x] 出站 PII 正则可配置化（自定义身份证/手机号/银行卡模式）
+- [ ] 规则模板库（预置 100+ 检测规则，按场景分包：通用/金融/医疗/政务）
+- [ ] 检测链（Pipeline）：多个检测阶段串行，支持自定义顺序
+- [ ] 上下文感知检测（多轮对话攻击识别 · 会话级攻击积分）
+- [ ] 可选 LLM 检测层（API 调用外部模型做语义分析 · 异步不阻塞）
+- [ ] 检测结果缓存（相同内容短时间内不重复检测）
 
-### v4.0 — 代码拆分 + 插件化
-> main.go 已超 6000 行。继续堆功能会降低可维护性。这是架构演进，不是功能版本。
+### v5.2 — 多实例部署
+> 真正的分布式高可用。前提：v4.2 的 Store 抽象层已就绪。
 
-- [ ] 按职责拆分文件（plugin/ · route/ · audit/ · detect/ · api/）
-- [ ] 插件接口标准化（ChannelPlugin 已有，扩展到 DetectPlugin · AuditPlugin）
-- [ ] 配置验证器（启动时检查配置完整性和一致性）
-- [ ] Go embed Dashboard（当前从文件系统读取，embed 简化部署）
+- [ ] PostgresStore 实现（替代 SQLite，支持多实例共享）
+- [ ] 路由表跨实例同步（基于 PostgreSQL LISTEN/NOTIFY）
+- [ ] Leader 选举（Bridge 模式防重复连接 · 基于 advisory lock）
+- [ ] 配置中心集成（从 etcd/consul 读取配置 · 热更新）
 
-### v4.1 — WebSocket 消息流代理
-> 场景：AI Agent 实时对话（streaming）经过安全网关。不同于 Bridge Mode（IM→龙虾→上游），这是代理 Agent 自身的 WebSocket 连接。
+### v5.3 — API Gateway 能力
+> 从安全网关扩展为轻量 API Gateway。
 
-- [x] WebSocket Upgrade 代理（透传 + 中间人两种模式）
-- [x] WebSocket 帧级检测（对流式输出做实时敏感信息扫描）
-- [x] 连接生命周期管理（空闲超时 · 最大时长 · 优雅断开）
-
-### v4.2 — 高可用（单实例基础设施）
-> 单实例高可用基础设施：优雅关闭、健康检查增强、数据备份/恢复、存储抽象层。
-
-- [x] 优雅关闭（SIGINT/SIGTERM · 7步关闭流程 · 可配置超时）
-- [x] 健康检查增强（5维度检查：数据库/上游/磁盘/内存/goroutines）
-- [x] 数据备份与恢复（VACUUM INTO · 自动备份 · API管理 · -restore CLI）
-- [x] Store 存储抽象层（SQLiteStore · 为 PostgresStore 做准备）
-
-### v4.3 — 多实例高可用
-> 前提：v4.2 Store 抽象层完成后，共享存储替换 SQLite。
-
-- [x] Store 抽象层（SQLiteStore 实现，预留 PostgresStore）（PostgresStore 实现 Store 接口）
-- [x] 优雅关闭（7 步 graceful shutdown + SIGINT/SIGTERM）（事件驱动 or 轮询）
-- [x] 健康检查增强（5 维度：DB/upstream/disk/memory/goroutines）（Bridge 模式防重复连接）
-- [x] 数据备份与恢复（VACUUM INTO + 自动轮转 + -restore CLI）（网关集群 → 上游集群）
+- [ ] API 限流增强（按路径/方法 · 滑动窗口 · 令牌桶可选）
+- [ ] 请求/响应转换（header 注入 · body 改写 · 路径重写）
+- [ ] 认证中间件（API Key · JWT · OAuth2 · 蓝信 SSO）
+- [ ] 灰度发布（按比例/按用户/按部门路由到不同上游版本）
 
 ### 未来探索
-- [ ] 基于 LLM 的语义级攻击检测（成本/延迟权衡）
-- [ ] 可视化规则编辑器（拖拽式）
 - [ ] Slack / Teams / Telegram 通道插件
+- [ ] 可视化规则编辑器（拖拽式 · 规则沙箱测试）
 - [ ] OpenAPI/Swagger 文档自动生成
 - [ ] 多语言检测规则（i18n 攻击模式）
+- [ ] Agent 行为审计（不只是消息内容，还有 tool_call 调用链审计）
+- [ ] 合规报告生成（自动生成安全审计报告 · PDF/HTML）
 
 ---
 

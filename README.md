@@ -868,8 +868,10 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 - [x] v4.0 — 代码拆分 + 插件化（13 个源文件 + go:embed + 配置验证器）
 - [x] v4.1 — WebSocket 消息流代理（Agent streaming 实时安全扫描）
 - [x] v4.2 — 高可用（优雅关闭 + 健康检查增强 + 数据备份 + Store 抽象层）
-- [ ] 基于 LLM 的语义级攻击检测
-- [ ] Slack / Teams / Telegram 通道插件
+- [ ] v5.0 — 可观测性 + 运维增强（结构化日志 · 请求追踪 · 监控大屏）
+- [ ] v5.1 — 智能检测（规则模板库 · 检测链 · 上下文感知 · 可选 LLM）
+- [ ] v5.2 — 多实例部署（PostgresStore · 路由同步 · Leader 选举）
+- [ ] v5.3 — API Gateway 能力（认证中间件 · 灰度发布 · 请求转换）
 
 ---
 
