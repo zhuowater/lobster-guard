@@ -835,6 +835,11 @@ type InboundMessage struct {
 	VerifyReply  []byte // 验证请求的响应内容
 }
 
+// RequestAwareParser 可选接口：支持从 HTTP 请求中提取额外参数（如蓝信 URL query 中的 timestamp/nonce）
+type RequestAwareParser interface {
+	ParseInboundRequest(body []byte, r *http.Request) (InboundMessage, error)
+}
+
 type ChannelPlugin interface {
 	Name() string
 	ParseInbound(body []byte) (InboundMessage, error)
@@ -884,9 +889,18 @@ func NewLanxinCrypto(callbackKey, signToken string) (*LanxinCrypto, error) {
 
 type LanxinWebhookBody struct {
 	DataEncrypt string `json:"dataEncrypt"`
-	Signature   string `json:"signature"`
-	Timestamp   string `json:"timestamp"`
-	Nonce       string `json:"nonce"`
+	Encrypt     string `json:"encrypt"`    // 兼容字段
+	Signature   string `json:"signature"`  // 可能在 URL query 中
+	Timestamp   string `json:"timestamp"`  // 可能在 URL query 中
+	Nonce       string `json:"nonce"`      // 可能在 URL query 中
+}
+
+// DataEncryptValue 返回密文（兼容 dataEncrypt 和 encrypt 两种字段名）
+func (wb *LanxinWebhookBody) DataEncryptValue() string {
+	if wb.DataEncrypt != "" {
+		return wb.DataEncrypt
+	}
+	return wb.Encrypt
 }
 
 func (lc *LanxinCrypto) VerifySignature(b *LanxinWebhookBody) bool {
@@ -914,22 +928,58 @@ func (lc *LanxinCrypto) Decrypt(dataEncrypt string) ([]byte, error) {
 	}
 	if len(pt) < 20 { return nil, fmt.Errorf("数据过短: %d", len(pt)) }
 	cl := binary.BigEndian.Uint32(pt[16:20])
+	var raw string
 	if int(cl) <= len(pt)-20 {
-		jd := pt[20 : 20+cl]
-		for i := range jd { if jd[i] == '{' { return jd[i:], nil } }
-		return jd, nil
+		raw = string(pt[20 : 20+cl])
+	} else {
+		raw = string(pt[20:])
 	}
-	for i := 20; i < len(pt); i++ { if pt[i] == '{' { return pt[i:], nil } }
-	return nil, fmt.Errorf("未找到 JSON")
+	// 找第一个 { 开始的位置
+	jsonStart := strings.Index(raw, "{")
+	if jsonStart == -1 {
+		return nil, fmt.Errorf("未找到 JSON")
+	}
+	// 用括号匹配提取第一个完整 JSON 对象（与 OpenClaw 对齐，过滤掉尾缀 appId 等）
+	extracted := extractFirstJSON(raw[jsonStart:])
+	if extracted == "" {
+		return nil, fmt.Errorf("JSON 结构不完整")
+	}
+	return []byte(extracted), nil
+}
+
+// extractFirstJSON 提取字符串中第一个完整的 JSON 对象（支持嵌套大括号）
+func extractFirstJSON(s string) string {
+	depth := 0
+	inStr := false
+	escape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escape { escape = false; continue }
+		if inStr {
+			if c == '\\' { escape = true } else if c == '"' { inStr = false }
+			continue
+		}
+		if c == '"' { inStr = true; continue }
+		if c == '{' { depth++; continue }
+		if c == '}' {
+			depth--
+			if depth == 0 { return s[:i+1] }
+		}
+	}
+	return ""
 }
 
 func extractMessageText(data []byte) (text, senderID, eventType string) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 { return }
+
 	var msg map[string]interface{}
 	if json.Unmarshal(data, &msg) != nil { return }
+
 	if et, ok := msg["eventType"].(string); ok { eventType = et }
 	if d, ok := msg["data"].(map[string]interface{}); ok {
-		for _, k := range []string{"senderId", "sender_id"} {
-			if s, ok := d[k].(string); ok { senderID = s; break }
+		for _, k := range []string{"FromStaffId", "from", "senderId", "sender_id"} {
+			if s, ok := d[k].(string); ok && s != "" { senderID = s; break }
 		}
 		if md, ok := d["msgData"].(map[string]interface{}); ok {
 			if to, ok := md["text"].(map[string]interface{}); ok {
@@ -960,14 +1010,55 @@ func NewLanxinPlugin(crypto *LanxinCrypto) *LanxinPlugin {
 func (lp *LanxinPlugin) Name() string { return "lanxin" }
 
 func (lp *LanxinPlugin) ParseInbound(body []byte) (InboundMessage, error) {
+	return lp.parseInbound(body, "", "", "")
+}
+
+// ParseInboundRequest 实现 RequestAwareParser 接口，从 URL query 提取 timestamp/nonce/signature
+func (lp *LanxinPlugin) ParseInboundRequest(body []byte, r *http.Request) (InboundMessage, error) {
+	q := r.URL.Query()
+	ts := q.Get("timestamp")
+	nonce := q.Get("nonce")
+	// 蓝信签名可能在 dev_data_signature 或 signature 参数中
+	sig := q.Get("dev_data_signature")
+	if sig == "" {
+		sig = q.Get("signature")
+	}
+	return lp.parseInbound(body, ts, nonce, sig)
+}
+
+func (lp *LanxinPlugin) parseInbound(body []byte, urlTimestamp, urlNonce, urlSignature string) (InboundMessage, error) {
 	var wb LanxinWebhookBody
-	if err := json.Unmarshal(body, &wb); err != nil || wb.DataEncrypt == "" {
+	if err := json.Unmarshal(body, &wb); err != nil {
 		return InboundMessage{}, fmt.Errorf("非蓝信 webhook 格式")
 	}
-	if !lp.crypto.VerifySignature(&wb) {
+	dataEncrypt := wb.DataEncryptValue()
+	if dataEncrypt == "" {
+		return InboundMessage{}, fmt.Errorf("非蓝信 webhook 格式")
+	}
+	// 蓝信通过 URL query 传 timestamp/nonce/signature（优先 URL，兜底 body）
+	timestamp := urlTimestamp
+	if timestamp == "" {
+		timestamp = wb.Timestamp
+	}
+	nonce := urlNonce
+	if nonce == "" {
+		nonce = wb.Nonce
+	}
+	signature := urlSignature
+	if signature == "" {
+		signature = wb.Signature
+	}
+	// 用统一的值做签名验证
+	verifyBody := &LanxinWebhookBody{
+		DataEncrypt: dataEncrypt,
+		Timestamp:   timestamp,
+		Nonce:       nonce,
+		Signature:   signature,
+	}
+	if !lp.crypto.VerifySignature(verifyBody) {
 		return InboundMessage{}, fmt.Errorf("签名验证失败")
 	}
-	dec, err := lp.crypto.Decrypt(wb.DataEncrypt)
+	dec, err := lp.crypto.Decrypt(dataEncrypt)
 	if err != nil {
 		return InboundMessage{}, fmt.Errorf("解密失败: %w", err)
 	}
@@ -3431,8 +3522,19 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var decryptOK bool
 	var isVerify bool
 	func() {
-		defer func() { recover() }()
-		msg, err := ip.channel.ParseInbound(body)
+		defer func() {
+			if rv := recover(); rv != nil {
+				log.Printf("[入站] ParseInbound panic: %v", rv)
+			}
+		}()
+		// 优先使用 RequestAwareParser（支持从 URL query 提取参数）
+		var msg InboundMessage
+		var err error
+		if rap, ok := ip.channel.(RequestAwareParser); ok {
+			msg, err = rap.ParseInboundRequest(body, r)
+		} else {
+			msg, err = ip.channel.ParseInbound(body)
+		}
 		if err != nil {
 			log.Printf("[入站] 解析失败: %v，fail-open", err)
 			return
