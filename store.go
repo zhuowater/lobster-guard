@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"sort"
 	"strings"
 	"sync"
