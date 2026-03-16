@@ -409,14 +409,18 @@ function loadAuditLogs(){
     var list=d.logs||d||[];if(!Array.isArray(list))list=[];
     if(!list.length){var el=document.getElementById('auditContent');el.innerHTML='<div class="empty">\u6682\u65e0\u65e5\u5fd7\u8bb0\u5f55</div>';el.className='';return}
     var dirMap={'inbound':'\u5165\u7ad9','outbound':'\u51fa\u7ad9'};
-    var h='<div class="table-wrap"><table><thead><tr><th>\u65f6\u95f4</th><th>\u65b9\u5411</th><th>\u53d1\u9001\u8005</th><th>\u52a8\u4f5c</th><th>\u539f\u56e0</th><th>\u5ef6\u8fdf</th></tr></thead><tbody>';
+    var h='<div class="table-wrap"><table><thead><tr><th>\u65f6\u95f4</th><th>\u65b9\u5411</th><th>App ID</th><th>\u53d1\u9001\u8005</th><th>\u52a8\u4f5c</th><th>\u5185\u5bb9</th><th>\u539f\u56e0</th><th>\u5ef6\u8fdf</th></tr></thead><tbody>';
     for(var i=0;i<list.length;i++){
       var l=list[i],action=(l.action||'').toLowerCase();
       var rowClass=action==='block'?' class="row-block"':(action==='warn'?' class="row-warn"':'');
+      var preview=l.content_preview||'';
+      if(preview.length>80)preview=preview.substring(0,80)+'...';
       h+='<tr'+rowClass+'><td>'+fmtTime(l.timestamp||l.time||l.created_at)+'</td>'
         +'<td>'+(dirMap[l.direction]||esc(l.direction))+'</td>'
+        +'<td style="font-size:.75rem;color:var(--text-dim)">'+esc(l.app_id||'--')+'</td>'
         +'<td>'+esc(l.sender_id||l.sender)+'</td>'
         +'<td><span class="tag '+actTag(l.action)+'">'+esc(l.action)+'</span></td>'
+        +'<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="'+esc(l.content_preview||'')+'">'+esc(preview||'--')+'</td>'
         +'<td>'+esc(l.reason||'--')+'</td>'
         +'<td>'+(l.latency!=null?l.latency+'ms':(l.latency_ms!=null?l.latency_ms+'ms':'--'))+'</td></tr>';
     }
