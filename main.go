@@ -2902,7 +2902,7 @@ func (p *LanxinUserProvider) getToken() (string, error) {
 	if p.token != "" && time.Now().Before(p.tokenExp) {
 		return p.token, nil
 	}
-	url := fmt.Sprintf("%s/v1/apptoken/create?app_id=%s&app_secret=%s",
+	url := fmt.Sprintf("%s/v1/apptoken/create?grant_type=client_credential&appid=%s&secret=%s",
 		p.upstream, url.QueryEscape(p.appID), url.QueryEscape(p.appSecret))
 	resp, err := http.Get(url)
 	if err != nil {
@@ -2911,21 +2911,21 @@ func (p *LanxinUserProvider) getToken() (string, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	var result struct {
-		Code int `json:"code"`
+		ErrCode int `json:"errCode"`
+		ErrMsg  string `json:"errMsg"`
 		Data struct {
 			AppToken string `json:"app_token"`
-			ExpireIn int    `json:"expire_in"`
+			ExpiresIn int  `json:"expires_in"`
 		} `json:"data"`
-		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("蓝信app_token解析失败: %w", err)
 	}
-	if result.Data.AppToken == "" {
-		return "", fmt.Errorf("蓝信app_token为空, code=%d, msg=%s", result.Code, result.Message)
+	if result.ErrCode != 0 || result.Data.AppToken == "" {
+		return "", fmt.Errorf("蓝信app_token获取失败, errCode=%d, errMsg=%s", result.ErrCode, result.ErrMsg)
 	}
 	p.token = result.Data.AppToken
-	expireIn := result.Data.ExpireIn
+	expireIn := result.Data.ExpiresIn
 	if expireIn <= 0 {
 		expireIn = 7200
 	}
@@ -2948,27 +2948,48 @@ func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	var result struct {
-		Code int `json:"code"`
-		Data struct {
-			Name    string `json:"name"`
-			Email   string `json:"email"`
-			OrgName string `json:"orgname"`
-			Avatar  string `json:"avatar"`
+		ErrCode int    `json:"errCode"`
+		ErrMsg  string `json:"errMsg"`
+		Data    struct {
+			Name       string `json:"name"`
+			Email      string `json:"email"`
+			OrgName    string `json:"orgName"`
+			OrgNameAlt string `json:"orgname"`
+			Avatar     string `json:"avatar"`
+			AvatarURL  string `json:"avatarUrl"`
+			Department []struct {
+				Name string `json:"name"`
+			} `json:"department"`
 		} `json:"data"`
-		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("蓝信用户信息解析失败: %w", err)
 	}
-	if result.Data.Name == "" && result.Data.Email == "" {
-		return nil, nil // 用户不存在或接口异常
+	if result.ErrCode != 0 {
+		return nil, fmt.Errorf("蓝信用户查询失败, errCode=%d, errMsg=%s", result.ErrCode, result.ErrMsg)
+	}
+	if result.Data.Name == "" {
+		return nil, nil // 用户不存在
+	}
+	// 部门优先用 department 数组第一个，fallback 到 orgName
+	dept := result.Data.OrgName
+	if dept == "" {
+		dept = result.Data.OrgNameAlt
+	}
+	if len(result.Data.Department) > 0 && result.Data.Department[0].Name != "" {
+		dept = result.Data.Department[0].Name
+	}
+	// 头像优先 avatarUrl
+	avatar := result.Data.AvatarURL
+	if avatar == "" {
+		avatar = result.Data.Avatar
 	}
 	return &UserInfo{
 		SenderID:   senderID,
 		Name:       result.Data.Name,
 		Email:      result.Data.Email,
-		Department: result.Data.OrgName,
-		Avatar:     result.Data.Avatar,
+		Department: dept,
+		Avatar:     avatar,
 	}, nil
 }
 
