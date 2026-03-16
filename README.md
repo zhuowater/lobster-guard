@@ -853,12 +853,13 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 - [x] v3.7 — 蓝信实战集成验证（签名/解密/SenderID 修复 + 双向全链路）
 - [x] v3.8 — 多 Bot 亲和路由（复合键路由 + 批量绑定 + 企业级路由管理面板）
 - [x] v3.9 — IM 用户信息自动获取（4 平台 UserInfoProvider + 邮箱策略路由）
-- [ ] v4.0 — 多租户隔离（不同 app 走不同规则集）
-- [ ] v4.1 — WebSocket 代理（Agent 实时对话场景）
-- [ ] v4.2 — 高可用（多实例 active-active + PostgreSQL）
-- [ ] Slack / Teams / Telegram 通道插件
+- [ ] v3.10 — 审计日志增强 + 告警通知（导出/轮转/block 实时推送/趋势图）
+- [ ] v3.11 — 正则规则 + 规则分组（按 app_id 绑定规则组 · 多租户规则隔离）
+- [ ] v4.0 — 代码拆分 + 插件化（6000+ 行单文件架构演进）
+- [ ] v4.1 — WebSocket 消息流代理（Agent streaming 实时安全扫描）
+- [ ] v4.2 — 高可用（PostgreSQL + 多实例 active-active）
 - [ ] 基于 LLM 的语义级攻击检测
-- [ ] 审计日志导出（CSV/JSON/S3）
+- [ ] Slack / Teams / Telegram 通道插件
 
 ---
 
