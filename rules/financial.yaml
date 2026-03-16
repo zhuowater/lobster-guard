@@ -1,0 +1,189 @@
+# lobster-guard 金融场景规则模板 — financial.yaml
+# 覆盖: 交易指令注入、账户信息泄露、金融欺诈、合规违规等
+rules:
+  # === 交易指令注入 ===
+  - name: "fin_trade_injection"
+    patterns:
+      - "立即执行转账"
+      - "紧急汇款"
+      - "直接转账到"
+      - "execute wire transfer"
+      - "urgent fund transfer"
+    action: "block"
+    priority: 100
+    group: "financial_injection"
+    message: "检测到交易指令注入攻击，已拦截。"
+
+  - name: "fin_trade_manipulation"
+    patterns:
+      - "修改交易金额"
+      - "篡改订单"
+      - "更改收款账户"
+      - "alter transaction amount"
+      - "modify payment recipient"
+    action: "block"
+    priority: 100
+    group: "financial_injection"
+    message: "检测到交易篡改指令，已拦截。"
+
+  # === 账户信息泄露检测 ===
+  - name: "fin_account_leak"
+    patterns:
+      - "查询所有账户余额"
+      - "导出客户账户信息"
+      - "列出所有银行卡号"
+      - "show all account balances"
+      - "export customer accounts"
+    action: "block"
+    priority: 95
+    group: "financial_data_leak"
+    message: "检测到账户信息批量泄露尝试，已拦截。"
+
+  - name: "fin_credential_probe"
+    patterns:
+      - "查询交易密码"
+      - "获取支付密码"
+      - "读取PIN码"
+      - "retrieve payment password"
+      - "get transaction PIN"
+    action: "block"
+    priority: 100
+    group: "financial_data_leak"
+    message: "检测到金融凭据探测，已拦截。"
+
+  # === 金融欺诈 ===
+  - name: "fin_fraud_patterns"
+    patterns:
+      - "伪造交易记录"
+      - "虚假对账单"
+      - "制造假流水"
+      - "forge transaction record"
+      - "fake bank statement"
+    action: "block"
+    priority: 95
+    group: "financial_fraud"
+    message: "检测到金融欺诈指令，已拦截。"
+
+  - name: "fin_money_laundering"
+    patterns:
+      - "如何洗钱"
+      - "资金清洗"
+      - "分散转账避开监管"
+      - "how to launder money"
+      - "avoid AML detection"
+    action: "block"
+    priority: 100
+    group: "financial_fraud"
+    message: "检测到洗钱相关内容，已拦截。"
+
+  # === 合规违规 ===
+  - name: "fin_insider_trading"
+    patterns:
+      - "内幕消息"
+      - "未公开信息"
+      - "提前知道财报"
+      - "insider information"
+      - "unreleased earnings"
+    action: "warn"
+    priority: 70
+    group: "financial_compliance"
+    message: "检测到可能的内幕交易相关内容。"
+
+  - name: "fin_unauthorized_disclosure"
+    patterns:
+      - "客户征信报告"
+      - "信用评分详情"
+      - "个人征信记录"
+      - "credit score details"
+      - "customer credit report"
+    action: "warn"
+    priority: 60
+    group: "financial_compliance"
+    message: "检测到可能的征信信息泄露。"
+
+  # === 金融 PII ===
+  - name: "fin_card_number_probe"
+    patterns:
+      - "银行卡号是"
+      - "信用卡号码"
+      - "CVV码是"
+      - "card number is"
+      - "CVV code"
+    action: "warn"
+    priority: 80
+    group: "financial_pii"
+    message: "检测到银行卡敏感信息。"
+
+  - name: "fin_account_number"
+    patterns:
+      - "对公账号"
+      - "收款账户号"
+      - "SWIFT代码"
+      - "IBAN号码"
+      - "routing number"
+    action: "warn"
+    priority: 60
+    group: "financial_pii"
+    message: "检测到银行账户信息。"
+
+  # === 投资建议合规 ===
+  - name: "fin_investment_advice"
+    patterns:
+      - "保证收益"
+      - "稳赚不赔"
+      - "guaranteed returns"
+      - "risk-free investment"
+      - "零风险高回报"
+    action: "warn"
+    priority: 50
+    group: "financial_compliance"
+    message: "检测到可能的不合规投资建议。"
+
+  # === 金融系统注入 ===
+  - name: "fin_system_bypass"
+    patterns:
+      - "绕过风控"
+      - "跳过审批流程"
+      - "忽略交易限额"
+      - "bypass risk control"
+      - "skip approval process"
+    action: "block"
+    priority: 90
+    group: "financial_injection"
+    message: "检测到金融系统绕过尝试，已拦截。"
+
+  - name: "fin_limit_override"
+    patterns:
+      - "修改日限额"
+      - "提升转账上限"
+      - "取消交易限制"
+      - "override daily limit"
+      - "remove transaction limit"
+    action: "block"
+    priority: 85
+    group: "financial_injection"
+    message: "检测到限额篡改指令，已拦截。"
+
+  # === 授权冒充 ===
+  - name: "fin_auth_impersonation"
+    patterns:
+      - "我是客户经理"
+      - "我是合规官"
+      - "我有审批权限"
+      - "I am the compliance officer"
+      - "I have authorization"
+    action: "block"
+    priority: 80
+    group: "financial_fraud"
+    message: "检测到权限冒充攻击，已拦截。"
+
+  - name: "fin_emergency_override"
+    patterns:
+      - "紧急授权"
+      - "特殊审批通道"
+      - "emergency authorization"
+      - "special approval channel"
+    action: "warn"
+    priority: 70
+    group: "financial_fraud"
+    message: "检测到紧急授权请求，请人工确认。"

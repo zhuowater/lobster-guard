@@ -1,0 +1,199 @@
+# lobster-guard 政务场景规则模板 — government.yaml
+# 覆盖: 机密信息泄露、公文伪造、政务欺诈、权限越权等
+rules:
+  # === 机密信息泄露 ===
+  - name: "gov_classified_leak"
+    patterns:
+      - "导出机密文件"
+      - "泄露国家秘密"
+      - "传输涉密信息"
+      - "export classified documents"
+      - "leak state secrets"
+    action: "block"
+    priority: 100
+    group: "gov_data_leak"
+    message: "检测到机密信息泄露尝试，已拦截。"
+
+  - name: "gov_internal_doc_leak"
+    patterns:
+      - "导出内部文件"
+      - "批量下载公文"
+      - "获取会议纪要"
+      - "export internal documents"
+      - "download government memos"
+    action: "block"
+    priority: 95
+    group: "gov_data_leak"
+    message: "检测到内部文件泄露尝试，已拦截。"
+
+  - name: "gov_personnel_data"
+    patterns:
+      - "导出人员名单"
+      - "查询干部档案"
+      - "列出全部公务员"
+      - "export personnel list"
+      - "query cadre files"
+    action: "block"
+    priority: 90
+    group: "gov_data_leak"
+    message: "检测到人事信息泄露尝试，已拦截。"
+
+  # === 公文伪造 ===
+  - name: "gov_doc_forgery"
+    patterns:
+      - "伪造公文"
+      - "生成红头文件"
+      - "制作政府文件"
+      - "forge government document"
+      - "generate official notice"
+    action: "block"
+    priority: 100
+    group: "gov_forgery"
+    message: "检测到公文伪造指令，已拦截。"
+
+  - name: "gov_seal_forgery"
+    patterns:
+      - "伪造公章"
+      - "仿制政府印章"
+      - "制作电子签章"
+      - "forge official seal"
+      - "replicate government stamp"
+    action: "block"
+    priority: 100
+    group: "gov_forgery"
+    message: "检测到公章伪造指令，已拦截。"
+
+  - name: "gov_certificate_forgery"
+    patterns:
+      - "伪造证书"
+      - "假证件"
+      - "制作虚假资质"
+      - "forge certificate"
+      - "fake credentials"
+    action: "block"
+    priority: 95
+    group: "gov_forgery"
+    message: "检测到证书伪造指令，已拦截。"
+
+  # === 政务欺诈 ===
+  - name: "gov_bid_rigging"
+    patterns:
+      - "围标串标"
+      - "操纵招标"
+      - "提前泄露标底"
+      - "bid rigging"
+      - "manipulate tender"
+    action: "block"
+    priority: 95
+    group: "gov_fraud"
+    message: "检测到招投标舞弊指令，已拦截。"
+
+  - name: "gov_fund_misuse"
+    patterns:
+      - "挪用公款"
+      - "套取财政资金"
+      - "虚报预算"
+      - "embezzle public funds"
+      - "misuse government budget"
+    action: "block"
+    priority: 100
+    group: "gov_fraud"
+    message: "检测到资金挪用指令，已拦截。"
+
+  # === 权限越权 ===
+  - name: "gov_authority_override"
+    patterns:
+      - "我是上级领导"
+      - "省级部门要求"
+      - "中央下达指示"
+      - "I am a senior official"
+      - "directive from central authority"
+    action: "block"
+    priority: 85
+    group: "gov_authority"
+    message: "检测到权限越级冒充，已拦截。"
+
+  - name: "gov_bypass_approval"
+    patterns:
+      - "跳过审批流程"
+      - "特事特办"
+      - "免于审批"
+      - "skip approval process"
+      - "expedite without review"
+    action: "warn"
+    priority: 70
+    group: "gov_authority"
+    message: "检测到审批流程绕过请求。"
+
+  # === 政策敏感 ===
+  - name: "gov_policy_sensitive"
+    patterns:
+      - "未公开的政策"
+      - "内部决策文件"
+      - "尚未发布的法规"
+      - "unreleased policy"
+      - "internal decision document"
+    action: "warn"
+    priority: 65
+    group: "gov_policy"
+    message: "检测到未公开政策信息请求。"
+
+  - name: "gov_diplomatic_sensitive"
+    patterns:
+      - "外交机密"
+      - "涉外情报"
+      - "diplomatic secrets"
+      - "foreign intelligence"
+    action: "block"
+    priority: 100
+    group: "gov_data_leak"
+    message: "检测到外交敏感信息，已拦截。"
+
+  # === 系统安全 ===
+  - name: "gov_system_breach"
+    patterns:
+      - "政务系统漏洞"
+      - "入侵政府网络"
+      - "获取管理员权限"
+      - "exploit government system"
+      - "breach government network"
+    action: "block"
+    priority: 100
+    group: "gov_security"
+    message: "检测到政务系统攻击指令，已拦截。"
+
+  - name: "gov_data_tampering"
+    patterns:
+      - "篡改统计数据"
+      - "修改公示信息"
+      - "伪造审计记录"
+      - "tamper statistics"
+      - "falsify audit records"
+    action: "block"
+    priority: 95
+    group: "gov_fraud"
+    message: "检测到数据篡改指令，已拦截。"
+
+  # === 社会工程 ===
+  - name: "gov_social_engineering"
+    patterns:
+      - "假冒纪检"
+      - "冒充监察委"
+      - "以检查名义"
+      - "impersonate inspector"
+      - "pretend to be oversight"
+    action: "block"
+    priority: 85
+    group: "gov_fraud"
+    message: "检测到身份冒充攻击，已拦截。"
+
+  - name: "gov_emergency_exploit"
+    patterns:
+      - "以应急名义"
+      - "紧急预案要求"
+      - "emergency protocol override"
+      - "crisis authority"
+    action: "warn"
+    priority: 60
+    group: "gov_authority"
+    message: "检测到应急权限请求，请人工确认。"

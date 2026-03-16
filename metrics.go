@@ -391,7 +391,7 @@ func (mc *MetricsCollector) GetWSMetrics() (total int64, active int64) {
 	return mc.wsConnectionsTotal, mc.wsConnectionsActive
 }
 
-func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string, ruleHits *RuleHitStats, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine) {
+func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstreamsHealthy, routesTotal int, bridgeStatus *BridgeStatus, channelName, mode string, ruleHits *RuleHitStats, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, extraWriters ...func(io.Writer)) {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
 
@@ -579,6 +579,11 @@ func (mc *MetricsCollector) WritePrometheus(w io.Writer, upstreamsTotal, upstrea
 	sort.Strings(wsBytesKeys)
 	for _, dir := range wsBytesKeys {
 		fmt.Fprintf(w, "lobster_guard_ws_message_bytes_total{direction=%q} %d\n", dir, mc.wsMessageBytes[dir])
+	}
+
+	// v5.1: 额外指标写入器（session risk, llm detect, detect cache 等）
+	for _, writer := range extraWriters {
+		writer(w)
 	}
 }
 

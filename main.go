@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "5.0.0"
+	AppVersion = "5.1.0"
 )
 
 var startTime = time.Now()
@@ -173,10 +173,29 @@ func main() {
 	var engine *RuleEngine
 	inboundRules, inboundSource, err := resolveInboundRules(cfg)
 	if err != nil { log.Fatalf("加载入站规则失败: %v", err) }
+
+	// v5.1: 加载规则模板
+	var templateRules []InboundRuleConfig
+	if len(cfg.RuleTemplates) > 0 {
+		templateRules, err = LoadRuleTemplates(cfg.RuleTemplates)
+		if err != nil { log.Fatalf("加载规则模板失败: %v", err) }
+		fmt.Printf("[初始化] ✅ 规则模板: %v (%d 条模板规则)\n", cfg.RuleTemplates, len(templateRules))
+	}
+
 	if inboundRules != nil {
+		if len(templateRules) > 0 {
+			// 合并模板规则 + 自定义规则
+			inboundRules = MergeRulesWithTemplates(templateRules, inboundRules)
+			inboundSource = inboundSource + "+templates"
+		}
 		engine = NewRuleEngineWithPII(inboundRules, inboundSource, cfg.OutboundPIIPatterns, cfg.RuleBindings)
 	} else {
-		engine = NewRuleEngineWithPII(getDefaultInboundRules(), "default", cfg.OutboundPIIPatterns, cfg.RuleBindings)
+		if len(templateRules) > 0 {
+			// 只有模板规则
+			engine = NewRuleEngineWithPII(templateRules, "templates", cfg.OutboundPIIPatterns, cfg.RuleBindings)
+		} else {
+			engine = NewRuleEngineWithPII(getDefaultInboundRules(), "default", cfg.OutboundPIIPatterns, cfg.RuleBindings)
+		}
 	}
 	printInboundRuleSummary(engine)
 
@@ -254,10 +273,69 @@ func main() {
 	// v5.0: 实时监控指标
 	realtime := NewRealtimeMetrics()
 
+	// v5.1: 会话检测器
+	var sessionDetector *SessionDetector
+	if cfg.SessionDetectEnabled {
+		sessionDetector = NewSessionDetector(SessionDetectorConfig{
+			Enabled:       true,
+			RiskThreshold: func() float64 { if cfg.SessionRiskThreshold > 0 { return cfg.SessionRiskThreshold }; return 10 }(),
+			Window:        func() int { if cfg.SessionWindow > 0 { return cfg.SessionWindow }; return 20 }(),
+			DecayRate:     func() float64 { if cfg.SessionDecayRate > 0 { return cfg.SessionDecayRate }; return 1 }(),
+		})
+		fmt.Printf("[初始化] ✅ 会话检测: threshold=%.0f, window=%d, decay_rate=%.1f/h\n",
+			sessionDetector.cfg.RiskThreshold, sessionDetector.cfg.Window, sessionDetector.cfg.DecayRate)
+	}
+
+	// v5.1: LLM 检测器
+	var llmDetector *LLMDetector
+	if cfg.LLMDetectEnabled {
+		llmDetector = NewLLMDetector(LLMDetectorConfig{
+			Enabled:  true,
+			Endpoint: cfg.LLMDetectEndpoint,
+			APIKey:   cfg.LLMDetectAPIKey,
+			Model:    cfg.LLMDetectModel,
+			Timeout:  cfg.LLMDetectTimeout,
+			Mode:     cfg.LLMDetectMode,
+			Prompt:   cfg.LLMDetectPrompt,
+		})
+		fmt.Printf("[初始化] ✅ LLM 检测: endpoint=%s, model=%s, mode=%s\n",
+			cfg.LLMDetectEndpoint, llmDetector.cfg.Model, llmDetector.cfg.Mode)
+	}
+
+	// v5.1: 检测缓存
+	var detectCache *DetectCache
+	cacheTTL := cfg.DetectCacheTTL
+	if cacheTTL <= 0 { cacheTTL = 300 }
+	cacheSize := cfg.DetectCacheSize
+	if cacheSize <= 0 { cacheSize = 1000 }
+	detectCache = NewDetectCache(cacheSize, time.Duration(cacheTTL)*time.Second)
+	fmt.Printf("[初始化] ✅ 检测缓存: size=%d, ttl=%ds\n", cacheSize, cacheTTL)
+
 	// 创建代理
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng)
 	inbound.realtime = realtime
 	inbound.slog = slog
+	// v5.1: 注入智能检测组件
+	inbound.sessionDetector = sessionDetector
+	inbound.llmDetector = llmDetector
+	inbound.detectCache = detectCache
+	// v5.1: 构建检测 Pipeline
+	{
+		additionalStages := map[string]DetectStage{}
+		if sessionDetector != nil {
+			additionalStages["session"] = NewSessionStage(sessionDetector)
+		}
+		if llmDetector != nil {
+			additionalStages["llm"] = NewLLMStage(llmDetector)
+		}
+		if len(cfg.DetectPipeline) > 0 {
+			inbound.pipeline = BuildPipelineFromConfig(cfg.DetectPipeline, engine, additionalStages)
+			fmt.Printf("[初始化] ✅ 检测链: %v\n", cfg.DetectPipeline)
+		} else {
+			inbound.pipeline = BuildDefaultPipeline(engine)
+			fmt.Printf("[初始化] ✅ 检测链: [keyword, regex, pii] (默认)\n")
+		}
+	}
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 	outbound.realtime = realtime
@@ -281,6 +359,10 @@ func main() {
 	}
 
 	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy, store, shutdownMgr, realtime)
+	// v5.1: 注入智能检测组件
+	mgmtAPI.sessionDetector = sessionDetector
+	mgmtAPI.llmDetector = llmDetector
+	mgmtAPI.detectCache = detectCache
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

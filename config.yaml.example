@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v5.0 配置文件（示例）
+# 龙虾卫士 lobster-guard v5.1 配置文件（示例）
 # ============================================================
 
 # ============================================================
@@ -368,3 +368,48 @@ static_upstreams:
 # 启用后，每天自动将超过 audit_retention_days 的日志导出为压缩 JSON 文件
 # audit_archive_enabled: false
 # audit_archive_dir: "/var/lib/lobster-guard/archives/"
+
+# ============================================================
+# 智能检测（v5.1 新增）
+# ============================================================
+
+# --- 规则模板库 ---
+# 预置的规则模板，按场景分包
+# 可选: general（通用）、financial（金融）、medical（医疗）、government（政务）
+# 模板规则 + 自定义规则合并加载，自定义规则优先级更高（同名覆盖）
+# 不配置则使用内置默认规则
+# rule_templates: ["general", "financial"]
+
+# --- 检测链（Pipeline）---
+# 多阶段串行检测，遇到 block 立即终止
+# 可选阶段: keyword（AC 自动机关键词）、regex（正则）、pii（PII 检测）、session（会话风险）、llm（LLM 语义分析）
+# 不配置则使用默认顺序: [keyword, regex, pii]
+# detect_pipeline: ["keyword", "regex", "pii", "session"]
+
+# --- 上下文感知检测（会话级攻击识别）---
+# 跟踪每个 sender_id 的对话历史，累计风险积分
+# warn +1 分，block +5 分，超过阈值后 warn 自动升级为 block
+# 积分有时间衰减（每小时减少 decay_rate 分）
+# session_detect_enabled: false
+# session_risk_threshold: 10    # 超过此积分，warn 自动升级为 block
+# session_window: 20            # 保留最近 N 条消息上下文
+# session_decay_rate: 1         # 每小时衰减积分
+
+# --- 可选 LLM 检测层 ---
+# 调用外部 LLM API 做语义分析（默认关闭）
+# async 模式: 不阻塞主请求，结果仅记录审计日志
+# sync 模式: 等待 LLM 结果，confidence > 0.8 且 is_attack=true 则 block
+# 调用失败时降级为 pass（fail-open 原则）
+# llm_detect_enabled: false
+# llm_detect_endpoint: "https://api.openai.com/v1/chat/completions"
+# llm_detect_api_key: "sk-xxx"
+# llm_detect_model: "gpt-4o-mini"
+# llm_detect_timeout: 5         # 超时秒数
+# llm_detect_mode: "async"      # async 或 sync
+# llm_detect_prompt: ""         # 自定义 system prompt，为空则使用默认
+
+# --- 检测结果缓存 ---
+# 对相同内容短时间内不重复全链路检测（LRU 淘汰策略）
+# 只缓存 pass 和 warn 结果（block 不缓存，确保规则更新后立即生效）
+# detect_cache_ttl: 300         # 缓存 TTL 秒（默认 300）
+# detect_cache_size: 1000       # 最大缓存条目数（默认 1000）

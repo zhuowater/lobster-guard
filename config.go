@@ -113,6 +113,22 @@ type Config struct {
 	LogFormat           string `yaml:"log_format"`            // 日志格式: "text"（默认）或 "json"
 	AuditArchiveEnabled bool   `yaml:"audit_archive_enabled"` // 是否启用审计日志归档
 	AuditArchiveDir     string `yaml:"audit_archive_dir"`     // 归档目录，默认 /var/lib/lobster-guard/archives/
+	// v5.1 智能检测
+	RuleTemplates          []string `yaml:"rule_templates"`           // 规则模板: ["general", "financial"]
+	DetectPipeline         []string `yaml:"detect_pipeline"`          // 检测链顺序: ["keyword", "regex", "pii"]
+	SessionDetectEnabled   bool     `yaml:"session_detect_enabled"`   // 会话检测开关
+	SessionRiskThreshold   float64  `yaml:"session_risk_threshold"`   // 风险积分阈值（默认 10）
+	SessionWindow          int      `yaml:"session_window"`           // 会话上下文窗口（默认 20）
+	SessionDecayRate       float64  `yaml:"session_decay_rate"`       // 每小时积分衰减（默认 1）
+	LLMDetectEnabled       bool     `yaml:"llm_detect_enabled"`       // LLM 检测开关（默认 false）
+	LLMDetectEndpoint      string   `yaml:"llm_detect_endpoint"`      // LLM API 端点
+	LLMDetectAPIKey        string   `yaml:"llm_detect_api_key"`       // LLM API 密钥
+	LLMDetectModel         string   `yaml:"llm_detect_model"`         // LLM 模型名称
+	LLMDetectTimeout       int      `yaml:"llm_detect_timeout"`       // LLM 超时秒数（默认 5）
+	LLMDetectMode          string   `yaml:"llm_detect_mode"`          // async / sync（默认 async）
+	LLMDetectPrompt        string   `yaml:"llm_detect_prompt"`        // 自定义 LLM system prompt
+	DetectCacheTTL         int      `yaml:"detect_cache_ttl"`         // 检测缓存 TTL 秒（默认 300）
+	DetectCacheSize        int      `yaml:"detect_cache_size"`        // 检测缓存大小（默认 1000）
 }
 
 type OutboundRuleConfig struct {

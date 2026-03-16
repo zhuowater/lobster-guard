@@ -8,6 +8,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -41,6 +42,10 @@ type ManagementAPI struct {
 	store          Store               // v4.2 存储抽象层
 	shutdownMgr    *ShutdownManager    // v4.2 关闭管理器
 	realtime       *RealtimeMetrics    // v5.0 实时监控
+	// v5.1 智能检测
+	sessionDetector *SessionDetector   // v5.1 会话检测器
+	llmDetector     *LLMDetector       // v5.1 LLM 检测器
+	detectCache     *DetectCache       // v5.1 检测缓存
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -208,6 +213,13 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListBackups(w, r)
 	case strings.HasPrefix(path, "/api/v1/backups/") && method == "DELETE":
 		api.handleDeleteBackup(w, r)
+	// v5.1 智能检测 API
+	case path == "/api/v1/rule-templates" && method == "GET":
+		api.handleListRuleTemplates(w, r)
+	case path == "/api/v1/sessions/risks" && method == "GET":
+		api.handleSessionRisks(w, r)
+	case path == "/api/v1/sessions/risks/reset" && method == "POST":
+		api.handleSessionRisksReset(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -975,7 +987,11 @@ func (api *ManagementAPI) handleMetrics(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 生成 Prometheus text format
-	api.metrics.WritePrometheus(w, upstreamsTotal, upstreamsHealthy, routesTotal, bridgeStatus, channelName, mode, api.ruleHits, api.inboundEngine, api.outboundEngine)
+	// v5.1: 额外指标写入器
+	var extraWriters []func(io.Writer)
+	extraWriters = append(extraWriters, api.writeV51Metrics)
+
+	api.metrics.WritePrometheus(w, upstreamsTotal, upstreamsHealthy, routesTotal, bridgeStatus, channelName, mode, api.ruleHits, api.inboundEngine, api.outboundEngine, extraWriters...)
 }
 
 func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -1191,5 +1207,99 @@ func (api *ManagementAPI) handleAuditArchiveNow(w http.ResponseWriter, r *http.R
 		"path":    path,
 		"deleted": deleted,
 	})
+}
+
+// ============================================================
+// v5.1 智能检测 API
+// ============================================================
+
+// handleListRuleTemplates GET /api/v1/rule-templates — 列出可用规则模板及其规则数
+func (api *ManagementAPI) handleListRuleTemplates(w http.ResponseWriter, r *http.Request) {
+	templates := ListRuleTemplates()
+	if templates == nil {
+		templates = []RuleTemplateMeta{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"templates": templates,
+		"total":     len(templates),
+	})
+}
+
+// handleSessionRisks GET /api/v1/sessions/risks — 列出高风险会话
+func (api *ManagementAPI) handleSessionRisks(w http.ResponseWriter, r *http.Request) {
+	if api.sessionDetector == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"sessions": []interface{}{},
+			"total":    0,
+			"enabled":  false,
+		})
+		return
+	}
+	sessions := api.sessionDetector.ListHighRiskSessions()
+	if sessions == nil {
+		sessions = []SessionInfo{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"sessions": sessions,
+		"total":    len(sessions),
+		"enabled":  true,
+	})
+}
+
+// handleSessionRisksReset POST /api/v1/sessions/risks/reset — 重置某用户的风险积分
+func (api *ManagementAPI) handleSessionRisksReset(w http.ResponseWriter, r *http.Request) {
+	if api.sessionDetector == nil {
+		jsonResponse(w, 400, map[string]string{"error": "session detector not enabled"})
+		return
+	}
+	var req struct {
+		SenderID string `json:"sender_id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.SenderID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "sender_id required"})
+		return
+	}
+	if api.sessionDetector.ResetRisk(req.SenderID) {
+		jsonResponse(w, 200, map[string]string{"status": "reset", "sender_id": req.SenderID})
+	} else {
+		jsonResponse(w, 404, map[string]string{"error": "session not found"})
+	}
+}
+
+// writeV51Metrics 写入 v5.1 Prometheus 指标
+func (api *ManagementAPI) writeV51Metrics(w io.Writer) {
+	// Session risk score gauge
+	if api.sessionDetector != nil {
+		sessions := api.sessionDetector.ListHighRiskSessions()
+		if len(sessions) > 0 {
+			fmt.Fprintln(w, "# HELP lobster_guard_session_risk_score Current session risk score")
+			fmt.Fprintln(w, "# TYPE lobster_guard_session_risk_score gauge")
+			for _, s := range sessions {
+				fmt.Fprintf(w, "lobster_guard_session_risk_score{sender_id=%q} %.1f\n", s.SenderID, s.RiskScore)
+			}
+		}
+	}
+
+	// LLM detect counters
+	if api.llmDetector != nil && api.llmDetector.cfg.Enabled {
+		stats := api.llmDetector.Stats()
+		fmt.Fprintln(w, "# HELP lobster_guard_llm_detect_total LLM detection results")
+		fmt.Fprintln(w, "# TYPE lobster_guard_llm_detect_total counter")
+		fmt.Fprintf(w, "lobster_guard_llm_detect_total{result=\"attack\"} %d\n", stats["attack"])
+		fmt.Fprintf(w, "lobster_guard_llm_detect_total{result=\"safe\"} %d\n", stats["safe"])
+		fmt.Fprintf(w, "lobster_guard_llm_detect_total{result=\"error\"} %d\n", stats["error"])
+		fmt.Fprintf(w, "lobster_guard_llm_detect_total{result=\"timeout\"} %d\n", stats["timeout"])
+	}
+
+	// Detect cache counters
+	if api.detectCache != nil {
+		hits, misses, _ := api.detectCache.Stats()
+		fmt.Fprintln(w, "# HELP lobster_guard_detect_cache_hits_total Detect cache hit count")
+		fmt.Fprintln(w, "# TYPE lobster_guard_detect_cache_hits_total counter")
+		fmt.Fprintf(w, "lobster_guard_detect_cache_hits_total %d\n", hits)
+		fmt.Fprintln(w, "# HELP lobster_guard_detect_cache_misses_total Detect cache miss count")
+		fmt.Fprintln(w, "# TYPE lobster_guard_detect_cache_misses_total counter")
+		fmt.Fprintf(w, "lobster_guard_detect_cache_misses_total %d\n", misses)
+	}
 }
 

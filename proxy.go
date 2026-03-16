@@ -45,6 +45,11 @@ type InboundProxy struct {
 	wsProxy    *WSProxyManager // v4.1 WebSocket 代理管理器
 	realtime   *RealtimeMetrics // v5.0 实时监控
 	slog       *Logger          // v5.0 结构化日志
+	// v5.1 智能检测
+	sessionDetector *SessionDetector
+	llmDetector     *LLMDetector
+	detectCache     *DetectCache
+	pipeline        *DetectPipeline
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *InboundProxy {

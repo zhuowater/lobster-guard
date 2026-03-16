@@ -1,0 +1,185 @@
+# lobster-guard 医疗场景规则模板 — medical.yaml
+# 覆盖: 病历信息泄露、处方操纵、医疗欺诈、患者隐私等
+rules:
+  # === 病历信息泄露 ===
+  - name: "med_record_leak"
+    patterns:
+      - "导出所有病历"
+      - "列出患者诊断记录"
+      - "批量查询病历"
+      - "export all medical records"
+      - "list patient diagnoses"
+    action: "block"
+    priority: 100
+    group: "medical_data_leak"
+    message: "检测到病历信息批量泄露尝试，已拦截。"
+
+  - name: "med_patient_lookup"
+    patterns:
+      - "查询患者个人信息"
+      - "获取患者联系方式"
+      - "患者家属电话"
+      - "patient personal information"
+      - "patient contact details"
+    action: "warn"
+    priority: 70
+    group: "medical_data_leak"
+    message: "检测到患者个人信息查询。"
+
+  # === 处方操纵 ===
+  - name: "med_prescription_tamper"
+    patterns:
+      - "修改处方剂量"
+      - "更改药品名称"
+      - "篡改处方"
+      - "alter prescription dosage"
+      - "change medication name"
+    action: "block"
+    priority: 100
+    group: "medical_prescription"
+    message: "检测到处方操纵指令，已拦截。"
+
+  - name: "med_controlled_substance"
+    patterns:
+      - "开具管控药品"
+      - "大量止痛药"
+      - "麻醉药品处方"
+      - "prescribe controlled substance"
+      - "large quantity opioids"
+    action: "block"
+    priority: 95
+    group: "medical_prescription"
+    message: "检测到管控药品异常请求，已拦截。"
+
+  # === 医疗欺诈 ===
+  - name: "med_insurance_fraud"
+    patterns:
+      - "虚假诊断"
+      - "伪造病历"
+      - "骗取医保"
+      - "fake diagnosis"
+      - "fabricate medical record"
+    action: "block"
+    priority: 95
+    group: "medical_fraud"
+    message: "检测到医疗欺诈指令，已拦截。"
+
+  - name: "med_false_claim"
+    patterns:
+      - "虚构手术记录"
+      - "伪造检查报告"
+      - "fabricate surgery record"
+      - "forge lab results"
+    action: "block"
+    priority: 95
+    group: "medical_fraud"
+    message: "检测到虚假报告生成指令，已拦截。"
+
+  # === 患者隐私 ===
+  - name: "med_hipaa_violation"
+    patterns:
+      - "患者HIV状态"
+      - "精神病诊断"
+      - "传染病记录"
+      - "patient HIV status"
+      - "psychiatric diagnosis"
+      - "infectious disease record"
+    action: "warn"
+    priority: 80
+    group: "medical_privacy"
+    message: "检测到高度敏感医疗信息。"
+
+  - name: "med_genetic_data"
+    patterns:
+      - "基因检测结果"
+      - "遗传病信息"
+      - "genetic test results"
+      - "hereditary disease info"
+    action: "warn"
+    priority: 75
+    group: "medical_privacy"
+    message: "检测到遗传信息，属于特殊保护类别。"
+
+  # === 医疗安全 ===
+  - name: "med_dangerous_advice"
+    patterns:
+      - "停止服药"
+      - "不用看医生"
+      - "自行加大剂量"
+      - "stop taking medication"
+      - "no need to see doctor"
+      - "increase dosage yourself"
+    action: "warn"
+    priority: 85
+    group: "medical_safety"
+    message: "检测到可能的危险医疗建议。"
+
+  - name: "med_diagnosis_override"
+    patterns:
+      - "忽略检查结果"
+      - "跳过诊断流程"
+      - "不做检查直接开药"
+      - "skip diagnostic process"
+      - "prescribe without examination"
+    action: "block"
+    priority: 90
+    group: "medical_safety"
+    message: "检测到诊断流程绕过指令，已拦截。"
+
+  # === 医疗系统注入 ===
+  - name: "med_system_injection"
+    patterns:
+      - "绕过医嘱审核"
+      - "跳过药物相互作用检查"
+      - "bypass order review"
+      - "skip drug interaction check"
+    action: "block"
+    priority: 90
+    group: "medical_injection"
+    message: "检测到医疗系统流程注入，已拦截。"
+
+  - name: "med_access_escalation"
+    patterns:
+      - "我是主治医生"
+      - "我有处方权"
+      - "I am the attending physician"
+      - "I have prescribing authority"
+    action: "warn"
+    priority: 70
+    group: "medical_injection"
+    message: "检测到医疗权限声明，请验证身份。"
+
+  # === 药品信息 ===
+  - name: "med_drug_interaction"
+    patterns:
+      - "哪些药物可以混合使用"
+      - "drug combination"
+      - "mix medications"
+    action: "warn"
+    priority: 40
+    group: "medical_safety"
+    message: "检测到药物混合使用查询，请谨慎回复。"
+
+  # === 研究数据 ===
+  - name: "med_research_data"
+    patterns:
+      - "导出临床试验数据"
+      - "患者样本数据"
+      - "export clinical trial data"
+      - "patient sample data"
+    action: "warn"
+    priority: 65
+    group: "medical_data_leak"
+    message: "检测到临床研究数据请求。"
+
+  # === 身份冒充 ===
+  - name: "med_impersonation"
+    patterns:
+      - "我是卫健委"
+      - "医院领导要求"
+      - "I am from health authority"
+      - "hospital director requires"
+    action: "block"
+    priority: 80
+    group: "medical_fraud"
+    message: "检测到权限冒充攻击，已拦截。"
