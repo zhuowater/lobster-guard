@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.11.0"
+	AppVersion = "4.0.0"
 )
 
 var startTime = time.Now()

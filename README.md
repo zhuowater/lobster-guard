@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.11.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
@@ -75,11 +75,11 @@
  | |_| (_) | |_) \__ \ ||  __/ | |_____| (_| | |_| | (_| | |  | |_
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
-        龙虾卫士 - AI Agent 安全网关 v3.11.0
+        龙虾卫士 - AI Agent 安全网关 v4.0.0
         入站检测 | 出站拦截 | 亲和路由 | 多通道插件 | Bridge Mode
 
 ┌─────────────────────────────────────────────────┐
-│                  配置摘要 v3.11                   │
+│                  配置摘要 v4.0                   │
 ├─────────────────────────────────────────────────┤
 │ 消息通道:    lanxin                             │
 │ 接入模式:    webhook                            │
@@ -742,7 +742,7 @@ CGO_ENABLED=1 go test -v -count=1 ./...
 
 ```
 lobster-guard/
-├── main.go                 # 全部源码（~7013 行，含 5 通道插件 + Bridge + Rate Limit + Metrics + 多Bot亲和路由）
+├── main.go                 # 13 个源文件（共 ~7200 行，含 5 通道插件 + Bridge + Rate Limit + Metrics + 多Bot亲和路由）
 ├── main_test.go            # 单元测试（220+ 用例）
 ├── integration_test.go     # 集成测试（23 用例）
 ├── dashboard.html          # 管理后台（27KB 单文件）
@@ -861,7 +861,7 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 - [x] v3.9 — IM 用户信息自动获取（4 平台 UserInfoProvider + 邮箱策略路由）
 - [x] v3.10 — 审计日志增强 + 告警通知（导出/轮转/block 实时推送/趋势图）
 - [x] v3.11 — 正则规则 + 规则分组（按 app_id 绑定规则组 · 多租户规则隔离）
-- [ ] v4.0 — 代码拆分 + 插件化（6000+ 行单文件架构演进）
+- [x] v4.0 — 代码拆分 + 插件化（13 个源文件 + go:embed + 配置验证器）
 - [ ] v4.1 — WebSocket 消息流代理（Agent streaming 实时安全扫描）
 - [ ] v4.2 — 高可用（PostgreSQL + 多实例 active-active）
 - [ ] 基于 LLM 的语义级攻击检测
