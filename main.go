@@ -2971,13 +2971,22 @@ func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
 	if result.Data.Name == "" {
 		return nil, nil // 用户不存在
 	}
-	// 部门优先用 department 数组第一个，fallback 到 orgName
-	dept := result.Data.OrgName
-	if dept == "" {
-		dept = result.Data.OrgNameAlt
+	// 部门：拼接所有部门名（逗号分隔），orgName 作为组织名不混入
+	dept := ""
+	if len(result.Data.Department) > 0 {
+		var deptNames []string
+		for _, d := range result.Data.Department {
+			if d.Name != "" {
+				deptNames = append(deptNames, d.Name)
+			}
+		}
+		dept = strings.Join(deptNames, ",")
 	}
-	if len(result.Data.Department) > 0 && result.Data.Department[0].Name != "" {
-		dept = result.Data.Department[0].Name
+	if dept == "" {
+		dept = result.Data.OrgName
+		if dept == "" {
+			dept = result.Data.OrgNameAlt
+		}
 	}
 	// 头像优先 avatarUrl
 	avatar := result.Data.AvatarURL
@@ -3303,6 +3312,16 @@ func (p *WeComUserProvider) NeedsCredentials() []string {
 }
 
 // ============================================================
+// containsDepartment 检查用户部门列表（逗号分隔）是否包含目标部门
+func containsDepartment(userDepts, target string) bool {
+	for _, d := range strings.Split(userDepts, ",") {
+		if strings.EqualFold(strings.TrimSpace(d), target) {
+			return true
+		}
+	}
+	return false
+}
+
 // v3.9: RoutePolicyEngine — 路由策略引擎
 // ============================================================
 
@@ -3344,7 +3363,7 @@ func (rpe *RoutePolicyEngine) Match(info *UserInfo, appID string) (string, bool)
 		}
 		if matched && p.Match.Department != "" {
 			hasCondition = true
-			if !strings.EqualFold(info.Department, p.Match.Department) {
+			if !containsDepartment(info.Department, p.Match.Department) {
 				matched = false
 			}
 		}
@@ -3399,7 +3418,7 @@ func (rpe *RoutePolicyEngine) TestMatch(info *UserInfo, appID string) (int, *Rou
 		}
 		if matched && p.Match.Department != "" {
 			hasCondition = true
-			if !strings.EqualFold(info.Department, p.Match.Department) {
+			if !containsDepartment(info.Department, p.Match.Department) {
 				matched = false
 			}
 		}
