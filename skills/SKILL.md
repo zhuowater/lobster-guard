@@ -63,7 +63,24 @@ LOBSTER_GUARD_REG_TOKEN="your-registration-token"
 | `POST /api/v1/rules/reload` | 热更新出站规则 |
 | `GET /api/v1/rules/hits` | 规则命中率排行 |
 | `POST /api/v1/rules/hits/reset` | 重置命中统计 |
-| `GET /api/v1/audit/logs` | 审计日志（支持 direction/action/sender_id 筛选）|
+| `GET /api/v1/audit/logs` | 审计日志（支持 direction/action/sender_id/app_id/q/trace_id 筛选）|
+| `GET /api/v1/audit/export` | 导出审计日志（?format=csv\|json）|
+| `GET /api/v1/audit/stats` | 日志统计（总数/最早最晚时间/磁盘占用）|
+| `GET /api/v1/audit/timeline` | 时间线统计（?hours=24，按小时聚合）|
+| `POST /api/v1/audit/cleanup` | 手动触发过期日志清理 |
+| `GET /api/v1/audit/archives` | 列出归档文件 |
+| `GET /api/v1/audit/archives/:name` | 下载归档文件 |
+| `POST /api/v1/audit/archive` | 手动触发归档 |
+| `GET /api/v1/rule-bindings` | 查看 app_id 规则组绑定关系 |
+| `POST /api/v1/rule-bindings/test` | 测试某 app_id 会应用哪些规则 |
+| `GET /api/v1/rule-templates` | 列出可用规则模板及规则数 |
+| `GET /api/v1/sessions/risks` | 列出高风险会话 |
+| `POST /api/v1/sessions/risks/reset` | 重置用户风险积分 |
+| `GET /api/v1/ws/connections` | 列出活跃 WebSocket 连接 |
+| `POST /api/v1/backup` | 创建数据库备份 |
+| `GET /api/v1/backups` | 列出已有备份 |
+| `DELETE /api/v1/backups/:name` | 删除指定备份 |
+| `GET /api/v1/metrics/realtime` | 最近 60 秒逐秒实时统计 |
 | `GET /api/v1/stats` | 统计概览 |
 | `GET /api/v1/rate-limit/stats` | 限流统计 |
 | `POST /api/v1/rate-limit/reset` | 重置限流计数器 |
@@ -92,11 +109,22 @@ LOBSTER_GUARD_REG_TOKEN="your-registration-token"
 | "路由策略" "怎么分配的" | `GET /api/v1/route-policies` |
 | "测试策略" "zhangzhuo@qianxin.com 会走哪" | `POST /api/v1/route-policies/test` |
 | "谁被拦截了" "最近的攻击" | `GET /api/v1/audit/logs?action=block` |
+| "导出审计日志" | `GET /api/v1/audit/export?format=csv` |
+| "日志统计" | `GET /api/v1/audit/stats` |
+| "攻击趋势" "时间线" | `GET /api/v1/audit/timeline?hours=24` |
+| "清理过期日志" | `POST /api/v1/audit/cleanup` |
+| "归档日志" | `GET /api/v1/audit/archives` |
 | "统计" "多少请求" | `GET /api/v1/stats` |
+| "实时监控" "当前 QPS" | `GET /api/v1/metrics/realtime` |
 | "更新规则" "刷新规则" | `POST /api/v1/inbound-rules/reload` + `POST /api/v1/rules/reload` |
+| "规则模板" "有哪些场景包" | `GET /api/v1/rule-templates` |
+| "规则绑定" "哪个 Bot 用什么规则" | `GET /api/v1/rule-bindings` |
 | "哪条规则命中最多" | `GET /api/v1/rules/hits` |
 | "限流情况" | `GET /api/v1/rate-limit/stats` |
-| "安全报告" "全面分析" | 依次调用 healthz + stats + audit/logs + rules/hits + rate-limit/stats，综合分析 |
+| "高风险用户" "谁在攻击" | `GET /api/v1/sessions/risks` |
+| "WebSocket 连接" | `GET /api/v1/ws/connections` |
+| "备份数据库" | `POST /api/v1/backup` |
+| "安全报告" "全面分析" | 依次调用 healthz + stats + audit/logs + rules/hits + rate-limit/stats + sessions/risks，综合分析 |
 
 ## 使用 CLI 工具
 
