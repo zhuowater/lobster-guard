@@ -215,9 +215,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, true)
 
-	inbound := NewInboundProxy(cfg, channel, engine, loggerInst, pool, routes, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, loggerInst, pool, routes, nil, nil, nil, nil)
 	outbound, _ := NewOutboundProxy(cfg, channel, engine, outboundEngine, loggerInst, nil, nil)
-	mgmtAPI := NewManagementAPI(cfg, "", pool, routes, loggerInst, engine, outboundEngine, inbound, nil, nil, nil)
+	mgmtAPI := NewManagementAPI(cfg, "", pool, routes, loggerInst, engine, outboundEngine, inbound, nil, nil, nil, nil, nil)
 
 	return &testEnv{
 		upstream:  upstream,
@@ -720,7 +720,7 @@ func TestInboundNoUpstream(t *testing.T) {
 	pool := NewUpstreamPool(cfg, nil) // 无上游
 	routes := NewRouteTable(nil, false)
 
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
 
 	body := buildEncryptedWebhook("user-no-upstream", "你好")
 	req := httptest.NewRequest("POST", "/lxappbot", bytes.NewReader(body))

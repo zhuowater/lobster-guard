@@ -1,8 +1,9 @@
-// lobster-guard - 高性能安全代理网关 v3.8
+// lobster-guard - 高性能安全代理网关 v3.9
 // 支持入站检测拦截、出站内容检测/拦截、用户ID亲和路由、服务自动注册
 // 支持多消息通道: 蓝信(lanxin)、飞书(feishu)、钉钉(dingtalk)、企微(wecom)、通用HTTP(generic)
 // v3.6: 规则引擎增强 — 规则优先级权重、自定义响应、命中率统计
 // v3.8: 多 Bot 亲和路由 — (sender_id, app_id) 复合键路由、批量绑定、按部门分配
+// v3.9: IM 用户信息自动获取 + 邮箱/部门策略匹配路由
 package main
 
 import (
@@ -46,7 +47,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "3.8.0"
+	AppVersion = "3.9.0"
 )
 
 var startTime = time.Now()
@@ -60,7 +61,7 @@ func printBanner() {
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
         龙虾卫士 - AI Agent 安全网关 v%s
-        入站检测 | 出站拦截 | 多Bot亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 规则热更新 | 规则引擎增强
+        入站检测 | 出站拦截 | 多Bot亲和路由 | 多通道支持 | 桥接模式 | 请求限流 | 规则热更新 | 规则引擎增强 | 用户信息自动获取
 `
 	fmt.Printf(banner, AppVersion)
 }
@@ -101,6 +102,10 @@ type Config struct {
 	WecomToken              string            `yaml:"wecom_token"`
 	WecomEncodingAesKey     string            `yaml:"wecom_encoding_aes_key"`
 	WecomCorpId             string            `yaml:"wecom_corp_id"`
+	WecomCorpSecret         string            `yaml:"wecom_corp_secret"`      // v3.9 企微用户信息获取
+	LanxinAppID             string            `yaml:"lanxin_app_id"`          // v3.9 蓝信用户信息获取
+	LanxinAppSecret         string            `yaml:"lanxin_app_secret"`      // v3.9 蓝信用户信息获取
+	RoutePolicies           []RoutePolicyConfig `yaml:"route_policies"`       // v3.9 路由策略
 	GenericSenderHeader  string               `yaml:"generic_sender_header"`
 	GenericTextField     string               `yaml:"generic_text_field"`
 	InboundListen        string               `yaml:"inbound_listen"`
@@ -142,6 +147,21 @@ type StaticUpstreamConfig struct {
 	ID      string `yaml:"id"`
 	Address string `yaml:"address"`
 	Port    int    `yaml:"port"`
+}
+
+// RoutePolicyConfig 路由策略配置（v3.9）
+type RoutePolicyConfig struct {
+	Match      RoutePolicyMatch `yaml:"match"`
+	UpstreamID string           `yaml:"upstream_id"`
+}
+
+// RoutePolicyMatch 策略匹配条件
+type RoutePolicyMatch struct {
+	Department  string `yaml:"department,omitempty"`
+	EmailSuffix string `yaml:"email_suffix,omitempty"`
+	Email       string `yaml:"email,omitempty"`
+	AppID       string `yaml:"app_id,omitempty"`
+	Default     bool   `yaml:"default,omitempty"`
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -2619,6 +2639,7 @@ type RouteEntry struct {
 	UpstreamID  string `json:"upstream_id"`
 	Department  string `json:"department,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email,omitempty"`    // v3.9
 	CreatedAt   string `json:"created_at,omitempty"`
 	UpdatedAt   string `json:"updated_at,omitempty"`
 }
@@ -2626,6 +2647,779 @@ type RouteEntry struct {
 // routeKey 生成复合路由键
 func routeKey(senderID, appID string) string {
 	return senderID + "|" + appID
+}
+
+// ============================================================
+// v3.9: 用户信息自动获取 — UserInfo + UserInfoProvider + UserInfoCache
+// ============================================================
+
+// UserInfo 用户信息（所有 IM 平台统一）
+type UserInfo struct {
+	SenderID   string `json:"sender_id"`
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Department string `json:"department"`
+	Avatar     string `json:"avatar,omitempty"`
+	FetchedAt  time.Time `json:"fetched_at,omitempty"`
+}
+
+// UserInfoProvider 可选接口 — 插件实现此接口则支持用户信息自动获取
+type UserInfoProvider interface {
+	FetchUserInfo(senderID string) (*UserInfo, error)
+	NeedsCredentials() []string
+}
+
+// UserInfoCache 内存+DB 两级缓存
+type UserInfoCache struct {
+	mu       sync.RWMutex
+	memory   map[string]*UserInfo
+	memTime  map[string]time.Time // sender_id -> fetched_at in memory
+	db       *sql.DB
+	ttl      time.Duration
+	provider UserInfoProvider
+}
+
+// NewUserInfoCache 创建用户信息缓存
+func NewUserInfoCache(db *sql.DB, provider UserInfoProvider, ttl time.Duration) *UserInfoCache {
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	return &UserInfoCache{
+		memory:   make(map[string]*UserInfo),
+		memTime:  make(map[string]time.Time),
+		db:       db,
+		ttl:      ttl,
+		provider: provider,
+	}
+}
+
+// GetOrFetch 获取用户信息：内存 → DB → API
+func (c *UserInfoCache) GetOrFetch(senderID string) (*UserInfo, error) {
+	if senderID == "" {
+		return nil, nil
+	}
+
+	// 1. 内存缓存
+	c.mu.RLock()
+	if info, ok := c.memory[senderID]; ok {
+		if ft, ok2 := c.memTime[senderID]; ok2 && time.Since(ft) < c.ttl {
+			c.mu.RUnlock()
+			return info, nil
+		}
+	}
+	c.mu.RUnlock()
+
+	// 2. DB 缓存
+	if c.db != nil {
+		info, err := c.loadFromDB(senderID)
+		if err == nil && info != nil && time.Since(info.FetchedAt) < c.ttl {
+			c.putMemory(info)
+			return info, nil
+		}
+	}
+
+	// 3. API 获取
+	if c.provider == nil {
+		return nil, nil
+	}
+	info, err := c.provider.FetchUserInfo(senderID)
+	if err != nil {
+		return nil, err
+	}
+	if info == nil {
+		return nil, nil
+	}
+	info.SenderID = senderID
+	info.FetchedAt = time.Now()
+
+	// 写入缓存
+	c.putMemory(info)
+	if c.db != nil {
+		c.saveToDB(info)
+	}
+	return info, nil
+}
+
+// GetCached 仅从缓存获取（不调API）
+func (c *UserInfoCache) GetCached(senderID string) *UserInfo {
+	c.mu.RLock()
+	if info, ok := c.memory[senderID]; ok {
+		c.mu.RUnlock()
+		return info
+	}
+	c.mu.RUnlock()
+
+	if c.db != nil {
+		info, err := c.loadFromDB(senderID)
+		if err == nil && info != nil {
+			c.putMemory(info)
+			return info
+		}
+	}
+	return nil
+}
+
+func (c *UserInfoCache) putMemory(info *UserInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.memory[info.SenderID] = info
+	c.memTime[info.SenderID] = info.FetchedAt
+}
+
+func (c *UserInfoCache) loadFromDB(senderID string) (*UserInfo, error) {
+	var info UserInfo
+	var fetchedAt string
+	err := c.db.QueryRow(`SELECT sender_id, name, email, department, avatar, fetched_at FROM user_info_cache WHERE sender_id = ?`, senderID).
+		Scan(&info.SenderID, &info.Name, &info.Email, &info.Department, &info.Avatar, &fetchedAt)
+	if err != nil {
+		return nil, err
+	}
+	t, _ := time.Parse(time.RFC3339, fetchedAt)
+	info.FetchedAt = t
+	return &info, nil
+}
+
+func (c *UserInfoCache) saveToDB(info *UserInfo) {
+	now := time.Now().Format(time.RFC3339)
+	c.db.Exec(`INSERT OR REPLACE INTO user_info_cache (sender_id, name, email, department, avatar, fetched_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
+		info.SenderID, info.Name, info.Email, info.Department, info.Avatar, info.FetchedAt.Format(time.RFC3339), now)
+}
+
+// ListAll 列出所有缓存用户
+func (c *UserInfoCache) ListAll(department, email string) []*UserInfo {
+	if c.db == nil {
+		return nil
+	}
+	query := `SELECT sender_id, name, email, department, avatar, fetched_at FROM user_info_cache WHERE 1=1`
+	var args []interface{}
+	if department != "" {
+		query += ` AND department = ?`
+		args = append(args, department)
+	}
+	if email != "" {
+		query += ` AND email LIKE ?`
+		args = append(args, "%"+email+"%")
+	}
+	query += ` ORDER BY updated_at DESC`
+	rows, err := c.db.Query(query, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var results []*UserInfo
+	for rows.Next() {
+		var info UserInfo
+		var fetchedAt string
+		if rows.Scan(&info.SenderID, &info.Name, &info.Email, &info.Department, &info.Avatar, &fetchedAt) == nil {
+			t, _ := time.Parse(time.RFC3339, fetchedAt)
+			info.FetchedAt = t
+			results = append(results, &info)
+		}
+	}
+	return results
+}
+
+// GetByID 获取单个用户信息
+func (c *UserInfoCache) GetByID(senderID string) *UserInfo {
+	return c.GetCached(senderID)
+}
+
+// Refresh 强制刷新单个用户
+func (c *UserInfoCache) Refresh(senderID string) (*UserInfo, error) {
+	if c.provider == nil {
+		return nil, fmt.Errorf("no provider configured")
+	}
+	info, err := c.provider.FetchUserInfo(senderID)
+	if err != nil {
+		return nil, err
+	}
+	if info == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	info.SenderID = senderID
+	info.FetchedAt = time.Now()
+	c.putMemory(info)
+	if c.db != nil {
+		c.saveToDB(info)
+	}
+	return info, nil
+}
+
+// RefreshAll 刷新所有已知用户
+func (c *UserInfoCache) RefreshAll() (int, int) {
+	if c.provider == nil || c.db == nil {
+		return 0, 0
+	}
+	rows, err := c.db.Query(`SELECT sender_id FROM user_info_cache`)
+	if err != nil {
+		return 0, 0
+	}
+	defer rows.Close()
+	var senderIDs []string
+	for rows.Next() {
+		var sid string
+		if rows.Scan(&sid) == nil {
+			senderIDs = append(senderIDs, sid)
+		}
+	}
+	success, failed := 0, 0
+	for _, sid := range senderIDs {
+		_, err := c.Refresh(sid)
+		if err != nil {
+			failed++
+		} else {
+			success++
+		}
+	}
+	return success, failed
+}
+
+// ============================================================
+// v3.9: LanxinUserProvider — 蓝信用户信息获取
+// ============================================================
+
+type LanxinUserProvider struct {
+	appID     string
+	appSecret string
+	upstream  string
+
+	mu       sync.Mutex
+	token    string
+	tokenExp time.Time
+}
+
+func NewLanxinUserProvider(appID, appSecret, upstream string) *LanxinUserProvider {
+	return &LanxinUserProvider{
+		appID:     appID,
+		appSecret: appSecret,
+		upstream:  strings.TrimRight(upstream, "/"),
+	}
+}
+
+func (p *LanxinUserProvider) getToken() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.token != "" && time.Now().Before(p.tokenExp) {
+		return p.token, nil
+	}
+	url := fmt.Sprintf("%s/v1/apptoken/create?app_id=%s&app_secret=%s",
+		p.upstream, url.QueryEscape(p.appID), url.QueryEscape(p.appSecret))
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("蓝信获取app_token失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Code int `json:"code"`
+		Data struct {
+			AppToken string `json:"app_token"`
+			ExpireIn int    `json:"expire_in"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("蓝信app_token解析失败: %w", err)
+	}
+	if result.Data.AppToken == "" {
+		return "", fmt.Errorf("蓝信app_token为空, code=%d, msg=%s", result.Code, result.Message)
+	}
+	p.token = result.Data.AppToken
+	expireIn := result.Data.ExpireIn
+	if expireIn <= 0 {
+		expireIn = 7200
+	}
+	// 提前5分钟过期
+	p.tokenExp = time.Now().Add(time.Duration(expireIn-300) * time.Second)
+	return p.token, nil
+}
+
+func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
+	token, err := p.getToken()
+	if err != nil {
+		return nil, err
+	}
+	reqURL := fmt.Sprintf("%s/v1/staffs/%s/fetch?app_token=%s",
+		p.upstream, url.PathEscape(senderID), url.QueryEscape(token))
+	resp, err := http.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("蓝信查询用户失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Code int `json:"code"`
+		Data struct {
+			Name    string `json:"name"`
+			Email   string `json:"email"`
+			OrgName string `json:"orgname"`
+			Avatar  string `json:"avatar"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("蓝信用户信息解析失败: %w", err)
+	}
+	if result.Data.Name == "" && result.Data.Email == "" {
+		return nil, nil // 用户不存在或接口异常
+	}
+	return &UserInfo{
+		SenderID:   senderID,
+		Name:       result.Data.Name,
+		Email:      result.Data.Email,
+		Department: result.Data.OrgName,
+		Avatar:     result.Data.Avatar,
+	}, nil
+}
+
+func (p *LanxinUserProvider) NeedsCredentials() []string {
+	return []string{"lanxin_app_id", "lanxin_app_secret"}
+}
+
+// ============================================================
+// v3.9: FeishuUserProvider — 飞书用户信息获取
+// ============================================================
+
+type FeishuUserProvider struct {
+	appID     string
+	appSecret string
+
+	mu       sync.Mutex
+	token    string
+	tokenExp time.Time
+}
+
+func NewFeishuUserProvider(appID, appSecret string) *FeishuUserProvider {
+	return &FeishuUserProvider{appID: appID, appSecret: appSecret}
+}
+
+func (p *FeishuUserProvider) getTenantToken() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.token != "" && time.Now().Before(p.tokenExp) {
+		return p.token, nil
+	}
+	body, _ := json.Marshal(map[string]string{
+		"app_id":     p.appID,
+		"app_secret": p.appSecret,
+	})
+	resp, err := http.Post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("飞书获取tenant_token失败: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
+		Expire            int    `json:"expire"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", err
+	}
+	if result.TenantAccessToken == "" {
+		return "", fmt.Errorf("飞书tenant_token为空: code=%d msg=%s", result.Code, result.Msg)
+	}
+	p.token = result.TenantAccessToken
+	expire := result.Expire
+	if expire <= 0 {
+		expire = 7200
+	}
+	p.tokenExp = time.Now().Add(time.Duration(expire-300) * time.Second)
+	return p.token, nil
+}
+
+func (p *FeishuUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
+	token, err := p.getTenantToken()
+	if err != nil {
+		return nil, err
+	}
+	reqURL := fmt.Sprintf("https://open.feishu.cn/open-apis/contact/v3/users/%s", url.PathEscape(senderID))
+	req, _ := http.NewRequest("GET", reqURL, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("飞书查询用户失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Code int `json:"code"`
+		Data struct {
+			User struct {
+				Name          string   `json:"name"`
+				Email         string   `json:"email"`
+				DepartmentIDs []string `json:"department_ids"`
+				Avatar        struct {
+					Avatar72 string `json:"avatar_72"`
+				} `json:"avatar"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	if result.Data.User.Name == "" {
+		return nil, nil
+	}
+	dept := ""
+	if len(result.Data.User.DepartmentIDs) > 0 {
+		dept = strings.Join(result.Data.User.DepartmentIDs, ",")
+	}
+	return &UserInfo{
+		SenderID:   senderID,
+		Name:       result.Data.User.Name,
+		Email:      result.Data.User.Email,
+		Department: dept,
+		Avatar:     result.Data.User.Avatar.Avatar72,
+	}, nil
+}
+
+func (p *FeishuUserProvider) NeedsCredentials() []string {
+	return []string{"feishu_app_id", "feishu_app_secret"}
+}
+
+// ============================================================
+// v3.9: DingTalkUserProvider — 钉钉用户信息获取
+// ============================================================
+
+type DingTalkUserProvider struct {
+	clientID     string
+	clientSecret string
+
+	mu       sync.Mutex
+	token    string
+	tokenExp time.Time
+}
+
+func NewDingTalkUserProvider(clientID, clientSecret string) *DingTalkUserProvider {
+	return &DingTalkUserProvider{clientID: clientID, clientSecret: clientSecret}
+}
+
+func (p *DingTalkUserProvider) getAccessToken() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.token != "" && time.Now().Before(p.tokenExp) {
+		return p.token, nil
+	}
+	reqURL := fmt.Sprintf("https://oapi.dingtalk.com/gettoken?appkey=%s&appsecret=%s",
+		url.QueryEscape(p.clientID), url.QueryEscape(p.clientSecret))
+	resp, err := http.Get(reqURL)
+	if err != nil {
+		return "", fmt.Errorf("钉钉获取access_token失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		ErrCode     int    `json:"errcode"`
+		ErrMsg      string `json:"errmsg"`
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("钉钉access_token为空: errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
+	}
+	p.token = result.AccessToken
+	expire := result.ExpiresIn
+	if expire <= 0 {
+		expire = 7200
+	}
+	p.tokenExp = time.Now().Add(time.Duration(expire-300) * time.Second)
+	return p.token, nil
+}
+
+func (p *DingTalkUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
+	token, err := p.getAccessToken()
+	if err != nil {
+		return nil, err
+	}
+	reqURL := fmt.Sprintf("https://oapi.dingtalk.com/topapi/v2/user/get?access_token=%s", url.QueryEscape(token))
+	body, _ := json.Marshal(map[string]string{"userid": senderID})
+	resp, err := http.Post(reqURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("钉钉查询用户失败: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	var result struct {
+		ErrCode int `json:"errcode"`
+		Result  struct {
+			Name       string `json:"name"`
+			Email      string `json:"email"`
+			DeptIDList []int  `json:"dept_id_list"`
+			Avatar     string `json:"avatar"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+	if result.Result.Name == "" {
+		return nil, nil
+	}
+	dept := ""
+	if len(result.Result.DeptIDList) > 0 {
+		deptStrs := make([]string, len(result.Result.DeptIDList))
+		for i, d := range result.Result.DeptIDList {
+			deptStrs[i] = strconv.Itoa(d)
+		}
+		dept = strings.Join(deptStrs, ",")
+	}
+	return &UserInfo{
+		SenderID:   senderID,
+		Name:       result.Result.Name,
+		Email:      result.Result.Email,
+		Department: dept,
+		Avatar:     result.Result.Avatar,
+	}, nil
+}
+
+func (p *DingTalkUserProvider) NeedsCredentials() []string {
+	return []string{"dingtalk_client_id", "dingtalk_client_secret"}
+}
+
+// ============================================================
+// v3.9: WeComUserProvider — 企业微信用户信息获取
+// ============================================================
+
+type WeComUserProvider struct {
+	corpID     string
+	corpSecret string
+
+	mu       sync.Mutex
+	token    string
+	tokenExp time.Time
+}
+
+func NewWeComUserProvider(corpID, corpSecret string) *WeComUserProvider {
+	return &WeComUserProvider{corpID: corpID, corpSecret: corpSecret}
+}
+
+func (p *WeComUserProvider) getAccessToken() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.token != "" && time.Now().Before(p.tokenExp) {
+		return p.token, nil
+	}
+	reqURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=%s&corpsecret=%s",
+		url.QueryEscape(p.corpID), url.QueryEscape(p.corpSecret))
+	resp, err := http.Get(reqURL)
+	if err != nil {
+		return "", fmt.Errorf("企微获取access_token失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		ErrCode     int    `json:"errcode"`
+		ErrMsg      string `json:"errmsg"`
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("企微access_token为空: errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
+	}
+	p.token = result.AccessToken
+	expire := result.ExpiresIn
+	if expire <= 0 {
+		expire = 7200
+	}
+	p.tokenExp = time.Now().Add(time.Duration(expire-300) * time.Second)
+	return p.token, nil
+}
+
+func (p *WeComUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
+	token, err := p.getAccessToken()
+	if err != nil {
+		return nil, err
+	}
+	reqURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=%s&userid=%s",
+		url.QueryEscape(token), url.QueryEscape(senderID))
+	resp, err := http.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("企微查询用户失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		ErrCode    int    `json:"errcode"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+		Department []int  `json:"department"`
+		Avatar     string `json:"avatar"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	if result.Name == "" {
+		return nil, nil
+	}
+	dept := ""
+	if len(result.Department) > 0 {
+		deptStrs := make([]string, len(result.Department))
+		for i, d := range result.Department {
+			deptStrs[i] = strconv.Itoa(d)
+		}
+		dept = strings.Join(deptStrs, ",")
+	}
+	return &UserInfo{
+		SenderID:   senderID,
+		Name:       result.Name,
+		Email:      result.Email,
+		Department: dept,
+		Avatar:     result.Avatar,
+	}, nil
+}
+
+func (p *WeComUserProvider) NeedsCredentials() []string {
+	return []string{"wecom_corp_id", "wecom_corp_secret"}
+}
+
+// ============================================================
+// v3.9: RoutePolicyEngine — 路由策略引擎
+// ============================================================
+
+type RoutePolicyEngine struct {
+	mu       sync.RWMutex
+	policies []RoutePolicyConfig
+}
+
+func NewRoutePolicyEngine(policies []RoutePolicyConfig) *RoutePolicyEngine {
+	return &RoutePolicyEngine{policies: policies}
+}
+
+// Match 匹配策略，返回 upstream_id 和是否命中
+func (rpe *RoutePolicyEngine) Match(info *UserInfo, appID string) (string, bool) {
+	if info == nil {
+		return "", false
+	}
+	rpe.mu.RLock()
+	defer rpe.mu.RUnlock()
+
+	for _, p := range rpe.policies {
+		if p.Match.Default {
+			return p.UpstreamID, true
+		}
+		matched := true
+		hasCondition := false
+
+		if p.Match.Email != "" {
+			hasCondition = true
+			if !strings.EqualFold(info.Email, p.Match.Email) {
+				matched = false
+			}
+		}
+		if matched && p.Match.EmailSuffix != "" {
+			hasCondition = true
+			if !strings.HasSuffix(strings.ToLower(info.Email), strings.ToLower(p.Match.EmailSuffix)) {
+				matched = false
+			}
+		}
+		if matched && p.Match.Department != "" {
+			hasCondition = true
+			if !strings.EqualFold(info.Department, p.Match.Department) {
+				matched = false
+			}
+		}
+		if matched && p.Match.AppID != "" {
+			hasCondition = true
+			if appID != p.Match.AppID {
+				matched = false
+			}
+		}
+		if hasCondition && matched {
+			return p.UpstreamID, true
+		}
+	}
+	return "", false
+}
+
+// ListPolicies 返回策略列表
+func (rpe *RoutePolicyEngine) ListPolicies() []RoutePolicyConfig {
+	rpe.mu.RLock()
+	defer rpe.mu.RUnlock()
+	result := make([]RoutePolicyConfig, len(rpe.policies))
+	copy(result, rpe.policies)
+	return result
+}
+
+// TestMatch 测试某个用户会命中哪条策略
+func (rpe *RoutePolicyEngine) TestMatch(info *UserInfo, appID string) (int, *RoutePolicyConfig, bool) {
+	if info == nil {
+		return -1, nil, false
+	}
+	rpe.mu.RLock()
+	defer rpe.mu.RUnlock()
+
+	for i, p := range rpe.policies {
+		if p.Match.Default {
+			return i, &rpe.policies[i], true
+		}
+		matched := true
+		hasCondition := false
+
+		if p.Match.Email != "" {
+			hasCondition = true
+			if !strings.EqualFold(info.Email, p.Match.Email) {
+				matched = false
+			}
+		}
+		if matched && p.Match.EmailSuffix != "" {
+			hasCondition = true
+			if !strings.HasSuffix(strings.ToLower(info.Email), strings.ToLower(p.Match.EmailSuffix)) {
+				matched = false
+			}
+		}
+		if matched && p.Match.Department != "" {
+			hasCondition = true
+			if !strings.EqualFold(info.Department, p.Match.Department) {
+				matched = false
+			}
+		}
+		if matched && p.Match.AppID != "" {
+			hasCondition = true
+			if appID != p.Match.AppID {
+				matched = false
+			}
+		}
+		if hasCondition && matched {
+			return i, &rpe.policies[i], true
+		}
+	}
+	return -1, nil, false
+}
+
+// createUserInfoProvider 根据配置创建对应平台的 UserInfoProvider
+func createUserInfoProvider(cfg *Config) UserInfoProvider {
+	channel := cfg.Channel
+	if channel == "" {
+		channel = "lanxin"
+	}
+	switch channel {
+	case "lanxin":
+		if cfg.LanxinAppID != "" && cfg.LanxinAppSecret != "" {
+			return NewLanxinUserProvider(cfg.LanxinAppID, cfg.LanxinAppSecret, cfg.LanxinUpstream)
+		}
+	case "feishu":
+		if cfg.FeishuAppID != "" && cfg.FeishuAppSecret != "" {
+			return NewFeishuUserProvider(cfg.FeishuAppID, cfg.FeishuAppSecret)
+		}
+	case "dingtalk":
+		if cfg.DingtalkClientID != "" && cfg.DingtalkClientSecret != "" {
+			return NewDingTalkUserProvider(cfg.DingtalkClientID, cfg.DingtalkClientSecret)
+		}
+	case "wecom":
+		if cfg.WecomCorpId != "" && cfg.WecomCorpSecret != "" {
+			return NewWeComUserProvider(cfg.WecomCorpId, cfg.WecomCorpSecret)
+		}
+	}
+	return nil
 }
 
 type RouteTable struct {
@@ -2752,6 +3546,19 @@ func (rt *RouteTable) BindBatch(entries []RouteEntry) {
 				e.SenderID, e.AppID, e.UpstreamID, e.Department, e.DisplayName, now, now)
 		}
 	}
+}
+
+// UpdateUserInfo 更新路由表中用户的显示名、邮箱和部门（v3.9）
+func (rt *RouteTable) UpdateUserInfo(senderID, displayName, email, department string) {
+	if rt.db == nil {
+		return
+	}
+	now := time.Now().Format(time.RFC3339)
+	rt.db.Exec(`UPDATE user_routes SET display_name=?, department=?, updated_at=? WHERE sender_id=? AND (display_name='' OR display_name IS NULL OR display_name!=?)`,
+		displayName, department, now, senderID, displayName)
+	// Also update email column if it exists
+	rt.db.Exec(`UPDATE user_routes SET email=?, updated_at=? WHERE sender_id=? AND (email='' OR email IS NULL OR email!=?)`,
+		email, now, senderID, email)
 }
 
 func (rt *RouteTable) Count() int {
@@ -3468,9 +4275,11 @@ type InboundProxy struct {
 	limiter    *RateLimiter    // v3.3 限流器，nil 表示不限流
 	metrics    *MetricsCollector // v3.4 指标采集器
 	ruleHits   *RuleHitStats   // v3.6 规则命中统计
+	userCache  *UserInfoCache  // v3.9 用户信息缓存
+	policyEng  *RoutePolicyEngine // v3.9 路由策略引擎
 }
 
-func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats) *InboundProxy {
+func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *InboundProxy {
 	wl := make(map[string]bool)
 	for _, id := range cfg.Whitelist { wl[id] = true }
 	mode := cfg.Mode
@@ -3483,7 +4292,7 @@ func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, log
 		channel: channel, engine: engine, logger: logger, pool: pool, routes: routes,
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
 		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg, limiter: limiter,
-		metrics: metrics, ruleHits: ruleHits,
+		metrics: metrics, ruleHits: ruleHits, userCache: userCache, policyEng: policyEng,
 	}
 }
 
@@ -3521,13 +4330,51 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					}
 				}
 			} else {
-				upstreamID = ip.pool.SelectUpstream(ip.policy)
-				if upstreamID != "" {
-					ip.routes.Bind(senderID, appID, upstreamID)
-					ip.pool.IncrUserCount(upstreamID, 1)
-					log.Printf("[桥接路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
+				// v3.9: 先尝试策略匹配
+				policyMatched := false
+				if ip.policyEng != nil && ip.userCache != nil {
+					if info := ip.userCache.GetCached(senderID); info != nil {
+						if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" {
+							if ip.pool.IsHealthy(pUID) {
+								upstreamID = pUID
+								ip.routes.Bind(senderID, appID, upstreamID)
+								ip.pool.IncrUserCount(upstreamID, 1)
+								policyMatched = true
+								log.Printf("[桥接路由] 策略匹配绑定 sender=%s app=%s -> %s (email=%s dept=%s)", senderID, appID, upstreamID, info.Email, info.Department)
+							}
+						}
+					}
+				}
+				if !policyMatched {
+					upstreamID = ip.pool.SelectUpstream(ip.policy)
+					if upstreamID != "" {
+						ip.routes.Bind(senderID, appID, upstreamID)
+						ip.pool.IncrUserCount(upstreamID, 1)
+						log.Printf("[桥接路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
+					}
 				}
 			}
+		}
+
+		// v3.9: 异步获取用户信息
+		if senderID != "" && ip.userCache != nil {
+			go func(sid, aID string) {
+				defer func() { recover() }()
+				info, err := ip.userCache.GetOrFetch(sid)
+				if err == nil && info != nil {
+					ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
+					// 如果还没通过策略匹配路由，尝试策略匹配
+					if ip.policyEng != nil {
+						if _, found := ip.routes.Lookup(sid, aID); !found {
+							if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+								ip.routes.Bind(sid, aID, pUID)
+								ip.pool.IncrUserCount(pUID, 1)
+								log.Printf("[桥接路由] 异步策略匹配绑定 sender=%s -> %s", sid, pUID)
+							}
+						}
+					}
+				}
+			}(senderID, appID)
 		}
 
 		// 限流检查（安检之前）
@@ -3814,14 +4661,52 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
-			// 新用户分配
-			upstreamID = ip.pool.SelectUpstream(ip.policy)
-			if upstreamID != "" {
-				ip.routes.Bind(senderID, appID, upstreamID)
-				ip.pool.IncrUserCount(upstreamID, 1)
-				log.Printf("[路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
+			// v3.9: 先尝试策略匹配
+			policyMatched := false
+			if ip.policyEng != nil && ip.userCache != nil {
+				if info := ip.userCache.GetCached(senderID); info != nil {
+					if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" {
+						if ip.pool.IsHealthy(pUID) {
+							upstreamID = pUID
+							ip.routes.Bind(senderID, appID, upstreamID)
+							ip.pool.IncrUserCount(upstreamID, 1)
+							policyMatched = true
+							log.Printf("[路由] 策略匹配绑定 sender=%s app=%s -> %s (email=%s dept=%s)", senderID, appID, upstreamID, info.Email, info.Department)
+						}
+					}
+				}
+			}
+			if !policyMatched {
+				// 新用户分配
+				upstreamID = ip.pool.SelectUpstream(ip.policy)
+				if upstreamID != "" {
+					ip.routes.Bind(senderID, appID, upstreamID)
+					ip.pool.IncrUserCount(upstreamID, 1)
+					log.Printf("[路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
+				}
 			}
 		}
+	}
+
+	// v3.9: 异步获取用户信息
+	if senderID != "" && ip.userCache != nil {
+		go func(sid, aID string) {
+			defer func() { recover() }()
+			info, err := ip.userCache.GetOrFetch(sid)
+			if err == nil && info != nil {
+				ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
+				// 如果还没通过策略匹配路由，尝试策略匹配
+				if ip.policyEng != nil {
+					if _, found := ip.routes.Lookup(sid, aID); !found {
+						if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+							ip.routes.Bind(sid, aID, pUID)
+							ip.pool.IncrUserCount(pUID, 1)
+							log.Printf("[路由] 异步策略匹配绑定 sender=%s -> %s", sid, pUID)
+						}
+					}
+				}
+			}
+		}(senderID, appID)
 	}
 
 	// 获取代理
@@ -4049,15 +4934,18 @@ type ManagementAPI struct {
 	channel        ChannelPlugin       // v3.4 通道引用
 	metrics        *MetricsCollector   // v3.4 指标采集器
 	ruleHits       *RuleHitStats       // v3.6 规则命中统计
+	userCache      *UserInfoCache      // v3.9 用户信息缓存
+	policyEng      *RoutePolicyEngine  // v3.9 路由策略引擎
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger,
 		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		cfg: cfg, cfgPath: cfgPath,
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
+		userCache: userCache, policyEng: policyEng,
 	}
 }
 
@@ -4166,6 +5054,19 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleRuleHits(w, r)
 	case path == "/api/v1/rules/hits/reset" && method == "POST":
 		api.handleRuleHitsReset(w, r)
+	// v3.9 用户信息 API
+	case path == "/api/v1/users" && method == "GET":
+		api.handleListUsers(w, r)
+	case path == "/api/v1/users/refresh-all" && method == "POST":
+		api.handleRefreshAllUsers(w, r)
+	case strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/refresh") && method == "POST":
+		api.handleRefreshUser(w, r)
+	case strings.HasPrefix(path, "/api/v1/users/") && method == "GET":
+		api.handleGetUser(w, r)
+	case path == "/api/v1/route-policies" && method == "GET":
+		api.handleListRoutePolicies(w, r)
+	case path == "/api/v1/route-policies/test" && method == "POST":
+		api.handleTestRoutePolicy(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -4545,6 +5446,149 @@ func (api *ManagementAPI) handleRuleHitsReset(w http.ResponseWriter, r *http.Req
 	jsonResponse(w, 200, map[string]string{"status": "reset"})
 }
 
+// ============================================================
+// v3.9 Management API 新端点
+// ============================================================
+
+// handleListUsers GET /api/v1/users — 列出所有已知用户
+func (api *ManagementAPI) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	if api.userCache == nil {
+		jsonResponse(w, 200, map[string]interface{}{"users": []interface{}{}, "total": 0, "message": "user info provider not configured"})
+		return
+	}
+	department := r.URL.Query().Get("department")
+	email := r.URL.Query().Get("email")
+	users := api.userCache.ListAll(department, email)
+	if users == nil {
+		users = []*UserInfo{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"users": users, "total": len(users)})
+}
+
+// handleGetUser GET /api/v1/users/:sender_id — 查单个用户
+func (api *ManagementAPI) handleGetUser(w http.ResponseWriter, r *http.Request) {
+	if api.userCache == nil {
+		jsonResponse(w, 404, map[string]string{"error": "user info provider not configured"})
+		return
+	}
+	senderID := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+	senderID = strings.TrimSuffix(senderID, "/refresh")
+	if senderID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "sender_id required"})
+		return
+	}
+	info := api.userCache.GetByID(senderID)
+	if info == nil {
+		jsonResponse(w, 404, map[string]string{"error": "user not found"})
+		return
+	}
+	jsonResponse(w, 200, info)
+}
+
+// handleRefreshUser POST /api/v1/users/:sender_id/refresh — 强制刷新
+func (api *ManagementAPI) handleRefreshUser(w http.ResponseWriter, r *http.Request) {
+	if api.userCache == nil {
+		jsonResponse(w, 400, map[string]string{"error": "user info provider not configured"})
+		return
+	}
+	// Extract sender_id: /api/v1/users/{sender_id}/refresh
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+	senderID := strings.TrimSuffix(path, "/refresh")
+	if senderID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "sender_id required"})
+		return
+	}
+	info, err := api.userCache.Refresh(senderID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	// 更新路由表
+	api.routes.UpdateUserInfo(senderID, info.Name, info.Email, info.Department)
+	jsonResponse(w, 200, info)
+}
+
+// handleRefreshAllUsers POST /api/v1/users/refresh-all — 刷新所有
+func (api *ManagementAPI) handleRefreshAllUsers(w http.ResponseWriter, r *http.Request) {
+	if api.userCache == nil {
+		jsonResponse(w, 400, map[string]string{"error": "user info provider not configured"})
+		return
+	}
+	success, failed := api.userCache.RefreshAll()
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":  "completed",
+		"success": success,
+		"failed":  failed,
+	})
+}
+
+// handleListRoutePolicies GET /api/v1/route-policies — 列出路由策略
+func (api *ManagementAPI) handleListRoutePolicies(w http.ResponseWriter, r *http.Request) {
+	if api.policyEng == nil {
+		jsonResponse(w, 200, map[string]interface{}{"policies": []interface{}{}, "total": 0})
+		return
+	}
+	policies := api.policyEng.ListPolicies()
+	jsonResponse(w, 200, map[string]interface{}{"policies": policies, "total": len(policies)})
+}
+
+// handleTestRoutePolicy POST /api/v1/route-policies/test — 测试策略匹配
+func (api *ManagementAPI) handleTestRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SenderID string `json:"sender_id"`
+		AppID    string `json:"app_id"`
+		Email    string `json:"email"`
+		Department string `json:"department"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	// 构建 UserInfo（优先用请求中的字段，其次查缓存）
+	var info *UserInfo
+	if req.Email != "" || req.Department != "" {
+		info = &UserInfo{
+			SenderID:   req.SenderID,
+			Email:      req.Email,
+			Department: req.Department,
+		}
+	} else if api.userCache != nil && req.SenderID != "" {
+		info = api.userCache.GetCached(req.SenderID)
+	}
+	if info == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"matched":  false,
+			"message":  "no user info available for matching",
+		})
+		return
+	}
+
+	if api.policyEng == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"matched":  false,
+			"message":  "no route policies configured",
+		})
+		return
+	}
+
+	idx, policy, matched := api.policyEng.TestMatch(info, req.AppID)
+	if !matched {
+		jsonResponse(w, 200, map[string]interface{}{
+			"matched":   false,
+			"user_info": info,
+		})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"matched":      true,
+		"policy_index": idx,
+		"policy":       policy,
+		"upstream_id":  policy.UpstreamID,
+		"user_info":    info,
+	})
+}
+
 // handleListInboundRules GET /api/v1/inbound-rules — 列出当前入站规则
 func (api *ManagementAPI) handleListInboundRules(w http.ResponseWriter, r *http.Request) {
 	rules := api.inboundEngine.ListRules()
@@ -4731,6 +5775,19 @@ func initDB(dbPath string) (*sql.DB, error) {
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)
 
+	// v3.9 user_info_cache table
+	db.Exec(`CREATE TABLE IF NOT EXISTS user_info_cache (
+		sender_id TEXT PRIMARY KEY,
+		name TEXT DEFAULT '',
+		email TEXT DEFAULT '',
+		department TEXT DEFAULT '',
+		avatar TEXT DEFAULT '',
+		fetched_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_email ON user_info_cache(email)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_dept ON user_info_cache(department)`)
+
 	return db, nil
 }
 
@@ -4748,6 +5805,7 @@ func migrateUserRoutes(db *sql.DB) {
 			upstream_id TEXT NOT NULL,
 			department TEXT DEFAULT '',
 			display_name TEXT DEFAULT '',
+			email TEXT DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			PRIMARY KEY (sender_id, app_id)
@@ -4755,6 +5813,7 @@ func migrateUserRoutes(db *sql.DB) {
 		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id)`)
 		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_app ON user_routes(app_id)`)
 		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_dept ON user_routes(department)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_email ON user_routes(email)`)
 		return
 	}
 
@@ -4775,10 +5834,12 @@ func migrateUserRoutes(db *sql.DB) {
 	}
 
 	if hasAppID {
-		// 已经是新 schema，只需确保索引存在
+		// 已经是新 schema，只需确保索引存在 + v3.9 email 列
+		db.Exec(`ALTER TABLE user_routes ADD COLUMN email TEXT DEFAULT ''`)
 		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id)`)
 		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_app ON user_routes(app_id)`)
 		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_dept ON user_routes(department)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_email ON user_routes(email)`)
 		return
 	}
 
@@ -4811,6 +5872,7 @@ func migrateUserRoutes(db *sql.DB) {
 		upstream_id TEXT NOT NULL,
 		department TEXT DEFAULT '',
 		display_name TEXT DEFAULT '',
+		email TEXT DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL,
 		PRIMARY KEY (sender_id, app_id)
@@ -4818,10 +5880,11 @@ func migrateUserRoutes(db *sql.DB) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_upstream ON user_routes(upstream_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_app ON user_routes(app_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_dept ON user_routes(department)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_routes_email ON user_routes(email)`)
 
 	// 3. 迁移数据（旧数据 app_id 设为空字符串）
 	for _, r := range oldData {
-		db.Exec(`INSERT INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,'','',?,?)`,
+		db.Exec(`INSERT INTO user_routes (sender_id, app_id, upstream_id, department, display_name, email, created_at, updated_at) VALUES(?,?,?,'','','',?,?)`,
 			r.senderID, "", r.upstreamID, r.createdAt, r.updatedAt)
 	}
 
@@ -4885,7 +5948,7 @@ func main() {
 		metricsDesc = cfg.ManagementListen + "/metrics (Prometheus)"
 	}
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│                  配置摘要 v3.8                   │")
+	fmt.Println("│                  配置摘要 v3.9                   │")
 	fmt.Println("├─────────────────────────────────────────────────┤")
 	fmt.Printf("│ 消息通道:    %-35s│\n", channelName)
 	fmt.Printf("│ 接入模式:    %-35s│\n", modeDesc)
@@ -4993,15 +6056,30 @@ func main() {
 	ruleHits := NewRuleHitStats()
 	log.Println("[初始化] 规则命中统计器就绪")
 
+	// v3.9 初始化用户信息提供者和缓存
+	var userCache *UserInfoCache
+	var policyEng *RoutePolicyEngine
+	provider := createUserInfoProvider(cfg)
+	if provider != nil {
+		userCache = NewUserInfoCache(db, provider, 24*time.Hour)
+		log.Printf("[初始化] 用户信息缓存就绪 (provider=%T, TTL=24h)", provider)
+	} else {
+		log.Println("[初始化] 用户信息获取未配置 (缺少 app_id/app_secret)")
+	}
+	if len(cfg.RoutePolicies) > 0 {
+		policyEng = NewRoutePolicyEngine(cfg.RoutePolicies)
+		log.Printf("[初始化] 路由策略引擎就绪 (%d 条策略)", len(cfg.RoutePolicies))
+	}
+
 	// 创建入站代理
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng)
 
 	// 创建出站代理
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 
 	// 创建管理 API
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng)
 
 	// 启动健康检查
 	ctx, cancel := context.WithCancel(context.Background())
@@ -5057,7 +6135,7 @@ func main() {
 		}
 	}()
 
-	log.Println("[启动完成] 龙虾卫士 v3.8 已就绪，等待请求...")
+	log.Println("[启动完成] 龙虾卫士 v3.9 已就绪，等待请求...")
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)

@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v3.6 配置文件（示例）
+# 龙虾卫士 lobster-guard v3.9 配置文件（示例）
 # ============================================================
 
 # ============================================================
@@ -50,6 +50,8 @@ callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
 # wecom_token: "YOUR_WECOM_TOKEN"
 # wecom_encoding_aes_key: "YOUR_WECOM_ENCODING_AES_KEY"  # 43字符 base64
 # wecom_corp_id: "YOUR_WECOM_CORP_ID"
+# --- 用户信息获取（v3.9，可选） ---
+# wecom_corp_secret: "YOUR_WECOM_CORP_SECRET"
 
 # ============================================================
 # 通用HTTP通道配置 (channel: generic)
@@ -131,6 +133,49 @@ heartbeat_timeout_count: 3
 # ============================================================
 route_default_policy: "least-users"    # least-users | round-robin
 route_persist: true
+
+# ============================================================
+# 蓝信用户信息获取（v3.9，可选）
+# 配置后自动从蓝信 API 获取用户姓名、邮箱、部门
+# ============================================================
+# lanxin_app_id: "2285568-213248"
+# lanxin_app_secret: "YOUR_LANXIN_APP_SECRET"
+
+# ============================================================
+# 路由策略（v3.9 增强：基于邮箱/部门/Bot 的策略匹配）
+# 匹配顺序：精确路由 → 策略匹配 → 动态分配
+# ============================================================
+# route_policies:
+#   # 按部门分配
+#   - match:
+#       department: "安全研究院"
+#     upstream_id: "openclaw-security"
+#
+#   # 按邮箱后缀分配
+#   - match:
+#       email_suffix: "@security.qianxin.com"
+#     upstream_id: "openclaw-security"
+#
+#   # 按邮箱精确匹配
+#   - match:
+#       email: "zhangzhuo@qianxin.com"
+#     upstream_id: "openclaw-vip"
+#
+#   # 按 Bot + 部门组合
+#   - match:
+#       app_id: "alpha-3588352-9076736"
+#       department: "产品中心"
+#     upstream_id: "openclaw-product"
+#
+#   # 按 Bot（所有用户访问这个 Bot 走同一上游）
+#   - match:
+#       app_id: "gamma-3588352-7654321"
+#     upstream_id: "openclaw-public"
+#
+#   # 默认策略（匹配所有未命中的用户）
+#   - match:
+#       default: true
+#     upstream_id: ""  # 空表示使用 route_default_policy 动态分配
 
 # Bot 注册（可选，用于 Dashboard 显示友好名称）
 # 不配置则自动从入站消息中学习
