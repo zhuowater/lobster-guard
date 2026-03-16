@@ -4007,6 +4007,7 @@ func TestUserInfoCache_GetOrFetch(t *testing.T) {
 		email TEXT DEFAULT '',
 		department TEXT DEFAULT '',
 		avatar TEXT DEFAULT '',
+		mobile TEXT DEFAULT '',
 		fetched_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
@@ -4071,6 +4072,7 @@ func TestUserInfoCache_ListAll(t *testing.T) {
 		email TEXT DEFAULT '',
 		department TEXT DEFAULT '',
 		avatar TEXT DEFAULT '',
+		mobile TEXT DEFAULT '',
 		fetched_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
@@ -4116,7 +4118,7 @@ func TestUserInfoCache_Refresh(t *testing.T) {
 	}
 	defer db.Close()
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_info_cache (
-		sender_id TEXT PRIMARY KEY, name TEXT, email TEXT, department TEXT, avatar TEXT,
+		sender_id TEXT PRIMARY KEY, name TEXT, email TEXT, department TEXT, avatar TEXT, mobile TEXT DEFAULT '',
 		fetched_at TEXT NOT NULL, updated_at TEXT NOT NULL
 	)`)
 
@@ -4384,7 +4386,8 @@ func TestUserInfoManagementAPI(t *testing.T) {
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_info_cache (
 		sender_id TEXT PRIMARY KEY, name TEXT DEFAULT '', email TEXT DEFAULT '',
-		department TEXT DEFAULT '', avatar TEXT DEFAULT '', fetched_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		department TEXT DEFAULT '', avatar TEXT DEFAULT '', mobile TEXT DEFAULT '',
+		fetched_at TEXT NOT NULL, updated_at TEXT NOT NULL
 	)`)
 
 	cfg := &Config{

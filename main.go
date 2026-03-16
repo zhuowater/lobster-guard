@@ -2658,6 +2658,7 @@ type UserInfo struct {
 	SenderID   string `json:"sender_id"`
 	Name       string `json:"name"`
 	Email      string `json:"email"`
+	Mobile     string `json:"mobile,omitempty"`
 	Department string `json:"department"`
 	Avatar     string `json:"avatar,omitempty"`
 	FetchedAt  time.Time `json:"fetched_at,omitempty"`
@@ -2769,8 +2770,8 @@ func (c *UserInfoCache) putMemory(info *UserInfo) {
 func (c *UserInfoCache) loadFromDB(senderID string) (*UserInfo, error) {
 	var info UserInfo
 	var fetchedAt string
-	err := c.db.QueryRow(`SELECT sender_id, name, email, department, avatar, fetched_at FROM user_info_cache WHERE sender_id = ?`, senderID).
-		Scan(&info.SenderID, &info.Name, &info.Email, &info.Department, &info.Avatar, &fetchedAt)
+	err := c.db.QueryRow(`SELECT sender_id, name, email, department, avatar, mobile, fetched_at FROM user_info_cache WHERE sender_id = ?`, senderID).
+		Scan(&info.SenderID, &info.Name, &info.Email, &info.Department, &info.Avatar, &info.Mobile, &fetchedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -2781,8 +2782,8 @@ func (c *UserInfoCache) loadFromDB(senderID string) (*UserInfo, error) {
 
 func (c *UserInfoCache) saveToDB(info *UserInfo) {
 	now := time.Now().Format(time.RFC3339)
-	c.db.Exec(`INSERT OR REPLACE INTO user_info_cache (sender_id, name, email, department, avatar, fetched_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
-		info.SenderID, info.Name, info.Email, info.Department, info.Avatar, info.FetchedAt.Format(time.RFC3339), now)
+	c.db.Exec(`INSERT OR REPLACE INTO user_info_cache (sender_id, name, email, department, avatar, mobile, fetched_at, updated_at) VALUES(?,?,?,?,?,?,?,?)`,
+		info.SenderID, info.Name, info.Email, info.Department, info.Avatar, info.Mobile, info.FetchedAt.Format(time.RFC3339), now)
 }
 
 // ListAll 列出所有缓存用户
@@ -2790,7 +2791,7 @@ func (c *UserInfoCache) ListAll(department, email string) []*UserInfo {
 	if c.db == nil {
 		return nil
 	}
-	query := `SELECT sender_id, name, email, department, avatar, fetched_at FROM user_info_cache WHERE 1=1`
+	query := `SELECT sender_id, name, email, department, avatar, mobile, fetched_at FROM user_info_cache WHERE 1=1`
 	var args []interface{}
 	if department != "" {
 		query += ` AND department = ?`
@@ -2810,7 +2811,7 @@ func (c *UserInfoCache) ListAll(department, email string) []*UserInfo {
 	for rows.Next() {
 		var info UserInfo
 		var fetchedAt string
-		if rows.Scan(&info.SenderID, &info.Name, &info.Email, &info.Department, &info.Avatar, &fetchedAt) == nil {
+		if rows.Scan(&info.SenderID, &info.Name, &info.Email, &info.Department, &info.Avatar, &info.Mobile, &fetchedAt) == nil {
 			t, _ := time.Parse(time.RFC3339, fetchedAt)
 			info.FetchedAt = t
 			results = append(results, &info)
@@ -2939,7 +2940,8 @@ func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	reqURL := fmt.Sprintf("%s/v1/staffs/%s/fetch?app_token=%s",
+	// 使用详细信息接口 /v1/staffs/:staffid/infor/fetch（返回 email、手机号等）
+	reqURL := fmt.Sprintf("%s/v1/staffs/%s/infor/fetch?app_token=%s",
 		p.upstream, url.PathEscape(senderID), url.QueryEscape(token))
 	resp, err := http.Get(reqURL)
 	if err != nil {
@@ -2951,15 +2953,17 @@ func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
 		ErrCode int    `json:"errCode"`
 		ErrMsg  string `json:"errMsg"`
 		Data    struct {
-			Name       string `json:"name"`
-			Email      string `json:"email"`
-			OrgName    string `json:"orgName"`
-			OrgNameAlt string `json:"orgname"`
-			Avatar     string `json:"avatar"`
-			AvatarURL  string `json:"avatarUrl"`
-			Department []struct {
+			Name        string `json:"name"`
+			Email       string `json:"email"`
+			OrgName     string `json:"orgName"`
+			AvatarURL   string `json:"avatarUrl"`
+			MobilePhone struct {
+				CountryCode string `json:"countryCode"`
+				Number      string `json:"number"`
+			} `json:"mobilePhone"`
+			Departments []struct {
 				Name string `json:"name"`
-			} `json:"department"`
+			} `json:"departments"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -2971,11 +2975,11 @@ func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
 	if result.Data.Name == "" {
 		return nil, nil // 用户不存在
 	}
-	// 部门：拼接所有部门名（逗号分隔），orgName 作为组织名不混入
+	// 部门：拼接所有部门名（逗号分隔）
 	dept := ""
-	if len(result.Data.Department) > 0 {
+	if len(result.Data.Departments) > 0 {
 		var deptNames []string
-		for _, d := range result.Data.Department {
+		for _, d := range result.Data.Departments {
 			if d.Name != "" {
 				deptNames = append(deptNames, d.Name)
 			}
@@ -2984,22 +2988,21 @@ func (p *LanxinUserProvider) FetchUserInfo(senderID string) (*UserInfo, error) {
 	}
 	if dept == "" {
 		dept = result.Data.OrgName
-		if dept == "" {
-			dept = result.Data.OrgNameAlt
-		}
 	}
-	// 头像优先 avatarUrl
-	avatar := result.Data.AvatarURL
-	if avatar == "" {
-		avatar = result.Data.Avatar
+	// 手机号拼接
+	mobile := ""
+	if result.Data.MobilePhone.Number != "" {
+		mobile = result.Data.MobilePhone.CountryCode + "-" + result.Data.MobilePhone.Number
 	}
-	return &UserInfo{
+	info := &UserInfo{
 		SenderID:   senderID,
 		Name:       result.Data.Name,
 		Email:      result.Data.Email,
+		Mobile:     mobile,
 		Department: dept,
-		Avatar:     avatar,
-	}, nil
+		Avatar:     result.Data.AvatarURL,
+	}
+	return info, nil
 }
 
 func (p *LanxinUserProvider) NeedsCredentials() []string {
@@ -5822,6 +5825,7 @@ func initDB(dbPath string) (*sql.DB, error) {
 		email TEXT DEFAULT '',
 		department TEXT DEFAULT '',
 		avatar TEXT DEFAULT '',
+		mobile TEXT DEFAULT '',
 		fetched_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
