@@ -97,6 +97,18 @@
 - [ ] 告警通知（邮件/webhook/企微机器人）
 - [ ] API 文档自动生成（OpenAPI/Swagger）
 
+### v3.7 — 蓝信实战集成验证（已完成 2026-03-16）
+- [x] 修复签名参数位置（从 URL query 提取 timestamp/nonce/signature）
+- [x] 新增 RequestAwareParser 接口支持 HTTP 请求感知的解析
+- [x] 修复 SenderID 字段名兼容（FromStaffId/from）
+- [x] 修复解密结果格式（extractFirstJSON 括号匹配，对齐 OpenClaw 逻辑）
+- [x] 兼容蓝信 encrypt/dataEncrypt 两种密文字段名
+- [x] 兼容 dev_data_signature/signature 两种签名参数名
+- [x] 审计日志新增 app_id 字段（入站从 entryId 提取）
+- [x] 出站接收者识别（从 userIdList/groupId 提取）
+- [x] Dashboard 审计日志表增加 App ID 和消息内容列
+- [x] 双向全链路实测通过：蓝信 → 龙虾卫士 → OpenClaw → 龙虾卫士 → 蓝信
+
 ## 版本发布原则
 
 1. **每个版本都可独立使用** — 不存在"必须升级到 vX 才能用"的情况

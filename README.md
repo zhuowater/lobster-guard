@@ -725,7 +725,7 @@ CGO_ENABLED=1 go test -v -count=1 ./...
 
 ```
 lobster-guard/
-├── main.go                 # 全部源码（~4586 行，含 5 通道插件 + Bridge + Rate Limit + Metrics）
+├── main.go                 # 全部源码（~4725 行，含 5 通道插件 + Bridge + Rate Limit + Metrics + 蓝信实战修复）
 ├── main_test.go            # 单元测试（130 用例）
 ├── integration_test.go     # 集成测试（20 用例）
 ├── dashboard.html          # 管理后台（27KB 单文件）
