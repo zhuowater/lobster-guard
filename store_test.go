@@ -619,7 +619,7 @@ func TestHealthzDuringShutdown(t *testing.T) {
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
 	shutdownMgr := NewShutdownManager(cfg)
 
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, shutdownMgr)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, shutdownMgr, nil)
 
 	// Normal healthz
 	req := httptest.NewRequest("GET", "/healthz", nil)
@@ -666,7 +666,7 @@ func TestBackupAPI_Create(t *testing.T) {
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
 
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil, nil)
 
 	req := httptest.NewRequest("POST", "/api/v1/backup", nil)
 	w := httptest.NewRecorder()
@@ -699,7 +699,7 @@ func TestBackupAPI_ListAndDelete(t *testing.T) {
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
 
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil, nil)
 
 	// Create backup
 	req := httptest.NewRequest("POST", "/api/v1/backup", nil)
@@ -831,7 +831,7 @@ func TestHealthzResponse_Format(t *testing.T) {
 	outEngine := NewOutboundRuleEngine(nil)
 	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
 
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.2.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
@@ -75,11 +75,11 @@
  | |_| (_) | |_) \__ \ ||  __/ | |_____| (_| | |_| | (_| | |  | |_
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
-        龙虾卫士 - AI Agent 安全网关 v4.2.0
+        龙虾卫士 - AI Agent 安全网关 v5.0.0
         入站检测 | 出站拦截 | 亲和路由 | 多通道插件 | Bridge Mode
 
 ┌─────────────────────────────────────────────────┐
-│                  配置摘要 v4.2                   │
+│                  配置摘要 v5.0                   │
 ├─────────────────────────────────────────────────┤
 │ 消息通道:    lanxin                             │
 │ 接入模式:    webhook                            │
@@ -868,7 +868,7 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 - [x] v4.0 — 代码拆分 + 插件化（13 个源文件 + go:embed + 配置验证器）
 - [x] v4.1 — WebSocket 消息流代理（Agent streaming 实时安全扫描）
 - [x] v4.2 — 高可用（优雅关闭 + 健康检查增强 + 数据备份 + Store 抽象层）
-- [ ] v5.0 — 可观测性 + 运维增强（结构化日志 · 请求追踪 · 监控大屏）
+- [x] v5.0 — 可观测性 + 运维增强（结构化日志 · 请求追踪 · 监控大屏）
 - [ ] v5.1 — 智能检测（规则模板库 · 检测链 · 上下文感知 · 可选 LLM）
 - [ ] v5.2 — 多实例部署（PostgresStore · 路由同步 · Leader 选举）
 - [ ] v5.3 — API Gateway 能力（认证中间件 · 灰度发布 · 请求转换）

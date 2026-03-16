@@ -43,6 +43,8 @@ type InboundProxy struct {
 	policyEng  *RoutePolicyEngine // v3.9 路由策略引擎
 	alertNotifier *AlertNotifier // v3.10 告警通知器
 	wsProxy    *WSProxyManager // v4.1 WebSocket 代理管理器
+	realtime   *RealtimeMetrics // v5.0 实时监控
+	slog       *Logger          // v5.0 结构化日志
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *InboundProxy {
@@ -75,6 +77,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		msgText := msg.Text
 		appID := msg.AppID
 		rh := fmt.Sprintf("%x", sha256.Sum256(msg.Raw))
+		bridgeTraceID := GenerateTraceID()
 
 		// 路由决策
 		var upstreamID string
@@ -194,11 +197,19 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		if act == "" {
 			act = "pass"
 		}
-		ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID)
+		ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
 
 		// 指标采集
 		if ip.metrics != nil {
 			ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
+		}
+
+		// v5.0 实时监控
+		if ip.realtime != nil {
+			ip.realtime.RecordInbound(act, time.Since(start).Microseconds())
+			if act == "block" || act == "warn" {
+				ip.realtime.RecordEvent("inbound", senderID, act, reason, bridgeTraceID)
+			}
 		}
 
 		// v3.6 规则命中统计
@@ -246,7 +257,15 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		}
 
 		// 构建 HTTP POST 转发
-		httpResp, err := http.Post(targetURL, "application/json", bytes.NewReader(msg.Raw))
+		// v5.0: 转发请求，携带 X-Trace-ID
+		fwdReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(msg.Raw))
+		if err != nil {
+			log.Printf("[桥接入站] 创建转发请求失败: %v", err)
+			return
+		}
+		fwdReq.Header.Set("Content-Type", "application/json")
+		fwdReq.Header.Set("X-Trace-ID", bridgeTraceID)
+		httpResp, err := http.DefaultClient.Do(fwdReq)
 		if err != nil {
 			log.Printf("[桥接入站] 转发失败: %v", err)
 			return
@@ -294,6 +313,8 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 
+	// v5.0: 生成 trace_id
+	traceID := GenerateTraceID()
 	// v4.1: WebSocket Upgrade 检测
 	if IsWebSocketUpgrade(r) && ip.wsProxy != nil {
 		// 从 query 或 header 提取 sender_id / app_id
@@ -412,6 +433,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Header().Set("Retry-After", "1")
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Trace-ID", traceID)
 			w.WriteHeader(429)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"errcode": 429,
@@ -534,11 +556,19 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	act := detectResult.Action; if act == "" { act = "pass" }
 	_ = eventType
-	ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID)
+	ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, traceID)
 
 	// 指标采集
 	if ip.metrics != nil {
 		ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
+	}
+
+	// v5.0 实时监控
+	if ip.realtime != nil {
+		ip.realtime.RecordInbound(act, time.Since(start).Microseconds())
+		if act == "block" || act == "warn" {
+			ip.realtime.RecordEvent("inbound", senderID, act, reason, traceID)
+		}
 	}
 
 	// v3.6 规则命中统计
@@ -550,7 +580,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 执行决策
 	if detectResult.Action == "block" {
-		log.Printf("[入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
+		if ip.slog != nil {
+			ip.slog.Warn("inbound", "请求拦截", "sender_id", senderID, "action", "block", "reason", reason, "trace_id", traceID)
+		} else {
+			log.Printf("[入站] 拦截 sender=%s reasons=%v trace_id=%s", senderID, detectResult.Reasons, traceID)
+		}
 		// v3.10 告警通知
 		if ip.alertNotifier != nil {
 			rule := strings.Join(detectResult.MatchedRules, ",")
@@ -558,17 +592,53 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		code, respBody := ip.channel.BlockResponseWithMessage(detectResult.Message)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Trace-ID", traceID)
 		w.WriteHeader(code)
 		w.Write(respBody)
 		return
 	}
 	if detectResult.Action == "warn" {
-		log.Printf("[入站] 告警放行 sender=%s reasons=%v", senderID, detectResult.Reasons)
+		if ip.slog != nil {
+			ip.slog.Warn("inbound", "告警放行", "sender_id", senderID, "action", "warn", "reason", reason, "trace_id", traceID)
+		} else {
+			log.Printf("[入站] 告警放行 sender=%s reasons=%v trace_id=%s", senderID, detectResult.Reasons, traceID)
+		}
 	}
 
+	// v5.0: 设置 X-Trace-ID header 传递给上游
+	r.Header.Set("X-Trace-ID", traceID)
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
-	proxy.ServeHTTP(w, r)
+
+	// v5.0: 包装 ResponseWriter 以在响应中添加 X-Trace-ID
+	tw := &traceResponseWriter{ResponseWriter: w, traceID: traceID, headerWritten: false}
+	proxy.ServeHTTP(tw, r)
+}
+
+// ============================================================
+// traceResponseWriter — 在响应中自动添加 X-Trace-ID（v5.0）
+// ============================================================
+
+type traceResponseWriter struct {
+	http.ResponseWriter
+	traceID       string
+	headerWritten bool
+}
+
+func (tw *traceResponseWriter) WriteHeader(statusCode int) {
+	if !tw.headerWritten {
+		tw.ResponseWriter.Header().Set("X-Trace-ID", tw.traceID)
+		tw.headerWritten = true
+	}
+	tw.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (tw *traceResponseWriter) Write(b []byte) (int, error) {
+	if !tw.headerWritten {
+		tw.ResponseWriter.Header().Set("X-Trace-ID", tw.traceID)
+		tw.headerWritten = true
+	}
+	return tw.ResponseWriter.Write(b)
 }
 
 // ============================================================
@@ -585,6 +655,7 @@ type OutboundProxy struct {
 	metrics        *MetricsCollector // v3.4 指标采集器
 	ruleHits       *RuleHitStats     // v3.6 规则命中统计
 	alertNotifier  *AlertNotifier    // v3.10 告警通知器
+	realtime       *RealtimeMetrics  // v5.0 实时监控
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats) (*OutboundProxy, error) {
@@ -673,6 +744,10 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "block", op.channel.Name(), latMs)
 		}
+		if op.realtime != nil {
+			op.realtime.RecordOutbound("block", time.Since(start).Microseconds())
+			op.realtime.RecordEvent("outbound", recipient, "block", result.Reason, "")
+		}
 		// v3.10 告警通知
 		if op.alertNotifier != nil {
 			op.alertNotifier.Notify("outbound", recipient, result.RuleName, text, outAppID)
@@ -688,10 +763,17 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "warn", op.channel.Name(), latMs)
 		}
+		if op.realtime != nil {
+			op.realtime.RecordOutbound("warn", time.Since(start).Microseconds())
+			op.realtime.RecordEvent("outbound", recipient, "warn", result.Reason, "")
+		}
 	case "log":
 		op.logger.Log("outbound", recipient, "log", result.Reason, pv, rh, latMs, upstreamID, outAppID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "log", op.channel.Name(), latMs)
+		}
+		if op.realtime != nil {
+			op.realtime.RecordOutbound("log", time.Since(start).Microseconds())
 		}
 	default:
 		// v1.0 兼容：PII 检测
@@ -704,6 +786,9 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		op.logger.Log("outbound", recipient, action, reason, pv, rh, latMs, upstreamID, outAppID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", action, op.channel.Name(), latMs)
+		}
+		if op.realtime != nil {
+			op.realtime.RecordOutbound(action, time.Since(start).Microseconds())
 		}
 	}
 

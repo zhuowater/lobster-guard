@@ -1,12 +1,16 @@
-// audit.go — AuditLogger、审计日志查询/导出/清理/时间线
-// lobster-guard v4.0 代码拆分
+// audit.go — AuditLogger、审计日志查询/导出/清理/时间线/归档
+// lobster-guard v4.0 代码拆分 + v5.0 trace_id + 归档
 package main
 
 import (
+	"compress/gzip"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,18 +28,22 @@ type AuditLogger struct {
 
 func NewAuditLogger(db *sql.DB) (*AuditLogger, error) {
 	stmt, err := db.Prepare(`INSERT INTO audit_log
-		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`)
+		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id,trace_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil { return nil, err }
 	return &AuditLogger{db: db, stmt: stmt}, nil
 }
 
 func (al *AuditLogger) Log(dir, sender, action, reason, preview, hash string, latMs float64, upstreamID, appID string) {
+	al.LogWithTrace(dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, "")
+}
+
+func (al *AuditLogger) LogWithTrace(dir, sender, action, reason, preview, hash string, latMs float64, upstreamID, appID, traceID string) {
 	go func() {
 		defer func() { recover() }()
 		al.mu.Lock(); defer al.mu.Unlock()
 		if rs := []rune(preview); len(rs) > 200 { preview = string(rs[:200]) + "..." }
-		al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID)
+		al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, traceID)
 	}()
 }
 
@@ -48,15 +56,21 @@ func (al *AuditLogger) QueryLogs(direction, action, senderID string, limit int) 
 	return al.QueryLogsEx(direction, action, senderID, "", "", limit)
 }
 
-// QueryLogsEx 扩展查询：支持 app_id 和全文搜索 q 参数（v3.10）
+// QueryLogsEx 扩展查询：支持 app_id、全文搜索 q 和 trace_id 参数（v3.10 + v5.0）
 func (al *AuditLogger) QueryLogsEx(direction, action, senderID, appID, q string, limit int) ([]map[string]interface{}, error) {
-	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id FROM audit_log WHERE 1=1`
+	return al.QueryLogsExTrace(direction, action, senderID, appID, q, "", limit)
+}
+
+// QueryLogsExTrace 支持 trace_id 筛选
+func (al *AuditLogger) QueryLogsExTrace(direction, action, senderID, appID, q, traceID string, limit int) ([]map[string]interface{}, error) {
+	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
 	var args []interface{}
 	if direction != "" { query += ` AND direction=?`; args = append(args, direction) }
 	if action != "" { query += ` AND action=?`; args = append(args, action) }
 	if senderID != "" { query += ` AND sender_id=?`; args = append(args, senderID) }
 	if appID != "" { query += ` AND app_id=?`; args = append(args, appID) }
 	if q != "" { query += ` AND content_preview LIKE ?`; args = append(args, "%"+q+"%") }
+	if traceID != "" { query += ` AND trace_id=?`; args = append(args, traceID) }
 	query += ` ORDER BY id DESC`
 	if limit <= 0 { limit = 50 }
 	if limit > 10000 { limit = 10000 }
@@ -67,12 +81,12 @@ func (al *AuditLogger) QueryLogsEx(direction, action, senderID, appID, q string,
 	defer rows.Close()
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int; var ts, dir, sid, act, reason, preview, uid, aid string; var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid) != nil { continue }
+		var id int; var ts, dir, sid, act, reason, preview, uid, aid, tid string; var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil { continue }
 		results = append(results, map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
-			"latency_ms": latMs, "upstream_id": uid, "app_id": aid,
+			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
 		})
 	}
 	return results, nil
@@ -187,6 +201,144 @@ func (al *AuditLogger) Stats() map[string]interface{} {
 	return stats
 }
 
+// ============================================================
+// v5.0 审计日志归档
+// ============================================================
+
+// ArchiveLogs 将超过 retentionDays 天的日志导出为压缩 JSON 文件，然后从 SQLite 删除
+func (al *AuditLogger) ArchiveLogs(retentionDays int, archiveDir string) (string, int64, error) {
+	if archiveDir == "" {
+		archiveDir = "/var/lib/lobster-guard/archives/"
+	}
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return "", 0, fmt.Errorf("创建归档目录失败: %w", err)
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
+
+	// 查询待归档的日志
+	rows, err := al.db.Query(`SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE timestamp < ? ORDER BY id ASC`, cutoff)
+	if err != nil {
+		return "", 0, fmt.Errorf("查询待归档日志失败: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []map[string]interface{}
+	var maxID int
+	for rows.Next() {
+		var id int
+		var ts, dir, sid, act, reason, preview, uid, aid, tid string
+		var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil {
+			continue
+		}
+		logs = append(logs, map[string]interface{}{
+			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
+			"action": act, "reason": reason, "content_preview": preview,
+			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
+		})
+		if id > maxID {
+			maxID = id
+		}
+	}
+
+	if len(logs) == 0 {
+		return "", 0, nil // 无需归档
+	}
+
+	// 写入压缩 JSON 文件
+	dateStr := time.Now().UTC().Format("2006-01-02")
+	filename := fmt.Sprintf("audit-%s.json.gz", dateStr)
+	filePath := filepath.Join(archiveDir, filename)
+
+	// 如果文件已存在，追加日期序号
+	if _, err := os.Stat(filePath); err == nil {
+		for i := 1; i < 100; i++ {
+			filename = fmt.Sprintf("audit-%s-%d.json.gz", dateStr, i)
+			filePath = filepath.Join(archiveDir, filename)
+			if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				break
+			}
+		}
+	}
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		return "", 0, fmt.Errorf("创建归档文件失败: %w", err)
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewWriterLevel(f, gzip.BestCompression)
+	if err != nil {
+		return "", 0, fmt.Errorf("创建 gzip writer 失败: %w", err)
+	}
+
+	encoder := json.NewEncoder(gz)
+	for _, l := range logs {
+		if err := encoder.Encode(l); err != nil {
+			gz.Close()
+			return "", 0, fmt.Errorf("写入归档日志失败: %w", err)
+		}
+	}
+	if err := gz.Close(); err != nil {
+		return "", 0, fmt.Errorf("关闭 gzip writer 失败: %w", err)
+	}
+
+	// 从 SQLite 删除已归档的日志
+	result, err := al.db.Exec(`DELETE FROM audit_log WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return filePath, int64(len(logs)), fmt.Errorf("归档文件已创建但删除旧日志失败: %w", err)
+	}
+	deleted, _ := result.RowsAffected()
+
+	return filePath, deleted, nil
+}
+
+// ListArchives 列出归档目录中的所有归档文件
+func ListArchives(archiveDir string) ([]map[string]interface{}, error) {
+	if archiveDir == "" {
+		archiveDir = "/var/lib/lobster-guard/archives/"
+	}
+
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []map[string]interface{}{}, nil
+		}
+		return nil, err
+	}
+
+	var archives []map[string]interface{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json.gz") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		archives = append(archives, map[string]interface{}{
+			"name":     name,
+			"size":     info.Size(),
+			"mod_time": info.ModTime().UTC().Format(time.RFC3339),
+		})
+	}
+
+	// 按修改时间倒序
+	sort.Slice(archives, func(i, j int) bool {
+		return archives[i]["mod_time"].(string) > archives[j]["mod_time"].(string)
+	})
+
+	if archives == nil {
+		archives = []map[string]interface{}{}
+	}
+	return archives, nil
+}
+
 
 // ============================================================
 // 数据库初始化
@@ -238,6 +390,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 	// 为旧表增加 upstream_id 列（v1.0 升级兼容）
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN upstream_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN app_id TEXT DEFAULT ''`)
+	// v5.0: trace_id 列
+	db.Exec(`ALTER TABLE audit_log ADD COLUMN trace_id TEXT DEFAULT ''`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trace ON audit_log(trace_id)`)
 
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)

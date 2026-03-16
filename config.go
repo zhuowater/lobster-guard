@@ -109,6 +109,10 @@ type Config struct {
 	BackupDir          string `yaml:"backup_dir"`           // 备份目录，默认 /var/lib/lobster-guard/backups/
 	BackupMaxCount     int    `yaml:"backup_max_count"`     // 最大备份数，默认 10
 	BackupAutoInterval int    `yaml:"backup_auto_interval"` // 自动备份间隔（小时），0=不自动备份
+	// v5.0 可观测性 + 运维增强
+	LogFormat           string `yaml:"log_format"`            // 日志格式: "text"（默认）或 "json"
+	AuditArchiveEnabled bool   `yaml:"audit_archive_enabled"` // 是否启用审计日志归档
+	AuditArchiveDir     string `yaml:"audit_archive_dir"`     // 归档目录，默认 /var/lib/lobster-guard/archives/
 }
 
 type OutboundRuleConfig struct {
@@ -403,6 +407,11 @@ func validateConfig(cfg *Config) []string {
 	}
 	if cfg.WSMaxConnections < 0 {
 		errs = append(errs, "ws_max_connections 不能为负数")
+	}
+
+	// v5.0 log_format 验证
+	if cfg.LogFormat != "" && cfg.LogFormat != "text" && cfg.LogFormat != "json" {
+		errs = append(errs, fmt.Sprintf("log_format %q 无效，必须是 text 或 json", cfg.LogFormat))
 	}
 
 	return errs

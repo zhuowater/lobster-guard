@@ -116,6 +116,25 @@ tr.row-warn td{background:rgba(255,204,0,0.10)!important}
 <main class="main">
   <!-- 1. 系统状态 -->
   <div class="card cd0"><div class="card-header"><span class="card-icon">📊</span><span class="card-title">系统状态</span><span style="margin-left:auto;font-size:.7rem;color:var(--text-dim)">每 10s 刷新</span></div><div id="healthContent" class="loading">加载中...</div></div>
+  <!-- 1.5 实时监控大屏 (v5.0) -->
+  <div class="card card-full cd0" id="realtimeCard"><div class="card-header"><span class="card-icon">⚡</span><span class="card-title">实时监控</span><span style="margin-left:auto;font-size:.7rem;color:var(--neon-green)">每 3s 刷新</span></div>
+  <div id="realtimeStats" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px"></div>
+  <div style="display:flex;gap:20px;flex-wrap:wrap">
+    <div style="flex:2;min-width:300px">
+      <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">📈 QPS 曲线（最近 60 秒）</div>
+      <div id="realtimeQPS" style="display:flex;align-items:flex-end;gap:1px;height:100px;background:rgba(0,0,0,0.2);border-radius:6px;padding:4px;overflow:hidden"></div>
+      <div style="display:flex;gap:12px;margin-top:4px;font-size:.65rem;color:var(--text-dim)">
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-blue);border-radius:2px;margin-right:2px"></span>入站</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-green);border-radius:2px;margin-right:2px"></span>出站</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-red);border-radius:2px;margin-right:2px"></span>拦截</span>
+      </div>
+    </div>
+    <div style="flex:1;min-width:280px">
+      <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">🚨 攻击实时流</div>
+      <div id="realtimeEvents" style="max-height:160px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:6px;padding:6px"></div>
+    </div>
+  </div>
+  </div>
   <!-- 2. Bridge 状态 -->
   <div class="card cd1 card-hidden" id="bridgeCard"><div class="card-header"><span class="card-icon">🌉</span><span class="card-title">Bridge 状态</span></div><div id="bridgeContent" class="loading">加载中...</div></div>
   <!-- 2.5 WebSocket 连接状态 (v4.1) -->
@@ -171,17 +190,20 @@ tr.row-warn td{background:rgba(255,204,0,0.10)!important}
   <div class="card card-full cd8"><div class="card-header"><span class="card-icon">📋</span><span class="card-title">审计日志</span></div>
   <!-- v3.10 时间线图 -->
   <div id="timelineChart" style="margin-bottom:16px"></div>
-  <div class="filters"><select id="filterDirection" onchange="loadAuditLogs()"><option value="">全部方向</option><option value="inbound">入站</option><option value="outbound">出站</option></select><select id="filterAction" onchange="loadAuditLogs()"><option value="">全部动作</option><option value="pass">Pass</option><option value="block">Block</option><option value="warn">Warn</option></select><input type="text" id="filterSender" placeholder="发送者 ID"/><input type="text" id="filterAppId" placeholder="App ID"/><input type="text" id="filterQ" placeholder="🔍 搜索内容..."/><button class="btn" onclick="loadAuditLogs()">筛选</button><button class="btn btn-green" onclick="exportAudit('csv')">📥 CSV</button><button class="btn btn-green" onclick="exportAudit('json')">📥 JSON</button></div><div id="auditContent" class="loading">加载中...</div>
+  <div class="filters"><select id="filterDirection" onchange="loadAuditLogs()"><option value="">全部方向</option><option value="inbound">入站</option><option value="outbound">出站</option></select><select id="filterAction" onchange="loadAuditLogs()"><option value="">全部动作</option><option value="pass">Pass</option><option value="block">Block</option><option value="warn">Warn</option></select><input type="text" id="filterSender" placeholder="发送者 ID"/><input type="text" id="filterAppId" placeholder="App ID"/><input type="text" id="filterTraceId" placeholder="Trace ID"/><input type="text" id="filterQ" placeholder="🔍 搜索内容..."/><button class="btn" onclick="loadAuditLogs()">筛选</button><button class="btn btn-green" onclick="exportAudit('csv')">📥 CSV</button><button class="btn btn-green" onclick="exportAudit('json')">📥 JSON</button></div><div id="auditContent" class="loading">加载中...</div>
   <!-- v3.10 审计统计 -->
   <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn" onclick="loadAuditStats()">📊 统计</button>
     <button class="btn" onclick="manualCleanup()" style="background:linear-gradient(135deg,var(--neon-red),#cc3355)">🗑️ 清理过期</button>
+    <button class="btn" onclick="manualArchive()" style="background:linear-gradient(135deg,#9b59b6,#8e44ad)">📦 手动归档</button>
+    <button class="btn" onclick="loadArchives()">📂 查看归档</button>
   </div>
   <div id="auditStatsContent" style="margin-top:8px"></div>
+  <div id="archivesContent" style="margin-top:8px"></div>
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<footer class="footer">🦞 龙虾卫士 Lobster Guard v3.6 — 安全网关管理后台<br>Protecting your upstream, one lobster at a time.</footer>
+<footer class="footer">🦞 龙虾卫士 Lobster Guard v5.0 — 安全网关管理后台<br>Protecting your upstream, one lobster at a time.</footer>
 <script>
 var TK='lobster_guard_token',_tt,_hc=null;
 function initToken(){var s=localStorage.getItem(TK);if(s)document.getElementById('tokenInput').value=s}
@@ -563,29 +585,34 @@ function loadAuditLogs(){
   var act=document.getElementById('filterAction').value;
   var sid=document.getElementById('filterSender').value.trim();
   var appId=(document.getElementById('filterAppId')||{}).value||'';appId=appId.trim();
+  var traceId=(document.getElementById('filterTraceId')||{}).value||'';traceId=traceId.trim();
   var q=(document.getElementById('filterQ')||{}).value||'';q=q.trim();
   var params=[];
   if(dir)params.push('direction='+encodeURIComponent(dir));
   if(act)params.push('action='+encodeURIComponent(act));
   if(sid)params.push('sender_id='+encodeURIComponent(sid));
   if(appId)params.push('app_id='+encodeURIComponent(appId));
+  if(traceId)params.push('trace_id='+encodeURIComponent(traceId));
   if(q)params.push('q='+encodeURIComponent(q));
   var qs=params.length?'?'+params.join('&'):'';
   api('/api/v1/audit/logs'+qs).then(function(d){
     var list=d.logs||d||[];if(!Array.isArray(list))list=[];
     if(!list.length){var el=document.getElementById('auditContent');el.innerHTML='<div class="empty">\u6682\u65e0\u65e5\u5fd7\u8bb0\u5f55</div>';el.className='';return}
     var dirMap={'inbound':'\u5165\u7ad9','outbound':'\u51fa\u7ad9'};
-    var h='<div class="table-wrap"><table><thead><tr><th>\u65f6\u95f4</th><th>\u65b9\u5411</th><th>App ID</th><th>\u53d1\u9001\u8005</th><th>\u52a8\u4f5c</th><th>\u5185\u5bb9</th><th>\u539f\u56e0</th><th>\u5ef6\u8fdf</th></tr></thead><tbody>';
+    var h='<div class="table-wrap"><table><thead><tr><th>\u65f6\u95f4</th><th>\u65b9\u5411</th><th>App ID</th><th>\u53d1\u9001\u8005</th><th>\u52a8\u4f5c</th><th>Trace ID</th><th>\u5185\u5bb9</th><th>\u539f\u56e0</th><th>\u5ef6\u8fdf</th></tr></thead><tbody>';
     for(var i=0;i<list.length;i++){
       var l=list[i],action=(l.action||'').toLowerCase();
       var rowClass=action==='block'?' class="row-block"':(action==='warn'?' class="row-warn"':'');
       var preview=l.content_preview||'';
       if(preview.length>80)preview=preview.substring(0,80)+'...';
+      var tid=l.trace_id||'';
+      var tidShort=tid.length>8?tid.substring(0,8)+'...':tid;
       h+='<tr'+rowClass+'><td>'+fmtTime(l.timestamp||l.time||l.created_at)+'</td>'
         +'<td>'+(dirMap[l.direction]||esc(l.direction))+'</td>'
         +'<td style="font-size:.75rem;color:var(--text-dim)">'+esc(l.app_id||'--')+'</td>'
         +'<td>'+esc(l.sender_id||l.sender)+'</td>'
         +'<td><span class="tag '+actTag(l.action)+'">'+esc(l.action)+'</span></td>'
+        +'<td style="font-size:.72rem;font-family:monospace;color:var(--neon-blue);cursor:pointer" title="'+esc(tid)+'" onclick="if(this.title){document.getElementById(\'filterTraceId\').value=this.title;loadAuditLogs()}">'+esc(tidShort||'--')+'</td>'
         +'<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="'+esc(l.content_preview||'')+'">'+esc(preview||'--')+'</td>'
         +'<td>'+esc(l.reason||'--')+'</td>'
         +'<td>'+(l.latency!=null?l.latency+'ms':(l.latency_ms!=null?l.latency_ms+'ms':'--'))+'</td></tr>';
@@ -683,6 +710,95 @@ function loadTimeline(){
   }).catch(function(){document.getElementById('timelineChart').innerHTML=''});
 }
 
+/* ========== v5.0 实时监控 ========== */
+function loadRealtime(){
+  api('/api/v1/metrics/realtime').then(function(d){
+    // 关键指标大字
+    var statsEl=document.getElementById('realtimeStats');
+    var avgLat=d.avg_latency_ms!=null?d.avg_latency_ms.toFixed(1):'0';
+    var bRate=d.block_rate!=null?d.block_rate.toFixed(1):'0';
+    statsEl.innerHTML='<div class="stat-item"><div class="stat-num blue">'+(d.total_requests||0)+'</div><div class="stat-label">总请求 (60s)</div></div>'
+      +'<div class="stat-item"><div class="stat-num red">'+(d.total_blocks||0)+'</div><div class="stat-label">拦截数</div></div>'
+      +'<div class="stat-item"><div class="stat-num yellow">'+bRate+'%</div><div class="stat-label">拦截率</div></div>'
+      +'<div class="stat-item"><div class="stat-num green">'+avgLat+'ms</div><div class="stat-label">平均延迟</div></div>';
+
+    // QPS 柱状图
+    var slots=d.slots||[];
+    var qpsEl=document.getElementById('realtimeQPS');
+    var maxV=1;
+    for(var i=0;i<slots.length;i++){
+      var t=slots[i].inbound+slots[i].outbound;
+      if(t>maxV)maxV=t;
+    }
+    var qh='';
+    for(var i=0;i<slots.length;i++){
+      var s=slots[i];
+      var inH=Math.max(0,Math.round(s.inbound/maxV*80));
+      var outH=Math.max(0,Math.round(s.outbound/maxV*80));
+      var blkH=Math.max(0,Math.round(s.block/maxV*80));
+      var total=s.inbound+s.outbound;
+      qh+='<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0" title="in='+s.inbound+' out='+s.outbound+' blk='+s.block+'">';
+      if(blkH>0)qh+='<div style="width:100%;height:'+blkH+'px;background:var(--neon-red);border-radius:1px;min-height:1px;margin-bottom:0"></div>';
+      if(outH>0)qh+='<div style="width:100%;height:'+outH+'px;background:var(--neon-green);border-radius:1px;min-height:1px"></div>';
+      if(inH>0)qh+='<div style="width:100%;height:'+inH+'px;background:var(--neon-blue);border-radius:1px;min-height:1px"></div>';
+      if(total===0)qh+='<div style="width:100%;height:1px;background:rgba(255,255,255,0.05)"></div>';
+      qh+='</div>';
+    }
+    qpsEl.innerHTML=qh;
+
+    // 攻击实时流
+    var events=d.events||[];
+    var evtEl=document.getElementById('realtimeEvents');
+    if(events.length===0){
+      evtEl.innerHTML='<div style="color:var(--text-dim);font-size:.8rem;text-align:center;padding:20px">暂无攻击事件 ✅</div>';
+    }else{
+      var eh='';
+      for(var i=events.length-1;i>=0;i--){
+        var e=events[i];
+        var ac=e.action==='block'?'var(--neon-red)':'var(--neon-yellow)';
+        var dirL=e.direction==='inbound'?'入':'出';
+        var tid=e.trace_id?e.trace_id.substring(0,8):'--';
+        eh+='<div style="padding:3px 6px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:.75rem;display:flex;gap:6px;align-items:center">';
+        eh+='<span style="color:var(--text-dim);font-size:.65rem">'+e.time.substring(11,19)+'</span>';
+        eh+='<span style="color:'+ac+';font-weight:600;font-size:.7rem">'+esc(e.action)+'</span>';
+        eh+='<span style="color:var(--text-dim)">['+dirL+']</span>';
+        eh+='<span>'+esc(e.sender_id||'--')+'</span>';
+        eh+='<span style="color:var(--text-dim);font-size:.7rem;font-family:monospace">'+esc(tid)+'</span>';
+        eh+='</div>';
+      }
+      evtEl.innerHTML=eh;
+    }
+  }).catch(function(){});
+}
+
+/* ========== v5.0 归档管理 ========== */
+function loadArchives(){
+  api('/api/v1/audit/archives').then(function(d){
+    var list=d.archives||[];
+    var el=document.getElementById('archivesContent');
+    if(!list.length){el.innerHTML='<div style="color:var(--text-dim);font-size:.82rem;padding:8px">暂无归档文件</div>';return}
+    var h='<div style="font-size:.82rem;color:var(--neon-blue);font-weight:600;margin-bottom:6px">📂 归档文件 ('+list.length+' 个)</div>';
+    h+='<div class="table-wrap"><table><tr><th>文件名</th><th>大小</th><th>时间</th><th>操作</th></tr>';
+    for(var i=0;i<list.length;i++){
+      var a=list[i];
+      var sizeKB=Math.round(a.size/1024);
+      var sizeStr=sizeKB>1024?(sizeKB/1024).toFixed(1)+' MB':sizeKB+' KB';
+      h+='<tr><td style="font-family:monospace;font-size:.8rem">'+esc(a.name)+'</td><td>'+sizeStr+'</td><td>'+fmtTime(a.mod_time)+'</td>';
+      h+='<td><a href="/api/v1/audit/archives/'+encodeURIComponent(a.name)+'" class="btn" style="padding:2px 8px;font-size:.7rem;text-decoration:none" target="_blank">下载</a></td></tr>';
+    }
+    h+='</table></div>';
+    el.innerHTML=h;
+  }).catch(function(e){showToast('加载归档列表失败: '+e.message,'error')});
+}
+function manualArchive(){
+  if(!confirm('确认手动归档过期日志？'))return;
+  api('/api/v1/audit/archive',{method:'POST'}).then(function(d){
+    if(d.status==='no_data'){showToast('没有需要归档的日志','success');return}
+    showToast('归档完成：已归档 '+d.deleted+' 条','success');
+    loadAuditLogs();loadAuditStats();loadArchives();
+  }).catch(function(e){showToast('归档失败: '+e.message,'error')});
+}
+
 /* ========== Refresh All ========== */
 function refreshAll(){
   loadHealth();
@@ -698,11 +814,12 @@ function refreshAll(){
   loadAuditLogs();
   loadTimeline();
   loadWSConnections();
+  loadRealtime();
 }
 
 /* ========== WebSocket 连接状态 (v4.1) ========== */
 function loadWSConnections(){
-  apiFetch('/api/v1/ws/connections').then(function(d){
+  api('/api/v1/ws/connections').then(function(d){
     if(!d)return;
     var el=document.getElementById('wsContent');
     var h='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">';
@@ -738,6 +855,7 @@ document.addEventListener('DOMContentLoaded',function(){
   refreshAll();
   setInterval(function(){loadHealth();loadWSConnections()},10000);
   setInterval(function(){loadUpstreams();loadRoutes();loadStats();loadRateLimitStats();loadRuleHits();loadAuditLogs();loadTimeline()},30000);
+  setInterval(function(){loadRealtime()},3000);
 });
 </script>
 </body>

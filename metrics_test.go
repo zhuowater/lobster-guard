@@ -134,7 +134,7 @@ func TestMetricsCollector_WritePrometheus(t *testing.T) {
 		`lobster_guard_rate_limit_total{decision="allowed"} 1`,
 		`lobster_guard_rate_limit_total{decision="denied"} 1`,
 		"lobster_guard_uptime_seconds",
-		`lobster_guard_info{version="4.1.0",channel="lanxin",mode="webhook"} 1`,
+		`lobster_guard_info{version="`+AppVersion+`",channel="lanxin",mode="webhook"} 1`,
 	}
 
 	for _, check := range checks {
@@ -166,7 +166,7 @@ func TestMetricsCollector_WritePrometheus_WithBridge(t *testing.T) {
 	if !strings.Contains(output, "lobster_guard_bridge_messages_total 1") {
 		t.Error("bridge messages should be 1")
 	}
-	if !strings.Contains(output, `lobster_guard_info{version="4.1.0",channel="feishu",mode="bridge"} 1`) {
+	if !strings.Contains(output, `lobster_guard_info{version="`+AppVersion+`",channel="feishu",mode="bridge"} 1`) {
 		t.Error("info metric should have feishu and bridge")
 	}
 }
@@ -211,7 +211,7 @@ func TestMetricsEndpoint(t *testing.T) {
 
 	engine := NewRuleEngine()
 	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, metrics, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, metrics, nil, nil, nil, nil, nil, nil, nil)
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, metrics, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// 记录一些指标
 	metrics.RecordRequest("inbound", "pass", "generic", 5.0)
@@ -282,7 +282,7 @@ func TestMetricsEndpoint_Disabled(t *testing.T) {
 
 	engine := NewRuleEngine()
 	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil)
-	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, nil, nil, nil, nil, nil, nil, nil, nil) // metrics=nil
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, nil, nil, nil, nil, nil, nil, nil, nil, nil) // metrics=nil
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	rec := httptest.NewRecorder()

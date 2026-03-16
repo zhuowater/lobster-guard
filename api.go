@@ -40,9 +40,10 @@ type ManagementAPI struct {
 	wsProxy        *WSProxyManager     // v4.1 WebSocket 代理管理器
 	store          Store               // v4.2 存储抽象层
 	shutdownMgr    *ShutdownManager    // v4.2 关闭管理器
+	realtime       *RealtimeMetrics    // v5.0 实时监控
 }
 
-func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager) *ManagementAPI {
+func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
 	return &ManagementAPI{
 		pool: pool, routes: routes, logger: logger,
 		inboundEngine: inboundEngine, outboundEngine: outboundEngine,
@@ -50,7 +51,7 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 		managementToken: cfg.ManagementToken, registrationToken: cfg.RegistrationToken,
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
 		userCache: userCache, policyEng: policyEng, alertNotifier: alertNotifier,
-		wsProxy: wsProxy, store: store, shutdownMgr: shutdownMgr,
+		wsProxy: wsProxy, store: store, shutdownMgr: shutdownMgr, realtime: realtime,
 	}
 }
 
@@ -157,12 +158,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAuditStats(w, r)
 	case path == "/api/v1/audit/timeline" && method == "GET":
 		api.handleAuditTimeline(w, r)
+	case path == "/api/v1/audit/archives" && method == "GET":
+		api.handleAuditArchives(w, r)
+	case strings.HasPrefix(path, "/api/v1/audit/archives/") && method == "GET":
+		api.handleAuditArchiveDownload(w, r)
+	case path == "/api/v1/audit/archive" && method == "POST":
+		api.handleAuditArchiveNow(w, r)
 	case path == "/api/v1/stats" && method == "GET":
 		api.handleStats(w, r)
 	case path == "/api/v1/rate-limit/stats" && method == "GET":
 		api.handleRateLimitStats(w, r)
 	case path == "/api/v1/rate-limit/reset" && method == "POST":
 		api.handleRateLimitReset(w, r)
+	case path == "/api/v1/metrics/realtime" && method == "GET":
+		api.handleRealtimeMetrics(w, r)
 	case path == "/api/v1/rules/hits" && method == "GET":
 		api.handleRuleHits(w, r)
 	case path == "/api/v1/rules/hits/reset" && method == "POST":
@@ -531,11 +540,12 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	senderID := r.URL.Query().Get("sender_id")
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
+	traceID := r.URL.Query().Get("trace_id")
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil { limit = n }
 	}
-	logs, err := api.logger.QueryLogsEx(direction, action, senderID, appID, q, limit)
+	logs, err := api.logger.QueryLogsExTrace(direction, action, senderID, appID, q, traceID, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -1090,5 +1100,96 @@ func (api *ManagementAPI) handleDeleteBackup(w http.ResponseWriter, r *http.Requ
 
 	log.Printf("[备份] 已删除备份: %s", name)
 	jsonResponse(w, 200, map[string]string{"status": "deleted", "name": name})
+}
+
+// ============================================================
+// v5.0 实时监控 API
+// ============================================================
+
+// handleRealtimeMetrics GET /api/v1/metrics/realtime — 返回最近 60 秒逐秒统计
+func (api *ManagementAPI) handleRealtimeMetrics(w http.ResponseWriter, r *http.Request) {
+	if api.realtime == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"slots":  []interface{}{},
+			"events": []interface{}{},
+		})
+		return
+	}
+	snapshot := api.realtime.Snapshot()
+	jsonResponse(w, 200, snapshot)
+}
+
+// ============================================================
+// v5.0 审计日志归档 API
+// ============================================================
+
+// handleAuditArchives GET /api/v1/audit/archives — 列出归档文件
+func (api *ManagementAPI) handleAuditArchives(w http.ResponseWriter, r *http.Request) {
+	archiveDir := api.cfg.AuditArchiveDir
+	if archiveDir == "" {
+		archiveDir = "/var/lib/lobster-guard/archives/"
+	}
+	archives, err := ListArchives(archiveDir)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"archives": archives, "total": len(archives)})
+}
+
+// handleAuditArchiveDownload GET /api/v1/audit/archives/:name — 下载归档文件
+func (api *ManagementAPI) handleAuditArchiveDownload(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/audit/archives/")
+	if name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "archive name required"})
+		return
+	}
+	// 安全检查：不允许路径穿越
+	if strings.Contains(name, "/") || strings.Contains(name, "..") {
+		jsonResponse(w, 400, map[string]string{"error": "invalid archive name"})
+		return
+	}
+	archiveDir := api.cfg.AuditArchiveDir
+	if archiveDir == "" {
+		archiveDir = "/var/lib/lobster-guard/archives/"
+	}
+	filePath := archiveDir + name
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		jsonResponse(w, 404, map[string]string{"error": "archive not found"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", name))
+	http.ServeFile(w, r, filePath)
+}
+
+// handleAuditArchiveNow POST /api/v1/audit/archive — 手动触发归档
+func (api *ManagementAPI) handleAuditArchiveNow(w http.ResponseWriter, r *http.Request) {
+	archiveDir := api.cfg.AuditArchiveDir
+	if archiveDir == "" {
+		archiveDir = "/var/lib/lobster-guard/archives/"
+	}
+	retentionDays := api.cfg.AuditRetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	path, deleted, err := api.logger.ArchiveLogs(retentionDays, archiveDir)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if path == "" {
+		jsonResponse(w, 200, map[string]interface{}{
+			"status":  "no_data",
+			"message": "没有需要归档的日志",
+		})
+		return
+	}
+	log.Printf("[归档] 手动归档完成: %s，删除 %d 条", path, deleted)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":  "archived",
+		"path":    path,
+		"deleted": deleted,
+	})
 }
 

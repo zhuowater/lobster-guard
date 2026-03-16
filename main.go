@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "4.2.0"
+	AppVersion = "5.0.0"
 )
 
 var startTime = time.Now()
@@ -42,7 +42,17 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "配置文件路径")
 	genRulesFile := flag.String("gen-rules", "", "生成默认入站规则文件到指定路径")
 	restorePath := flag.String("restore", "", "从备份文件恢复数据库后启动")
+	checkConfig := flag.Bool("check-config", false, "验证配置文件并退出")
+	dumpRoutes := flag.Bool("dump-routes", false, "打印当前路由表并退出")
+	dumpRules := flag.Bool("dump-rules", false, "打印当前入站+出站规则并退出")
+	showVersion := flag.Bool("version", false, "打印版本号并退出")
 	flag.Parse()
+
+	// -version: 打印版本号并退出
+	if *showVersion {
+		fmt.Printf("%s v%s\n", AppName, AppVersion)
+		return
+	}
 
 	// -gen-rules: 导出默认规则文件后退出
 	if *genRulesFile != "" {
@@ -69,6 +79,63 @@ func main() {
 		for _, e := range errs { log.Printf("[配置错误] ❌ %s", e) }
 		log.Fatalf("配置验证失败，共 %d 个错误", len(errs))
 	}
+
+	// -check-config: 验证配置文件并退出
+	if *checkConfig {
+		fmt.Println("✅ 配置文件验证通过")
+		fmt.Printf("  通道: %s\n", func() string { if cfg.Channel == "" { return "lanxin" }; return cfg.Channel }())
+		fmt.Printf("  模式: %s\n", func() string { if cfg.Mode == "" { return "webhook" }; return cfg.Mode }())
+		fmt.Printf("  入站监听: %s\n", cfg.InboundListen)
+		fmt.Printf("  出站监听: %s\n", cfg.OutboundListen)
+		fmt.Printf("  管理监听: %s\n", cfg.ManagementListen)
+		fmt.Printf("  数据库: %s\n", cfg.DBPath)
+		fmt.Printf("  上游数: %d\n", len(cfg.StaticUpstreams))
+		fmt.Printf("  日志格式: %s\n", func() string { if cfg.LogFormat == "" { return "text" }; return cfg.LogFormat }())
+		return
+	}
+
+	// -dump-rules: 打印规则并退出
+	if *dumpRules {
+		rules, source, err := resolveInboundRules(cfg)
+		if err != nil { log.Fatalf("加载入站规则失败: %v", err) }
+		if rules == nil {
+			rules = getDefaultInboundRules()
+			source = "default"
+		}
+		fmt.Printf("=== 入站规则 (来源: %s, %d 条) ===\n", source, len(rules))
+		for _, r := range rules {
+			typeStr := r.Type
+			if typeStr == "" { typeStr = "keyword" }
+			fmt.Printf("  [%s] %s (%s) patterns=%d priority=%d group=%q\n", r.Action, r.Name, typeStr, len(r.Patterns), r.Priority, r.Group)
+		}
+		fmt.Printf("\n=== 出站规则 (%d 条) ===\n", len(cfg.OutboundRules))
+		for _, r := range cfg.OutboundRules {
+			pCount := 0
+			if r.Pattern != "" { pCount = 1 }
+			if len(r.Patterns) > 0 { pCount = len(r.Patterns) }
+			fmt.Printf("  [%s] %s patterns=%d priority=%d\n", r.Action, r.Name, pCount, r.Priority)
+		}
+		return
+	}
+
+	// -dump-routes: 需要数据库，打印路由表并退出
+	if *dumpRoutes {
+		db, err := initDB(cfg.DBPath)
+		if err != nil { log.Fatalf("初始化数据库失败: %v", err) }
+		defer db.Close()
+		routes := NewRouteTable(db, cfg.RoutePersist)
+		entries := routes.ListRoutes()
+		fmt.Printf("=== 路由表 (%d 条) ===\n", len(entries))
+		for _, e := range entries {
+			fmt.Printf("  sender=%s app=%s -> upstream=%s (dept=%s name=%s)\n",
+				e.SenderID, e.AppID, e.UpstreamID, e.Department, e.DisplayName)
+		}
+		return
+	}
+
+	// v5.0: 初始化结构化日志
+	InitAppLogger(cfg.LogFormat)
+	slog := GetAppLogger()
 
 	// v4.2: 从备份恢复
 	if *restorePath != "" {
@@ -184,10 +251,16 @@ func main() {
 		fmt.Println("[初始化] ⚠️ Bridge Mode: 未启用")
 	}
 
+	// v5.0: 实时监控指标
+	realtime := NewRealtimeMetrics()
+
 	// 创建代理
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng)
+	inbound.realtime = realtime
+	inbound.slog = slog
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
+	outbound.realtime = realtime
 
 	// v4.1 WebSocket 代理管理器
 	wsProxy := NewWSProxyManager(cfg, engine, outboundEngine, logger, metrics, pool, routes, ruleHits)
@@ -207,7 +280,7 @@ func main() {
 		outbound.alertNotifier = alertNotifier
 	}
 
-	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy, store, shutdownMgr)
+	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy, store, shutdownMgr, realtime)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -224,6 +297,39 @@ func main() {
 		ticker := time.NewTicker(24 * time.Hour); defer ticker.Stop()
 		for { select { case <-ctx.Done(): return; case <-ticker.C: logger.CleanupOldLogs(retentionDays) } }
 	}()
+
+	// v5.0: 审计日志归档
+	if cfg.AuditArchiveEnabled {
+		archiveDir := cfg.AuditArchiveDir
+		if archiveDir == "" { archiveDir = "/var/lib/lobster-guard/archives/" }
+		fmt.Printf("[初始化] ✅ 审计归档: 目录 %s, 保留 %d 天\n", archiveDir, retentionDays)
+		// 启动时立即归档一次
+		go func() {
+			defer func() { recover() }()
+			path, deleted, err := logger.ArchiveLogs(retentionDays, archiveDir)
+			if err != nil {
+				log.Printf("[归档] 启动归档失败: %v", err)
+			} else if path != "" {
+				log.Printf("[归档] ✅ 启动归档完成: %s，删除 %d 条", path, deleted)
+			}
+		}()
+		// 每天归档
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour); defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done(): return
+				case <-ticker.C:
+					path, deleted, err := logger.ArchiveLogs(retentionDays, archiveDir)
+					if err != nil {
+						log.Printf("[归档] 定时归档失败: %v", err)
+					} else if path != "" {
+						log.Printf("[归档] ✅ 定时归档完成: %s，删除 %d 条", path, deleted)
+					}
+				}
+			}
+		}()
+	}
 
 	// Bridge 模式
 	if cfg.Mode == "bridge" {
@@ -273,7 +379,7 @@ func main() {
 	go func() { if err := outSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("出站代理启动失败: %v", err) } }()
 	go func() { if err := mgmtSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("管理API启动失败: %v", err) } }()
 
-	log.Printf("[启动完成] 龙虾卫士 v%s 已就绪 (入站=%s 出站=%s 管理=%s)", AppVersion, cfg.InboundListen, cfg.OutboundListen, cfg.ManagementListen)
+	log.Printf("[启动完成] 龙虾卫士 v%s 已就绪 (入站=%s 出站=%s 管理=%s log_format=%s)", AppVersion, cfg.InboundListen, cfg.OutboundListen, cfg.ManagementListen, slog.Format())
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
