@@ -830,6 +830,7 @@ type InboundMessage struct {
 	Text         string
 	SenderID     string
 	EventType    string
+	AppID        string // 应用 ID（蓝信: entryId / appId）
 	Raw          []byte
 	IsVerify     bool   // URL verification / echostr 验证请求
 	VerifyReply  []byte // 验证请求的响应内容
@@ -969,7 +970,7 @@ func extractFirstJSON(s string) string {
 	return ""
 }
 
-func extractMessageText(data []byte) (text, senderID, eventType string) {
+func extractMessageText(data []byte) (text, senderID, eventType, appID string) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 { return }
 
@@ -980,6 +981,10 @@ func extractMessageText(data []byte) (text, senderID, eventType string) {
 	if d, ok := msg["data"].(map[string]interface{}); ok {
 		for _, k := range []string{"FromStaffId", "from", "senderId", "sender_id"} {
 			if s, ok := d[k].(string); ok && s != "" { senderID = s; break }
+		}
+		// appID: entryId 或 appId
+		for _, k := range []string{"entryId", "appId", "app_id"} {
+			if s, ok := d[k].(string); ok && s != "" { appID = s; break }
 		}
 		if md, ok := d["msgData"].(map[string]interface{}); ok {
 			if to, ok := md["text"].(map[string]interface{}); ok {
@@ -1062,8 +1067,8 @@ func (lp *LanxinPlugin) parseInbound(body []byte, urlTimestamp, urlNonce, urlSig
 	if err != nil {
 		return InboundMessage{}, fmt.Errorf("解密失败: %w", err)
 	}
-	text, senderID, eventType := extractMessageText(dec)
-	return InboundMessage{Text: text, SenderID: senderID, EventType: eventType, Raw: dec}, nil
+	text, senderID, eventType, appID := extractMessageText(dec)
+	return InboundMessage{Text: text, SenderID: senderID, EventType: eventType, AppID: appID, Raw: dec}, nil
 }
 
 var lanxinAuditPaths = map[string]bool{
@@ -1092,6 +1097,19 @@ func (lp *LanxinPlugin) ExtractOutbound(path string, body []byte) (string, bool)
 		return c, true
 	}
 	return string(body), true
+}
+
+// ExtractOutboundRecipient 从蓝信出站消息中提取接收者
+func (lp *LanxinPlugin) ExtractOutboundRecipient(body []byte) string {
+	var msg map[string]interface{}
+	if json.Unmarshal(body, &msg) != nil { return "" }
+	// 私聊: userIdList
+	if uids, ok := msg["userIdList"].([]interface{}); ok && len(uids) > 0 {
+		if s, ok := uids[0].(string); ok { return s }
+	}
+	// 群聊: groupId
+	if gid, ok := msg["groupId"].(string); ok { return gid }
+	return ""
 }
 
 func (lp *LanxinPlugin) BlockResponse() (int, []byte) {
@@ -2689,27 +2707,28 @@ type AuditLogger struct {
 
 func NewAuditLogger(db *sql.DB) (*AuditLogger, error) {
 	stmt, err := db.Prepare(`INSERT INTO audit_log
-		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id)
-		VALUES (?,?,?,?,?,?,?,?,?)`)
+		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil { return nil, err }
 	return &AuditLogger{db: db, stmt: stmt}, nil
 }
 
-func (al *AuditLogger) Log(dir, sender, action, reason, preview, hash string, latMs float64, upstreamID string) {
+func (al *AuditLogger) Log(dir, sender, action, reason, preview, hash string, latMs float64, upstreamID, appID string) {
 	go func() {
 		defer func() { recover() }()
 		al.mu.Lock(); defer al.mu.Unlock()
 		if rs := []rune(preview); len(rs) > 200 { preview = string(rs[:200]) + "..." }
-		al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID)
+		al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID)
 	}()
 }
 
 func (al *AuditLogger) Close() {
+	if al == nil { return }
 	if al.stmt != nil { al.stmt.Close() }
 }
 
 func (al *AuditLogger) QueryLogs(direction, action, senderID string, limit int) ([]map[string]interface{}, error) {
-	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id FROM audit_log WHERE 1=1`
+	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id FROM audit_log WHERE 1=1`
 	var args []interface{}
 	if direction != "" { query += ` AND direction=?`; args = append(args, direction) }
 	if action != "" { query += ` AND action=?`; args = append(args, action) }
@@ -2724,12 +2743,12 @@ func (al *AuditLogger) QueryLogs(direction, action, senderID string, limit int) 
 	defer rows.Close()
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int; var ts, dir, sid, act, reason, preview, uid string; var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid) != nil { continue }
+		var id int; var ts, dir, sid, act, reason, preview, uid, appID string; var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &appID) != nil { continue }
 		results = append(results, map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
-			"latency_ms": latMs, "upstream_id": uid,
+			"latency_ms": latMs, "upstream_id": uid, "app_id": appID,
 		})
 	}
 	return results, nil
@@ -3298,6 +3317,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		start := time.Now()
 		senderID := msg.SenderID
 		msgText := msg.Text
+		appID := msg.AppID
 		rh := fmt.Sprintf("%x", sha256.Sum256(msg.Raw))
 
 		// 路由决策
@@ -3337,7 +3357,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					ip.metrics.RecordRateLimit(false)
 					ip.metrics.RecordRequest("inbound", "rate_limited", ip.channel.Name(), 0)
 				}
-				ip.logger.Log("inbound", msg.SenderID, "rate_limited", reason, truncate(msg.Text, 200), rh, 0, "")
+				ip.logger.Log("inbound", msg.SenderID, "rate_limited", reason, truncate(msg.Text, 200), rh, 0, "", msg.AppID)
 				return // 丢弃消息
 			}
 			if ip.metrics != nil {
@@ -3380,7 +3400,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		if act == "" {
 			act = "pass"
 		}
-		ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID)
+		ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID)
 
 		// 指标采集
 		if ip.metrics != nil {
@@ -3518,7 +3538,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rh := fmt.Sprintf("%x", sha256.Sum256(body))
 
 	// 使用通道插件解析入站消息
-	var msgText, senderID, eventType string
+	var msgText, senderID, eventType, appID string
 	var decryptOK bool
 	var isVerify bool
 	func() {
@@ -3559,6 +3579,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		msgText = msg.Text
 		senderID = msg.SenderID
 		eventType = msg.EventType
+		appID = msg.AppID
 		decryptOK = true
 	}()
 
@@ -3583,7 +3604,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"errmsg":  "rate limited",
 				"detail":  reason,
 			})
-			ip.logger.Log("inbound", senderID, "rate_limited", reason, truncate(msgText, 200), rh, 0, "")
+			ip.logger.Log("inbound", senderID, "rate_limited", reason, truncate(msgText, 200), rh, 0, "", appID)
 			return
 		}
 		if ip.metrics != nil {
@@ -3661,7 +3682,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	act := detectResult.Action; if act == "" { act = "pass" }
 	_ = eventType
-	ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID)
+	ip.logger.Log("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID)
 
 	// 指标采集
 	if ip.metrics != nil {
@@ -3753,10 +3774,24 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 使用通道插件提取出站消息文本
 	var text string
+	var recipient string
+	var outAppID string
 	func() {
 		defer func() { recover() }()
 		t, ok := op.channel.ExtractOutbound(r.URL.Path, body)
 		if ok { text = t }
+		// 提取接收者（蓝信: userIdList/groupId）
+		type recipientExtractor interface {
+			ExtractOutboundRecipient([]byte) string
+		}
+		if re, ok := op.channel.(recipientExtractor); ok {
+			recipient = re.ExtractOutboundRecipient(body)
+		}
+		// 提取 appId
+		var m map[string]interface{}
+		if json.Unmarshal(body, &m) == nil {
+			if a, ok := m["appId"].(string); ok { outAppID = a }
+		}
 	}()
 
 	// 出站规则检测
@@ -3776,7 +3811,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch result.Action {
 	case "block":
 		log.Printf("[出站] 拦截 path=%s rule=%s", r.URL.Path, result.RuleName)
-		op.logger.Log("outbound", "", "block", result.Reason, pv, rh, latMs, upstreamID)
+		op.logger.Log("outbound", recipient, "block", result.Reason, pv, rh, latMs, upstreamID, outAppID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "block", op.channel.Name(), latMs)
 		}
@@ -3787,12 +3822,12 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case "warn":
 		log.Printf("[出站] 告警放行 path=%s rule=%s", r.URL.Path, result.RuleName)
-		op.logger.Log("outbound", "", "warn", result.Reason, pv, rh, latMs, upstreamID)
+		op.logger.Log("outbound", recipient, "warn", result.Reason, pv, rh, latMs, upstreamID, outAppID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "warn", op.channel.Name(), latMs)
 		}
 	case "log":
-		op.logger.Log("outbound", "", "log", result.Reason, pv, rh, latMs, upstreamID)
+		op.logger.Log("outbound", recipient, "log", result.Reason, pv, rh, latMs, upstreamID, outAppID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "log", op.channel.Name(), latMs)
 		}
@@ -3804,7 +3839,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			action = "pii_detected"; reason = "outbound_pii:" + strings.Join(piis, "+")
 			log.Printf("[出站] PII path=%s piis=%v", r.URL.Path, piis)
 		}
-		op.logger.Log("outbound", "", action, reason, pv, rh, latMs, upstreamID)
+		op.logger.Log("outbound", recipient, action, reason, pv, rh, latMs, upstreamID, outAppID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", action, op.channel.Name(), latMs)
 		}
@@ -4397,7 +4432,8 @@ func initDB(dbPath string) (*sql.DB, error) {
 		content_preview TEXT,
 		full_request_hash TEXT,
 		latency_ms REAL,
-		upstream_id TEXT DEFAULT ''
+		upstream_id TEXT DEFAULT '',
+		app_id TEXT DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_ts ON audit_log(timestamp);
 	CREATE INDEX IF NOT EXISTS idx_dir ON audit_log(direction);
@@ -4430,6 +4466,7 @@ func initDB(dbPath string) (*sql.DB, error) {
 
 	// 为旧表增加 upstream_id 列（v1.0 升级兼容）
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN upstream_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE audit_log ADD COLUMN app_id TEXT DEFAULT ''`)
 
 	return db, nil
 }

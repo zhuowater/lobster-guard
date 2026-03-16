@@ -326,7 +326,7 @@ func TestLanxinEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("解密失败: %v", err)
 	}
-	text, sender, eventType := extractMessageText(decrypted)
+	text, sender, eventType, _ := extractMessageText(decrypted)
 	if text != "你好世界" {
 		t.Errorf("文本提取错误: %s", text)
 	}
@@ -357,7 +357,7 @@ func TestExtractMessageText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text, sender, _ := extractMessageText([]byte(tt.json))
+			text, sender, _, _ := extractMessageText([]byte(tt.json))
 			if text != tt.wantText {
 				t.Errorf("text: 期望 %q，实际 %q", tt.wantText, text)
 			}
@@ -502,8 +502,8 @@ func TestAuditLogger(t *testing.T) {
 	if err != nil { t.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
 
-	logger.Log("inbound", "user1", "block", "prompt_injection", "ignore previous", "hash123", 0.5, "up-1")
-	logger.Log("outbound", "", "pass", "", "正常消息", "hash456", 0.1, "up-1")
+	logger.Log("inbound", "user1", "block", "prompt_injection", "ignore previous", "hash123", 0.5, "up-1", "app-1")
+	logger.Log("outbound", "", "pass", "", "正常消息", "hash456", 0.1, "up-1", "app-1")
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -1817,7 +1817,7 @@ func TestTruncate(t *testing.T) {
 func TestInboundProxy_RateLimit_Webhook(t *testing.T) {
 	db, _ := sql.Open("sqlite3", ":memory:")
 	defer db.Close()
-	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT, app_id TEXT DEFAULT '')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (sender_id TEXT PRIMARY KEY, upstream_id TEXT, created_at TEXT, updated_at TEXT)`)
 
@@ -1864,7 +1864,7 @@ func TestInboundProxy_RateLimit_Webhook(t *testing.T) {
 func TestHealthz_RateLimiter(t *testing.T) {
 	db, _ := sql.Open("sqlite3", ":memory:")
 	defer db.Close()
-	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT, app_id TEXT DEFAULT '')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (sender_id TEXT PRIMARY KEY, upstream_id TEXT, created_at TEXT, updated_at TEXT)`)
 
@@ -1917,7 +1917,7 @@ func TestHealthz_RateLimiter(t *testing.T) {
 func TestManagementAPI_RateLimitEndpoints(t *testing.T) {
 	db, _ := sql.Open("sqlite3", ":memory:")
 	defer db.Close()
-	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT, app_id TEXT DEFAULT '')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (sender_id TEXT PRIMARY KEY, upstream_id TEXT, created_at TEXT, updated_at TEXT)`)
 
