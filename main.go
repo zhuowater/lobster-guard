@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "8.1.0"
+	AppVersion = "9.0.0"
 )
 
 var startTime = time.Now()
@@ -218,6 +218,11 @@ func main() {
 	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
 
+	// v9.0: 创建工具调用审计器
+	toolAuditor, err := NewToolCallAuditor(db)
+	if err != nil { log.Fatalf("初始化工具调用审计器失败: %v", err) }
+	fmt.Println("[初始化] ✅ Agent 行为审计: tool_calls 表已就绪")
+
 	// v4.2: 创建关闭管理器
 	shutdownMgr := NewShutdownManager(cfg)
 	shutdownMgr.SetLogger(logger)
@@ -339,6 +344,7 @@ func main() {
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 	outbound.realtime = realtime
+	outbound.toolAuditor = toolAuditor // v9.0
 
 	// v4.1 WebSocket 代理管理器
 	wsProxy := NewWSProxyManager(cfg, engine, outboundEngine, logger, metrics, pool, routes, ruleHits)
@@ -363,6 +369,7 @@ func main() {
 	mgmtAPI.sessionDetector = sessionDetector
 	mgmtAPI.llmDetector = llmDetector
 	mgmtAPI.detectCache = detectCache
+	mgmtAPI.toolAuditor = toolAuditor // v9.0
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

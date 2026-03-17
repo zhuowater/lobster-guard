@@ -7,6 +7,7 @@ const routes = [
   { path: '/routes', name: 'routes', component: () => import('./views/Routes.vue'), meta: { title: '路由', icon: '🗺️' } },
   { path: '/rules', name: 'rules', component: () => import('./views/Rules.vue'), meta: { title: '规则', icon: '🛡️' } },
   { path: '/audit', name: 'audit', component: () => import('./views/Audit.vue'), meta: { title: '审计', icon: '📋' } },
+  { path: '/agent', name: 'agent', component: () => import('./views/AgentAudit.vue'), meta: { title: 'Agent', icon: '🤖' } },
   { path: '/monitor', name: 'monitor', component: () => import('./views/Monitor.vue'), meta: { title: '监控', icon: '⚡' } },
   { path: '/ops', name: 'ops', component: () => import('./views/Operations.vue'), meta: { title: '运维', icon: '🔧' } },
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { title: '设置', icon: '⚙️' } },

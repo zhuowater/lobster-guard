@@ -661,6 +661,7 @@ type OutboundProxy struct {
 	ruleHits       *RuleHitStats     // v3.6 规则命中统计
 	alertNotifier  *AlertNotifier    // v3.10 告警通知器
 	realtime       *RealtimeMetrics  // v5.0 实时监控
+	toolAuditor    *ToolCallAuditor  // v9.0 工具调用审计器
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats) (*OutboundProxy, error) {
@@ -799,6 +800,18 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
+
+	// v9.0: 异步解析 tool_calls 并审计
+	if op.toolAuditor != nil && len(body) > 0 {
+		go func() {
+			defer func() { recover() }()
+			records := op.toolAuditor.ParseResponse(body, recipient, outAppID, "")
+			for _, rec := range records {
+				op.toolAuditor.Record(rec)
+			}
+		}()
+	}
+
 	op.proxy.ServeHTTP(w, r)
 }
 

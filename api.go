@@ -49,6 +49,8 @@ type ManagementAPI struct {
 	sessionDetector *SessionDetector   // v5.1 会话检测器
 	llmDetector     *LLMDetector       // v5.1 LLM 检测器
 	detectCache     *DetectCache       // v5.1 检测缓存
+	// v9.0 Agent 行为审计
+	toolAuditor     *ToolCallAuditor   // v9.0 工具调用审计器
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -261,6 +263,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleRestoreBackup(w, r)
 	case strings.HasPrefix(path, "/api/v1/backups/") && strings.HasSuffix(path, "/download") && method == "GET":
 		api.handleDownloadBackup(w, r)
+	// v9.0 Agent 行为审计 API
+	case path == "/api/v1/tool-calls" && method == "GET":
+		api.handleToolCalls(w, r)
+	case path == "/api/v1/tool-calls/stats" && method == "GET":
+		api.handleToolCallStats(w, r)
+	case path == "/api/v1/tool-calls/high-risk" && method == "GET":
+		api.handleToolCallHighRisk(w, r)
+	case path == "/api/v1/tool-calls/timeline" && method == "GET":
+		api.handleToolCallTimeline(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -1925,10 +1936,107 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 注入了规则命中统计数据")
 	}
 
+	// v9.0: 注入 tool_calls 演示数据
+	toolCallsInserted := 0
+	if api.toolAuditor != nil {
+		toolNames := []struct {
+			name   string
+			weight int
+		}{
+			{"exec", 15}, {"read_file", 20}, {"write_file", 10}, {"web_search", 15},
+			{"web_fetch", 10}, {"browser", 10}, {"send_message", 5},
+			{"read", 5}, {"edit", 3}, {"image", 2}, {"tts", 2}, {"canvas", 3},
+		}
+		totalWeight := 0
+		for _, t := range toolNames {
+			totalWeight += t.weight
+		}
+		// 标记原因
+		flagReasons := []string{
+			"执行了系统命令",
+			"访问了敏感路径",
+			"写入了配置文件",
+			"发送了外部请求",
+			"操作频率异常",
+			"命令包含危险参数",
+		}
+		// 参数预览
+		inputSamples := map[string][]string{
+			"exec":         {`{"command":"ls -la /tmp"}`, `{"command":"cat /etc/passwd"}`, `{"command":"ps aux"}`, `{"command":"whoami"}`, `{"command":"curl http://example.com"}`},
+			"read_file":    {`{"path":"/tmp/data.txt"}`, `{"path":"config.yaml"}`, `{"path":"main.go"}`, `{"path":"/var/log/app.log"}`},
+			"write_file":   {`{"path":"/tmp/out.txt","content":"..."}`, `{"path":"result.json","content":"..."}`, `{"path":"config.yaml","content":"..."}`},
+			"web_search":   {`{"query":"AI安全最新论文"}`, `{"query":"prompt injection"}`, `{"query":"Python教程"}`},
+			"web_fetch":    {`{"url":"https://example.com"}`, `{"url":"https://api.github.com"}`, `{"url":"https://arxiv.org/abs/xxx"}`},
+			"browser":      {`{"action":"navigate","url":"https://example.com"}`, `{"action":"screenshot"}`, `{"action":"click","ref":"e12"}`},
+			"send_message": {`{"target":"user-1","message":"Hello"}`, `{"channel":"general","message":"通知"}`},
+			"read":         {`{"path":"api.go","offset":1}`, `{"path":"README.md"}`},
+			"edit":         {`{"path":"config.yaml","old":"...","new":"..."}`, `{"path":"main.go","old":"v8","new":"v9"}`},
+			"image":        {`{"image":"/tmp/photo.jpg","prompt":"描述"}`, `{"url":"https://img.example.com/1.png"}`},
+			"tts":          {`{"text":"你好世界"}`, `{"text":"测试语音合成"}`},
+			"canvas":       {`{"action":"present","url":"http://localhost:3000"}`, `{"action":"snapshot"}`},
+		}
+		rng3 := rand.New(rand.NewSource(time.Now().UnixNano()))
+		tcCount := 120 + rng3.Intn(31) // 120-150
+
+		tcTx, err := al.db.Begin()
+		if err == nil {
+			tcStmt, err := tcTx.Prepare(`INSERT INTO tool_calls
+				(timestamp, trace_id, sender_id, app_id, tool_name, tool_input_preview, tool_result_preview, duration_ms, risk_level, flagged, flag_reason)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+			if err == nil {
+				for i := 0; i < tcCount; i++ {
+					offsetSec := rng3.Int63n(7 * 24 * 3600)
+					ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
+					sender := senders[rng3.Intn(len(senders))]
+					appID := appIDs[rng3.Intn(len(appIDs))]
+					traceID := fmt.Sprintf("tc-%08x%08x", rng3.Uint32(), rng3.Uint32())
+
+					// 按权重选工具
+					roll := rng3.Intn(totalWeight)
+					var toolName string
+					cum := 0
+					for _, t := range toolNames {
+						cum += t.weight
+						if roll < cum {
+							toolName = t.name
+							break
+						}
+					}
+
+					riskLevel := api.toolAuditor.ClassifyRisk(toolName)
+					durationMs := 10.0 + rng3.Float64()*500.0
+
+					// 参数预览
+					var inputPreview string
+					if samples, ok := inputSamples[toolName]; ok && len(samples) > 0 {
+						inputPreview = samples[rng3.Intn(len(samples))]
+					}
+
+					// 标记：10-20% 的高危调用
+					flagged := 0
+					flagReason := ""
+					if (riskLevel == "high" || riskLevel == "critical") && rng3.Float64() < 0.15 {
+						flagged = 1
+						flagReason = flagReasons[rng3.Intn(len(flagReasons))]
+					}
+
+					_, err := tcStmt.Exec(ts, traceID, sender, appID, toolName, inputPreview, "", durationMs, riskLevel, flagged, flagReason)
+					if err == nil {
+						toolCallsInserted++
+					}
+				}
+				tcStmt.Close()
+			}
+			tcTx.Commit()
+		}
+		log.Printf("[Demo] 注入了 %d 条 tool_call 演示数据", toolCallsInserted)
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":    true,
-		"count": inserted,
+		"ok":          true,
+		"count":       inserted,
+		"tool_calls":  toolCallsInserted,
 	})
 }
 
@@ -1947,10 +2055,18 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 	}
 
 	deleted, _ := result.RowsAffected()
-	log.Printf("[Demo] 清除了 %d 条审计数据", deleted)
+
+	// v9.0: 同时清除 tool_calls
+	var toolDeleted int64
+	if result2, err := al.db.Exec(`DELETE FROM tool_calls`); err == nil {
+		toolDeleted, _ = result2.RowsAffected()
+	}
+
+	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 tool_call 数据", deleted, toolDeleted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":      true,
-		"deleted": deleted,
+		"ok":           true,
+		"deleted":      deleted,
+		"tool_deleted": toolDeleted,
 	})
 }
 
@@ -2182,6 +2298,93 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// ============================================================
+// v9.0 Agent 行为审计 API
+// ============================================================
+
+// handleToolCalls GET /api/v1/tool-calls — 工具调用列表（分页+筛选）
+func (api *ManagementAPI) handleToolCalls(w http.ResponseWriter, r *http.Request) {
+	if api.toolAuditor == nil {
+		jsonResponse(w, 200, map[string]interface{}{"records": []interface{}{}, "total": 0})
+		return
+	}
+	tool := r.URL.Query().Get("tool")
+	risk := r.URL.Query().Get("risk")
+	sender := r.URL.Query().Get("sender")
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil { limit = n }
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil { offset = n }
+	}
+	records, total, err := api.toolAuditor.QueryToolCalls(tool, risk, sender, from, to, limit, offset)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if records == nil { records = []ToolCallRecord{} }
+	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": total})
+}
+
+// handleToolCallStats GET /api/v1/tool-calls/stats — 工具调用统计
+func (api *ManagementAPI) handleToolCallStats(w http.ResponseWriter, r *http.Request) {
+	if api.toolAuditor == nil {
+		jsonResponse(w, 200, &ToolCallStats{
+			ByTool: []map[string]interface{}{},
+			ByRisk: map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0},
+		})
+		return
+	}
+	stats, err := api.toolAuditor.Stats()
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, stats)
+}
+
+// handleToolCallHighRisk GET /api/v1/tool-calls/high-risk — 高危调用列表
+func (api *ManagementAPI) handleToolCallHighRisk(w http.ResponseWriter, r *http.Request) {
+	if api.toolAuditor == nil {
+		jsonResponse(w, 200, map[string]interface{}{"records": []interface{}{}, "total": 0})
+		return
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil { limit = n }
+	}
+	records, err := api.toolAuditor.QueryHighRisk(limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if records == nil { records = []ToolCallRecord{} }
+	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": len(records)})
+}
+
+// handleToolCallTimeline GET /api/v1/tool-calls/timeline — 工具调用时间线
+func (api *ManagementAPI) handleToolCallTimeline(w http.ResponseWriter, r *http.Request) {
+	if api.toolAuditor == nil {
+		jsonResponse(w, 200, map[string]interface{}{"timeline": []interface{}{}, "hours": 24})
+		return
+	}
+	hours := 24
+	if h := r.URL.Query().Get("hours"); h != "" {
+		if n, err := strconv.Atoi(h); err == nil && n > 0 { hours = n }
+	}
+	timeline, err := api.toolAuditor.Timeline(hours)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if timeline == nil { timeline = []map[string]interface{}{} }
+	jsonResponse(w, 200, map[string]interface{}{"timeline": timeline, "hours": hours})
 }
 
 // writeV51Metrics 写入 v5.1 Prometheus 指标

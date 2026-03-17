@@ -394,6 +394,25 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN trace_id TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trace ON audit_log(trace_id)`)
 
+	// v9.0: tool_calls 表（ToolCallAuditor 会自行创建，但在此确保索引存在）
+	db.Exec(`CREATE TABLE IF NOT EXISTS tool_calls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp TEXT NOT NULL,
+		trace_id TEXT,
+		sender_id TEXT,
+		app_id TEXT,
+		tool_name TEXT NOT NULL,
+		tool_input_preview TEXT,
+		tool_result_preview TEXT,
+		duration_ms REAL,
+		risk_level TEXT DEFAULT 'low',
+		flagged INTEGER DEFAULT 0,
+		flag_reason TEXT
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_calls_ts ON tool_calls(timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool_name)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_calls_risk ON tool_calls(risk_level)`)
+
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)
 
