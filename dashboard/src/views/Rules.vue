@@ -3,14 +3,14 @@
     <!-- Rule Hits -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">🎯</span><span class="card-title">规则命中率</span>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span class="card-title">规则命中率</span>
         <div class="card-actions">
-          <button class="btn btn-sm" @click="loadRuleHits">🔄 刷新</button>
-          <button class="btn btn-sm btn-red" @click="confirmResetHits">🔄 重置</button>
+          <button class="btn btn-ghost btn-sm" @click="loadRuleHits">刷新</button>
+          <button class="btn btn-danger btn-sm" @click="confirmResetHits">重置</button>
         </div>
       </div>
-      <DataTable :columns="hitsColumns" :data="ruleHits" :loading="hitsLoading" empty-text="暂无命中数据" empty-icon="🎯" :expandable="false">
-        <template #cell-hits="{ value }"><span style="font-weight:700;color:var(--neon-blue)">{{ value }}</span></template>
+      <DataTable :columns="hitsColumns" :data="ruleHits" :loading="hitsLoading" empty-text="规则正在保护中" empty-desc="命中数据将在检测到威胁后显示" :expandable="false">
+        <template #cell-hits="{ value }"><span style="font-weight:700;color:var(--color-primary)">{{ value }}</span></template>
         <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
         <template #cell-direction="{ value }">{{ value === 'inbound' ? '入站' : '出站' }}</template>
         <template #cell-last_hit="{ value }">{{ fmtTime(value) }}</template>
@@ -20,11 +20,11 @@
     <!-- Rules Management -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">⚙️</span><span class="card-title">规则管理</span>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="card-title">规则管理</span>
         <div class="card-actions">
-          <button class="btn btn-sm btn-green" @click="openCreateEditor">➕ 新建规则</button>
-          <button class="btn btn-sm" @click="exportRules" title="导出规则为 YAML">📥 导出</button>
-          <button class="btn btn-sm" @click="showImport = true" title="从 YAML 导入规则">📤 导入</button>
+          <button class="btn btn-sm" @click="openCreateEditor">新建规则</button>
+          <button class="btn btn-ghost btn-sm" @click="exportRules" title="导出规则为 YAML">导出</button>
+          <button class="btn btn-ghost btn-sm" @click="showImport = true" title="从 YAML 导入规则">导入</button>
         </div>
       </div>
       <div class="tab-header">
@@ -43,14 +43,14 @@
           </template>
           <template #expand="{ row }">
             <div style="font-size:.82rem">
-              <div><b style="color:var(--neon-blue)">名称:</b> {{ row.name }}</div>
-              <div><b style="color:var(--neon-blue)">类型:</b> {{ row.type || 'keyword' }} | <b style="color:var(--neon-blue)">动作:</b> {{ row.action }} | <b style="color:var(--neon-blue)">优先级:</b> {{ row.priority ?? '--' }}</div>
-              <div v-if="row.patterns && row.patterns.length"><b style="color:var(--neon-blue)">模式:</b>
-                <pre style="background:rgba(0,0,0,.3);padding:8px;border-radius:6px;margin-top:4px;font-size:.75rem;overflow-x:auto;color:var(--neon-green)">{{ row.patterns.join('\n') }}</pre>
+              <div><b style="color:var(--color-primary)">名称:</b> {{ row.name }}</div>
+              <div><b style="color:var(--color-primary)">类型:</b> {{ row.type || 'keyword' }} | <b style="color:var(--color-primary)">动作:</b> {{ row.action }} | <b style="color:var(--color-primary)">优先级:</b> {{ row.priority ?? '--' }}</div>
+              <div v-if="row.patterns && row.patterns.length"><b style="color:var(--color-primary)">模式:</b>
+                <pre style="background:var(--bg-base);padding:8px;border-radius:var(--radius-md);margin-top:4px;font-size:var(--text-xs);overflow-x:auto;color:var(--color-success);border:1px solid var(--border-subtle)">{{ row.patterns.join('\n') }}</pre>
               </div>
               <div style="margin-top:8px;display:flex;gap:8px">
-                <button class="btn btn-sm" @click.stop="openEditEditor(row)">✏️ 编辑</button>
-                <button class="btn btn-sm btn-red" @click.stop="confirmDeleteRule(row)">🗑️ 删除</button>
+                <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row)">编辑</button>
+                <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row)">删除</button>
               </div>
             </div>
           </template>
@@ -58,7 +58,7 @@
         <div class="rule-meta" v-if="inboundMeta">
           版本: {{ inboundMeta.version }} 来源: {{ inboundMeta.source }} 加载: {{ fmtTime(inboundMeta.loaded_at) }}
         </div>
-        <div style="margin-top:12px"><button class="btn btn-green" @click="reloadInbound">🔄 热更新入站规则</button></div>
+        <div style="margin-top:12px"><button class="btn btn-sm" @click="reloadInbound">热更新入站规则</button></div>
       </div>
 
       <!-- Outbound -->
@@ -66,14 +66,14 @@
         <DataTable :columns="outboundColumns" :data="outboundRules" :loading="outboundLoading" empty-text="暂无出站规则" :expandable="false">
           <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
         </DataTable>
-        <div style="margin-top:12px"><button class="btn btn-green" @click="reloadOutbound">🔄 热更新出站规则</button></div>
+        <div style="margin-top:12px"><button class="btn btn-sm" @click="reloadOutbound">热更新出站规则</button></div>
       </div>
     </div>
 
     <!-- Regex Tester Standalone -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">🔍</span><span class="card-title">正则表达式测试器</span>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="card-title">正则表达式测试器</span>
       </div>
       <div style="padding:0 16px 16px">
         <RegexTester />
@@ -83,11 +83,11 @@
     <!-- Rule Templates -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">📖</span><span class="card-title">规则模板</span>
-        <div class="card-actions"><button class="btn btn-sm" @click="loadTemplates">🔄 刷新</button></div>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span><span class="card-title">规则模板</span>
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadTemplates">刷新</button></div>
       </div>
-      <div v-if="templatesLoading" style="padding:16px;text-align:center;color:var(--text-dim)">加载中...</div>
-      <div v-else-if="templates.length === 0" style="padding:16px;text-align:center;color:var(--text-dim)">暂无规则模板</div>
+      <div v-if="templatesLoading" style="padding:16px;text-align:center;color:var(--text-secondary)">加载中...</div>
+      <div v-else-if="templates.length === 0" style="padding:16px;text-align:center;color:var(--text-secondary)">暂无规则模板</div>
       <div v-else class="template-list">
         <div v-for="tmpl in templates" :key="tmpl.name" class="template-card">
           <div class="template-header" @click="toggleTemplate(tmpl.name)">
@@ -107,8 +107,8 @@
             </div>
           </div>
           <div v-if="expandedTemplate === tmpl.name" class="template-detail">
-            <div v-if="templateDetailLoading" style="padding:12px;text-align:center;color:var(--text-dim)">加载中...</div>
-            <div v-else-if="templateRules.length === 0" style="padding:12px;text-align:center;color:var(--text-dim)">无规则</div>
+            <div v-if="templateDetailLoading" style="padding:12px;text-align:center;color:var(--text-secondary)">加载中...</div>
+            <div v-else-if="templateRules.length === 0" style="padding:12px;text-align:center;color:var(--text-secondary)">无规则</div>
             <table v-else class="mini-table">
               <thead>
                 <tr>
@@ -152,13 +152,13 @@
             <div style="margin-bottom:12px">
               <input type="file" accept=".yaml,.yml" @change="handleFileUpload" ref="fileInput" style="display:none" />
               <button class="btn btn-sm" @click="$refs.fileInput.click()">📁 选择 YAML 文件</button>
-              <span v-if="importFileName" style="margin-left:8px;font-size:.82rem;color:var(--text-dim)">{{ importFileName }}</span>
+              <span v-if="importFileName" style="margin-left:8px;font-size:.82rem;color:var(--text-secondary)">{{ importFileName }}</span>
             </div>
             <textarea v-model="importYaml" rows="10" placeholder="或直接粘贴 YAML 内容..." class="import-textarea"></textarea>
             <div v-if="importPreview" class="import-preview">
               <div><b>预览:</b> {{ importPreview.total }} 条规则</div>
-              <div v-if="importPreview.new_count > 0" style="color:var(--neon-green)">新增: {{ importPreview.new_count }} 条 ({{ importPreview.new_rules?.join(', ') }})</div>
-              <div v-if="importPreview.override_count > 0" style="color:var(--neon-yellow)">覆盖: {{ importPreview.override_count }} 条 ({{ importPreview.override_rules?.join(', ') }})</div>
+              <div v-if="importPreview.new_count > 0" style="color:var(--color-success)">新增: {{ importPreview.new_count }} 条 ({{ importPreview.new_rules?.join(', ') }})</div>
+              <div v-if="importPreview.override_count > 0" style="color:var(--color-warning)">覆盖: {{ importPreview.override_count }} 条 ({{ importPreview.override_rules?.join(', ') }})</div>
             </div>
           </div>
           <div class="import-footer">
@@ -429,7 +429,7 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadTemplates()
 <style scoped>
 .template-list { padding: 0 16px 16px; }
 .template-card {
-  border: 1px solid rgba(0,212,255,.12);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   margin-bottom: 10px;
   overflow: hidden;
@@ -439,37 +439,37 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadTemplates()
   padding: 12px 16px; cursor: pointer;
   transition: background .2s;
 }
-.template-header:hover { background: rgba(0,212,255,.05); }
+.template-header:hover { background: var(--border-subtle); }
 .template-info { display: flex; align-items: center; gap: 10px; }
 .template-icon { font-size: 1.3rem; }
-.template-name { font-weight: 600; font-size: .9rem; color: var(--text); }
-.template-desc { font-size: .78rem; color: var(--text-dim); margin-top: 2px; }
+.template-name { font-weight: 600; font-size: .9rem; color: var(--text-primary); }
+.template-desc { font-size: .78rem; color: var(--text-secondary); margin-top: 2px; }
 .template-stats { display: flex; align-items: center; gap: 10px; }
-.template-groups { font-size: .75rem; color: var(--text-dim); }
+.template-groups { font-size: .75rem; color: var(--text-secondary); }
 .expand-arrow {
-  font-size: .7rem; color: var(--text-dim);
+  font-size: .7rem; color: var(--text-secondary);
   transition: transform .2s;
   display: inline-block;
 }
 .expand-arrow.expanded { transform: rotate(90deg); }
 .template-detail {
-  border-top: 1px solid rgba(0,212,255,.08);
-  background: rgba(0,0,0,.15);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
   max-height: 400px; overflow-y: auto;
 }
 .mini-table {
   width: 100%; border-collapse: collapse; font-size: .8rem;
 }
 .mini-table th {
-  text-align: left; padding: 8px 12px; color: var(--text-dim);
-  border-bottom: 1px solid rgba(0,212,255,.1); font-weight: 500;
+  text-align: left; padding: 8px 12px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle); font-weight: 500;
   font-size: .75rem; text-transform: uppercase;
 }
 .mini-table td {
-  padding: 6px 12px; border-bottom: 1px solid rgba(0,212,255,.05);
-  color: var(--text);
+  padding: 6px 12px; border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
 }
-.mini-table tr:hover td { background: rgba(0,212,255,.03); }
+.mini-table tr:hover td { background: var(--bg-elevated); }
 
 /* Import modal */
 .modal-overlay {
@@ -481,36 +481,36 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadTemplates()
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .import-panel {
-  background: var(--bg-card); border: 1px solid rgba(0,212,255,.25);
+  background: var(--bg-surface); border: 1px solid var(--border-default);
   border-radius: var(--radius); width: 600px; max-width: 95vw;
-  box-shadow: 0 16px 64px rgba(0,0,0,.5);
+  box-shadow: 0 16px 64px var(--shadow-lg);
   animation: slideUp .25s ease-out;
 }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 .import-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 16px 20px; border-bottom: 1px solid rgba(0,212,255,.1);
-  color: var(--text);
+  padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
 }
 .editor-close {
-  background: none; border: none; color: var(--text-dim); font-size: 1.2rem;
+  background: none; border: none; color: var(--text-secondary); font-size: 1.2rem;
   cursor: pointer; padding: 4px 8px; border-radius: 4px;
 }
-.editor-close:hover { background: rgba(255,255,255,.1); color: var(--text); }
+.editor-close:hover { background: var(--border-subtle); color: var(--text-primary); }
 .import-body { padding: 20px; }
 .import-textarea {
-  width: 100%; background: rgba(0,0,0,.3); color: var(--text);
-  border: 1px solid rgba(0,212,255,.2); border-radius: 6px;
+  width: 100%; background: var(--bg-base); color: var(--text-primary);
+  border: 1px solid var(--border-default); border-radius: 6px;
   padding: 10px; font-family: 'Courier New', monospace; font-size: .82rem;
   resize: vertical;
 }
-.import-textarea:focus { border-color: var(--neon-blue); outline: none; }
+.import-textarea:focus { border-color: var(--color-primary); outline: none; }
 .import-preview {
-  margin-top: 12px; padding: 10px; background: rgba(0,0,0,.2);
-  border-radius: 6px; font-size: .82rem; color: var(--text);
+  margin-top: 12px; padding: 10px; background: var(--bg-elevated);
+  border-radius: 6px; font-size: .82rem; color: var(--text-primary);
 }
 .import-footer {
   display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 20px; border-top: 1px solid rgba(0,212,255,.1);
+  padding: 12px 20px; border-top: 1px solid var(--border-subtle);
 }
 </style>

@@ -96,7 +96,7 @@ function escapeHtml(s) {
 <style scoped>
 .regex-tester {
   background: rgba(0,0,0,.2);
-  border: 1px solid rgba(0,212,255,.15);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius);
   padding: 16px;
   margin-top: 12px;
@@ -108,30 +108,30 @@ function escapeHtml(s) {
   margin-bottom: 10px;
 }
 .regex-row label {
-  display: block; font-size: .8rem; color: var(--text-dim); margin-bottom: 4px;
+  display: block; font-size: .8rem; color: var(--text-secondary); margin-bottom: 4px;
 }
 .regex-input, .regex-textarea {
   width: 100%; background: rgba(0,0,0,.3); color: var(--text);
-  border: 1px solid rgba(0,212,255,.2); border-radius: 6px;
+  border: 1px solid var(--border-default); border-radius: 6px;
   padding: 8px; font-size: .85rem; font-family: 'Courier New', monospace;
   resize: vertical;
 }
 .regex-input:focus, .regex-textarea:focus {
-  border-color: var(--neon-blue); outline: none;
+  border-color: var(--color-primary); outline: none;
 }
 .regex-input.regex-error {
-  border-color: var(--neon-red);
+  border-color: var(--color-danger);
 }
 .regex-error-msg {
-  color: var(--neon-red); font-size: .75rem; margin: -6px 0 8px;
+  color: var(--color-danger); font-size: .75rem; margin: -6px 0 8px;
 }
 .regex-result {
   display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;
 }
 .regex-status { display: flex; align-items: center; gap: 6px; }
-.match-positions { font-size: .75rem; color: var(--text-dim); }
+.match-positions { font-size: .75rem; color: var(--text-secondary); }
 .match-pos {
-  display: inline-block; background: rgba(255,68,102,.15); color: var(--neon-red);
+  display: inline-block; background: var(--color-danger-dim); color: var(--color-danger);
   padding: 1px 4px; border-radius: 3px; margin: 0 2px; font-family: monospace; font-size: .72rem;
 }
 .highlighted-text {

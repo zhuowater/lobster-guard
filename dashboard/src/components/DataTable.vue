@@ -3,7 +3,10 @@
     <!-- Toolbar: column visibility -->
     <div class="dt-toolbar" v-if="showToolbar">
       <div class="dt-col-toggle" v-if="columns.length > 3">
-        <button class="btn btn-sm" @click="colMenuOpen = !colMenuOpen" title="列显隐">⚙️ 列</button>
+        <button class="btn btn-ghost btn-sm" @click="colMenuOpen = !colMenuOpen" title="列显隐">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          列
+        </button>
         <div class="dt-col-menu" v-show="colMenuOpen">
           <label v-for="col in columns" :key="col.key" class="dt-col-item">
             <input type="checkbox" :checked="visibleCols.has(col.key)" @change="toggleCol(col.key)" />
@@ -18,11 +21,13 @@
     <div v-if="loading" class="loading">加载中...</div>
 
     <!-- Empty -->
-    <div v-else-if="!sortedData.length" class="empty">
-      <div class="empty-icon">{{ emptyIcon }}</div>
-      {{ emptyText }}
-      <div class="empty-hint"><slot name="empty-hint"></slot></div>
-    </div>
+    <EmptyState v-else-if="!sortedData.length"
+      :icon-svg="emptySvg"
+      :title="emptyText"
+      :description="emptyDesc"
+    >
+      <slot name="empty-hint"></slot>
+    </EmptyState>
 
     <!-- Table -->
     <div v-else class="table-wrap">
@@ -38,7 +43,10 @@
             >
               {{ col.label }}
               <span v-if="col.sortable" class="sort-icon">
-                {{ sortKey === col.key ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}
+                <template v-if="sortKey === col.key">{{ sortDir === 'asc' ? '▲' : '▼' }}</template>
+                <template v-else>
+                  <span class="sort-icon-neutral">▲▼</span>
+                </template>
               </span>
             </th>
             <th v-if="$slots.actions" style="white-space:nowrap">操作</th>
@@ -52,7 +60,7 @@
               :style="expandable ? { cursor: 'pointer' } : {}"
             >
               <td v-if="expandable" style="width:30px;text-align:center">
-                {{ expandedRows.has(idx) ? '▼' : '▶' }}
+                <svg :class="{ 'expand-arrow': true, expanded: expandedRows.has(idx) }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
               </td>
               <td v-for="col in visibleColumns" :key="col.key" :style="col.tdStyle || {}">
                 <slot :name="'cell-' + col.key" :row="row" :value="getCellValue(row, col)">
@@ -83,8 +91,9 @@
         <select v-model.number="currentPageSize" @change="currentPage = 1" class="dt-page-select">
           <option v-for="s in pageSizes" :key="s" :value="s">{{ s }} 条/页</option>
         </select>
-        <button class="btn btn-sm" :disabled="currentPage <= 1" @click="currentPage--">上一页</button>
-        <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="currentPage++">下一页</button>
+        <button class="btn btn-ghost btn-sm" :disabled="currentPage <= 1" @click="currentPage--">上一页</button>
+        <span class="dt-page-num">{{ currentPage }}</span>
+        <button class="btn btn-ghost btn-sm" :disabled="currentPage >= totalPages" @click="currentPage++">下一页</button>
       </div>
     </div>
   </div>
@@ -92,6 +101,7 @@
 
 <script setup>
 import { ref, computed, watch, reactive } from 'vue'
+import EmptyState from './EmptyState.vue'
 
 const props = defineProps({
   columns: { type: Array, required: true },
@@ -100,7 +110,9 @@ const props = defineProps({
   pageSizes: { type: Array, default: () => [20, 50, 100] },
   loading: { type: Boolean, default: false },
   emptyText: { type: String, default: '暂无数据' },
-  emptyIcon: { type: String, default: '📭' },
+  emptyIcon: { type: String, default: '' },
+  emptyDesc: { type: String, default: '' },
+  emptySvg: { type: String, default: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>' },
   expandable: { type: Boolean, default: false },
   rowKey: { type: [String, Function], default: null },
   rowClass: { type: Function, default: null },
@@ -200,39 +212,55 @@ function escHtml(s) {
 
 <style scoped>
 .data-table-wrapper { position: relative; }
-.dt-toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; justify-content: flex-end; position: relative; }
+.dt-toolbar { display: flex; gap: var(--space-2); margin-bottom: var(--space-2); align-items: center; justify-content: flex-end; position: relative; }
 .dt-col-toggle { position: relative; }
 .dt-col-menu {
   position: absolute; right: 0; top: 100%; z-index: 50;
-  background: var(--bg-card-2); border: 1px solid rgba(0,212,255,.2);
-  border-radius: 8px; padding: 8px; min-width: 160px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  background: var(--bg-overlay); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); padding: var(--space-2); min-width: 160px;
+  box-shadow: var(--shadow-lg);
 }
-.dt-col-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: .8rem; color: var(--text); cursor: pointer; }
-.dt-col-item input { accent-color: var(--neon-blue); }
+.dt-col-item { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; font-size: var(--text-sm); color: var(--text-primary); cursor: pointer; }
+.dt-col-item input { accent-color: var(--color-primary); }
 
 th.sortable { cursor: pointer; user-select: none; }
-th.sortable:hover { color: var(--neon-green); }
-th.sorted { color: var(--neon-green); }
-.sort-icon { font-size: .65rem; margin-left: 2px; opacity: .6; }
-th.sorted .sort-icon { opacity: 1; }
+th.sortable:hover { color: var(--text-primary); }
+th.sorted { color: var(--text-primary); }
+.sort-icon { font-size: 0.55rem; margin-left: 2px; color: var(--text-tertiary); }
+th.sorted .sort-icon { color: var(--color-primary); }
+.sort-icon-neutral { font-size: 0.5rem; letter-spacing: -2px; opacity: .4; }
+
+.expand-arrow {
+  transition: transform var(--transition-fast); display: inline-block;
+  color: var(--text-tertiary);
+}
+.expand-arrow.expanded { transform: rotate(90deg); }
 
 .expand-row td {
-  background: rgba(0,0,0,.15); padding: 12px 16px;
-  border-bottom: 1px solid rgba(0,212,255,.08);
+  background: var(--bg-elevated); padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .dt-pagination {
   display: flex; justify-content: space-between; align-items: center;
-  margin-top: 12px; padding-top: 8px;
-  border-top: 1px solid rgba(0,212,255,.08);
-  font-size: .8rem; color: var(--text-dim);
+  margin-top: var(--space-3); padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-sm); color: var(--text-secondary);
 }
-.dt-page-controls { display: flex; gap: 6px; align-items: center; }
+.dt-page-controls { display: flex; gap: var(--space-2); align-items: center; }
+.dt-page-num {
+  font-weight: 600; color: var(--color-primary);
+  background: var(--color-primary-dim);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  min-width: 24px; text-align: center;
+}
 .dt-page-select {
-  background: rgba(0,0,0,.3); border: 1px solid rgba(0,212,255,.2);
-  border-radius: 6px; color: var(--text); padding: 4px 8px; font-size: .78rem; outline: none;
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); color: var(--text-primary); padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs); outline: none; font-family: var(--font-sans);
 }
-.dt-page-select option { background: var(--bg-card); }
-.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.dt-page-select option { background: var(--bg-elevated); }
+.btn:disabled { opacity: .3; cursor: not-allowed; transform: none; }
 </style>

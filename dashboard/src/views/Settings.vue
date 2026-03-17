@@ -2,9 +2,9 @@
   <div>
     <!-- Token -->
     <div class="card" style="margin-bottom:20px">
-      <div class="card-header"><span class="card-icon">🔑</span><span class="card-title">Token 管理</span></div>
+      <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span><span class="card-title">Token 管理</span></div>
       <div class="token-section">
-        <label style="font-size:.85rem;color:var(--text-dim)">🔑 Bearer Token:</label>
+        <label style="font-size:.85rem;color:var(--text-secondary)">🔑 Bearer Token:</label>
         <input type="password" v-model="tokenValue" placeholder="输入 Bearer Token" />
         <button class="btn" @click="doSaveToken">保存</button>
         <button class="btn btn-red" @click="doClearToken">清除</button>
@@ -14,8 +14,8 @@
     <!-- System Info -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">📊</span><span class="card-title">系统信息</span>
-        <div class="card-actions"><button class="btn btn-sm" @click="refreshHealth">🔄 刷新</button></div>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span><span class="card-title">系统信息</span>
+        <div class="card-actions"><button class="btn btn-sm" @click="refreshHealth">刷新</button></div>
       </div>
       <div v-if="!appState.health" class="loading">加载中...</div>
       <div v-else>
@@ -41,8 +41,8 @@
         </div>
 
         <!-- Bridge -->
-        <div v-if="health.mode === 'bridge' && health.bridge" style="margin-top:16px;border-top:1px solid rgba(0,212,255,.08);padding-top:12px">
-          <div style="font-size:.85rem;color:var(--neon-blue);font-weight:600;margin-bottom:8px">🌉 Bridge 状态</div>
+        <div v-if="health.mode === 'bridge' && health.bridge" style="margin-top:16px;border-top:1px solid var(--border-subtle);padding-top:12px">
+          <div style="font-size:.85rem;color:var(--color-primary);font-weight:600;margin-bottom:8px">Bridge 状态</div>
           <div class="status-row"><span class="status-key">连接</span><span class="status-val"><span class="dot" :class="health.bridge.connected ? 'dot-healthy' : 'dot-unhealthy'"></span>{{ health.bridge.connected ? '已连接' : '已断开' }}</span></div>
           <div class="status-row"><span class="status-key">重连</span><span class="status-val">{{ health.bridge.reconnects ?? '--' }}</span></div>
           <div class="status-row"><span class="status-key">消息数</span><span class="status-val">{{ health.bridge.message_count ?? '--' }}</span></div>
@@ -53,10 +53,10 @@
     <!-- Backups -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">💾</span><span class="card-title">备份管理</span>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span><span class="card-title">备份管理</span>
         <div class="card-actions">
-          <button class="btn btn-sm btn-green" @click="createBackup">创建备份</button>
-          <button class="btn btn-sm" @click="loadBackups">🔄 刷新</button>
+          <button class="btn btn btn-sm" @click="createBackup">创建备份</button>
+          <button class="btn btn-sm" @click="loadBackups">刷新</button>
         </div>
       </div>
       <div v-if="backupsLoading" class="loading">加载中...</div>
@@ -66,14 +66,14 @@
         <template #cell-size="{ value }">{{ formatSize(value) }}</template>
         <template #cell-mod_time="{ value }">{{ fmtTime(value) }}</template>
         <template #actions="{ row }">
-          <button class="btn btn-sm btn-red" @click="confirmDeleteBackup(row)">删除</button>
+          <button class="btn btn-danger btn-sm" @click="confirmDeleteBackup(row)">删除</button>
         </template>
       </DataTable>
     </div>
 
     <!-- Health Checks -->
     <div class="card">
-      <div class="card-header"><span class="card-icon">🏥</span><span class="card-title">健康检查详情</span></div>
+      <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="card-title">健康检查详情</span></div>
       <div v-if="!appState.health || !appState.health.checks" class="loading">加载中...</div>
       <div v-else>
         <div v-for="hc in healthCheckList" :key="hc.name" class="status-row">
@@ -118,9 +118,9 @@ const totalUp = computed(() => health.value.upstreams?.total || 0)
 const healthyUp = computed(() => health.value.upstreams?.healthy || 0)
 const pct = computed(() => totalUp.value > 0 ? Math.round(healthyUp.value / totalUp.value * 100) : 100)
 const ringOffset = computed(() => C - pct.value / 100 * C)
-const ringColor = computed(() => pct.value >= 80 ? 'var(--neon-green)' : (pct.value >= 50 ? 'var(--neon-yellow)' : 'var(--neon-red)'))
+const ringColor = computed(() => pct.value >= 80 ? 'var(--color-success)' : (pct.value >= 50 ? 'var(--color-warning)' : 'var(--color-danger)'))
 const statusText = computed(() => { const s = health.value.status; return s === 'healthy' ? '健康' : (s === 'degraded' ? '降级' : '异常') })
-const statusColor = computed(() => { const s = health.value.status; return s === 'healthy' ? 'var(--neon-green)' : (s === 'degraded' ? 'var(--neon-yellow)' : 'var(--neon-red)') })
+const statusColor = computed(() => { const s = health.value.status; return s === 'healthy' ? 'var(--color-success)' : (s === 'degraded' ? 'var(--color-warning)' : 'var(--color-danger)') })
 const rlText = computed(() => { const rl = health.value.rate_limiter; if (!rl || !rl.enabled) return '未启用'; return `${rl.global_rps || '?'} rps (全局) / ${rl.per_sender_rps || '?'} rps (每用户)` })
 
 const healthCheckList = computed(() => {
@@ -137,7 +137,7 @@ const healthCheckList = computed(() => {
   for (const dm of dims) {
     const c = checks[dm.k]
     if (!c) continue
-    const color = c.status === 'ok' ? 'var(--neon-green)' : (c.status === 'warning' ? 'var(--neon-yellow)' : 'var(--neon-red)')
+    const color = c.status === 'ok' ? 'var(--color-success)' : (c.status === 'warning' ? 'var(--color-warning)' : 'var(--color-danger)')
     const icon = c.status === 'ok' ? '✅' : (c.status === 'warning' ? '⚠️' : '❌')
     result.push({ name: dm.n, val: dm.fn(c), color, icon })
   }

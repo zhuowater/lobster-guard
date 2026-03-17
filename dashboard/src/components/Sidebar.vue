@@ -14,8 +14,9 @@
         class="nav-item"
         :class="{ active: $route.path === item.path }"
         @click="$emit('closeMobile')"
+        :title="appState.sidebarCollapsed ? item.label : ''"
       >
-        <span class="nav-icon">{{ item.icon }}</span>
+        <span class="nav-icon" v-html="item.svg"></span>
         <span class="nav-label">{{ item.label }}</span>
       </router-link>
     </div>
@@ -23,10 +24,13 @@
       <div class="sidebar-version">{{ appState.version }}</div>
       <div class="sidebar-status">
         <span class="dot dot-sm" :class="dotClass"></span>
-        <span>{{ statusText }}</span>
+        <span class="sidebar-status-text">{{ statusText }}</span>
       </div>
     </div>
-    <button class="sidebar-toggle" @click="toggleSidebar" title="折叠/展开">≡</button>
+    <button class="sidebar-toggle" @click="toggleSidebar" :title="appState.sidebarCollapsed ? '展开' : '折叠'">
+      <svg v-if="appState.sidebarCollapsed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
   </nav>
 </template>
 
@@ -40,13 +44,13 @@ defineEmits(['closeMobile'])
 const appState = inject('appState')
 
 const navItems = [
-  { path: '/overview', icon: '📊', label: '概览' },
-  { path: '/upstream', icon: '🔗', label: '上游' },
-  { path: '/routes', icon: '🗺️', label: '路由' },
-  { path: '/rules', icon: '🛡️', label: '规则' },
-  { path: '/audit', icon: '📋', label: '审计' },
-  { path: '/monitor', icon: '⚡', label: '监控' },
-  { path: '/settings', icon: '⚙️', label: '设置' },
+  { path: '/overview', label: '概览', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>' },
+  { path: '/upstream', label: '上游', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/></svg>' },
+  { path: '/routes', label: '路由', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>' },
+  { path: '/rules', label: '规则', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
+  { path: '/audit', label: '审计', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>' },
+  { path: '/monitor', label: '监控', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' },
+  { path: '/settings', label: '设置', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
 ]
 
 const dotClass = computed(() => appState.connectionStatus === 'connected' ? 'dot-healthy' : 'dot-unhealthy')
@@ -59,57 +63,56 @@ const statusText = computed(() => {
 <style scoped>
 .sidebar {
   width: var(--sidebar-w); min-width: var(--sidebar-w); height: 100vh;
-  background: linear-gradient(180deg, #0d1137, #151a3a);
-  border-right: 1px solid rgba(0,212,255,.12);
-  display: flex; flex-direction: column; transition: width .3s, min-width .3s;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column; transition: width var(--transition-normal), min-width var(--transition-normal);
   z-index: 200; position: relative; overflow: hidden;
 }
 .sidebar.collapsed { width: var(--sidebar-collapsed); min-width: var(--sidebar-collapsed); }
 .sidebar-brand {
-  padding: 16px 16px 12px; display: flex; align-items: center; gap: 10px;
-  border-bottom: 1px solid rgba(0,212,255,.08); min-height: 60px;
+  padding: var(--space-4) var(--space-4) var(--space-3); display: flex; align-items: center; gap: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle); min-height: 60px;
   overflow: hidden; white-space: nowrap;
 }
-.sidebar-logo { font-size: 2rem; flex-shrink: 0; animation: lf 3s ease-in-out infinite; }
-@keyframes lf { 0%,100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-3px) rotate(-4deg); } 75% { transform: translateY(2px) rotate(3deg); } }
-.sidebar-brand-text { display: flex; flex-direction: column; overflow: hidden; transition: opacity .3s; }
+.sidebar-logo { font-size: 1.75rem; flex-shrink: 0; }
+.sidebar-brand-text { display: flex; flex-direction: column; overflow: hidden; transition: opacity var(--transition-normal), width var(--transition-normal); }
 .sidebar.collapsed .sidebar-brand-text { opacity: 0; width: 0; }
 .sidebar-brand-title {
-  font-size: 1rem; font-weight: 700;
-  background: linear-gradient(90deg, var(--neon-blue), var(--neon-green));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  font-size: var(--text-base); font-weight: 700;
+  color: var(--text-primary);
   white-space: nowrap;
 }
-.sidebar-brand-sub { font-size: .65rem; color: var(--text-dim); white-space: nowrap; }
-.sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; overflow-x: hidden; }
+.sidebar-brand-sub { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
+.sidebar-nav { flex: 1; padding: var(--space-2) 0; overflow-y: auto; overflow-x: hidden; }
 .nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 16px; margin: 2px 8px;
-  border-radius: 8px; cursor: pointer; color: var(--text-dim); font-size: .88rem;
-  transition: all .2s; position: relative; white-space: nowrap; overflow: hidden; text-decoration: none;
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); margin: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md); cursor: pointer; color: var(--text-secondary); font-size: var(--text-sm);
+  transition: all var(--transition-fast); position: relative; white-space: nowrap; overflow: hidden; text-decoration: none;
 }
-.nav-item:hover { background: rgba(0,212,255,.06); color: var(--text); }
-.nav-item.active { background: rgba(0,212,255,.1); color: var(--neon-blue); }
+.nav-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.nav-item.active { background: var(--color-primary-dim); color: var(--color-primary); }
 .nav-item.active::before {
-  content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px;
-  background: var(--neon-blue); border-radius: 0 3px 3px 0;
+  content: ''; position: absolute; left: 0; top: var(--space-1); bottom: var(--space-1); width: 3px;
+  background: var(--color-primary); border-radius: 0 3px 3px 0;
 }
-.nav-icon { font-size: 1.15rem; flex-shrink: 0; width: 24px; text-align: center; }
-.nav-label { transition: opacity .3s; overflow: hidden; }
+.nav-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
+.nav-label { transition: opacity var(--transition-normal); overflow: hidden; }
 .sidebar.collapsed .nav-label { opacity: 0; width: 0; }
-.sidebar.collapsed .nav-item { justify-content: center; padding: 10px 0; margin: 2px 4px; }
+.sidebar.collapsed .nav-item { justify-content: center; padding: var(--space-2) 0; margin: var(--space-1) var(--space-1); }
 .sidebar-footer {
-  padding: 12px 16px; border-top: 1px solid rgba(0,212,255,.08);
-  display: flex; flex-direction: column; gap: 6px; overflow: hidden;
+  padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: var(--space-1); overflow: hidden;
 }
-.sidebar-version { font-size: .7rem; color: var(--text-dim); font-family: monospace; white-space: nowrap; transition: opacity .3s; }
-.sidebar-status { display: flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--text-dim); white-space: nowrap; }
-.sidebar.collapsed .sidebar-version, .sidebar.collapsed .sidebar-status span:not(.dot) { opacity: 0; width: 0; overflow: hidden; }
+.sidebar-version { font-size: var(--text-xs); color: var(--text-tertiary); font-family: var(--font-mono); white-space: nowrap; transition: opacity var(--transition-normal); }
+.sidebar-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; }
+.sidebar.collapsed .sidebar-version,
+.sidebar.collapsed .sidebar-status-text { opacity: 0; width: 0; overflow: hidden; }
 .sidebar-toggle {
-  display: flex; align-items: center; justify-content: center; padding: 8px;
-  margin: 0 8px 8px; border-radius: 6px; cursor: pointer; color: var(--text-dim);
-  font-size: 1.1rem; transition: all .2s; border: 1px solid rgba(0,212,255,.1); background: transparent;
+  display: flex; align-items: center; justify-content: center; padding: var(--space-2);
+  margin: 0 var(--space-2) var(--space-2); border-radius: var(--radius-md); cursor: pointer; color: var(--text-tertiary);
+  transition: all var(--transition-fast); border: 1px solid var(--border-subtle); background: transparent;
 }
-.sidebar-toggle:hover { background: rgba(0,212,255,.1); color: var(--neon-blue); }
+.sidebar-toggle:hover { background: var(--bg-elevated); color: var(--text-primary); }
 
 @media(max-width:768px) {
   .sidebar {

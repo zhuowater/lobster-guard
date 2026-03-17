@@ -134,7 +134,7 @@ function submit() {
 <style scoped>
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,.6); z-index: 1000;
+  background: rgba(0,0,0,.5); z-index: 1000;
   display: flex; align-items: flex-start; justify-content: center;
   padding-top: 40px;
   animation: fadeIn .2s;
@@ -142,7 +142,7 @@ function submit() {
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .editor-panel {
-  background: var(--bg-card); border: 1px solid rgba(0,212,255,.25);
+  background: var(--bg-surface); border: 1px solid var(--border-default);
   border-radius: var(--radius); width: 600px; max-width: 95vw;
   box-shadow: 0 16px 64px rgba(0,0,0,.5);
   animation: slideUp .25s ease-out;
@@ -151,36 +151,36 @@ function submit() {
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 .editor-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 16px 20px; border-bottom: 1px solid rgba(0,212,255,.1);
+  padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);
 }
 .modal-icon { font-size: 1.2rem; }
 .modal-title { font-size: 1.05rem; font-weight: 600; flex: 1; color: var(--text); }
 .editor-close {
-  background: none; border: none; color: var(--text-dim); font-size: 1.2rem;
+  background: none; border: none; color: var(--text-secondary); font-size: 1.2rem;
   cursor: pointer; padding: 4px 8px; border-radius: 4px;
 }
 .editor-close:hover { background: rgba(255,255,255,.1); color: var(--text); }
 .editor-body { padding: 20px; max-height: 70vh; overflow-y: auto; }
 .editor-footer {
   display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 20px; border-top: 1px solid rgba(0,212,255,.1);
+  padding: 12px 20px; border-top: 1px solid var(--border-subtle);
 }
 .form-group { margin-bottom: 14px; }
 .form-group label {
-  display: block; font-size: .82rem; color: var(--text-dim); margin-bottom: 4px; font-weight: 500;
+  display: block; font-size: .82rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;
 }
 .form-group input, .form-group select, .form-group textarea {
   width: 100%; background: rgba(0,0,0,.3); color: var(--text);
-  border: 1px solid rgba(0,212,255,.2); border-radius: 6px;
+  border: 1px solid var(--border-default); border-radius: 6px;
   padding: 8px 10px; font-size: .85rem;
 }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-  border-color: var(--neon-blue); outline: none;
+  border-color: var(--color-primary); outline: none;
 }
 .form-group select { cursor: pointer; }
 .form-group textarea { resize: vertical; font-family: inherit; }
 .mono-textarea { font-family: 'Courier New', monospace !important; }
 .form-row { display: flex; gap: 12px; }
-.required { color: var(--neon-red); }
-.hint { color: var(--text-dim); font-size: .75rem; font-weight: 400; }
+.required { color: var(--color-danger); }
+.hint { color: var(--text-secondary); font-size: .75rem; font-weight: 400; }
 </style>

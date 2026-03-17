@@ -3,17 +3,17 @@
     <!-- Policy Visualization -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-icon">📋</span>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span>
         <span class="card-title">策略路由管理</span>
         <div class="card-actions">
-          <button class="btn btn-sm" @click="loadPolicies">🔄 刷新</button>
+          <button class="btn btn-sm" @click="loadPolicies">刷新</button>
         </div>
       </div>
 
       <!-- Policy Table -->
       <div style="padding:0 16px">
-        <div v-if="policiesLoading" style="padding:16px;text-align:center;color:var(--text-dim)">加载中...</div>
-        <div v-else-if="policies.length === 0" style="padding:16px;text-align:center;color:var(--text-dim)">
+        <div v-if="policiesLoading" style="padding:16px;text-align:center;color:var(--text-secondary)">加载中...</div>
+        <div v-else-if="policies.length === 0" style="padding:16px;text-align:center;color:var(--text-secondary)">
           暂无路由策略配置。策略可在 config.yaml 的 route_policies 字段中设置。
         </div>
         <table v-else class="policy-table">
@@ -27,7 +27,7 @@
           </thead>
           <tbody>
             <tr v-for="(p, idx) in policies" :key="idx" :class="{ 'policy-matched': policyTestResult && policyTestResult.matched && policyTestResult.policy_index === idx }">
-              <td style="color:var(--text-dim);font-size:.75rem">{{ idx + 1 }}</td>
+              <td style="color:var(--text-secondary);font-size:.75rem">{{ idx + 1 }}</td>
               <td>
                 <div class="policy-conditions">
                   <span v-if="p.match?.department" class="tag tag-info" style="font-size:.72rem">部门: {{ p.match.department }}</span>
@@ -41,7 +41,7 @@
                 <span class="tag tag-pass" style="font-weight:600">{{ p.upstream_id }}</span>
               </td>
               <td>
-                <span v-if="p.match?.default" class="tag" style="background:rgba(255,204,0,.15);color:var(--neon-yellow);font-size:.72rem">默认</span>
+                <span v-if="p.match?.default" class="tag" style="background:rgba(255,204,0,.15);color:var(--color-warning);font-size:.72rem">默认</span>
                 <span v-else class="tag tag-info" style="font-size:.72rem">条件</span>
               </td>
             </tr>
@@ -52,7 +52,7 @@
       <!-- Policy Test -->
       <div style="padding:12px 16px 16px">
         <details open>
-          <summary style="cursor:pointer;color:var(--neon-green);font-weight:600;margin-bottom:8px">🧪 策略匹配测试</summary>
+          <summary style="cursor:pointer;color:var(--color-success);font-weight:600;margin-bottom:8px">策略匹配测试</summary>
           <div class="policy-test-form">
             <input v-model="policyTestForm.email" placeholder="邮箱" style="flex:1;min-width:120px" />
             <input v-model="policyTestForm.department" placeholder="部门" style="flex:1;min-width:100px" />
@@ -61,9 +61,9 @@
           </div>
           <div v-if="policyTestResult" class="policy-test-result" :class="{ matched: policyTestResult.matched }">
             <div v-if="policyTestResult.matched">
-              <span style="color:var(--neon-green);font-weight:600">✅ 命中策略 #{{ policyTestResult.policy_index + 1 }}</span>
+              <span style="color:var(--color-success);font-weight:600">✅ 命中策略 #{{ policyTestResult.policy_index + 1 }}</span>
               <span style="margin-left:12px">→ 上游: <span class="tag tag-pass" style="font-weight:700">{{ policyTestResult.upstream_id }}</span></span>
-              <div v-if="policyTestResult.policy" style="margin-top:6px;font-size:.78rem;color:var(--text-dim)">
+              <div v-if="policyTestResult.policy" style="margin-top:6px;font-size:.78rem;color:var(--text-secondary)">
                 匹配条件:
                 <span v-if="policyTestResult.policy.match?.department">部门={{ policyTestResult.policy.match.department }}</span>
                 <span v-if="policyTestResult.policy.match?.email">邮箱={{ policyTestResult.policy.match.email }}</span>
@@ -73,8 +73,8 @@
               </div>
             </div>
             <div v-else>
-              <span style="color:var(--neon-red);font-weight:600">❌ 未命中任何策略</span>
-              <span v-if="policyTestResult.message" style="margin-left:8px;font-size:.82rem;color:var(--text-dim)">{{ policyTestResult.message }}</span>
+              <span style="color:var(--color-danger);font-weight:600">❌ 未命中任何策略</span>
+              <span v-if="policyTestResult.message" style="margin-left:8px;font-size:.82rem;color:var(--text-secondary)">{{ policyTestResult.message }}</span>
             </div>
           </div>
         </details>
@@ -84,10 +84,10 @@
     <!-- Affinity Routes -->
     <div class="card">
       <div class="card-header">
-        <span class="card-icon">🗺️</span>
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>
         <span class="card-title">亲和路由管理</span>
         <div class="card-actions">
-          <button class="btn btn-sm" @click="refresh">🔄 刷新</button>
+          <button class="btn btn-sm" @click="refresh">刷新</button>
         </div>
       </div>
 
@@ -109,7 +109,7 @@
         <span class="tag tag-pass" style="font-size:.8rem">Bot 数: {{ routeStats.appCount }}</span>
         <span class="tag tag-pass" style="font-size:.8rem">用户数: {{ routeStats.senderCount }}</span>
         <span class="tag tag-info" style="font-size:.8rem">上游数: {{ routeStats.upstreamCount }}</span>
-        <span class="tag" style="font-size:.8rem;background:rgba(255,204,0,.15);color:var(--neon-yellow)">路由数: {{ routeStats.total }}</span>
+        <span class="tag" style="font-size:.8rem;background:rgba(255,204,0,.15);color:var(--color-warning)">路由数: {{ routeStats.total }}</span>
       </div>
 
       <!-- DataTable -->
@@ -117,8 +117,9 @@
         :columns="columns"
         :data="filteredRoutes"
         :loading="loading"
-        empty-text="暂无匹配路由"
-        empty-icon="🗺️"
+        empty-text="尚未绑定用户"
+        empty-desc="用户首次访问时将自动绑定路由"
+       
         :expandable="true"
       >
         <template #empty-hint>请先绑定用户到上游</template>
@@ -130,13 +131,13 @@
         </template>
         <template #expand="{ row }">
           <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.82rem">
-            <div><b style="color:var(--neon-blue)">用户ID:</b> {{ row.sender_id }}</div>
-            <div><b style="color:var(--neon-blue)">姓名:</b> {{ getUserInfo(row, 'name') }}</div>
-            <div><b style="color:var(--neon-blue)">邮箱:</b> {{ getUserInfo(row, 'email') }}</div>
-            <div><b style="color:var(--neon-blue)">手机:</b> {{ getUserInfo(row, 'mobile') }}</div>
-            <div><b style="color:var(--neon-blue)">部门:</b> {{ getUserInfo(row, 'department') }}</div>
-            <div><b style="color:var(--neon-blue)">App ID:</b> {{ row.app_id || '--' }}</div>
-            <div><b style="color:var(--neon-blue)">上游:</b> {{ row.upstream_id }}</div>
+            <div><b style="color:var(--color-primary)">用户ID:</b> {{ row.sender_id }}</div>
+            <div><b style="color:var(--color-primary)">姓名:</b> {{ getUserInfo(row, 'name') }}</div>
+            <div><b style="color:var(--color-primary)">邮箱:</b> {{ getUserInfo(row, 'email') }}</div>
+            <div><b style="color:var(--color-primary)">手机:</b> {{ getUserInfo(row, 'mobile') }}</div>
+            <div><b style="color:var(--color-primary)">部门:</b> {{ getUserInfo(row, 'department') }}</div>
+            <div><b style="color:var(--color-primary)">App ID:</b> {{ row.app_id || '--' }}</div>
+            <div><b style="color:var(--color-primary)">上游:</b> {{ row.upstream_id }}</div>
           </div>
         </template>
         <template #actions="{ row }">
@@ -146,7 +147,7 @@
 
       <!-- Bind forms -->
       <details style="margin-top:12px">
-        <summary style="cursor:pointer;color:var(--neon-green);font-weight:600">➕ 单用户绑定</summary>
+        <summary style="cursor:pointer;color:var(--color-success);font-weight:600">单用户绑定</summary>
         <div class="inline-form" style="margin-top:8px">
           <input v-model="bindForm.sender" placeholder="用户 ID" style="flex:1;min-width:100px" />
           <input v-model="bindForm.app" placeholder="App ID (Bot)" style="flex:1;min-width:100px" />
@@ -158,19 +159,19 @@
       </details>
 
       <details style="margin-top:8px">
-        <summary style="cursor:pointer;color:var(--neon-yellow);font-weight:600">📋 批量绑定</summary>
+        <summary style="cursor:pointer;color:var(--color-warning);font-weight:600">批量绑定</summary>
         <div style="margin-top:8px">
           <div class="inline-form" style="margin-bottom:8px">
             <input v-model="batchForm.app" placeholder="App ID (Bot)" style="flex:1" />
             <input v-model="batchForm.upstream" placeholder="上游 ID" style="flex:1" />
           </div>
-          <textarea v-model="batchForm.text" rows="4" placeholder="每行一条: 用户ID,显示名,部门" style="width:100%;background:rgba(0,0,0,.3);color:var(--text);border:1px solid rgba(0,212,255,.2);border-radius:6px;padding:8px;font-size:.8rem;font-family:monospace;resize:vertical"></textarea>
+          <textarea v-model="batchForm.text" rows="4" placeholder="每行一条: 用户ID,显示名,部门" style="width:100%;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-default);border-radius:6px;padding:8px;font-size:.8rem;font-family:monospace;resize:vertical"></textarea>
           <button class="btn btn-green" @click="batchBind" style="margin-top:8px">批量绑定</button>
         </div>
       </details>
 
       <details style="margin-top:8px">
-        <summary style="cursor:pointer;color:var(--neon-blue);font-weight:600">🔀 迁移用户</summary>
+        <summary style="cursor:pointer;color:var(--color-primary);font-weight:600">迁移用户</summary>
         <div class="inline-form" style="margin-top:8px">
           <input v-model="migrateForm.sender" placeholder="用户 ID" />
           <input v-model="migrateForm.app" placeholder="App ID (可选)" />
@@ -361,15 +362,15 @@ onMounted(refresh)
   width: 100%; border-collapse: collapse; margin-bottom: 12px;
 }
 .policy-table th {
-  text-align: left; padding: 10px 14px; color: var(--text-dim);
-  border-bottom: 1px solid rgba(0,212,255,.15); font-weight: 500;
+  text-align: left; padding: 10px 14px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default); font-weight: 500;
   font-size: .78rem; text-transform: uppercase;
 }
 .policy-table td {
-  padding: 10px 14px; border-bottom: 1px solid rgba(0,212,255,.06);
-  color: var(--text); font-size: .85rem;
+  padding: 10px 14px; border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary); font-size: .85rem;
 }
-.policy-table tr:hover td { background: rgba(0,212,255,.04); }
+.policy-table tr:hover td { background: var(--bg-elevated); }
 .policy-table tr.policy-matched td {
   background: rgba(0,255,136,.1) !important;
   border-color: rgba(0,255,136,.2);
@@ -381,18 +382,18 @@ onMounted(refresh)
   display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
 }
 .policy-test-form input {
-  background: rgba(0,0,0,.3); color: var(--text);
-  border: 1px solid rgba(0,212,255,.2); border-radius: 6px;
+  background: var(--bg-base); color: var(--text-primary);
+  border: 1px solid var(--border-default); border-radius: 6px;
   padding: 6px 10px; font-size: .82rem;
 }
-.policy-test-form input:focus { border-color: var(--neon-blue); outline: none; }
+.policy-test-form input:focus { border-color: var(--color-primary); outline: none; }
 .policy-test-result {
   margin-top: 10px; padding: 10px 14px;
-  background: rgba(0,0,0,.2); border-radius: 6px;
-  border-left: 3px solid var(--neon-red);
+  background: var(--bg-elevated); border-radius: 6px;
+  border-left: 3px solid var(--color-danger);
   font-size: .85rem;
 }
 .policy-test-result.matched {
-  border-left-color: var(--neon-green);
+  border-left-color: var(--color-success);
 }
 </style>

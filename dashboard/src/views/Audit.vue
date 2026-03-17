@@ -1,15 +1,22 @@
 <template>
   <div class="card">
     <div class="card-header">
-      <span class="card-icon">📋</span><span class="card-title">审计日志</span>
+      <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
+      <span class="card-title">审计日志</span>
       <div class="card-actions">
-        <button class="btn btn-sm" @click="loadLogs">🔄 刷新</button>
+        <button class="btn btn-ghost btn-sm" @click="loadLogs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          刷新
+        </button>
       </div>
     </div>
 
     <!-- Timeline trend chart -->
-    <div style="margin-bottom:16px">
-      <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">📈 请求趋势</div>
+    <div style="margin-bottom:var(--space-4)">
+      <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-2);font-weight:500;display:flex;align-items:center;gap:6px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        请求趋势
+      </div>
       <TrendChart v-if="timelineData.length"
         :data="timelineChartData"
         :lines="timelineLines"
@@ -19,37 +26,39 @@
         :currentRange="timelineRange"
         @rangeChange="onTimelineRangeChange"
       />
-      <div v-else style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:12px">暂无趋势数据</div>
+      <div v-else style="color:var(--text-tertiary);font-size:var(--text-sm);text-align:center;padding:var(--space-3)">暂无趋势数据</div>
     </div>
 
-    <!-- Filters -->
-    <div class="filters">
-      <div class="date-range-picker">
-        <label class="date-label">📅 开始</label>
-        <input type="datetime-local" v-model="filters.start_time" class="date-input" />
-        <label class="date-label">至</label>
-        <input type="datetime-local" v-model="filters.end_time" class="date-input" />
-        <button class="btn btn-sm" @click="applyDateRange" title="按日期范围筛选">📅 筛选</button>
-        <button v-if="filters.start_time || filters.end_time" class="btn btn-sm" @click="clearDateRange" title="清除日期范围" style="background:rgba(255,255,255,.1)">✕</button>
+    <!-- Filters — single row -->
+    <div class="audit-filters">
+      <div class="audit-filter-row">
+        <div class="date-range-picker">
+          <span class="date-label">开始</span>
+          <input type="datetime-local" v-model="filters.start_time" class="date-input" />
+          <span class="date-label">至</span>
+          <input type="datetime-local" v-model="filters.end_time" class="date-input" />
+          <button class="btn btn-ghost btn-sm" @click="applyDateRange" title="按日期范围筛选">筛选</button>
+          <button v-if="filters.start_time || filters.end_time" class="btn btn-ghost btn-sm" @click="clearDateRange" title="清除日期范围">✕</button>
+        </div>
       </div>
-      <select v-model="filters.direction" @change="loadLogs">
-        <option value="">全部方向</option>
-        <option value="inbound">入站</option>
-        <option value="outbound">出站</option>
-      </select>
-      <select v-model="filters.action" @change="loadLogs">
-        <option value="">全部动作</option>
-        <option value="pass">Pass</option>
-        <option value="block">Block</option>
-        <option value="warn">Warn</option>
-      </select>
-      <input v-model="filters.sender_id" placeholder="发送者 ID" />
-      <input v-model="filters.app_id" placeholder="App ID" />
-      <input v-model="filters.trace_id" placeholder="Trace ID" />
-      <input v-model="filters.q" placeholder="🔍 搜索内容..." />
-      <button class="btn" @click="loadLogs">筛选</button>
-      <button class="btn btn-green" @click="exportAudit('csv')">📥 CSV</button>
-      <button class="btn btn-green" @click="exportAudit('json')">📥 JSON</button>
+      <div class="audit-filter-row">
+        <select v-model="filters.direction" @change="loadLogs">
+          <option value="">全部方向</option>
+          <option value="inbound">入站</option>
+          <option value="outbound">出站</option>
+        </select>
+        <select v-model="filters.action" @change="loadLogs">
+          <option value="">全部动作</option>
+          <option value="pass">Pass</option>
+          <option value="block">Block</option>
+          <option value="warn">Warn</option>
+        </select>
+        <input v-model="filters.sender_id" placeholder="发送者 ID" />
+        <input v-model="filters.q" placeholder="搜索内容..." />
+        <button class="btn btn-sm" @click="loadLogs">搜索</button>
+        <button class="btn btn-ghost btn-sm" @click="exportAudit('csv')">CSV</button>
+        <button class="btn btn-ghost btn-sm" @click="exportAudit('json')">JSON</button>
+      </div>
     </div>
 
     <!-- DataTable -->
@@ -60,7 +69,7 @@
       :page-size="20"
       :page-sizes="[20, 50, 100]"
       empty-text="暂无日志记录"
-      empty-icon="📋"
+      empty-desc="调整筛选条件或等待新请求"
       :expandable="true"
       :row-class="rowClass"
     >
@@ -69,7 +78,7 @@
       <template #cell-direction="{ value }">{{ value === 'inbound' ? '入站' : '出站' }}</template>
       <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
       <template #cell-trace_id="{ row }">
-        <span style="font-size:.72rem;font-family:monospace;color:var(--neon-blue);cursor:pointer"
+        <span style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-primary);cursor:pointer"
               :title="row.trace_id"
               @click.stop="filters.trace_id = row.trace_id; loadLogs()">
           {{ (row.trace_id || '--').substring(0, 8) }}{{ row.trace_id && row.trace_id.length > 8 ? '...' : '' }}
@@ -82,43 +91,46 @@
       </template>
       <template #cell-latency="{ row }">{{ row.latency != null ? row.latency + 'ms' : (row.latency_ms != null ? row.latency_ms + 'ms' : '--') }}</template>
       <template #expand="{ row }">
-        <div style="font-size:.82rem;line-height:1.8">
-          <div><b style="color:var(--neon-blue)">时间:</b> {{ fmtTime(row.timestamp || row.time) }}</div>
-          <div><b style="color:var(--neon-blue)">方向:</b> {{ row.direction }} | <b style="color:var(--neon-blue)">动作:</b> {{ row.action }}</div>
-          <div><b style="color:var(--neon-blue)">发送者:</b> {{ row.sender_id || '--' }} | <b style="color:var(--neon-blue)">App ID:</b> {{ row.app_id || '--' }}</div>
-          <div><b style="color:var(--neon-blue)">Trace ID:</b> {{ row.trace_id || '--' }}</div>
-          <div><b style="color:var(--neon-blue)">上游:</b> {{ row.upstream_id || '--' }}</div>
-          <div><b style="color:var(--neon-blue)">原因:</b> {{ row.reason || '--' }}</div>
-          <div><b style="color:var(--neon-blue)">延迟:</b> {{ row.latency || row.latency_ms || '--' }}ms</div>
-          <div v-if="row.content_preview"><b style="color:var(--neon-blue)">内容:</b>
-            <pre style="background:rgba(0,0,0,.3);padding:8px;border-radius:6px;margin-top:4px;font-size:.75rem;white-space:pre-wrap;word-break:break-all;color:var(--text)">{{ row.content_preview }}</pre>
+        <div style="font-size:var(--text-sm);line-height:1.8">
+          <div><b style="color:var(--color-primary)">时间:</b> {{ fmtTime(row.timestamp || row.time) }}</div>
+          <div><b style="color:var(--color-primary)">方向:</b> {{ row.direction }} | <b style="color:var(--color-primary)">动作:</b> {{ row.action }}</div>
+          <div><b style="color:var(--color-primary)">发送者:</b> {{ row.sender_id || '--' }} | <b style="color:var(--color-primary)">App ID:</b> {{ row.app_id || '--' }}</div>
+          <div><b style="color:var(--color-primary)">Trace ID:</b> {{ row.trace_id || '--' }}</div>
+          <div><b style="color:var(--color-primary)">上游:</b> {{ row.upstream_id || '--' }}</div>
+          <div><b style="color:var(--color-primary)">原因:</b> {{ row.reason || '--' }}</div>
+          <div><b style="color:var(--color-primary)">延迟:</b> {{ row.latency || row.latency_ms || '--' }}ms</div>
+          <div v-if="row.content_preview"><b style="color:var(--color-primary)">内容:</b>
+            <pre style="background:var(--bg-base);padding:var(--space-2);border-radius:var(--radius-md);margin-top:var(--space-1);font-size:var(--text-xs);white-space:pre-wrap;word-break:break-all;color:var(--text-primary);border:1px solid var(--border-subtle)">{{ row.content_preview }}</pre>
           </div>
         </div>
       </template>
     </DataTable>
 
     <!-- Actions -->
-    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" @click="loadAuditStats">📊 统计</button>
-      <button class="btn btn-red" @click="confirmCleanup">🗑️ 清理过期</button>
-      <button class="btn btn-purple" @click="confirmArchive">📦 手动归档</button>
-      <button class="btn" @click="loadArchives">📂 查看归档</button>
+    <div style="margin-top:var(--space-3);display:flex;gap:var(--space-2);flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" @click="loadAuditStats">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        统计
+      </button>
+      <button class="btn btn-danger btn-sm" @click="confirmCleanup">清理过期</button>
+      <button class="btn btn-ghost btn-sm" @click="confirmArchive">手动归档</button>
+      <button class="btn btn-ghost btn-sm" @click="loadArchives">查看归档</button>
     </div>
 
     <!-- Stats -->
-    <div v-if="auditStatsHtml" v-html="auditStatsHtml" style="margin-top:8px"></div>
+    <div v-if="auditStatsHtml" v-html="auditStatsHtml" style="margin-top:var(--space-2)"></div>
 
     <!-- Archives -->
-    <div v-if="archives.length" style="margin-top:8px">
-      <div style="font-size:.82rem;color:var(--neon-blue);font-weight:600;margin-bottom:6px">📂 归档文件 ({{ archives.length }} 个)</div>
+    <div v-if="archives.length" style="margin-top:var(--space-2)">
+      <div style="font-size:var(--text-sm);color:var(--color-primary);font-weight:500;margin-bottom:var(--space-2)">归档文件 ({{ archives.length }} 个)</div>
       <div class="table-wrap">
         <table>
           <tr><th>文件名</th><th>大小</th><th>时间</th><th>操作</th></tr>
           <tr v-for="a in archives" :key="a.name">
-            <td style="font-family:monospace;font-size:.8rem">{{ a.name }}</td>
+            <td style="font-family:var(--font-mono);font-size:var(--text-xs)">{{ a.name }}</td>
             <td>{{ formatSize(a.size) }}</td>
             <td>{{ fmtTime(a.mod_time) }}</td>
-            <td><a :href="'/api/v1/audit/archives/' + encodeURIComponent(a.name)" class="btn btn-sm" style="text-decoration:none" target="_blank">下载</a></td>
+            <td><a :href="'/api/v1/audit/archives/' + encodeURIComponent(a.name)" class="btn btn-ghost btn-sm" style="text-decoration:none" target="_blank">下载</a></td>
           </tr>
         </table>
       </div>
@@ -148,7 +160,7 @@ const filters = reactive({ direction: '', action: '', sender_id: '', app_id: '',
 const columns = [
   { key: 'timestamp', label: '时间', sortable: true },
   { key: 'direction', label: '方向', sortable: true },
-  { key: 'app_id', label: 'App ID', sortable: true, tdStyle: { fontSize: '.75rem', color: 'var(--text-dim)' } },
+  { key: 'app_id', label: 'App ID', sortable: true, tdStyle: { fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' } },
   { key: 'sender_id', label: '发送者', sortable: true },
   { key: 'action', label: '动作', sortable: true },
   { key: 'trace_id', label: 'Trace ID', sortable: false },
@@ -157,7 +169,6 @@ const columns = [
   { key: 'latency', label: '延迟', sortable: true },
 ]
 
-// Confirm
 const confirmVisible = ref(false)
 const confirmTitle = ref('')
 const confirmMessage = ref('')
@@ -169,7 +180,6 @@ function actTag(a) { a = (a || '').toLowerCase(); return a === 'block' ? 'tag-bl
 function rowClass(row) { const a = (row.action || '').toLowerCase(); return a === 'block' ? 'row-block' : a === 'warn' ? 'row-warn' : '' }
 function formatSize(bytes) { const kb = Math.round((bytes || 0) / 1024); return kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB' }
 
-// Timeline chart
 const timelineChartData = computed(() => {
   return timelineData.value.map(t => ({
     pass: t.pass || 0,
@@ -179,16 +189,17 @@ const timelineChartData = computed(() => {
 })
 
 const timelineLines = [
-  { key: 'pass', color: '#00ff88', label: 'Pass' },
-  { key: 'block', color: '#ff4466', label: 'Block' },
-  { key: 'warn', color: '#ffcc00', label: 'Warn' },
+  { key: 'pass', color: '#10B981', label: 'Pass' },
+  { key: 'block', color: '#EF4444', label: 'Block' },
+  { key: 'warn', color: '#F59E0B', label: 'Warn' },
 ]
 
 const timelineXLabels = computed(() => {
   return timelineData.value.map(t => {
     const h = t.hour || ''
     if (timelineRange.value === '7d') return h.substring(5, 10)
-    return h.substring(11, 13) + 'h'
+    const hourPart = h.substring(11, 13)
+    return hourPart ? hourPart + ':00' : ''
   })
 })
 
@@ -197,15 +208,8 @@ function onTimelineRangeChange(range) {
   loadTimeline()
 }
 
-function applyDateRange() {
-  loadLogs()
-}
-
-function clearDateRange() {
-  filters.start_time = ''
-  filters.end_time = ''
-  loadLogs()
-}
+function applyDateRange() { loadLogs() }
+function clearDateRange() { filters.start_time = ''; filters.end_time = ''; loadLogs() }
 
 async function loadLogs() {
   loading.value = true
@@ -247,7 +251,7 @@ async function loadAuditStats() {
     const d = await api('/api/v1/audit/stats')
     const kb = d.disk_bytes ? Math.round(d.disk_bytes / 1024) : 0
     const ss = kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB'
-    auditStatsHtml.value = `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem"><span>📊 总数: <b style="color:var(--neon-blue)">${d.total}</b></span><span>📅 最早: <b>${fmtTime(d.earliest)}</b></span><span>📅 最晚: <b>${fmtTime(d.latest)}</b></span><span>💾 磁盘: <b>${ss}</b></span></div>`
+    auditStatsHtml.value = `<div style="display:flex;gap:var(--space-4);flex-wrap:wrap;font-size:var(--text-sm);padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-md)"><span>总数: <b style="color:var(--color-primary)">${d.total}</b></span><span>最早: <b>${fmtTime(d.earliest)}</b></span><span>最晚: <b>${fmtTime(d.latest)}</b></span><span>磁盘: <b>${ss}</b></span></div>`
   } catch (e) { showToast('获取统计失败: ' + e.message, 'error') }
 }
 
@@ -292,16 +296,34 @@ onUnmounted(() => clearInterval(refreshTimer))
 </script>
 
 <style scoped>
+.audit-filters {
+  margin-bottom: var(--space-3);
+}
+.audit-filter-row {
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.audit-filter-row select,
+.audit-filter-row input:not([type="datetime-local"]) {
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); color: var(--text-primary); padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm); outline: none; font-family: var(--font-sans);
+  transition: border-color var(--transition-fast);
+}
+.audit-filter-row select:focus,
+.audit-filter-row input:focus { border-color: var(--color-primary); }
+.audit-filter-row select option { background: var(--bg-elevated); }
 .date-range-picker {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  background: rgba(0,0,0,.15); border-radius: 6px; padding: 4px 8px;
-  border: 1px solid rgba(0,212,255,.1);
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  background: var(--bg-elevated); border-radius: var(--radius-md); padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-subtle);
 }
-.date-label { font-size: .75rem; color: var(--text-dim); white-space: nowrap; }
+.date-label { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
 .date-input {
-  background: rgba(0,0,0,.3); border: 1px solid rgba(0,212,255,.2);
-  border-radius: 4px; color: var(--text); padding: 3px 6px; font-size: .78rem;
-  outline: none; color-scheme: dark;
+  background: var(--bg-base); border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm); color: var(--text-primary); padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs); outline: none; color-scheme: dark;
+  font-family: var(--font-sans);
 }
-.date-input:focus { border-color: var(--neon-blue); }
+.date-input:focus { border-color: var(--color-primary); }
 </style>

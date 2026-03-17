@@ -2,17 +2,30 @@
   <div>
     <!-- Stat Cards -->
     <div class="ov-cards">
-      <StatCard icon="📨" :value="stats.total" label="总请求" color="blue" />
-      <StatCard icon="🛡️" :value="stats.blocked" label="拦截数" color="red" />
-      <StatCard icon="⚠️" :value="stats.warned" label="告警数" color="yellow" />
-      <StatCard icon="📊" :value="stats.rate" label="拦截率" color="green" />
+      <StatCard
+        :iconSvg="svgGlobe" :value="stats.total" label="总请求" color="blue"
+      />
+      <StatCard
+        :iconSvg="svgShieldX" :value="stats.blocked" label="拦截数" color="red"
+      />
+      <StatCard
+        :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" color="yellow"
+      />
+      <StatCard
+        :iconSvg="svgPercent" :value="stats.rate" label="拦截率" color="green"
+      />
     </div>
 
     <!-- Trend + Health -->
     <div class="ov-row">
       <div class="card">
-        <div class="card-header"><span class="card-icon">📈</span><span class="card-title">请求趋势</span></div>
-        <div v-if="!trendData.length" class="empty"><div class="empty-icon">📈</div>暂无趋势数据</div>
+        <div class="card-header">
+          <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
+          <span class="card-title">请求趋势</span>
+        </div>
+        <EmptyState v-if="!trendData.length"
+          :iconSvg="svgTrend" title="暂无趋势数据" description="系统运行后将自动收集趋势数据"
+        />
         <TrendChart v-else
           :data="trendChartData"
           :lines="trendLines"
@@ -24,8 +37,13 @@
         />
       </div>
       <div class="card">
-        <div class="card-header"><span class="card-icon">🏥</span><span class="card-title">健康状态</span></div>
-        <div v-if="!healthBars.length" class="empty">无健康数据</div>
+        <div class="card-header">
+          <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
+          <span class="card-title">健康状态</span>
+        </div>
+        <EmptyState v-if="!healthBars.length"
+          :iconSvg="svgHeart" title="无健康数据" description="等待系统上报健康信息"
+        />
         <div v-else>
           <div class="hb-row" v-for="hb in healthBars" :key="hb.name">
             <span class="hb-label">{{ hb.name }}</span>
@@ -39,13 +57,23 @@
     <!-- Pie + Top Rules -->
     <div class="ov-row">
       <div class="card">
-        <div class="card-header"><span class="card-icon">🧩</span><span class="card-title">拦截类型分布</span></div>
-        <div v-if="!pieData.length" class="empty"><div class="empty-icon">🧩</div>暂无拦截数据</div>
+        <div class="card-header">
+          <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+          <span class="card-title">拦截类型分布</span>
+        </div>
+        <EmptyState v-if="!pieData.length"
+          :iconSvg="svgPie" title="暂无拦截数据" description="检测到威胁后将显示分布统计"
+        />
         <PieChart v-else :data="pieData" :size="180" />
       </div>
       <div class="card">
-        <div class="card-header"><span class="card-icon">🎯</span><span class="card-title">规则命中 TOP5</span></div>
-        <div v-if="!topRules.length" class="empty"><div class="empty-icon">🎯</div>暂无命中数据</div>
+        <div class="card-header">
+          <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="card-title">规则命中 TOP5</span>
+        </div>
+        <EmptyState v-if="!topRules.length"
+          :iconSvg="svgTarget" title="规则正在保护中" description="命中数据将在检测到威胁后显示"
+        />
         <div v-else>
           <div class="hbar-row" v-for="(r, i) in topRules" :key="r.name">
             <span class="hbar-rank">#{{ i + 1 }}</span>
@@ -60,15 +88,25 @@
 
     <!-- Heatmap -->
     <div class="card" style="margin-bottom:20px">
-      <div class="card-header"><span class="card-icon">🔥</span><span class="card-title">7 天攻击频率热力图</span></div>
-      <div v-if="!heatmapData.length" class="empty"><div class="empty-icon">🔥</div>暂无热力图数据</div>
+      <div class="card-header">
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
+        <span class="card-title">7 天攻击频率热力图</span>
+      </div>
+      <EmptyState v-if="!heatmapData.length"
+        :iconSvg="svgGrid" title="暂无热力图数据" description="系统运行 24 小时后将生成攻击频率热力图"
+      />
       <HeatMap v-else :data="heatmapData" title="" />
     </div>
 
     <!-- Recent Attacks -->
     <div class="card">
-      <div class="card-header"><span class="card-icon">🚨</span><span class="card-title">最近攻击事件</span></div>
-      <div v-if="!recentAttacks.length" class="empty"><div class="empty-icon">✅</div>暂无攻击事件<div class="empty-hint">系统安全运行中</div></div>
+      <div class="card-header">
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+        <span class="card-title">最近攻击事件</span>
+      </div>
+      <EmptyState v-if="!recentAttacks.length"
+        :iconSvg="svgShieldCheck" title="当前环境安全" description="没有检测到攻击事件"
+      />
       <div v-else class="table-wrap">
         <table>
           <thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
@@ -93,10 +131,25 @@ import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
 import PieChart from '../components/PieChart.vue'
 import HeatMap from '../components/HeatMap.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const appState = inject('appState')
-const barColors = ['#00d4ff', '#00ff88', '#ffcc00', '#ff4466', '#9b59b6']
-const pieColors = ['#ff4466', '#ffa94d', '#00d4ff', '#00ff88', '#9b59b6', '#74c0fc', '#e599f7', '#ffcc00']
+const barColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
+const pieColors = ['#EF4444', '#F59E0B', '#3B82F6', '#10B981', '#8B5CF6', '#06B6D4', '#EC4899', '#F97316']
+
+// SVG icons for stat cards
+const svgGlobe = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
+const svgShieldX = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9.5" y1="9.5" x2="14.5" y2="14.5"/><line x1="14.5" y1="9.5" x2="9.5" y2="14.5"/></svg>'
+const svgAlertTriangle = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+const svgPercent = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>'
+
+// SVG for empty states
+const svgTrend = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+const svgHeart = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+const svgPie = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>'
+const svgTarget = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>'
+const svgGrid = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>'
+const svgShieldCheck = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
 
 const stats = ref({ total: '--', blocked: '--', warned: '--', rate: '--' })
 const trendData = ref([])
@@ -127,13 +180,12 @@ const healthBars = computed(() => {
     const c = h.checks[dm.k]
     if (!c) continue
     const pct = dm.fn(c)
-    const color = c.status === 'ok' ? 'var(--neon-green)' : (c.status === 'warning' ? 'var(--neon-yellow)' : 'var(--neon-red)')
+    const color = c.status === 'ok' ? 'var(--color-success)' : (c.status === 'warning' ? 'var(--color-warning)' : 'var(--color-danger)')
     result.push({ name: dm.n, pct, color, val: dm.vfn(c) })
   }
   return result
 })
 
-// Trend chart data
 const trendChartData = computed(() => {
   return trendData.value.map(t => ({
     total: (t.pass || 0) + (t.block || 0) + (t.warn || 0),
@@ -143,19 +195,20 @@ const trendChartData = computed(() => {
 })
 
 const trendLines = [
-  { key: 'total', color: '#00d4ff', label: '总请求' },
-  { key: 'block', color: '#ff4466', label: '拦截' },
-  { key: 'warn', color: '#ffcc00', label: '告警' },
+  { key: 'total', color: '#3B82F6', label: '总请求' },
+  { key: 'block', color: '#EF4444', label: '拦截' },
+  { key: 'warn', color: '#F59E0B', label: '告警' },
 ]
 
 const trendXLabels = computed(() => {
   return trendData.value.map(t => {
     const h = t.hour || ''
     if (trendRange.value === '7d') {
-      // Show date for 7d
-      return h.substring(5, 10) + '\n' + h.substring(11, 13) + 'h'
+      return h.substring(5, 10) + ' ' + h.substring(11, 13) + ':00'
     }
-    return h.substring(11, 13) + 'h'
+    // Format as HH:00
+    const hourPart = h.substring(11, 13)
+    return hourPart ? hourPart + ':00' : ''
   })
 })
 
@@ -201,7 +254,6 @@ async function loadData() {
     const maxH = top.length ? (top[0].hits || 1) : 1
     topRules.value = top.map(r => ({ ...r, pct: (r.hits / maxH) * 100 }))
 
-    // Build pie data from groups
     const groupMap = {}
     for (const r of list) {
       const g = r.group || 'other'
@@ -219,11 +271,9 @@ async function loadData() {
     pieData.value = []
   }
 
-  // Load heatmap data (7d × 24h)
   try {
     const d = await api('/api/v1/audit/timeline?hours=168')
     const tl = d.timeline || []
-    // Aggregate into 7×24 matrix
     const matrix = Array.from({ length: 7 }, () => Array(24).fill(0))
     const now = new Date()
     for (const t of tl) {
@@ -249,7 +299,7 @@ onUnmounted(() => clearInterval(refreshTimer))
 
 <style scoped>
 .hbar-rank {
-  width: 24px; font-size: .72rem; color: var(--neon-blue); font-weight: 700; text-align: center; flex-shrink: 0;
+  width: 24px; font-size: var(--text-xs); color: var(--color-primary); font-weight: 700; text-align: center; flex-shrink: 0;
 }
 .hbar-fill-anim {
   width: 0;

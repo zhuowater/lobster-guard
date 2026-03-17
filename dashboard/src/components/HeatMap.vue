@@ -33,7 +33,7 @@
     <!-- Tooltip -->
     <div v-if="hoverInfo" class="heatmap-tooltip" :style="hoverInfo.style">
       <div>{{ hoverInfo.dayName }} {{ String(hoverInfo.hour).padStart(2, '0') }}:00</div>
-      <div style="font-weight:700;color:var(--neon-blue)">{{ hoverInfo.count }} 次攻击</div>
+      <div style="font-weight:700;color:var(--color-primary)">{{ hoverInfo.count }} 次攻击</div>
     </div>
   </div>
 </template>
@@ -127,28 +127,28 @@ function onHover(e, hour, day) {
 
 <style scoped>
 .heatmap-wrap { position: relative; }
-.heatmap-title { font-size: .82rem; color: var(--text-dim); margin-bottom: 8px; font-weight: 600; }
+.heatmap-title { font-size: .82rem; color: var(--text-secondary); margin-bottom: 8px; font-weight: 600; }
 .heatmap-grid-box { display: flex; gap: 4px; }
 .heatmap-y-labels { display: flex; flex-direction: column; gap: 1px; padding-top: 22px; }
-.heatmap-y-label { height: 14px; line-height: 14px; font-size: .6rem; color: var(--text-dim); text-align: right; padding-right: 4px; }
+.heatmap-y-label { height: 14px; line-height: 14px; font-size: .6rem; color: var(--text-secondary); text-align: right; padding-right: 4px; }
 .heatmap-grid { flex: 1; min-width: 0; }
 .heatmap-header { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; margin-bottom: 2px; }
-.heatmap-day-label { text-align: center; font-size: .65rem; color: var(--text-dim); font-weight: 600; }
+.heatmap-day-label { text-align: center; font-size: .65rem; color: var(--text-secondary); font-weight: 600; }
 .heatmap-body { display: flex; flex-direction: column; gap: 1px; }
 .heatmap-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
 .heatmap-cell {
   height: 14px; border-radius: 2px; cursor: pointer;
   transition: transform .15s, box-shadow .15s;
 }
-.heatmap-cell:hover { transform: scale(1.3); z-index: 2; box-shadow: 0 0 6px rgba(0,212,255,.5); }
+.heatmap-cell:hover { transform: scale(1.3); z-index: 2; box-shadow: 0 0 6px var(--shadow-md); }
 .heatmap-scale { display: flex; align-items: center; gap: 6px; margin-top: 8px; justify-content: center; }
-.heatmap-scale-label { font-size: .65rem; color: var(--text-dim); }
+.heatmap-scale-label { font-size: .65rem; color: var(--text-secondary); }
 .heatmap-scale-bar {
   width: 120px; height: 10px; border-radius: 5px;
   background: linear-gradient(to right, rgba(0,40,80,0.5), rgba(0,180,220,0.7), rgba(100,220,100,0.8), rgba(255,200,0,0.85), rgba(255,60,60,0.9));
 }
 .heatmap-tooltip {
-  position: absolute; background: rgba(10,14,39,.95); border: 1px solid rgba(0,212,255,.3);
+  position: absolute; background: var(--bg-overlay); border: 1px solid var(--border-strong);
   border-radius: 6px; padding: 6px 10px; font-size: .75rem; pointer-events: none;
   z-index: 10; box-shadow: 0 4px 16px rgba(0,0,0,.5); color: var(--text); white-space: nowrap;
 }

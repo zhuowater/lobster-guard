@@ -46,13 +46,13 @@ const confirmBtnClass = computed(() => {
 <style scoped>
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,.6); z-index: 1000;
+  background: rgba(0,0,0,.5); z-index: 1000;
   display: flex; align-items: center; justify-content: center;
   animation: fadeIn .2s;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .modal-box {
-  background: var(--bg-card); border: 1px solid rgba(0,212,255,.2);
+  background: var(--bg-surface); border: 1px solid var(--border-default);
   border-radius: var(--radius); padding: 24px; min-width: 360px; max-width: 480px;
   box-shadow: 0 16px 64px rgba(0,0,0,.5);
   animation: slideUp .2s ease-out;
@@ -62,6 +62,6 @@ const confirmBtnClass = computed(() => {
 .modal-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .modal-icon { font-size: 1.4rem; }
 .modal-title { font-size: 1.1rem; font-weight: 600; color: var(--text); }
-.modal-body { color: var(--text-dim); font-size: .9rem; margin-bottom: 20px; line-height: 1.6; }
+.modal-body { color: var(--text-secondary); font-size: .9rem; margin-bottom: 20px; line-height: 1.6; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

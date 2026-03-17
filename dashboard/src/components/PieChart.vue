@@ -40,7 +40,7 @@
       <div class="pie-tooltip-label">{{ legendItems[hoverIdx]?.label }}</div>
       <div class="pie-tooltip-val">
         <b>{{ legendItems[hoverIdx]?.value }}</b>
-        <span style="color:var(--text-dim);margin-left:4px">({{ legendItems[hoverIdx]?.pct }}%)</span>
+        <span style="color:var(--text-secondary);margin-left:4px">({{ legendItems[hoverIdx]?.pct }}%)</span>
       </div>
     </div>
   </div>
@@ -115,24 +115,24 @@ function onMouseMove(e, i) {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
   text-align: center; pointer-events: none;
 }
-.pie-center-num { font-size: 1.6rem; font-weight: 800; font-family: monospace; color: var(--neon-blue); }
-.pie-center-label { font-size: .68rem; color: var(--text-dim); }
+.pie-center-num { font-size: 1.6rem; font-weight: 800; font-family: monospace; color: var(--color-primary); }
+.pie-center-label { font-size: .68rem; color: var(--text-secondary); }
 .pie-legend { display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
 .pie-legend-item {
   display: flex; align-items: center; gap: 6px; font-size: .78rem;
   cursor: pointer; transition: opacity .2s; padding: 2px 4px; border-radius: 4px;
 }
-.pie-legend-item:hover { background: rgba(0,212,255,.06); }
+.pie-legend-item:hover { background: var(--bg-elevated); }
 .pie-legend-item.dimmed { opacity: .4; }
 .pie-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 .pie-legend-label { color: var(--text); flex: 1; }
 .pie-legend-value { font-weight: 700; font-family: monospace; color: var(--text); }
-.pie-legend-pct { font-size: .7rem; color: var(--text-dim); }
+.pie-legend-pct { font-size: .7rem; color: var(--text-secondary); }
 .pie-tooltip {
-  position: absolute; background: rgba(10,14,39,.95); border: 1px solid rgba(0,212,255,.3);
+  position: absolute; background: var(--bg-overlay); border: 1px solid var(--border-strong);
   border-radius: 6px; padding: 8px 12px; font-size: .78rem; pointer-events: none;
   z-index: 10; box-shadow: 0 4px 16px rgba(0,0,0,.5);
 }
-.pie-tooltip-label { color: var(--text-dim); margin-bottom: 2px; }
+.pie-tooltip-label { color: var(--text-secondary); margin-bottom: 2px; }
 .pie-tooltip-val { color: var(--text); }
 </style>

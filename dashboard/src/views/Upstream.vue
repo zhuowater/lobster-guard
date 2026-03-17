@@ -1,10 +1,10 @@
 <template>
   <div class="card">
     <div class="card-header">
-      <span class="card-icon">🔗</span>
+      <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/></svg></span>
       <span class="card-title">上游管理</span>
       <div class="card-actions">
-        <button class="btn btn-sm" @click="loadUpstreams">🔄 刷新</button>
+        <button class="btn btn-sm" @click="loadUpstreams">刷新</button>
       </div>
     </div>
     <DataTable
@@ -12,7 +12,8 @@
       :data="upstreams"
       :loading="loading"
       empty-text="暂无上游节点"
-      empty-icon="🔗"
+      empty-desc="请配置 upstream 或等待服务注册"
+     
       :expandable="true"
     >
       <template #empty-hint>请配置 upstream 或等待服务注册</template>
@@ -25,11 +26,11 @@
       </template>
       <template #expand="{ row }">
         <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.82rem">
-          <div><b style="color:var(--neon-blue)">ID:</b> {{ row.id }}</div>
-          <div><b style="color:var(--neon-blue)">地址:</b> {{ row.address || row.addr || row.host }}:{{ row.port }}</div>
-          <div><b style="color:var(--neon-blue)">静态:</b> {{ row.static ? '是' : '否' }}</div>
-          <div v-if="row.tags"><b style="color:var(--neon-blue)">Tags:</b> {{ JSON.stringify(row.tags) }}</div>
-          <div v-if="row.load"><b style="color:var(--neon-blue)">负载:</b> {{ JSON.stringify(row.load) }}</div>
+          <div><b style="color:var(--color-primary)">ID:</b> {{ row.id }}</div>
+          <div><b style="color:var(--color-primary)">地址:</b> {{ row.address || row.addr || row.host }}:{{ row.port }}</div>
+          <div><b style="color:var(--color-primary)">静态:</b> {{ row.static ? '是' : '否' }}</div>
+          <div v-if="row.tags"><b style="color:var(--color-primary)">Tags:</b> {{ JSON.stringify(row.tags) }}</div>
+          <div v-if="row.load"><b style="color:var(--color-primary)">负载:</b> {{ JSON.stringify(row.load) }}</div>
         </div>
       </template>
     </DataTable>

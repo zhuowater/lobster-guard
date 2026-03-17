@@ -54,6 +54,7 @@ onUnmounted(() => {
 }
 .sidebar-overlay.show { display: block; }
 
-.page-enter-active { animation: pi .3s ease-out both; }
-.page-leave-active { animation: pi .2s ease-in reverse; }
+.page-enter-active { animation: page-in .15s ease-out both; }
+.page-leave-active { animation: page-in .1s ease-in reverse; }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 </style>
