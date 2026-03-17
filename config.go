@@ -15,6 +15,32 @@ import (
 // 配置结构
 // ============================================================
 
+// LLMProxyConfig LLM 侧反向代理配置（v9.0）
+type LLMProxyConfig struct {
+	Enabled      bool              `yaml:"enabled" json:"enabled"`
+	Listen       string            `yaml:"listen" json:"listen"`
+	Targets      []LLMTargetConfig `yaml:"targets" json:"targets"`
+	AuditConfig  LLMAuditConfig    `yaml:"audit" json:"audit"`
+	TimeoutSec   int               `yaml:"timeout_sec" json:"timeout_sec"`
+	MaxBodyBytes int64             `yaml:"max_body_bytes" json:"max_body_bytes"`
+}
+
+// LLMTargetConfig LLM 上游配置
+type LLMTargetConfig struct {
+	Name         string `yaml:"name" json:"name"`
+	Upstream     string `yaml:"upstream" json:"upstream"`
+	PathPrefix   string `yaml:"path_prefix" json:"path_prefix"`
+	APIKeyHeader string `yaml:"api_key_header" json:"api_key_header"`
+}
+
+// LLMAuditConfig LLM 审计配置
+type LLMAuditConfig struct {
+	LogSystemPrompt bool `yaml:"log_system_prompt" json:"log_system_prompt"`
+	LogToolInput    bool `yaml:"log_tool_input" json:"log_tool_input"`
+	LogToolResult   bool `yaml:"log_tool_result" json:"log_tool_result"`
+	MaxPreviewLen   int  `yaml:"max_preview_len" json:"max_preview_len"`
+}
+
 // InboundRuleConfig 入站规则配置（v3.5 外部化）
 type InboundRuleConfig struct {
 	Name     string   `yaml:"name" json:"name"`
@@ -129,6 +155,8 @@ type Config struct {
 	LLMDetectPrompt        string   `yaml:"llm_detect_prompt"`        // 自定义 LLM system prompt
 	DetectCacheTTL         int      `yaml:"detect_cache_ttl"`         // 检测缓存 TTL 秒（默认 300）
 	DetectCacheSize        int      `yaml:"detect_cache_size"`        // 检测缓存大小（默认 1000）
+	// v9.0 LLM 代理
+	LLMProxy               LLMProxyConfig `yaml:"llm_proxy" json:"llm_proxy"` // LLM 侧反向代理配置
 }
 
 type OutboundRuleConfig struct {

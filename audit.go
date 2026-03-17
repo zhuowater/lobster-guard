@@ -52,6 +52,11 @@ func (al *AuditLogger) Close() {
 	if al.stmt != nil { al.stmt.Close() }
 }
 
+// DB returns the underlying database handle
+func (al *AuditLogger) DB() *sql.DB {
+	return al.db
+}
+
 func (al *AuditLogger) QueryLogs(direction, action, senderID string, limit int) ([]map[string]interface{}, error) {
 	return al.QueryLogsEx(direction, action, senderID, "", "", limit)
 }
@@ -394,24 +399,37 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN trace_id TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trace ON audit_log(trace_id)`)
 
-	// v9.0: tool_calls 表（ToolCallAuditor 会自行创建，但在此确保索引存在）
-	db.Exec(`CREATE TABLE IF NOT EXISTS tool_calls (
+	// v9.0: LLM 审计表（LLMAuditor 会初始化，但确保表结构存在）
+	db.Exec(`CREATE TABLE IF NOT EXISTS llm_calls (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		timestamp TEXT NOT NULL,
 		trace_id TEXT,
-		sender_id TEXT,
-		app_id TEXT,
+		model TEXT,
+		request_tokens INTEGER,
+		response_tokens INTEGER,
+		total_tokens INTEGER,
+		latency_ms REAL,
+		status_code INTEGER,
+		has_tool_use INTEGER DEFAULT 0,
+		tool_count INTEGER DEFAULT 0,
+		error_message TEXT
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(timestamp)`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS llm_tool_calls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		llm_call_id INTEGER REFERENCES llm_calls(id),
+		timestamp TEXT NOT NULL,
 		tool_name TEXT NOT NULL,
 		tool_input_preview TEXT,
 		tool_result_preview TEXT,
-		duration_ms REAL,
 		risk_level TEXT DEFAULT 'low',
 		flagged INTEGER DEFAULT 0,
 		flag_reason TEXT
 	)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_calls_ts ON tool_calls(timestamp)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool_name)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_calls_risk ON tool_calls(risk_level)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_ts ON llm_tool_calls(timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk ON llm_tool_calls(risk_level)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tool ON llm_tool_calls(tool_name)`)
 
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)

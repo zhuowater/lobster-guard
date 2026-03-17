@@ -8,8 +8,42 @@
       </div>
     </div>
     <div class="sidebar-nav">
+      <!-- IM 安全 -->
+      <div class="nav-group-label" v-if="!appState.sidebarCollapsed">IM 安全</div>
       <router-link
-        v-for="item in navItems" :key="item.path"
+        v-for="item in imItems" :key="item.path"
+        :to="item.path"
+        class="nav-item"
+        :class="{ active: $route.path === item.path }"
+        @click="$emit('closeMobile')"
+        :title="appState.sidebarCollapsed ? item.label : ''"
+      >
+        <span class="nav-icon" v-html="item.svg"></span>
+        <span class="nav-label">{{ item.label }}</span>
+      </router-link>
+
+      <!-- LLM 安全 (仅启用时显示) -->
+      <template v-if="llmEnabled">
+        <div class="nav-divider"></div>
+        <div class="nav-group-label" v-if="!appState.sidebarCollapsed">LLM 安全</div>
+        <router-link
+          v-for="item in llmItems" :key="item.path"
+          :to="item.path"
+          class="nav-item"
+          :class="{ active: $route.path === item.path }"
+          @click="$emit('closeMobile')"
+          :title="appState.sidebarCollapsed ? item.label : ''"
+        >
+          <span class="nav-icon" v-html="item.svg"></span>
+          <span class="nav-label">{{ item.label }}</span>
+        </router-link>
+      </template>
+
+      <!-- 系统 -->
+      <div class="nav-divider"></div>
+      <div class="nav-group-label" v-if="!appState.sidebarCollapsed">系统</div>
+      <router-link
+        v-for="item in systemItems" :key="item.path"
         :to="item.path"
         class="nav-item"
         :class="{ active: $route.path === item.path }"
@@ -35,21 +69,48 @@
 </template>
 
 <script setup>
-import { inject, computed } from 'vue'
+import { inject, computed, ref, onMounted } from 'vue'
 import { toggleSidebar } from '../stores/app.js'
+import { api } from '../api.js'
 
 defineProps({ mobileOpen: Boolean })
 defineEmits(['closeMobile'])
 
 const appState = inject('appState')
 
-const navItems = [
+const llmEnabled = ref(false)
+
+// 检测 LLM 代理是否启用
+async function checkLLMStatus() {
+  try {
+    const d = await api('/api/v1/llm/status')
+    llmEnabled.value = d.enabled === true
+  } catch {
+    llmEnabled.value = false
+  }
+}
+
+onMounted(() => {
+  checkLLMStatus()
+})
+
+// IM 安全导航项
+const imItems = [
   { path: '/overview', label: '概览', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>' },
   { path: '/upstream', label: '上游', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/></svg>' },
   { path: '/routes', label: '路由', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>' },
   { path: '/rules', label: '规则', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
   { path: '/audit', label: '审计', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>' },
-  { path: '/agent', label: 'Agent', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>' },
+]
+
+// LLM 安全导航项
+const llmItems = [
+  { path: '/llm', label: 'LLM 概览', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2"/></svg>' },
+  { path: '/agent', label: 'Agent 行为', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>' },
+]
+
+// 系统导航项
+const systemItems = [
   { path: '/monitor', label: '监控', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' },
   { path: '/ops', label: '运维', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' },
   { path: '/settings', label: '设置', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
@@ -87,6 +148,23 @@ const statusText = computed(() => {
 }
 .sidebar-brand-sub { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
 .sidebar-nav { flex: 1; padding: var(--space-2) 0; overflow-y: auto; overflow-x: hidden; }
+
+.nav-group-label {
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.nav-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-2) var(--space-3);
+}
+
 .nav-item {
   display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); margin: var(--space-1) var(--space-2);
   border-radius: var(--radius-md); cursor: pointer; color: var(--text-secondary); font-size: var(--text-sm);
@@ -102,6 +180,8 @@ const statusText = computed(() => {
 .nav-label { transition: opacity var(--transition-normal); overflow: hidden; }
 .sidebar.collapsed .nav-label { opacity: 0; width: 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding: var(--space-2) 0; margin: var(--space-1) var(--space-1); }
+.sidebar.collapsed .nav-group-label,
+.sidebar.collapsed .nav-divider { display: none; }
 .sidebar-footer {
   padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle);
   display: flex; flex-direction: column; gap: var(--space-1); overflow: hidden;

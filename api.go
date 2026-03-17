@@ -49,8 +49,8 @@ type ManagementAPI struct {
 	sessionDetector *SessionDetector   // v5.1 会话检测器
 	llmDetector     *LLMDetector       // v5.1 LLM 检测器
 	detectCache     *DetectCache       // v5.1 检测缓存
-	// v9.0 Agent 行为审计
-	toolAuditor     *ToolCallAuditor   // v9.0 工具调用审计器
+	// v9.0 LLM 侧审计
+	llmAuditor      *LLMAuditor        // v9.0 LLM 审计器
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -263,15 +263,28 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleRestoreBackup(w, r)
 	case strings.HasPrefix(path, "/api/v1/backups/") && strings.HasSuffix(path, "/download") && method == "GET":
 		api.handleDownloadBackup(w, r)
-	// v9.0 Agent 行为审计 API
-	case path == "/api/v1/tool-calls" && method == "GET":
-		api.handleToolCalls(w, r)
-	case path == "/api/v1/tool-calls/stats" && method == "GET":
-		api.handleToolCallStats(w, r)
-	case path == "/api/v1/tool-calls/high-risk" && method == "GET":
-		api.handleToolCallHighRisk(w, r)
-	case path == "/api/v1/tool-calls/timeline" && method == "GET":
-		api.handleToolCallTimeline(w, r)
+	// v9.0 LLM 侧安全审计 API
+	case strings.HasPrefix(path, "/api/v1/llm/"):
+		if api.llmAuditor == nil {
+			jsonResponse(w, 404, map[string]string{"error": "LLM proxy not enabled"})
+			return
+		}
+		switch {
+		case path == "/api/v1/llm/status" && method == "GET":
+			api.handleLLMStatus(w, r)
+		case path == "/api/v1/llm/overview" && method == "GET":
+			api.handleLLMOverview(w, r)
+		case path == "/api/v1/llm/calls" && method == "GET":
+			api.handleLLMCalls(w, r)
+		case path == "/api/v1/llm/tools" && method == "GET":
+			api.handleLLMTools(w, r)
+		case path == "/api/v1/llm/tools/stats" && method == "GET":
+			api.handleLLMToolStats(w, r)
+		case path == "/api/v1/llm/tools/timeline" && method == "GET":
+			api.handleLLMToolTimeline(w, r)
+		default:
+			w.WriteHeader(404)
+		}
 	default:
 		w.WriteHeader(404)
 	}
@@ -315,6 +328,28 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 		"routes": map[string]interface{}{"total": api.routes.Count()},
 		"audit":  api.logger.Stats(),
 	}
+	// v9.0: modules 字段
+	modules := map[string]interface{}{
+		"im_proxy": map[string]interface{}{
+			"status":   "healthy",
+			"inbound":  api.cfg.InboundListen,
+			"outbound": api.cfg.OutboundListen,
+		},
+	}
+	if api.cfg.LLMProxy.Enabled {
+		targets := []string{}
+		for _, t := range api.cfg.LLMProxy.Targets {
+			targets = append(targets, t.Name)
+		}
+		modules["llm_proxy"] = map[string]interface{}{
+			"status":  "healthy",
+			"listen":  api.cfg.LLMProxy.Listen,
+			"targets": targets,
+		}
+	} else {
+		modules["llm_proxy"] = map[string]interface{}{"status": "disabled"}
+	}
+	result["modules"] = modules
 	// v3.5 入站规则信息
 	if api.inboundEngine != nil {
 		rv := api.inboundEngine.Version()
@@ -1936,107 +1971,20 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 注入了规则命中统计数据")
 	}
 
-	// v9.0: 注入 tool_calls 演示数据
-	toolCallsInserted := 0
-	if api.toolAuditor != nil {
-		toolNames := []struct {
-			name   string
-			weight int
-		}{
-			{"exec", 15}, {"read_file", 20}, {"write_file", 10}, {"web_search", 15},
-			{"web_fetch", 10}, {"browser", 10}, {"send_message", 5},
-			{"read", 5}, {"edit", 3}, {"image", 2}, {"tts", 2}, {"canvas", 3},
-		}
-		totalWeight := 0
-		for _, t := range toolNames {
-			totalWeight += t.weight
-		}
-		// 标记原因
-		flagReasons := []string{
-			"执行了系统命令",
-			"访问了敏感路径",
-			"写入了配置文件",
-			"发送了外部请求",
-			"操作频率异常",
-			"命令包含危险参数",
-		}
-		// 参数预览
-		inputSamples := map[string][]string{
-			"exec":         {`{"command":"ls -la /tmp"}`, `{"command":"cat /etc/passwd"}`, `{"command":"ps aux"}`, `{"command":"whoami"}`, `{"command":"curl http://example.com"}`},
-			"read_file":    {`{"path":"/tmp/data.txt"}`, `{"path":"config.yaml"}`, `{"path":"main.go"}`, `{"path":"/var/log/app.log"}`},
-			"write_file":   {`{"path":"/tmp/out.txt","content":"..."}`, `{"path":"result.json","content":"..."}`, `{"path":"config.yaml","content":"..."}`},
-			"web_search":   {`{"query":"AI安全最新论文"}`, `{"query":"prompt injection"}`, `{"query":"Python教程"}`},
-			"web_fetch":    {`{"url":"https://example.com"}`, `{"url":"https://api.github.com"}`, `{"url":"https://arxiv.org/abs/xxx"}`},
-			"browser":      {`{"action":"navigate","url":"https://example.com"}`, `{"action":"screenshot"}`, `{"action":"click","ref":"e12"}`},
-			"send_message": {`{"target":"user-1","message":"Hello"}`, `{"channel":"general","message":"通知"}`},
-			"read":         {`{"path":"api.go","offset":1}`, `{"path":"README.md"}`},
-			"edit":         {`{"path":"config.yaml","old":"...","new":"..."}`, `{"path":"main.go","old":"v8","new":"v9"}`},
-			"image":        {`{"image":"/tmp/photo.jpg","prompt":"描述"}`, `{"url":"https://img.example.com/1.png"}`},
-			"tts":          {`{"text":"你好世界"}`, `{"text":"测试语音合成"}`},
-			"canvas":       {`{"action":"present","url":"http://localhost:3000"}`, `{"action":"snapshot"}`},
-		}
-		rng3 := rand.New(rand.NewSource(time.Now().UnixNano()))
-		tcCount := 120 + rng3.Intn(31) // 120-150
-
-		tcTx, err := al.db.Begin()
-		if err == nil {
-			tcStmt, err := tcTx.Prepare(`INSERT INTO tool_calls
-				(timestamp, trace_id, sender_id, app_id, tool_name, tool_input_preview, tool_result_preview, duration_ms, risk_level, flagged, flag_reason)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-			if err == nil {
-				for i := 0; i < tcCount; i++ {
-					offsetSec := rng3.Int63n(7 * 24 * 3600)
-					ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
-					sender := senders[rng3.Intn(len(senders))]
-					appID := appIDs[rng3.Intn(len(appIDs))]
-					traceID := fmt.Sprintf("tc-%08x%08x", rng3.Uint32(), rng3.Uint32())
-
-					// 按权重选工具
-					roll := rng3.Intn(totalWeight)
-					var toolName string
-					cum := 0
-					for _, t := range toolNames {
-						cum += t.weight
-						if roll < cum {
-							toolName = t.name
-							break
-						}
-					}
-
-					riskLevel := api.toolAuditor.ClassifyRisk(toolName)
-					durationMs := 10.0 + rng3.Float64()*500.0
-
-					// 参数预览
-					var inputPreview string
-					if samples, ok := inputSamples[toolName]; ok && len(samples) > 0 {
-						inputPreview = samples[rng3.Intn(len(samples))]
-					}
-
-					// 标记：10-20% 的高危调用
-					flagged := 0
-					flagReason := ""
-					if (riskLevel == "high" || riskLevel == "critical") && rng3.Float64() < 0.15 {
-						flagged = 1
-						flagReason = flagReasons[rng3.Intn(len(flagReasons))]
-					}
-
-					_, err := tcStmt.Exec(ts, traceID, sender, appID, toolName, inputPreview, "", durationMs, riskLevel, flagged, flagReason)
-					if err == nil {
-						toolCallsInserted++
-					}
-				}
-				tcStmt.Close()
-			}
-			tcTx.Commit()
-		}
-		log.Printf("[Demo] 注入了 %d 条 tool_call 演示数据", toolCallsInserted)
+	// v9.0: 注入 LLM 演示数据（仅在 llm_proxy 启用时）
+	llmCallsInserted := 0
+	llmToolCallsInserted := 0
+	if api.llmAuditor != nil {
+		llmCallsInserted, llmToolCallsInserted = api.llmAuditor.SeedDemoData(al.db)
+		log.Printf("[Demo] 注入了 %d 条 llm_calls + %d 条 llm_tool_calls 演示数据", llmCallsInserted, llmToolCallsInserted)
 	}
 
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":          true,
-		"count":       inserted,
-		"tool_calls":  toolCallsInserted,
+		"ok":              true,
+		"count":           inserted,
+		"llm_calls":       llmCallsInserted,
+		"llm_tool_calls":  llmToolCallsInserted,
 	})
 }
 
@@ -2056,17 +2004,17 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 
 	deleted, _ := result.RowsAffected()
 
-	// v9.0: 同时清除 tool_calls
-	var toolDeleted int64
-	if result2, err := al.db.Exec(`DELETE FROM tool_calls`); err == nil {
-		toolDeleted, _ = result2.RowsAffected()
+	// v9.0: 同时清除 LLM 审计数据（仅在启用时）
+	var llmDeleted int64
+	if api.llmAuditor != nil {
+		llmDeleted = api.llmAuditor.ClearDemoData(al.db)
 	}
 
-	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 tool_call 数据", deleted, toolDeleted)
+	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据", deleted, llmDeleted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":           true,
-		"deleted":      deleted,
-		"tool_deleted": toolDeleted,
+		"ok":          true,
+		"deleted":     deleted,
+		"llm_deleted": llmDeleted,
 	})
 }
 
@@ -2301,18 +2249,38 @@ func formatBytes(b int64) string {
 }
 
 // ============================================================
-// v9.0 Agent 行为审计 API
+// v9.0 LLM 侧安全审计 API
 // ============================================================
 
-// handleToolCalls GET /api/v1/tool-calls — 工具调用列表（分页+筛选）
-func (api *ManagementAPI) handleToolCalls(w http.ResponseWriter, r *http.Request) {
-	if api.toolAuditor == nil {
-		jsonResponse(w, 200, map[string]interface{}{"records": []interface{}{}, "total": 0})
+// handleLLMStatus GET /api/v1/llm/status — LLM 代理状态
+func (api *ManagementAPI) handleLLMStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := api.cfg.LLMProxy
+	targets := []string{}
+	for _, t := range cfg.Targets {
+		targets = append(targets, t.Name)
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"enabled":  cfg.Enabled,
+		"listen":   cfg.Listen,
+		"targets":  targets,
+		"status":   "healthy",
+	})
+}
+
+// handleLLMOverview GET /api/v1/llm/overview — LLM 概览统计
+func (api *ManagementAPI) handleLLMOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := api.llmAuditor.Overview()
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	tool := r.URL.Query().Get("tool")
-	risk := r.URL.Query().Get("risk")
-	sender := r.URL.Query().Get("sender")
+	jsonResponse(w, 200, overview)
+}
+
+// handleLLMCalls GET /api/v1/llm/calls — LLM 调用列表
+func (api *ManagementAPI) handleLLMCalls(w http.ResponseWriter, r *http.Request) {
+	model := r.URL.Query().Get("model")
+	hasToolUse := r.URL.Query().Get("has_tool_use")
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	limit := 50
@@ -2323,25 +2291,41 @@ func (api *ManagementAPI) handleToolCalls(w http.ResponseWriter, r *http.Request
 	if o := r.URL.Query().Get("offset"); o != "" {
 		if n, err := strconv.Atoi(o); err == nil { offset = n }
 	}
-	records, total, err := api.toolAuditor.QueryToolCalls(tool, risk, sender, from, to, limit, offset)
+	records, total, err := api.llmAuditor.QueryCalls(model, hasToolUse, from, to, limit, offset)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	if records == nil { records = []ToolCallRecord{} }
+	if records == nil { records = []map[string]interface{}{} }
 	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": total})
 }
 
-// handleToolCallStats GET /api/v1/tool-calls/stats — 工具调用统计
-func (api *ManagementAPI) handleToolCallStats(w http.ResponseWriter, r *http.Request) {
-	if api.toolAuditor == nil {
-		jsonResponse(w, 200, &ToolCallStats{
-			ByTool: []map[string]interface{}{},
-			ByRisk: map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0},
-		})
+// handleLLMTools GET /api/v1/llm/tools — 工具调用列表
+func (api *ManagementAPI) handleLLMTools(w http.ResponseWriter, r *http.Request) {
+	tool := r.URL.Query().Get("tool_name")
+	risk := r.URL.Query().Get("risk_level")
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil { limit = n }
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil { offset = n }
+	}
+	records, total, err := api.llmAuditor.QueryToolCalls(tool, risk, from, to, limit, offset)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	stats, err := api.toolAuditor.Stats()
+	if records == nil { records = []map[string]interface{}{} }
+	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": total})
+}
+
+// handleLLMToolStats GET /api/v1/llm/tools/stats — 工具统计
+func (api *ManagementAPI) handleLLMToolStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := api.llmAuditor.ToolStats()
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -2349,36 +2333,13 @@ func (api *ManagementAPI) handleToolCallStats(w http.ResponseWriter, r *http.Req
 	jsonResponse(w, 200, stats)
 }
 
-// handleToolCallHighRisk GET /api/v1/tool-calls/high-risk — 高危调用列表
-func (api *ManagementAPI) handleToolCallHighRisk(w http.ResponseWriter, r *http.Request) {
-	if api.toolAuditor == nil {
-		jsonResponse(w, 200, map[string]interface{}{"records": []interface{}{}, "total": 0})
-		return
-	}
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil { limit = n }
-	}
-	records, err := api.toolAuditor.QueryHighRisk(limit)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	if records == nil { records = []ToolCallRecord{} }
-	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": len(records)})
-}
-
-// handleToolCallTimeline GET /api/v1/tool-calls/timeline — 工具调用时间线
-func (api *ManagementAPI) handleToolCallTimeline(w http.ResponseWriter, r *http.Request) {
-	if api.toolAuditor == nil {
-		jsonResponse(w, 200, map[string]interface{}{"timeline": []interface{}{}, "hours": 24})
-		return
-	}
+// handleLLMToolTimeline GET /api/v1/llm/tools/timeline — 工具调用时间线
+func (api *ManagementAPI) handleLLMToolTimeline(w http.ResponseWriter, r *http.Request) {
 	hours := 24
 	if h := r.URL.Query().Get("hours"); h != "" {
 		if n, err := strconv.Atoi(h); err == nil && n > 0 { hours = n }
 	}
-	timeline, err := api.toolAuditor.Timeline(hours)
+	timeline, err := api.llmAuditor.ToolTimeline(hours)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return

@@ -218,10 +218,21 @@ func main() {
 	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
 
-	// v9.0: 创建工具调用审计器
-	toolAuditor, err := NewToolCallAuditor(db)
-	if err != nil { log.Fatalf("初始化工具调用审计器失败: %v", err) }
-	fmt.Println("[初始化] ✅ Agent 行为审计: tool_calls 表已就绪")
+	// v9.0: LLM 代理（可选）
+	var llmAuditor *LLMAuditor
+	var llmProxy *LLMProxy
+	if cfg.LLMProxy.Enabled {
+		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig)
+		llmProxy = NewLLMProxy(cfg.LLMProxy, llmAuditor)
+		go func() {
+			if err := llmProxy.Start(); err != nil {
+				log.Printf("[LLM代理] 启动失败: %v", err)
+			}
+		}()
+		log.Printf("[初始化] ✅ LLM 代理已启动: %s (%d 个 target)", cfg.LLMProxy.Listen, len(cfg.LLMProxy.Targets))
+	} else {
+		fmt.Println("[初始化] ⚠️ LLM 代理: 未启用")
+	}
 
 	// v4.2: 创建关闭管理器
 	shutdownMgr := NewShutdownManager(cfg)
@@ -344,7 +355,6 @@ func main() {
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 	outbound.realtime = realtime
-	outbound.toolAuditor = toolAuditor // v9.0
 
 	// v4.1 WebSocket 代理管理器
 	wsProxy := NewWSProxyManager(cfg, engine, outboundEngine, logger, metrics, pool, routes, ruleHits)
@@ -369,7 +379,7 @@ func main() {
 	mgmtAPI.sessionDetector = sessionDetector
 	mgmtAPI.llmDetector = llmDetector
 	mgmtAPI.detectCache = detectCache
-	mgmtAPI.toolAuditor = toolAuditor // v9.0
+	mgmtAPI.llmAuditor = llmAuditor // v9.0
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -476,6 +486,9 @@ func main() {
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
 	// v4.2: 使用 ShutdownManager 优雅关闭
+	if llmProxy != nil {
+		llmProxy.Stop()
+	}
 	shutdownMgr.Shutdown()
 }
 

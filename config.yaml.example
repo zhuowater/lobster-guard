@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v6.0 配置文件（示例）
+# 龙虾卫士 lobster-guard v9.0 配置文件（示例）
 # ============================================================
 
 # ============================================================
@@ -413,3 +413,30 @@ static_upstreams:
 # 只缓存 pass 和 warn 结果（block 不缓存，确保规则更新后立即生效）
 # detect_cache_ttl: 300         # 缓存 TTL 秒（默认 300）
 # detect_cache_size: 1000       # 最大缓存条目数（默认 1000）
+
+# ============================================================
+# LLM 侧安全审计代理（v9.0 新增）
+# 独立于 IM 侧功能，透明反向代理 LLM API 调用
+# 自动审计工具调用、Token 用量、延迟和错误率
+# 默认关闭，启用后在独立端口监听
+# ============================================================
+# llm_proxy:
+#   enabled: false              # 是否启用 LLM 代理（默认 false）
+#   listen: ":8445"             # LLM 代理监听地址
+#   targets:                    # LLM API 上游目标列表
+#     - name: "anthropic"               # 目标名称（用于日志和 Dashboard 显示）
+#       upstream: "https://api.anthropic.com"  # 上游 API 地址
+#       path_prefix: "/v1/"              # 路径前缀（用于路由到正确的 target）
+#       api_key_header: "x-api-key"      # API 密钥 Header 名
+#     # 可配置多个目标：
+#     # - name: "openai"
+#     #   upstream: "https://api.openai.com"
+#     #   path_prefix: "/v1/"
+#     #   api_key_header: "Authorization"
+#   audit:
+#     log_system_prompt: false   # 是否记录 system prompt（默认 false，保护隐私）
+#     log_tool_input: true       # 是否记录工具输入参数预览（默认 true）
+#     log_tool_result: true      # 是否记录工具结果预览（默认 true）
+#     max_preview_len: 500       # 参数/结果预览最大字符数（默认 500）
+#   timeout_sec: 300             # LLM 请求超时秒数（默认 300，LLM 生成可能很慢）
+#   max_body_bytes: 10485760     # 请求体最大大小（默认 10MB）
