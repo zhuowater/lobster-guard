@@ -62,7 +62,7 @@ export async function apiPut(path, body) {
  * @param {object} body
  */
 export async function apiDelete(path, body) {
-  return api(path, { method: 'DELETE', body: JSON.stringify(body) })
+  return api(path, { method: 'DELETE', body: body ? JSON.stringify(body) : undefined })
 }
 
 /**

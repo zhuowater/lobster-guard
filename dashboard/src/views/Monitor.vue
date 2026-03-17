@@ -69,7 +69,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
           </button></div>
         </div>
-        <div v-if="wsLoading" class="loading">加载中...</div>
+        <Skeleton v-if="wsLoading" type="text" />
         <div v-else>
           <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
             <div><span style="color:var(--text-secondary);font-size:var(--text-xs)">活跃连接</span><br><span style="font-size:var(--text-2xl);font-weight:700;color:var(--color-success);font-family:var(--font-mono)">{{ ws.active }}</span></div>
@@ -104,7 +104,7 @@
             <button class="btn btn-danger btn-sm" @click="confirmResetRL">重置</button>
           </div>
         </div>
-        <div v-if="rlLoading" class="loading">加载中...</div>
+        <Skeleton v-if="rlLoading" type="text" />
         <EmptyState v-else-if="!rl.enabled" title="限流未启用" description="在配置文件中启用限流功能" />
         <div v-else>
           <div class="stat-big">
@@ -135,6 +135,7 @@ import ConfirmModal from '../components/ConfirmModal.vue'
 import TrendChart from '../components/TrendChart.vue'
 import StatCard from '../components/StatCard.vue'
 import EmptyState from '../components/EmptyState.vue'
+import Skeleton from '../components/Skeleton.vue'
 
 // SVG icons
 const svgActivity = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'

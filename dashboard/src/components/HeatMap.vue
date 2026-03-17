@@ -1,7 +1,7 @@
 <template>
   <div class="heatmap-wrap">
     <div class="heatmap-title">{{ title || '7 天攻击频率热力图' }}</div>
-    <div class="heatmap-grid-box">
+    <div class="heatmap-grid-box" style="position:relative">
       <!-- Hour labels (left) -->
       <div class="heatmap-y-labels">
         <div v-for="h in 24" :key="h" class="heatmap-y-label">{{ String(h - 1).padStart(2, '0') }}</div>
@@ -22,6 +22,10 @@
             </div>
           </div>
         </div>
+      </div>
+      <!-- Zero data overlay -->
+      <div v-if="isAllZero" class="heatmap-zero-overlay">
+        暂无攻击记录
       </div>
     </div>
     <!-- Color scale -->
@@ -49,7 +53,6 @@ const props = defineProps({
 const dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 const dayLabels = computed(() => {
-  // Show last 7 days with day names
   const labels = []
   const now = new Date()
   for (let d = 6; d >= 0; d--) {
@@ -60,14 +63,11 @@ const dayLabels = computed(() => {
   return labels
 })
 
-// Get cell value: data can be a flat array[168] (day0h0..day0h23..day6h23) or 2D
 function getVal(hour, day) {
   if (!props.data || !props.data.length) return 0
   if (Array.isArray(props.data[0])) {
-    // 2D: data[day][hour]
     return props.data[day]?.[hour] ?? 0
   }
-  // Flat: index = day * 24 + hour
   return props.data[day * 24 + hour] ?? 0
 }
 
@@ -82,11 +82,19 @@ const maxCount = computed(() => {
   return m || 1
 })
 
+const isAllZero = computed(() => {
+  for (let d = 0; d < 7; d++) {
+    for (let h = 0; h < 24; h++) {
+      if (getVal(h, d) > 0) return false
+    }
+  }
+  return true
+})
+
 function cellColor(hour, day) {
   const v = getVal(hour, day)
   if (v === 0) return 'rgba(0,40,80,0.5)'
   const ratio = Math.min(1, v / maxCount.value)
-  // Deep blue → cyan → yellow → red
   if (ratio < 0.25) {
     const t = ratio / 0.25
     return interpolate([0, 40, 80], [0, 180, 220], t, 0.5 + t * 0.3)
@@ -151,5 +159,11 @@ function onHover(e, hour, day) {
   position: absolute; background: var(--bg-overlay); border: 1px solid var(--border-strong);
   border-radius: 6px; padding: 6px 10px; font-size: .75rem; pointer-events: none;
   z-index: 10; box-shadow: 0 4px 16px rgba(0,0,0,.5); color: var(--text); white-space: nowrap;
+}
+.heatmap-zero-overlay {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: var(--text-sm); color: var(--text-tertiary); font-weight: 500;
+  pointer-events: none; z-index: 3; background: rgba(12,15,26,0.6);
+  padding: var(--space-2) var(--space-4); border-radius: var(--radius-md);
 }
 </style>

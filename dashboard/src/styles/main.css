@@ -300,6 +300,13 @@ tr.row-warn td { background: var(--color-warning-dim) !important; }
 .page-leave-active { animation: page-in .1s ease-in reverse; }
 @keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ===== List transition ===== */
+.list-anim-enter-active { animation: list-slide-in .2s ease-out; }
+.list-anim-leave-active { animation: list-slide-out .2s ease-in; }
+.list-anim-move { transition: transform .2s ease; }
+@keyframes list-slide-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes list-slide-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(10px); } }
+
 /* ===== Toolbar ===== */
 .page-toolbar {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;

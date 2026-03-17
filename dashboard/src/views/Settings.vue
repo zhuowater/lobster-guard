@@ -36,7 +36,7 @@
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span><span class="card-title">系统信息</span>
         <div class="card-actions"><button class="btn btn-ghost btn-sm" @click="refreshHealth">刷新</button></div>
       </div>
-      <div v-if="!appState.health" class="loading">加载中...</div>
+      <Skeleton v-if="!appState.health" type="text" />
       <div v-else>
         <div class="status-grid">
           <div class="ring-chart">
@@ -49,7 +49,7 @@
           <div class="status-info">
             <div class="status-row"><span class="status-key">总体状态</span><span class="status-val" :style="{ color: statusColor }">{{ statusText }}</span></div>
             <div class="status-row"><span class="status-key">版本</span><span class="status-val">{{ health.version }}</span></div>
-            <div class="status-row"><span class="status-key">运行时间</span><span class="status-val">{{ health.uptime || '--' }}</span></div>
+            <div class="status-row"><span class="status-key">运行时间</span><span class="status-val">{{ formattedUptime }}</span></div>
             <div class="status-row"><span class="status-key">模式</span><span class="status-val">{{ health.mode || '--' }}</span></div>
             <div class="status-row"><span class="status-key">上游</span><span class="status-val">{{ healthyUp }}/{{ totalUp }}</span></div>
             <div class="status-row"><span class="status-key">路由数</span><span class="status-val">{{ health.routes?.total || 0 }}</span></div>
@@ -66,6 +66,30 @@
       </div>
     </div>
 
+    <!-- Demo Data -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
+        <span class="card-title">演示数据</span>
+      </div>
+      <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-3)">
+        注入模拟审计数据用于演示 Dashboard 图表效果。数据包含 250-300 条过去 7 天的模拟记录。
+      </div>
+      <div v-if="demoResult" style="margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);background:var(--bg-elevated)">
+        <span :style="{ color: demoResult.ok ? 'var(--color-success)' : 'var(--color-danger)' }">{{ demoResult.message }}</span>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-sm" @click="seedDemo" :disabled="demoLoading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          {{ demoLoading ? '注入中...' : '注入演示数据' }}
+        </button>
+        <button class="btn btn-danger btn-sm" @click="clearDemo" :disabled="demoLoading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          清除演示数据
+        </button>
+      </div>
+    </div>
+
     <!-- Backups -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
@@ -75,7 +99,7 @@
           <button class="btn btn-ghost btn-sm" @click="loadBackups">刷新</button>
         </div>
       </div>
-      <div v-if="backupsLoading" class="loading">加载中...</div>
+      <Skeleton v-if="backupsLoading" type="table" />
       <div v-else-if="!backups.length" class="empty"><div class="empty-icon">💾</div>暂无备份<div class="empty-hint">点击"创建备份"开始</div></div>
       <DataTable v-else :columns="backupColumns" :data="backups" :show-toolbar="false">
         <template #cell-name="{ value }"><span style="font-family:monospace;font-size:.8rem">{{ value }}</span></template>
@@ -90,7 +114,7 @@
     <!-- Health Checks -->
     <div class="card">
       <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="card-title">健康检查详情</span></div>
-      <div v-if="!appState.health || !appState.health.checks" class="loading">加载中...</div>
+      <Skeleton v-if="!appState.health || !appState.health.checks" type="text" />
       <div v-else>
         <div v-for="hc in healthCheckList" :key="hc.name" class="status-row">
           <span class="status-key">{{ hc.icon }} {{ hc.name }}</span>
@@ -105,10 +129,11 @@
 
 <script setup>
 import { ref, computed, inject, onMounted } from 'vue'
-import { api, apiPost, saveToken, clearToken, getToken } from '../api.js'
+import { api, apiPost, apiDelete, saveToken, clearToken, getToken } from '../api.js'
 import { showToast, updateHealth } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import Skeleton from '../components/Skeleton.vue'
 
 const appState = inject('appState')
 const tokenValue = ref(getToken())
@@ -116,6 +141,9 @@ const showToken = ref(false)
 
 const backups = ref([])
 const backupsLoading = ref(false)
+
+const demoLoading = ref(false)
+const demoResult = ref(null)
 
 const confirmVisible = ref(false)
 const confirmTitle = ref('')
@@ -139,6 +167,32 @@ const ringColor = computed(() => pct.value >= 80 ? 'var(--color-success)' : (pct
 const statusText = computed(() => { const s = health.value.status; return s === 'healthy' ? '健康' : (s === 'degraded' ? '降级' : '异常') })
 const statusColor = computed(() => { const s = health.value.status; return s === 'healthy' ? 'var(--color-success)' : (s === 'degraded' ? 'var(--color-warning)' : 'var(--color-danger)') })
 const rlText = computed(() => { const rl = health.value.rate_limiter; if (!rl || !rl.enabled) return '未启用'; return `${rl.global_rps || '?'} rps / ${rl.per_sender_rps || '?'} rps` })
+
+// Format uptime like Topbar
+const formattedUptime = computed(() => {
+  const raw = health.value.uptime
+  if (!raw || raw === '--') return '--'
+  return formatUptime(raw)
+})
+
+function formatUptime(raw) {
+  let totalSeconds = 0
+  const hMatch = raw.match(/([\d.]+)h/)
+  if (hMatch) totalSeconds += parseFloat(hMatch[1]) * 3600
+  const mMatch = raw.match(/([\d.]+)m(?!s)/)
+  if (mMatch) totalSeconds += parseFloat(mMatch[1]) * 60
+  const sMatch = raw.match(/([\d.]+)s/)
+  if (sMatch) totalSeconds += parseFloat(sMatch[1])
+  if (totalSeconds <= 0) return raw
+  const minutes = Math.floor(totalSeconds / 60)
+  const hours = Math.floor(totalSeconds / 3600)
+  const days = Math.floor(totalSeconds / 86400)
+  if (minutes < 1) return '< 1 min'
+  if (hours < 1) return minutes + ' min'
+  if (days < 1) return hours + 'h ' + (minutes % 60) + 'm'
+  if (days < 7) return days + 'd ' + (hours % 24) + 'h'
+  return days + 'd'
+}
 
 const healthCheckList = computed(() => {
   const checks = appState.health?.checks
@@ -183,6 +237,35 @@ async function loadBackups() {
 
 async function createBackup() {
   try { await apiPost('/api/v1/backup', {}); showToast('备份创建成功', 'success'); loadBackups() } catch (e) { showToast('备份失败: ' + e.message, 'error') }
+}
+
+// Demo data management
+async function seedDemo() {
+  demoLoading.value = true
+  demoResult.value = null
+  try {
+    const d = await apiPost('/api/v1/demo/seed', {})
+    demoResult.value = { ok: true, message: `✅ 成功注入 ${d.count} 条模拟数据` }
+    showToast(`注入了 ${d.count} 条演示数据`, 'success')
+  } catch (e) {
+    demoResult.value = { ok: false, message: `❌ 注入失败: ${e.message}` }
+    showToast('注入失败: ' + e.message, 'error')
+  }
+  demoLoading.value = false
+}
+
+async function clearDemo() {
+  demoLoading.value = true
+  demoResult.value = null
+  try {
+    const d = await apiDelete('/api/v1/demo/clear')
+    demoResult.value = { ok: true, message: `✅ 已清除 ${d.deleted} 条数据` }
+    showToast(`清除了 ${d.deleted} 条数据`, 'success')
+  } catch (e) {
+    demoResult.value = { ok: false, message: `❌ 清除失败: ${e.message}` }
+    showToast('清除失败: ' + e.message, 'error')
+  }
+  demoLoading.value = false
 }
 
 function confirmDeleteBackup(row) {

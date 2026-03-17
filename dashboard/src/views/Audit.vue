@@ -91,7 +91,7 @@
       </template>
       <template #cell-latency="{ row }">{{ row.latency != null ? row.latency + 'ms' : (row.latency_ms != null ? row.latency_ms + 'ms' : '--') }}</template>
       <template #expand="{ row }">
-        <div style="font-size:var(--text-sm);line-height:1.8">
+        <div style="font-size:var(--text-sm);line-height:1.8;background:var(--bg-elevated);padding:var(--space-3);border-radius:var(--radius-md)">
           <div><b style="color:var(--color-primary)">时间:</b> {{ fmtTime(row.timestamp || row.time) }}</div>
           <div><b style="color:var(--color-primary)">方向:</b> {{ row.direction }} | <b style="color:var(--color-primary)">动作:</b> {{ row.action }}</div>
           <div><b style="color:var(--color-primary)">发送者:</b> {{ row.sender_id || '--' }} | <b style="color:var(--color-primary)">App ID:</b> {{ row.app_id || '--' }}</div>
@@ -100,7 +100,7 @@
           <div><b style="color:var(--color-primary)">原因:</b> {{ row.reason || '--' }}</div>
           <div><b style="color:var(--color-primary)">延迟:</b> {{ row.latency || row.latency_ms || '--' }}ms</div>
           <div v-if="row.content_preview"><b style="color:var(--color-primary)">内容:</b>
-            <pre style="background:var(--bg-base);padding:var(--space-2);border-radius:var(--radius-md);margin-top:var(--space-1);font-size:var(--text-xs);white-space:pre-wrap;word-break:break-all;color:var(--text-primary);border:1px solid var(--border-subtle)">{{ row.content_preview }}</pre>
+            <JsonHighlight :content="row.content_preview" />
           </div>
         </div>
       </template>
@@ -147,6 +147,8 @@ import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import TrendChart from '../components/TrendChart.vue'
+import JsonHighlight from '../components/JsonHighlight.vue'
+import Skeleton from '../components/Skeleton.vue'
 
 const loading = ref(false)
 const logs = ref([])

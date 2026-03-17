@@ -18,7 +18,7 @@
     </div>
 
     <!-- Loading -->
-    <div v-if="loading" class="loading">加载中...</div>
+    <Skeleton v-if="loading" type="table" />
 
     <!-- Empty -->
     <EmptyState v-else-if="!sortedData.length"
@@ -102,6 +102,7 @@
 <script setup>
 import { ref, computed, watch, reactive } from 'vue'
 import EmptyState from './EmptyState.vue'
+import Skeleton from './Skeleton.vue'
 
 const props = defineProps({
   columns: { type: Array, required: true },

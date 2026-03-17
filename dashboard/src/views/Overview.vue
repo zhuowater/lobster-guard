@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- Stat Cards -->
-    <div class="ov-cards">
+    <div class="ov-cards" v-if="loaded">
       <StatCard
         :iconSvg="svgGlobe" :value="stats.total" label="总请求" color="blue"
       />
@@ -15,6 +15,12 @@
         :iconSvg="svgPercent" :value="stats.rate" label="拦截率" color="green"
       />
     </div>
+    <div class="ov-cards" v-else>
+      <Skeleton type="card" />
+      <Skeleton type="card" />
+      <Skeleton type="card" />
+      <Skeleton type="card" />
+    </div>
 
     <!-- Trend + Health -->
     <div class="ov-row">
@@ -23,7 +29,8 @@
           <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
           <span class="card-title">请求趋势</span>
         </div>
-        <EmptyState v-if="!trendData.length"
+        <Skeleton v-if="!loaded" type="chart" />
+        <EmptyState v-else-if="!trendData.length"
           :iconSvg="svgTrend" title="暂无趋势数据" description="系统运行后将自动收集趋势数据"
         />
         <TrendChart v-else
@@ -41,7 +48,8 @@
           <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
           <span class="card-title">健康状态</span>
         </div>
-        <EmptyState v-if="!healthBars.length"
+        <Skeleton v-if="!loaded" type="text" />
+        <EmptyState v-else-if="!healthBars.length"
           :iconSvg="svgHeart" title="无健康数据" description="等待系统上报健康信息"
         />
         <div v-else>
@@ -61,9 +69,7 @@
           <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
           <span class="card-title">拦截类型分布</span>
         </div>
-        <EmptyState v-if="!pieData.length"
-          :iconSvg="svgPie" title="暂无拦截数据" description="检测到威胁后将显示分布统计"
-        />
+        <Skeleton v-if="!loaded" type="chart" />
         <PieChart v-else :data="pieData" :size="180" />
       </div>
       <div class="card">
@@ -71,17 +77,20 @@
           <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
           <span class="card-title">规则命中 TOP5</span>
         </div>
-        <EmptyState v-if="!topRules.length"
+        <Skeleton v-if="!loaded" type="text" />
+        <EmptyState v-else-if="!topRules.length"
           :iconSvg="svgTarget" title="规则正在保护中" description="命中数据将在检测到威胁后显示"
         />
         <div v-else>
-          <div class="hbar-row" v-for="(r, i) in topRules" :key="r.name">
-            <span class="hbar-rank">#{{ i + 1 }}</span>
-            <span class="hbar-name" :title="r.name">{{ r.name }}</span>
-            <div class="hbar-track">
-              <div class="hbar-fill hbar-fill-anim" :style="{ '--target-w': Math.max(5, r.pct) + '%', background: barColors[i % barColors.length] }">{{ r.hits }}</div>
+          <TransitionGroup name="list-anim" tag="div">
+            <div class="hbar-row" v-for="(r, i) in topRules" :key="r.name">
+              <span class="hbar-rank">#{{ i + 1 }}</span>
+              <span class="hbar-name" :title="r.name">{{ r.name }}</span>
+              <div class="hbar-track">
+                <div class="hbar-fill hbar-fill-anim" :style="{ '--target-w': Math.max(5, r.pct) + '%', background: barColors[i % barColors.length] }">{{ r.hits }}</div>
+              </div>
             </div>
-          </div>
+          </TransitionGroup>
         </div>
       </div>
     </div>
@@ -92,7 +101,8 @@
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
         <span class="card-title">7 天攻击频率热力图</span>
       </div>
-      <EmptyState v-if="!heatmapData.length"
+      <Skeleton v-if="!loaded" type="chart" />
+      <EmptyState v-else-if="!heatmapData.length"
         :iconSvg="svgGrid" title="暂无热力图数据" description="系统运行 24 小时后将生成攻击频率热力图"
       />
       <HeatMap v-else :data="heatmapData" title="" />
@@ -104,20 +114,21 @@
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
         <span class="card-title">最近攻击事件</span>
       </div>
-      <EmptyState v-if="!recentAttacks.length"
+      <Skeleton v-if="!loaded" type="table" />
+      <EmptyState v-else-if="!recentAttacks.length"
         :iconSvg="svgShieldCheck" title="当前环境安全" description="没有检测到攻击事件"
       />
       <div v-else class="table-wrap">
         <table>
           <thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
-          <tbody>
-            <tr v-for="a in recentAttacks" :key="a.id" class="row-block" style="cursor:pointer" @click="$router.push('/audit')">
+          <TransitionGroup name="list-anim" tag="tbody">
+            <tr v-for="a in recentAttacks" :key="a.id || a.trace_id || a.timestamp" class="row-block" style="cursor:pointer" @click="$router.push('/audit')">
               <td>{{ fmtTime(a.timestamp || a.time) }}</td>
               <td>{{ a.direction === 'inbound' ? '入站' : '出站' }}</td>
               <td>{{ a.sender_id || '--' }}</td>
               <td>{{ a.reason || '--' }}</td>
             </tr>
-          </tbody>
+          </TransitionGroup>
         </table>
       </div>
     </div>
@@ -132,6 +143,7 @@ import TrendChart from '../components/TrendChart.vue'
 import PieChart from '../components/PieChart.vue'
 import HeatMap from '../components/HeatMap.vue'
 import EmptyState from '../components/EmptyState.vue'
+import Skeleton from '../components/Skeleton.vue'
 
 const appState = inject('appState')
 const barColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
@@ -151,6 +163,7 @@ const svgTarget = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" s
 const svgGrid = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>'
 const svgShieldCheck = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
 
+const loaded = ref(false)
 const stats = ref({ total: '--', blocked: '--', warned: '--', rate: '--' })
 const trendData = ref([])
 const trendRange = ref('24h')
@@ -206,7 +219,6 @@ const trendXLabels = computed(() => {
     if (trendRange.value === '7d') {
       return h.substring(5, 10) + ' ' + h.substring(11, 13) + ':00'
     }
-    // Format as HH:00
     const hourPart = h.substring(11, 13)
     return hourPart ? hourPart + ':00' : ''
   })
@@ -287,6 +299,8 @@ async function loadData() {
     }
     heatmapData.value = matrix
   } catch { heatmapData.value = [] }
+
+  loaded.value = true
 }
 
 let refreshTimer = null
@@ -308,5 +322,24 @@ onUnmounted(() => clearInterval(refreshTimer))
 @keyframes hbar-grow {
   from { width: 0; }
   to { width: var(--target-w); }
+}
+
+/* List transition animations */
+.list-anim-enter-active {
+  animation: list-in .2s ease-out;
+}
+.list-anim-leave-active {
+  animation: list-out .2s ease-in;
+}
+.list-anim-move {
+  transition: transform .2s ease;
+}
+@keyframes list-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes list-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(10px); }
 }
 </style>

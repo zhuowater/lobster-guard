@@ -4,7 +4,13 @@
       <!-- SVG Donut -->
       <div class="pie-svg-box" :style="{ width: size + 'px', height: size + 'px' }" @mouseleave="hoverIdx = -1">
         <svg :viewBox="`0 0 ${size} ${size}`" :width="size" :height="size">
-          <circle v-for="(seg, i) in segments" :key="i"
+          <!-- Empty state: gray ring -->
+          <circle v-if="isEmpty"
+            :cx="center" :cy="center" :r="radius"
+            fill="none" stroke="rgba(255,255,255,0.06)" :stroke-width="strokeW"
+          />
+          <!-- Normal segments -->
+          <circle v-else v-for="(seg, i) in segments" :key="i"
             :cx="center" :cy="center" :r="radius"
             fill="none"
             :stroke="hoverIdx >= 0 && hoverIdx !== i ? seg.color + '88' : seg.color"
@@ -19,12 +25,17 @@
         </svg>
         <!-- Center label -->
         <div class="pie-center">
-          <div class="pie-center-num">{{ total }}</div>
-          <div class="pie-center-label">总计</div>
+          <template v-if="isEmpty">
+            <div class="pie-center-empty">暂无数据</div>
+          </template>
+          <template v-else>
+            <div class="pie-center-num">{{ total }}</div>
+            <div class="pie-center-label">总计</div>
+          </template>
         </div>
       </div>
       <!-- Legend -->
-      <div class="pie-legend">
+      <div class="pie-legend" v-if="!isEmpty">
         <div v-for="(item, i) in legendItems" :key="i" class="pie-legend-item"
           :class="{ dimmed: hoverIdx >= 0 && hoverIdx !== i }"
           @mouseenter="hoverIdx = i" @mouseleave="hoverIdx = -1">
@@ -64,8 +75,10 @@ const center = computed(() => props.size / 2)
 const radius = computed(() => (props.size - strokeW - 8) / 2)
 const circumference = computed(() => 2 * Math.PI * radius.value)
 const total = computed(() => props.data.reduce((s, d) => s + (d.value || 0), 0))
+const isEmpty = computed(() => total.value === 0)
 
 const segments = computed(() => {
+  if (isEmpty.value) return []
   const t = total.value || 1
   const segs = []
   let offset = 0
@@ -117,6 +130,7 @@ function onMouseMove(e, i) {
 }
 .pie-center-num { font-size: 1.6rem; font-weight: 800; font-family: monospace; color: var(--color-primary); }
 .pie-center-label { font-size: .68rem; color: var(--text-secondary); }
+.pie-center-empty { font-size: .82rem; color: var(--text-tertiary); white-space: nowrap; }
 .pie-legend { display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
 .pie-legend-item {
   display: flex; align-items: center; gap: 6px; font-size: .78rem;

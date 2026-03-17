@@ -18,6 +18,8 @@
       <line v-if="hoverIdx >= 0" :x1="hoverX" :y1="padT" :x2="hoverX" :y2="svgH - padB" stroke="rgba(148,163,184,0.2)" stroke-width="1" stroke-dasharray="3,3" />
       <!-- Hover dots -->
       <circle v-for="dot in hoverDots" :key="'d'+dot.key" :cx="dot.x" :cy="dot.y" r="3.5" :fill="dot.color" stroke="var(--bg-base, #0B0E1A)" stroke-width="1.5" />
+      <!-- Zero data text -->
+      <text v-if="isAllZero" :x="svgW / 2" :y="svgH / 2" fill="#5C6578" font-size="13" text-anchor="middle" font-family="var(--font-sans, sans-serif)">暂无数据</text>
     </svg>
     <!-- Tooltip -->
     <div v-if="hoverIdx >= 0" class="trend-tooltip" :style="tooltipStyle">
@@ -70,6 +72,15 @@ const maxVal = computed(() => {
     }
   }
   return m || 1
+})
+
+const isAllZero = computed(() => {
+  for (const d of props.data) {
+    for (const l of props.lines) {
+      if ((d[l.key] ?? 0) > 0) return false
+    }
+  }
+  return true
 })
 
 function niceMax(v) {

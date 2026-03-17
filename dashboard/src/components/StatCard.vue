@@ -4,7 +4,7 @@
       <span class="stat-card-icon" v-html="iconSvg"></span>
       <span class="stat-card-label">{{ label }}</span>
     </div>
-    <div class="stat-card-value">{{ value }}</div>
+    <div class="stat-card-value">{{ displayText }}</div>
     <div v-if="change" class="stat-card-change" :class="changeUp ? 'change-up' : 'change-down'">
       <svg v-if="changeUp" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
       <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
@@ -14,7 +14,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   icon: { type: String, default: '' },
@@ -27,6 +27,61 @@ const props = defineProps({
 })
 
 const hovered = ref(false)
+const animatedValue = ref(0)
+const isAnimating = ref(false)
+
+// Detect if value has a suffix (like % or ms)
+const suffix = computed(() => {
+  const v = String(props.value)
+  const m = v.match(/[^\d.]+$/)
+  return m ? m[0] : ''
+})
+
+const isNumeric = computed(() => {
+  const v = String(props.value)
+  const numPart = v.replace(/[^\d.]/g, '')
+  return numPart !== '' && !isNaN(parseFloat(numPart)) && v !== '--'
+})
+
+const targetNum = computed(() => {
+  if (!isNumeric.value) return 0
+  return parseFloat(String(props.value).replace(/[^\d.]/g, '')) || 0
+})
+
+const isPercent = computed(() => suffix.value.includes('%'))
+
+const displayText = computed(() => {
+  if (!isNumeric.value) return props.value
+  if (isPercent.value) {
+    return animatedValue.value.toFixed(1) + suffix.value
+  }
+  if (suffix.value) {
+    // For ms or other suffixed values
+    if (String(props.value).includes('.')) {
+      return animatedValue.value.toFixed(1) + suffix.value
+    }
+    return Math.round(animatedValue.value) + suffix.value
+  }
+  return Math.round(animatedValue.value)
+})
+
+watch(() => props.value, (newVal) => {
+  if (!isNumeric.value) return
+  const end = targetNum.value
+  const start = animatedValue.value
+  const duration = 800
+  const startTime = performance.now()
+
+  function animate(now) {
+    const progress = Math.min((now - startTime) / duration, 1)
+    const eased = 1 - Math.pow(1 - progress, 3) // ease-out cubic
+    animatedValue.value = start + (end - start) * eased
+    if (progress < 1) {
+      requestAnimationFrame(animate)
+    }
+  }
+  requestAnimationFrame(animate)
+}, { immediate: true })
 </script>
 
 <style scoped>
