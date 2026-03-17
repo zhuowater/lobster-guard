@@ -24,3 +24,7 @@ tls/
 Thumbs.db
 config.yaml
 lobster-guard-deploy
+
+# Dashboard (Vue 3)
+dashboard/node_modules/
+dashboard/.vite/

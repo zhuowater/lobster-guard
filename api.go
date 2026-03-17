@@ -3,8 +3,6 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -82,9 +80,9 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
 
-	// Dashboard（无需鉴权，页面内输入 Token）
-	if path == "/" || path == "/dashboard" {
-		api.handleDashboard(w, r)
+	// Dashboard 静态文件（无需鉴权，页面内输入 Token）
+	if path == "/" || path == "/dashboard" || strings.HasPrefix(path, "/assets/") {
+		getDashboardHandler().ServeHTTP(w, r)
 		return
 	}
 
@@ -995,49 +993,8 @@ func (api *ManagementAPI) handleMetrics(w http.ResponseWriter, r *http.Request) 
 }
 
 func (api *ManagementAPI) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	// v4.0: 优先从文件系统读取（方便开发调试），否则使用 go:embed 嵌入版本
-	var data []byte
-	// 尝试读取同目录下的 dashboard.html
-	htmlPath := "dashboard.html"
-	if api.cfgPath != "" {
-		if idx := strings.LastIndex(api.cfgPath, "/"); idx >= 0 {
-			htmlPath = api.cfgPath[:idx] + "/dashboard.html"
-		}
-	}
-	fileData, err := os.ReadFile(htmlPath)
-	if err != nil {
-		// 尝试可执行文件所在目录
-		if exe, err2 := os.Executable(); err2 == nil {
-			if idx := strings.LastIndex(exe, "/"); idx >= 0 {
-				fileData2, err3 := os.ReadFile(exe[:idx] + "/dashboard.html")
-				if err3 == nil { fileData = fileData2; err = nil }
-			}
-		}
-	}
-	if err == nil {
-		data = fileData
-	} else {
-		// 使用 go:embed 嵌入版本
-		data = embeddedDashboardHTML
-	}
-	// gzip 压缩（HTML 文本压缩率通常 70-80%）
-	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		var buf bytes.Buffer
-		gz, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-		gz.Write(data)
-		gz.Close()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Vary", "Accept-Encoding")
-		w.WriteHeader(200)
-		w.Write(buf.Bytes())
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.WriteHeader(200)
-	w.Write(data)
+	// v6.1: 使用 Vue 3 + Vite 构建的 SPA，通过 getDashboardHandler() 提供静态文件
+	getDashboardHandler().ServeHTTP(w, r)
 }
 
 // ============================================================

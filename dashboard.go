@@ -1,17 +1,22 @@
-// dashboard.go — Dashboard HTML 嵌入（//go:embed）
-// lobster-guard v4.0 代码拆分
-// 回退逻辑：优先使用文件系统中的 dashboard.html，否则使用嵌入版本
+// dashboard.go — Dashboard 前端资源嵌入（go:embed）
+// lobster-guard v6.1 — Vue 3 + Vite 构建产物
 package main
 
 import (
-	_ "embed"
+	"embed"
+	"io/fs"
+	"net/http"
 )
 
-//go:embed dashboard.html
-var embeddedDashboardHTML []byte
+//go:embed dashboard/dist/*
+var dashboardFS embed.FS
 
-// getDashboardHTML 获取 Dashboard HTML 内容
-// 优先从文件系统读取（方便开发调试），否则使用嵌入版本
-func getDashboardHTML(cfgPath string) []byte {
-	return embeddedDashboardHTML
+// getDashboardHandler 返回 Dashboard 静态文件 handler
+func getDashboardHandler() http.Handler {
+	sub, err := fs.Sub(dashboardFS, "dashboard/dist")
+	if err != nil {
+		// fallback: 本地文件系统（开发模式）
+		return http.FileServer(http.Dir("dashboard/dist"))
+	}
+	return http.FileServer(http.FS(sub))
 }
