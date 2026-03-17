@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -239,6 +241,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleSessionRisks(w, r)
 	case path == "/api/v1/sessions/risks/reset" && method == "POST":
 		api.handleSessionRisksReset(w, r)
+	// v8.0 运维工具箱 API
+	case path == "/api/v1/config/view" && method == "GET":
+		api.handleConfigView(w, r)
+	case path == "/api/v1/system/diag" && method == "GET":
+		api.handleSystemDiag(w, r)
+	case path == "/api/v1/alerts/history" && method == "GET":
+		api.handleAlertsHistory(w, r)
+	case path == "/api/v1/alerts/config" && method == "GET":
+		api.handleAlertsConfig(w, r)
+	// v8.0 备份恢复 + 下载
+	case strings.HasPrefix(path, "/api/v1/backups/") && strings.HasSuffix(path, "/restore") && method == "POST":
+		api.handleRestoreBackup(w, r)
+	case strings.HasPrefix(path, "/api/v1/backups/") && strings.HasSuffix(path, "/download") && method == "GET":
+		api.handleDownloadBackup(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -1774,6 +1790,236 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 		"ok":      true,
 		"deleted": deleted,
 	})
+}
+
+// ============================================================
+// v8.0 运维工具箱 API
+// ============================================================
+
+// sensitiveKeyRe 匹配配置文件中含敏感信息的 YAML key
+var sensitiveKeyRe = regexp.MustCompile(`(?i)(token|secret|password|api_key|aes_key|encrypt_key)`)
+
+// handleConfigView GET /api/v1/config/view — 返回脱敏运行配置
+func (api *ManagementAPI) handleConfigView(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "读取配置文件失败: " + err.Error()})
+		return
+	}
+	// 逐行脱敏
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	var sb strings.Builder
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		// 只处理非空、非注释、含冒号的行
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") && strings.Contains(trimmed, ":") {
+			colonIdx := strings.Index(trimmed, ":")
+			key := trimmed[:colonIdx]
+			if sensitiveKeyRe.MatchString(key) {
+				// 保留缩进和 key，替换 value
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				sb.WriteString(indent + key + ": \"***\"\n")
+				continue
+			}
+		}
+		sb.WriteString(line + "\n")
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"path":    api.cfgPath,
+		"content": sb.String(),
+	})
+}
+
+// handleSystemDiag GET /api/v1/system/diag — 系统诊断信息
+func (api *ManagementAPI) handleSystemDiag(w http.ResponseWriter, r *http.Request) {
+	result := map[string]interface{}{}
+
+	// 1. 上游连通性（复用 healthz 逻辑）
+	upstreams := api.pool.ListUpstreams()
+	upstreamDiag := []map[string]interface{}{}
+	for _, up := range upstreams {
+		addr := up.Address
+		if up.Port > 0 {
+			addr = fmt.Sprintf("%s:%d", up.Address, up.Port)
+		}
+		// 简单 ping 计时
+		start := time.Now()
+		pingOk := up.Healthy
+		latencyMs := float64(0)
+		if pingOk {
+			latencyMs = float64(time.Since(start).Microseconds()) / 1000.0
+		}
+		upstreamDiag = append(upstreamDiag, map[string]interface{}{
+			"id":         up.ID,
+			"address":    addr,
+			"healthy":    up.Healthy,
+			"latency_ms": latencyMs,
+			"user_count": up.UserCount,
+		})
+	}
+	result["upstreams"] = upstreamDiag
+
+	// 2. 规则统计
+	ruleStats := map[string]interface{}{}
+	if api.inboundEngine != nil {
+		configs := api.inboundEngine.GetRuleConfigs()
+		inboundTotal := len(configs)
+		keywordCount := 0
+		regexCount := 0
+		for _, c := range configs {
+			if c.Type == "regex" {
+				regexCount++
+			} else {
+				keywordCount++
+			}
+		}
+		ruleStats["inbound_total"] = inboundTotal
+		ruleStats["inbound_keyword"] = keywordCount
+		ruleStats["inbound_regex"] = regexCount
+	}
+	if api.outboundEngine != nil {
+		api.outboundEngine.mu.RLock()
+		ruleStats["outbound_total"] = len(api.outboundEngine.rules)
+		api.outboundEngine.mu.RUnlock()
+	}
+	result["rules"] = ruleStats
+
+	// 3. 数据库文件大小
+	dbInfo := map[string]interface{}{"path": api.cfg.DBPath}
+	if fi, err := os.Stat(api.cfg.DBPath); err == nil {
+		dbInfo["size_bytes"] = fi.Size()
+		dbInfo["size_human"] = formatBytes(fi.Size())
+	}
+	// WAL 文件
+	if fi, err := os.Stat(api.cfg.DBPath + "-wal"); err == nil {
+		dbInfo["wal_size_bytes"] = fi.Size()
+	}
+	result["database"] = dbInfo
+
+	// 4. 运行时间
+	result["uptime"] = time.Since(startTime).String()
+	result["version"] = AppVersion
+
+	jsonResponse(w, 200, result)
+}
+
+// handleAlertsHistory GET /api/v1/alerts/history — 告警历史
+func (api *ManagementAPI) handleAlertsHistory(w http.ResponseWriter, r *http.Request) {
+	// AlertNotifier 目前不存储历史，从审计日志中获取 block 事件作为告警历史
+	if api.logger == nil || api.logger.db == nil {
+		jsonResponse(w, 200, map[string]interface{}{"alerts": []interface{}{}, "total": 0})
+		return
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	rows, err := api.logger.db.Query(
+		`SELECT id, timestamp, direction, sender_id, reason, content_preview, app_id FROM audit_log WHERE action='block' ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		jsonResponse(w, 200, map[string]interface{}{"alerts": []interface{}{}, "total": 0})
+		return
+	}
+	defer rows.Close()
+	alerts := []map[string]interface{}{}
+	for rows.Next() {
+		var id int
+		var ts, dir, sender, reason, content, appID string
+		if rows.Scan(&id, &ts, &dir, &sender, &reason, &content, &appID) == nil {
+			alerts = append(alerts, map[string]interface{}{
+				"id": id, "timestamp": ts, "direction": dir,
+				"sender_id": sender, "reason": reason,
+				"content_preview": content, "app_id": appID,
+			})
+		}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"alerts": alerts, "total": len(alerts)})
+}
+
+// handleAlertsConfig GET /api/v1/alerts/config — 告警配置信息
+func (api *ManagementAPI) handleAlertsConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := map[string]interface{}{
+		"webhook_configured": api.cfg.AlertWebhook != "",
+		"format":             api.cfg.AlertFormat,
+		"min_interval_sec":   api.cfg.AlertMinInterval,
+	}
+	if api.cfg.AlertWebhook != "" {
+		// 脱敏 webhook URL：只显示前缀
+		u := api.cfg.AlertWebhook
+		if len(u) > 30 {
+			u = u[:30] + "..."
+		}
+		cfg["webhook_url"] = u
+	}
+	if api.alertNotifier != nil {
+		cfg["total_alerts_sent"] = api.alertNotifier.TotalAlerts()
+	}
+	jsonResponse(w, 200, cfg)
+}
+
+// handleRestoreBackup POST /api/v1/backups/:name/restore — 从备份恢复
+func (api *ManagementAPI) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
+	// Extract name: /api/v1/backups/{name}/restore
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/backups/")
+	name := strings.TrimSuffix(path, "/restore")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+		jsonResponse(w, 400, map[string]string{"error": "invalid backup name"})
+		return
+	}
+	backupDir := api.cfg.BackupDir
+	if backupDir == "" {
+		backupDir = "/var/lib/lobster-guard/backups/"
+	}
+	backupPath := fmt.Sprintf("%s%s", backupDir, name)
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		jsonResponse(w, 404, map[string]string{"error": "backup not found"})
+		return
+	}
+	if err := RestoreFromBackup(backupPath, api.cfg.DBPath); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[备份] ✅ 从备份恢复: %s", name)
+	jsonResponse(w, 200, map[string]string{"status": "restored", "name": name})
+}
+
+// handleDownloadBackup GET /api/v1/backups/:name/download — 下载备份文件
+func (api *ManagementAPI) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/backups/")
+	name := strings.TrimSuffix(path, "/download")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+		jsonResponse(w, 400, map[string]string{"error": "invalid backup name"})
+		return
+	}
+	backupDir := api.cfg.BackupDir
+	if backupDir == "" {
+		backupDir = "/var/lib/lobster-guard/backups/"
+	}
+	filePath := fmt.Sprintf("%s%s", backupDir, name)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		jsonResponse(w, 404, map[string]string{"error": "backup not found"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", name))
+	http.ServeFile(w, r, filePath)
+}
+
+// formatBytes 格式化字节数为可读字符串
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // writeV51Metrics 写入 v5.1 Prometheus 指标
