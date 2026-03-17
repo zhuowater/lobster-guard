@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "10.2.0"
+	AppVersion = "11.0.0"
 )
 
 var startTime = time.Now()
@@ -391,6 +391,7 @@ func main() {
 	mgmtAPI.llmAuditor = llmAuditor // v9.0
 	mgmtAPI.llmRuleEngine = llmRuleEngine // v10.0
 	mgmtAPI.llmProxy = llmProxy // v10.1
+	mgmtAPI.userProfileEng = NewUserProfileEngine(logger.DB()) // v11.0
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

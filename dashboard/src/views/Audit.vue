@@ -77,6 +77,10 @@
       <template #cell-timestamp="{ row }">{{ fmtTime(row.timestamp || row.time || row.created_at) }}</template>
       <template #cell-direction="{ value }">{{ value === 'inbound' ? '入站' : '出站' }}</template>
       <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
+      <template #cell-sender_id="{ row }">
+        <a v-if="row.sender_id" class="user-link" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(row.sender_id))">{{ row.sender_id }}</a>
+        <span v-else>--</span>
+      </template>
       <template #cell-trace_id="{ row }">
         <span style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-primary);cursor:pointer"
               :title="row.trace_id"
@@ -94,7 +98,7 @@
         <div style="font-size:var(--text-sm);line-height:1.8;background:var(--bg-elevated);padding:var(--space-3);border-radius:var(--radius-md)">
           <div><b style="color:var(--color-primary)">时间:</b> {{ fmtTime(row.timestamp || row.time) }}</div>
           <div><b style="color:var(--color-primary)">方向:</b> {{ row.direction }} | <b style="color:var(--color-primary)">动作:</b> {{ row.action }}</div>
-          <div><b style="color:var(--color-primary)">发送者:</b> {{ row.sender_id || '--' }} | <b style="color:var(--color-primary)">App ID:</b> {{ row.app_id || '--' }}</div>
+          <div><b style="color:var(--color-primary)">发送者:</b> <a v-if="row.sender_id" class="user-link" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(row.sender_id))">{{ row.sender_id }}</a><span v-else>--</span> | <b style="color:var(--color-primary)">App ID:</b> {{ row.app_id || '--' }}</div>
           <div><b style="color:var(--color-primary)">Trace ID:</b> {{ row.trace_id || '--' }}</div>
           <div><b style="color:var(--color-primary)">上游:</b> {{ row.upstream_id || '--' }}</div>
           <div><b style="color:var(--color-primary)">原因:</b> {{ row.reason || '--' }}</div>
@@ -328,4 +332,6 @@ onUnmounted(() => clearInterval(refreshTimer))
   font-family: var(--font-sans);
 }
 .date-input:focus { border-color: var(--color-primary); }
+.user-link { color: var(--color-primary); cursor: pointer; text-decoration: none; font-weight: 500; }
+.user-link:hover { text-decoration: underline; }
 </style>

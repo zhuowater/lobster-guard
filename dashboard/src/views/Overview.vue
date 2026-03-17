@@ -18,6 +18,10 @@
         :iconSvg="svgPercent" :value="stats.rate" label="拦截率" color="green"
         class="stat-clickable" @click="router.push('/rules')"
       />
+      <StatCard
+        :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" color="red"
+        class="stat-clickable" @click="router.push('/user-profiles')"
+      />
     </div>
     <div class="ov-cards" v-else>
       <Skeleton type="card" />
@@ -129,7 +133,7 @@
             <tr v-for="a in recentAttacks" :key="a.id || a.trace_id || a.timestamp" class="row-block" style="cursor:pointer" @click="$router.push('/audit')">
               <td>{{ fmtTime(a.timestamp || a.time) }}</td>
               <td>{{ a.direction === 'inbound' ? '入站' : '出站' }}</td>
-              <td>{{ a.sender_id || '--' }}</td>
+              <td><a v-if="a.sender_id" class="user-link" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(a.sender_id))">{{ a.sender_id }}</a><span v-else>--</span></td>
               <td>{{ a.reason || '--' }}</td>
             </tr>
           </TransitionGroup>
@@ -160,6 +164,7 @@ const svgGlobe = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" st
 const svgShieldX = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9.5" y1="9.5" x2="14.5" y2="14.5"/><line x1="14.5" y1="9.5" x2="9.5" y2="14.5"/></svg>'
 const svgAlertTriangle = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
 const svgPercent = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>'
+const svgUserDanger = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg>'
 
 // SVG for empty states
 const svgTrend = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
@@ -177,6 +182,7 @@ const recentAttacks = ref([])
 const topRules = ref([])
 const pieData = ref([])
 const heatmapData = ref([])
+const highRiskUserCount = ref(0)
 
 function fmtTime(ts) {
   if (!ts) return '--'
@@ -306,6 +312,12 @@ async function loadData() {
     heatmapData.value = matrix
   } catch { heatmapData.value = [] }
 
+  // v11.0: 加载高危用户数
+  try {
+    const rs = await api('/api/v1/users/risk-stats')
+    highRiskUserCount.value = (rs.critical_count || 0) + (rs.high_count || 0)
+  } catch { highRiskUserCount.value = 0 }
+
   loaded.value = true
 }
 
@@ -320,6 +332,8 @@ onUnmounted(() => clearInterval(refreshTimer))
 <style scoped>
 .stat-clickable { cursor: pointer !important; }
 .stat-clickable:hover { transform: translateY(-3px) !important; box-shadow: var(--shadow-lg) !important; border-color: var(--color-primary) !important; }
+.user-link { color: var(--color-primary); cursor: pointer; text-decoration: none; font-weight: 500; }
+.user-link:hover { text-decoration: underline; }
 .hbar-rank {
   width: 24px; font-size: var(--text-xs); color: var(--color-primary); font-weight: 700; text-align: center; flex-shrink: 0;
 }

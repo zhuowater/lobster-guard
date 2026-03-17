@@ -53,6 +53,7 @@ type ManagementAPI struct {
 	llmAuditor      *LLMAuditor        // v9.0 LLM 审计器
 	llmRuleEngine   *LLMRuleEngine     // v10.0 LLM 规则引擎
 	llmProxy        *LLMProxy          // v10.1 LLM 代理引用（用于 canary token 操作）
+	userProfileEng  *UserProfileEngine // v11.0 用户画像引擎
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -193,6 +194,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListUsers(w, r)
 	case path == "/api/v1/users/refresh-all" && method == "POST":
 		api.handleRefreshAllUsers(w, r)
+	// v11.0 用户画像 API（必须在通配 /api/v1/users/ GET 之前）
+	case path == "/api/v1/users/risk-top" && method == "GET":
+		api.handleUserRiskTop(w, r)
+	case path == "/api/v1/users/risk-stats" && method == "GET":
+		api.handleUserRiskStats(w, r)
+	case strings.HasPrefix(path, "/api/v1/users/timeline/") && method == "GET":
+		api.handleUserTimeline(w, r)
+	case strings.HasPrefix(path, "/api/v1/users/risk/") && method == "GET":
+		api.handleUserRiskProfile(w, r)
 	case strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/refresh") && method == "POST":
 		api.handleRefreshUser(w, r)
 	case strings.HasPrefix(path, "/api/v1/users/") && method == "GET":
@@ -1842,7 +1852,18 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	senders := []string{"user-alice", "user-bob", "user-charlie", "user-dave", "user-eve", "user-frank", "user-grace"}
+	senders := []string{"user-001", "user-002", "user-003", "user-004", "user-005", "user-006", "user-007", "user-008"}
+	// v11.0: 每个用户有不同的攻击概率（用于生成差异化的风险画像）
+	senderBlockRates := map[string]float64{
+		"user-001": 0.55, // 高攻击者
+		"user-002": 0.40, // 高攻击者
+		"user-003": 0.25, // 中等
+		"user-004": 0.15, // 中等
+		"user-005": 0.08, // 偶尔
+		"user-006": 0.03, // 正常
+		"user-007": 0.02, // 正常
+		"user-008": 0.01, // 几乎无攻击
+	}
 	appIDs := []string{"app-chat", "app-assistant", "app-translate", "app-code"}
 
 	blockReasons := map[string][]string{
@@ -1943,13 +1964,11 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		roll := rng.Float64()
 		var action, reason, content string
 
-		if roll < 0.70 {
-			// pass - 70%
-			action = "pass"
-			reason = ""
-			content = contentSamples[rng.Intn(len(contentSamples))]
-		} else if roll < 0.90 {
-			// block - 20%
+		// v11.0: 使用每用户独立的拦截概率
+		blockRate := senderBlockRates[sender]
+		warnRate := blockRate * 0.3 // warn 是 block 的 30%
+		if roll < blockRate {
+			// block
 			action = "block"
 			groupRoll := rng.Float64()
 			var group string
@@ -1965,10 +1984,15 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 			reasons := blockReasons[group]
 			reason = reasons[rng.Intn(len(reasons))]
 			content = attackContent[rng.Intn(len(attackContent))]
-		} else {
-			// warn - 10%
+		} else if roll < blockRate+warnRate {
+			// warn
 			action = "warn"
 			reason = warnReasons[rng.Intn(len(warnReasons))]
+			content = contentSamples[rng.Intn(len(contentSamples))]
+		} else {
+			// pass
+			action = "pass"
+			reason = ""
 			content = contentSamples[rng.Intn(len(contentSamples))]
 		}
 
@@ -3079,5 +3103,97 @@ func (api *ManagementAPI) writeV51Metrics(w io.Writer) {
 		fmt.Fprintln(w, "# TYPE lobster_guard_detect_cache_misses_total counter")
 		fmt.Fprintf(w, "lobster_guard_detect_cache_misses_total %d\n", misses)
 	}
+}
+
+// ============================================================
+// v11.0 用户画像 API
+// ============================================================
+
+// handleUserRiskTop GET /api/v1/users/risk-top — 风险用户 TOP N
+func (api *ManagementAPI) handleUserRiskTop(w http.ResponseWriter, r *http.Request) {
+	if api.userProfileEng == nil {
+		jsonResponse(w, 200, map[string]interface{}{"users": []interface{}{}, "total": 0})
+		return
+	}
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	users, err := api.userProfileEng.GetTopRiskUsers(limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if users == nil {
+		users = []UserRiskProfile{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"users": users, "total": len(users)})
+}
+
+// handleUserRiskProfile GET /api/v1/users/risk/:id — 单个用户风险画像
+func (api *ManagementAPI) handleUserRiskProfile(w http.ResponseWriter, r *http.Request) {
+	if api.userProfileEng == nil {
+		jsonResponse(w, 404, map[string]string{"error": "user profile engine not available"})
+		return
+	}
+	userID := strings.TrimPrefix(r.URL.Path, "/api/v1/users/risk/")
+	if userID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "user_id required"})
+		return
+	}
+	profile, err := api.userProfileEng.GetUserProfile(userID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if profile.TotalRequests == 0 {
+		jsonResponse(w, 404, map[string]string{"error": "user not found"})
+		return
+	}
+	jsonResponse(w, 200, profile)
+}
+
+// handleUserTimeline GET /api/v1/users/timeline/:id — 用户行为时间线
+func (api *ManagementAPI) handleUserTimeline(w http.ResponseWriter, r *http.Request) {
+	if api.userProfileEng == nil {
+		jsonResponse(w, 200, map[string]interface{}{"events": []interface{}{}, "total": 0})
+		return
+	}
+	userID := strings.TrimPrefix(r.URL.Path, "/api/v1/users/timeline/")
+	if userID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "user_id required"})
+		return
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	events, err := api.userProfileEng.GetUserTimeline(userID, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if events == nil {
+		events = []UserTimelineEvent{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"events": events, "total": len(events)})
+}
+
+// handleUserRiskStats GET /api/v1/users/risk-stats — 风险统计概览
+func (api *ManagementAPI) handleUserRiskStats(w http.ResponseWriter, r *http.Request) {
+	if api.userProfileEng == nil {
+		jsonResponse(w, 200, &UserRiskStats{})
+		return
+	}
+	stats, err := api.userProfileEng.GetRiskStats()
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, stats)
 }
 
