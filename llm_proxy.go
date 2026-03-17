@@ -1,5 +1,5 @@
 // llm_proxy.go — LLMProxy: LLM 侧透明反向代理（SSE streaming 支持）
-// lobster-guard v9.0
+// lobster-guard v10.0
 package main
 
 import (
@@ -20,12 +20,13 @@ import (
 type LLMProxy struct {
 	cfg        LLMProxyConfig
 	auditor    *LLMAuditor
+	ruleEngine *LLMRuleEngine
 	httpServer *http.Server
 	client     *http.Client
 }
 
 // NewLLMProxy 创建 LLM 代理
-func NewLLMProxy(cfg LLMProxyConfig, auditor *LLMAuditor) *LLMProxy {
+func NewLLMProxy(cfg LLMProxyConfig, auditor *LLMAuditor, ruleEngine *LLMRuleEngine) *LLMProxy {
 	if cfg.Listen == "" {
 		cfg.Listen = ":8445"
 	}
@@ -47,8 +48,9 @@ func NewLLMProxy(cfg LLMProxyConfig, auditor *LLMAuditor) *LLMProxy {
 	}
 
 	lp := &LLMProxy{
-		cfg:     cfg,
-		auditor: auditor,
+		cfg:        cfg,
+		auditor:    auditor,
+		ruleEngine: ruleEngine,
 		client: &http.Client{
 			Transport: transport,
 			Timeout:   time.Duration(cfg.TimeoutSec) * time.Second,
@@ -137,6 +139,30 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 提取 model（用于审计上下文）
 	model := ParseAnthropicRequest(bodyBytes)
 
+	// v10.0: 请求侧规则检测
+	if lp.ruleEngine != nil && len(bodyBytes) > 0 {
+		reqMatches := lp.ruleEngine.CheckRequest(string(bodyBytes))
+		if len(reqMatches) > 0 {
+			action, topMatch := HighestPriorityAction(reqMatches)
+			switch action {
+			case "block":
+				log.Printf("[LLM规则] 请求被阻断: rule=%s category=%s pattern=%q",
+					topMatch.RuleID, topMatch.Category, topMatch.Pattern)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(403)
+				fmt.Fprintf(w, `{"error":"Request blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
+					topMatch.RuleName, topMatch.RuleID, topMatch.Category)
+				return
+			case "warn":
+				log.Printf("[LLM规则] 请求告警: rule=%s category=%s pattern=%q",
+					topMatch.RuleID, topMatch.Category, topMatch.Pattern)
+			case "log":
+				log.Printf("[LLM规则] 请求日志: rule=%s category=%s",
+					topMatch.RuleID, topMatch.Category)
+			}
+		}
+	}
+
 	// 构建上游请求
 	upstreamURL := strings.TrimRight(target.Upstream, "/") + r.URL.RequestURI()
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
@@ -195,6 +221,39 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(502)
 			return
 		}
+
+		// v10.0: 响应侧规则检测
+		if lp.ruleEngine != nil && len(respBody) > 0 {
+			respMatches := lp.ruleEngine.CheckResponse(string(respBody))
+			if len(respMatches) > 0 {
+				action, topMatch := HighestPriorityAction(respMatches)
+				switch action {
+				case "block":
+					log.Printf("[LLM规则] 响应被阻断: rule=%s category=%s",
+						topMatch.RuleID, topMatch.Category)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(403)
+					fmt.Fprintf(w, `{"error":"Response blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
+						topMatch.RuleName, topMatch.RuleID, topMatch.Category)
+					go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+					return
+				case "rewrite":
+					newBody := lp.ruleEngine.ApplyRewrite(string(respBody), respMatches)
+					respBody = []byte(newBody)
+					// 更新 Content-Length
+					w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
+					log.Printf("[LLM规则] 响应已改写: rule=%s category=%s",
+						topMatch.RuleID, topMatch.Category)
+				case "warn":
+					log.Printf("[LLM规则] 响应告警: rule=%s category=%s",
+						topMatch.RuleID, topMatch.Category)
+				case "log":
+					log.Printf("[LLM规则] 响应日志: rule=%s category=%s",
+						topMatch.RuleID, topMatch.Category)
+				}
+			}
+		}
+
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 
@@ -225,5 +284,20 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 	// 流结束，异步解析完整的审计数据
 	eventData := make([]byte, eventBuf.Len())
 	copy(eventData, eventBuf.Bytes())
+
+	// v10.0: SSE 流式响应的规则检测（仅 log/warn，数据已推送给客户端）
+	if lp.ruleEngine != nil && len(eventData) > 0 {
+		go func() {
+			respMatches := lp.ruleEngine.CheckResponse(string(eventData))
+			if len(respMatches) > 0 {
+				_, topMatch := HighestPriorityAction(respMatches)
+				if topMatch != nil {
+					log.Printf("[LLM规则] SSE 响应检测: rule=%s category=%s action=%s (流式模式仅记录)",
+						topMatch.RuleID, topMatch.Category, topMatch.Action)
+				}
+			}
+		}()
+	}
+
 	go lp.auditor.ProcessSSEBuffer(auditCtx, eventData)
 }

@@ -8,6 +8,7 @@ const routes = [
   { path: '/rules', name: 'rules', component: () => import('./views/Rules.vue'), meta: { title: '规则', icon: '🛡️', group: 'im' } },
   { path: '/audit', name: 'audit', component: () => import('./views/Audit.vue'), meta: { title: '审计', icon: '📋', group: 'im' } },
   { path: '/llm', name: 'llm', component: () => import('./views/LLMOverview.vue'), meta: { title: 'LLM 概览', icon: '🧠', group: 'llm' } },
+  { path: '/llm-rules', name: 'llm-rules', component: () => import('./views/LLMRules.vue'), meta: { title: 'LLM 规则', icon: '🛡️', group: 'llm' } },
   { path: '/agent', name: 'agent', component: () => import('./views/AgentBehavior.vue'), meta: { title: 'Agent 行为', icon: '🤖', group: 'llm' } },
   { path: '/monitor', name: 'monitor', component: () => import('./views/Monitor.vue'), meta: { title: '监控', icon: '⚡', group: 'system' } },
   { path: '/ops', name: 'ops', component: () => import('./views/Operations.vue'), meta: { title: '运维', icon: '🔧', group: 'system' } },

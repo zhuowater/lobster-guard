@@ -15,7 +15,7 @@ import (
 // 配置结构
 // ============================================================
 
-// LLMProxyConfig LLM 侧反向代理配置（v9.0）
+// LLMProxyConfig LLM 侧反向代理配置（v9.0, v10.0 新增 Rules）
 type LLMProxyConfig struct {
 	Enabled      bool              `yaml:"enabled" json:"enabled"`
 	Listen       string            `yaml:"listen" json:"listen"`
@@ -25,6 +25,7 @@ type LLMProxyConfig struct {
 	MaxBodyBytes int64             `yaml:"max_body_bytes" json:"max_body_bytes,omitempty"`
 	CostAlert    LLMCostAlertConfig `yaml:"cost_alert" json:"cost_alert"`
 	Security     LLMSecurityConfig  `yaml:"security" json:"security"`
+	Rules        []LLMRule          `yaml:"rules" json:"rules"`
 }
 
 // LLMCostAlertConfig LLM 成本预警配置（v9.1）

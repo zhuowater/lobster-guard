@@ -42,7 +42,7 @@ func setupTestLLMProxy(t *testing.T, handler http.HandlerFunc) (*LLMProxy, *sql.
 		MaxBodyBytes:  10 * 1024 * 1024,
 	}
 
-	proxy := NewLLMProxy(proxyCfg, auditor)
+	proxy := NewLLMProxy(proxyCfg, auditor, nil)
 	return proxy, db, upstream
 }
 
@@ -170,7 +170,7 @@ func TestLLMProxy_NoTarget(t *testing.T) {
 		Enabled: true,
 		Listen:  ":0",
 		Targets: []LLMTargetConfig{}, // no targets
-	}, auditor)
+	}, auditor, nil)
 
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
 	rr := httptest.NewRecorder()

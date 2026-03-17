@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "9.0.0"
+	AppVersion = "10.0.0"
 )
 
 var startTime = time.Now()
@@ -221,9 +221,18 @@ func main() {
 	// v9.0: LLM 代理（可选）
 	var llmAuditor *LLMAuditor
 	var llmProxy *LLMProxy
+	var llmRuleEngine *LLMRuleEngine
 	if cfg.LLMProxy.Enabled {
+		// v10.0: 初始化 LLM 规则引擎
+		llmRules := cfg.LLMProxy.Rules
+		if len(llmRules) == 0 {
+			llmRules = defaultLLMRules
+		}
+		llmRuleEngine = NewLLMRuleEngine(llmRules)
+		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则", len(llmRules))
+
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)
-		llmProxy = NewLLMProxy(cfg.LLMProxy, llmAuditor)
+		llmProxy = NewLLMProxy(cfg.LLMProxy, llmAuditor, llmRuleEngine)
 		go func() {
 			if err := llmProxy.Start(); err != nil {
 				log.Printf("[LLM代理] 启动失败: %v", err)
@@ -380,6 +389,7 @@ func main() {
 	mgmtAPI.llmDetector = llmDetector
 	mgmtAPI.detectCache = detectCache
 	mgmtAPI.llmAuditor = llmAuditor // v9.0
+	mgmtAPI.llmRuleEngine = llmRuleEngine // v10.0
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

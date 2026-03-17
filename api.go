@@ -51,6 +51,7 @@ type ManagementAPI struct {
 	detectCache     *DetectCache       // v5.1 检测缓存
 	// v9.0 LLM 侧审计
 	llmAuditor      *LLMAuditor        // v9.0 LLM 审计器
+	llmRuleEngine   *LLMRuleEngine     // v10.0 LLM 规则引擎
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -271,6 +272,19 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			api.handleLLMConfigGet(w, r)
 		case path == "/api/v1/llm/config" && method == "PUT":
 			api.handleLLMConfigPut(w, r)
+		// v10.0: LLM 规则 API（不需要 llmAuditor）
+		case path == "/api/v1/llm/rules" && method == "GET":
+			api.handleLLMRulesList(w, r)
+		case path == "/api/v1/llm/rules" && method == "POST":
+			api.handleLLMRulesCreate(w, r)
+		case path == "/api/v1/llm/rules/hits" && method == "GET":
+			api.handleLLMRulesHits(w, r)
+		case strings.HasPrefix(path, "/api/v1/llm/rules/") && strings.HasSuffix(path, "/toggle-shadow") && method == "POST":
+			api.handleLLMRulesToggleShadow(w, r)
+		case strings.HasPrefix(path, "/api/v1/llm/rules/") && method == "PUT":
+			api.handleLLMRulesUpdate(w, r)
+		case strings.HasPrefix(path, "/api/v1/llm/rules/") && method == "DELETE":
+			api.handleLLMRulesDelete(w, r)
 		default:
 			if api.llmAuditor == nil {
 				jsonResponse(w, 404, map[string]string{"error": "LLM proxy not enabled"})
@@ -1987,6 +2001,29 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 注入了 %d 条 llm_calls + %d 条 llm_tool_calls 演示数据", llmCallsInserted, llmToolCallsInserted)
 	}
 
+	// v10.0: 注入 LLM 规则命中统计
+	if api.llmRuleEngine != nil {
+		rng3 := rand.New(rand.NewSource(time.Now().UnixNano()))
+		rules := api.llmRuleEngine.GetRules()
+		for _, rule := range rules {
+			hits := 5 + rng3.Intn(26) // 5-30 次命中
+			api.llmRuleEngine.mu.Lock()
+			hit, ok := api.llmRuleEngine.hits[rule.ID]
+			if !ok {
+				hit = &LLMRuleHit{}
+				api.llmRuleEngine.hits[rule.ID] = hit
+			}
+			if rule.ShadowMode {
+				hit.ShadowHits += int64(hits)
+			} else {
+				hit.Count += int64(hits)
+			}
+			hit.LastHit = time.Now().Add(-time.Duration(rng3.Intn(3600)) * time.Second)
+			api.llmRuleEngine.mu.Unlock()
+		}
+		log.Printf("[Demo] 注入了 %d 条 LLM 规则命中统计", len(rules))
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":              true,
@@ -2525,6 +2562,35 @@ func (api *ManagementAPI) saveLLMConfig() error {
 		"prompt_injection_scan": cfg.Security.PromptInjectionScan,
 	}
 
+	// v10.0: 规则
+	if len(cfg.Rules) > 0 {
+		var rulesList []interface{}
+		for _, rule := range cfg.Rules {
+			rm := map[string]interface{}{
+				"id":        rule.ID,
+				"name":      rule.Name,
+				"category":  rule.Category,
+				"direction": rule.Direction,
+				"type":      rule.Type,
+				"patterns":  rule.Patterns,
+				"action":    rule.Action,
+				"enabled":   rule.Enabled,
+				"priority":  rule.Priority,
+			}
+			if rule.Description != "" {
+				rm["description"] = rule.Description
+			}
+			if rule.RewriteTo != "" {
+				rm["rewrite_to"] = rule.RewriteTo
+			}
+			if rule.ShadowMode {
+				rm["shadow_mode"] = true
+			}
+			rulesList = append(rulesList, rm)
+		}
+		llmProxy["rules"] = rulesList
+	}
+
 	raw["llm_proxy"] = llmProxy
 	out, err := yaml.Marshal(raw)
 	if err != nil {
@@ -2534,6 +2600,244 @@ func (api *ManagementAPI) saveLLMConfig() error {
 		return fmt.Errorf("写入配置文件失败: %w", err)
 	}
 	return nil
+}
+
+// ============================================================
+// v10.0 LLM 规则 CRUD API
+// ============================================================
+
+// handleLLMRulesList GET /api/v1/llm/rules — LLM 规则列表
+func (api *ManagementAPI) handleLLMRulesList(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		// 未启用时返回默认规则列表
+		jsonResponse(w, 200, map[string]interface{}{
+			"rules": defaultLLMRules,
+			"total": len(defaultLLMRules),
+		})
+		return
+	}
+	rules := api.llmRuleEngine.GetRules()
+	jsonResponse(w, 200, map[string]interface{}{
+		"rules": rules,
+		"total": len(rules),
+	})
+}
+
+// handleLLMRulesCreate POST /api/v1/llm/rules — 新建规则
+func (api *ManagementAPI) handleLLMRulesCreate(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM rule engine not initialized"})
+		return
+	}
+	var req LLMRule
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
+		return
+	}
+	if len(req.Patterns) == 0 {
+		jsonResponse(w, 400, map[string]string{"error": "patterns required"})
+		return
+	}
+	if req.ID == "" {
+		req.ID = fmt.Sprintf("llm-custom-%d", time.Now().UnixNano()%100000)
+	}
+	if req.Type == "" {
+		req.Type = "keyword"
+	}
+	if req.Action == "" {
+		req.Action = "log"
+	}
+
+	rules := api.llmRuleEngine.GetRules()
+	// 检查 ID 重复
+	for _, existing := range rules {
+		if existing.ID == req.ID {
+			jsonResponse(w, 409, map[string]string{"error": "rule with ID '" + req.ID + "' already exists"})
+			return
+		}
+	}
+
+	rules = append(rules, req)
+	api.llmRuleEngine.UpdateRules(rules)
+	api.persistLLMRules(rules)
+
+	log.Printf("[LLM规则] 新建规则: %s (type=%s, action=%s, patterns=%d)", req.ID, req.Type, req.Action, len(req.Patterns))
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "created",
+		"rule":   req,
+		"total":  len(rules),
+	})
+}
+
+// handleLLMRulesUpdate PUT /api/v1/llm/rules/:id — 编辑规则（完整替换）
+func (api *ManagementAPI) handleLLMRulesUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM rule engine not initialized"})
+		return
+	}
+	ruleID := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/rules/")
+	if ruleID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "rule id required"})
+		return
+	}
+
+	// 使用 raw JSON 解析以区分"未传"和"传了零值"
+	bodyBytes, _ := io.ReadAll(r.Body)
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &rawFields); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	rules := api.llmRuleEngine.GetRules()
+	found := false
+	var updated LLMRule
+	for i, existing := range rules {
+		if existing.ID == ruleID {
+			// 以现有规则为基础
+			updated = existing
+			// 只覆盖请求中明确传入的字段
+			if v, ok := rawFields["name"]; ok { json.Unmarshal(v, &updated.Name) }
+			if v, ok := rawFields["description"]; ok { json.Unmarshal(v, &updated.Description) }
+			if v, ok := rawFields["category"]; ok { json.Unmarshal(v, &updated.Category) }
+			if v, ok := rawFields["direction"]; ok { json.Unmarshal(v, &updated.Direction) }
+			if v, ok := rawFields["type"]; ok { json.Unmarshal(v, &updated.Type) }
+			if v, ok := rawFields["patterns"]; ok { json.Unmarshal(v, &updated.Patterns) }
+			if v, ok := rawFields["action"]; ok { json.Unmarshal(v, &updated.Action) }
+			if v, ok := rawFields["rewrite_to"]; ok { json.Unmarshal(v, &updated.RewriteTo) }
+			if v, ok := rawFields["enabled"]; ok { json.Unmarshal(v, &updated.Enabled) }
+			if v, ok := rawFields["priority"]; ok { json.Unmarshal(v, &updated.Priority) }
+			if v, ok := rawFields["shadow_mode"]; ok { json.Unmarshal(v, &updated.ShadowMode) }
+			rules[i] = updated
+			found = true
+			break
+		}
+	}
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "rule not found: " + ruleID})
+		return
+	}
+
+	api.llmRuleEngine.UpdateRules(rules)
+	api.persistLLMRules(rules)
+
+	log.Printf("[LLM规则] 更新规则: %s", ruleID)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "updated",
+		"rule":   updated,
+	})
+}
+
+// handleLLMRulesDelete DELETE /api/v1/llm/rules/:id — 删除规则
+func (api *ManagementAPI) handleLLMRulesDelete(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM rule engine not initialized"})
+		return
+	}
+	ruleID := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/rules/")
+	if ruleID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "rule id required"})
+		return
+	}
+
+	rules := api.llmRuleEngine.GetRules()
+	found := false
+	var newRules []LLMRule
+	for _, existing := range rules {
+		if existing.ID == ruleID {
+			found = true
+			continue
+		}
+		newRules = append(newRules, existing)
+	}
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "rule not found: " + ruleID})
+		return
+	}
+
+	api.llmRuleEngine.UpdateRules(newRules)
+	api.persistLLMRules(newRules)
+
+	log.Printf("[LLM规则] 删除规则: %s", ruleID)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "deleted",
+		"rule_id": ruleID,
+		"total":   len(newRules),
+	})
+}
+
+// handleLLMRulesHits GET /api/v1/llm/rules/hits — 规则命中统计
+func (api *ManagementAPI) handleLLMRulesHits(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 200, map[string]interface{}{"hits": map[string]interface{}{}})
+		return
+	}
+	hits := api.llmRuleEngine.GetHits()
+	// 转换为 JSON 友好格式
+	result := make(map[string]interface{}, len(hits))
+	for id, h := range hits {
+		result[id] = map[string]interface{}{
+			"count":       h.Count,
+			"last_hit":    h.LastHit.Format(time.RFC3339),
+			"shadow_hits": h.ShadowHits,
+		}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"hits": result})
+}
+
+// handleLLMRulesToggleShadow POST /api/v1/llm/rules/:id/toggle-shadow — 切换影子模式
+func (api *ManagementAPI) handleLLMRulesToggleShadow(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM rule engine not initialized"})
+		return
+	}
+	// 解析 rule ID: /api/v1/llm/rules/{id}/toggle-shadow
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/rules/")
+	ruleID := strings.TrimSuffix(path, "/toggle-shadow")
+	if ruleID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "rule id required"})
+		return
+	}
+
+	rules := api.llmRuleEngine.GetRules()
+	found := false
+	var newShadow bool
+	for i, existing := range rules {
+		if existing.ID == ruleID {
+			rules[i].ShadowMode = !existing.ShadowMode
+			newShadow = rules[i].ShadowMode
+			found = true
+			break
+		}
+	}
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "rule not found: " + ruleID})
+		return
+	}
+
+	api.llmRuleEngine.UpdateRules(rules)
+	api.persistLLMRules(rules)
+
+	mode := "active"
+	if newShadow {
+		mode = "shadow"
+	}
+	log.Printf("[LLM规则] 切换影子模式: %s → %s", ruleID, mode)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":      "toggled",
+		"rule_id":     ruleID,
+		"shadow_mode": newShadow,
+	})
+}
+
+// persistLLMRules 将 LLM 规则持久化到 config.yaml
+func (api *ManagementAPI) persistLLMRules(rules []LLMRule) {
+	api.cfg.LLMProxy.Rules = rules
+	if err := api.saveLLMConfig(); err != nil {
+		log.Printf("[LLM规则] 持久化失败: %v", err)
+	} else {
+		log.Printf("[LLM规则] 已持久化 %d 条规则到 %s", len(rules), api.cfgPath)
+	}
 }
 
 // writeV51Metrics 写入 v5.1 Prometheus 指标
