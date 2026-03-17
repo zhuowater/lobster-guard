@@ -13,7 +13,10 @@
           <span class="alert-reason">{{ a.flag_reason || a.risk_level }}</span>
         </div>
       </div>
-      <a class="alert-link" @click="scrollToHighRisk">查看全部 →</a>
+      <div class="alert-footer">
+        <a class="alert-link" @click="scrollToHighRisk">查看全部 →</a>
+        <a class="alert-config-link" @click="goToSettings('security')">前往安全策略配置 →</a>
+      </div>
     </div>
 
     <!-- v10.1: Canary 泄露告警 -->
@@ -25,6 +28,9 @@
       <div style="font-size:var(--text-sm);color:var(--text-secondary);padding:4px 0">
         Agent 响应中包含了 Canary Token，表明 System Prompt 内容被泄露（OWASP LLM06）
       </div>
+      <div class="alert-footer" style="justify-content:flex-end">
+        <a class="alert-config-link" @click="goToSettings('canary')">配置 Canary Token →</a>
+      </div>
     </div>
 
     <!-- v10.1: 预算超限告警 -->
@@ -35,6 +41,9 @@
       </div>
       <div style="font-size:var(--text-sm);color:var(--text-secondary);padding:4px 0">
         Agent 工具调用或 Token 使用量超出预算限制（OWASP LLM08 Excessive Agency）
+      </div>
+      <div class="alert-footer" style="justify-content:flex-end">
+        <a class="alert-config-link" @click="goToSettings('budget')">配置 Response Budget →</a>
       </div>
     </div>
 
@@ -163,6 +172,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
@@ -222,6 +232,11 @@ function scrollToHighRisk() {
   nextTick(() => {
     highRiskRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
+}
+
+const router = useRouter()
+function goToSettings(section) {
+  router.push({ path: '/settings', query: { section } })
 }
 
 function fmtTime(ts) {
@@ -333,6 +348,12 @@ onUnmounted(() => clearInterval(timer))
 .alert-time { color: var(--text-tertiary); font-size: var(--text-xs); }
 .alert-reason { color: var(--text-secondary); font-size: var(--text-xs); margin-left: auto; }
 .alert-link { font-size: var(--text-sm); color: #EF4444; cursor: pointer; text-decoration: underline; }
+.alert-footer { display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-2); }
+.alert-config-link {
+  font-size: var(--text-sm); color: var(--color-primary); cursor: pointer;
+  text-decoration: none; transition: text-decoration .15s;
+}
+.alert-config-link:hover { text-decoration: underline; }
 
 /* v10.1: Canary 告警样式 */
 .canary-alert {

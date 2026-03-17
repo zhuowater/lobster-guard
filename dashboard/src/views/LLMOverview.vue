@@ -4,15 +4,19 @@
     <div class="ov-cards" v-if="loaded">
       <StatCard
         :iconSvg="svgCalls" :value="overview.total_calls" label="总调用数" color="indigo"
+        class="stat-clickable" @click="router.push('/agent')"
       />
       <StatCard
         :iconSvg="svgToken" :value="formatTokens(overview.total_tokens)" label="Token 用量" color="blue"
+        class="stat-clickable" @click="router.push({ path: '/settings', query: { section: 'cost' } })"
       />
       <StatCard
         :iconSvg="svgSpeed" :value="overview.avg_latency_ms + 'ms'" label="平均延迟" color="green"
+        class="stat-clickable" @click="router.push('/agent')"
       />
       <StatCard
         :iconSvg="svgError" :value="(overview.error_rate * 100).toFixed(1) + '%'" label="错误率" color="red"
+        class="stat-clickable" @click="router.push('/agent')"
       />
     </div>
     <div class="ov-cards" v-else>
@@ -156,6 +160,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
@@ -170,6 +175,7 @@ const svgError = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" st
 const svgTrend = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
 
 const modelColors = ['#6366F1', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
+const router = useRouter()
 
 const loaded = ref(false)
 const overview = ref({ total_calls: 0, total_tokens: 0, avg_latency_ms: 0, error_rate: 0, models: [], cost_by_model: [], cost_trend: [], daily_limit_usd: 0, today_cost_usd: 0, cost_alert_triggered: false })
@@ -283,6 +289,8 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <style scoped>
+.stat-clickable { cursor: pointer !important; }
+.stat-clickable:hover { transform: translateY(-3px) !important; box-shadow: var(--shadow-lg) !important; border-color: var(--color-primary) !important; }
 code { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; font-size: var(--text-xs); font-family: var(--font-mono); }
 .row-error { background: rgba(239, 68, 68, 0.06) !important; }
 .status-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: var(--text-xs); font-weight: 600; }

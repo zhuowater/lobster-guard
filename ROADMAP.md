@@ -60,20 +60,13 @@
 
 ## 进行中
 
-### v10.x — LLM 安全规则引擎 · 策略编排
+### v10.x — LLM 安全规则引擎 · 策略编排 ✅
 > 对标 Guardrails AI 的验证器理念 + OWASP LLM Top 10 防护矩阵
 
-- [ ] v10.0 **LLM 规则引擎**
-  - LLM 侧独立规则集（与 IM 侧规则分离）
-  - 规则类型：Prompt Injection 检测 · PII 出站扫描 · 敏感话题过滤 · Token 超限拦截
-  - 规则动作：log / warn / block / rewrite（重写是创新：自动脱敏后放行）
-  - 规则编辑器（Dashboard 可视化 CRUD，复用 IM 侧 RuleEditor 组件思路）
-  - LLM 侧专属规则页面
+- [x] v10.0 **LLM 规则引擎**（独立规则集 · 8 条内置规则 · keyword/regex · log/warn/block/rewrite · Shadow Mode · 规则 CRUD · 热更新 · LLMRules.vue）
+- [x] v10.1 **策略编排**（🔥 Canary Token Prompt 泄露检测 · Response Budget Agent 行为预算 · 三层安全告警面板 · Settings 配置区 · 5 个新 API）
 
-- [ ] v10.1 **策略编排**（反直觉创新 🔥）
-  - **Canary Token 注入**：在 System Prompt 末尾自动注入不可见标记，如果 Agent 输出中出现该标记 → 证明发生了 Prompt Leakage → 自动触发告警。灵感来自 Rebuff。用户完全无感，但安全团队能精确检测到 system prompt 泄露。
-  - **Response Budget**：不只限 Token 数量，还能限单次对话的总工具调用次数、单类工具最大调用次数。防止 Agent 失控循环调用（OWASP LLM08 Excessive Agency 的精确防护）。
-  - **Shadow Mode**：新规则部署后默认进入"影子模式"——只记录不拦截，Dashboard 上显示"如果这条规则激活，会影响 N 条请求"。确认无误后一键切换为实施模式。解决"我加了规则但不敢开"的焦虑。
+**当前状态**: v10.1.0 · Go ~13,500 行 · Vue ~6,000 行 · Dashboard 11 页面
 
 ---
 

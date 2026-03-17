@@ -4,15 +4,19 @@
     <div class="ov-cards" v-if="loaded">
       <StatCard
         :iconSvg="svgGlobe" :value="stats.total" label="总请求" color="blue"
+        class="stat-clickable" @click="router.push('/audit')"
       />
       <StatCard
         :iconSvg="svgShieldX" :value="stats.blocked" label="拦截数" color="red"
+        class="stat-clickable" @click="router.push('/audit')"
       />
       <StatCard
         :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" color="yellow"
+        class="stat-clickable" @click="router.push('/audit')"
       />
       <StatCard
         :iconSvg="svgPercent" :value="stats.rate" label="拦截率" color="green"
+        class="stat-clickable" @click="router.push('/rules')"
       />
     </div>
     <div class="ov-cards" v-else>
@@ -137,6 +141,7 @@
 
 <script setup>
 import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
@@ -146,6 +151,7 @@ import EmptyState from '../components/EmptyState.vue'
 import Skeleton from '../components/Skeleton.vue'
 
 const appState = inject('appState')
+const router = useRouter()
 const barColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
 const pieColors = ['#EF4444', '#F59E0B', '#3B82F6', '#10B981', '#8B5CF6', '#06B6D4', '#EC4899', '#F97316']
 
@@ -312,6 +318,8 @@ onUnmounted(() => clearInterval(refreshTimer))
 </script>
 
 <style scoped>
+.stat-clickable { cursor: pointer !important; }
+.stat-clickable:hover { transform: translateY(-3px) !important; box-shadow: var(--shadow-lg) !important; border-color: var(--color-primary) !important; }
 .hbar-rank {
   width: 24px; font-size: var(--text-xs); color: var(--color-primary); font-weight: 700; text-align: center; flex-shrink: 0;
 }
