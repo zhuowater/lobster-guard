@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +15,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +26,9 @@ type LLMProxy struct {
 	ruleEngine *LLMRuleEngine
 	httpServer *http.Server
 	client     *http.Client
+	// v10.1 Canary Token
+	canaryMu    sync.RWMutex
+	canaryToken string
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -60,6 +66,9 @@ func NewLLMProxy(cfg LLMProxyConfig, auditor *LLMAuditor, ruleEngine *LLMRuleEng
 			},
 		},
 	}
+
+	// v10.1: 初始化 Canary Token
+	lp.initCanaryToken()
 
 	lp.httpServer = &http.Server{
 		Addr:         cfg.Listen,
@@ -139,6 +148,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 提取 model（用于审计上下文）
 	model := ParseAnthropicRequest(bodyBytes)
 
+	// v10.1: Canary Token 注入
+	var activeCanaryToken string
+	if lp.cfg.Security.CanaryToken.Enabled {
+		bodyBytes, activeCanaryToken = lp.injectCanaryToken(bodyBytes)
+	}
+
 	// v10.0: 请求侧规则检测
 	if lp.ruleEngine != nil && len(bodyBytes) > 0 {
 		reqMatches := lp.ruleEngine.CheckRequest(string(bodyBytes))
@@ -192,10 +207,11 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 审计上下文
 	auditCtx := &LLMAuditContext{
-		TraceID:   traceID,
-		StartTime: start,
-		Model:     model,
-		ReqBody:   bodyBytes,
+		TraceID:      traceID,
+		StartTime:    start,
+		Model:        model,
+		ReqBody:      bodyBytes,
+		CanaryToken:  activeCanaryToken,
 	}
 
 	// 复制响应 headers
@@ -300,4 +316,123 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 	}
 
 	go lp.auditor.ProcessSSEBuffer(auditCtx, eventData)
+}
+
+// ============================================================
+// v10.1 Canary Token — Prompt 泄露检测
+// ============================================================
+
+// generateCanaryToken 生成随机 Canary Token
+func generateCanaryToken() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return fmt.Sprintf("<!-- LG-CANARY-%x -->", b)
+}
+
+// initCanaryToken 初始化 canary token（从配置读取或自动生成）
+func (lp *LLMProxy) initCanaryToken() {
+	cfg := &lp.cfg.Security.CanaryToken
+	// 默认启用
+	if cfg.AlertAction == "" {
+		cfg.AlertAction = "warn"
+	}
+	if cfg.Token == "" {
+		cfg.Token = generateCanaryToken()
+		cfg.Enabled = true
+		log.Printf("[Canary] 自动生成 Canary Token: %s", cfg.Token)
+	}
+	lp.canaryToken = cfg.Token
+}
+
+// GetCanaryToken 返回当前的 canary token（并发安全）
+func (lp *LLMProxy) GetCanaryToken() string {
+	lp.canaryMu.RLock()
+	defer lp.canaryMu.RUnlock()
+	return lp.canaryToken
+}
+
+// RotateCanaryToken 轮换 canary token（并发安全）
+func (lp *LLMProxy) RotateCanaryToken() string {
+	lp.canaryMu.Lock()
+	defer lp.canaryMu.Unlock()
+	newToken := generateCanaryToken()
+	lp.canaryToken = newToken
+	lp.cfg.Security.CanaryToken.Token = newToken
+	log.Printf("[Canary] Token 已轮换: %s", newToken)
+	return newToken
+}
+
+// injectCanaryToken 在请求 JSON 的 system prompt 末尾注入 canary token
+func (lp *LLMProxy) injectCanaryToken(body []byte) ([]byte, string) {
+	token := lp.GetCanaryToken()
+	if token == "" {
+		return body, ""
+	}
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body, ""
+	}
+
+	modified := false
+
+	// Anthropic 格式: "system" 字段（string 或 array）
+	if sys, ok := req["system"]; ok {
+		switch v := sys.(type) {
+		case string:
+			req["system"] = v + "\n" + token
+			modified = true
+		case []interface{}:
+			// system 是 content block 数组
+			for i, item := range v {
+				if m, ok := item.(map[string]interface{}); ok {
+					if t, _ := m["type"].(string); t == "text" {
+						if text, ok := m["text"].(string); ok {
+							m["text"] = text + "\n" + token
+							v[i] = m
+							modified = true
+							break
+						}
+					}
+				}
+			}
+			req["system"] = v
+		}
+	}
+
+	// OpenAI 格式: messages 中 role=system 的内容
+	if !modified {
+		if msgs, ok := req["messages"].([]interface{}); ok {
+			for i, msg := range msgs {
+				if m, ok := msg.(map[string]interface{}); ok {
+					if role, _ := m["role"].(string); role == "system" {
+						if content, ok := m["content"].(string); ok {
+							m["content"] = content + "\n" + token
+							msgs[i] = m
+							modified = true
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if !modified {
+		return body, ""
+	}
+
+	newBody, err := json.Marshal(req)
+	if err != nil {
+		return body, ""
+	}
+	return newBody, token
+}
+
+// checkCanaryLeak 检查响应中是否包含 canary token
+func (lp *LLMProxy) checkCanaryLeak(responseBody string, canaryToken string) bool {
+	if canaryToken == "" {
+		return false
+	}
+	return strings.Contains(responseBody, canaryToken)
 }

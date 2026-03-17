@@ -390,6 +390,7 @@ func main() {
 	mgmtAPI.detectCache = detectCache
 	mgmtAPI.llmAuditor = llmAuditor // v9.0
 	mgmtAPI.llmRuleEngine = llmRuleEngine // v10.0
+	mgmtAPI.llmProxy = llmProxy // v10.1
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

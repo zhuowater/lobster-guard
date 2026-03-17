@@ -16,12 +16,36 @@
       <a class="alert-link" @click="scrollToHighRisk">查看全部 →</a>
     </div>
 
+    <!-- v10.1: Canary 泄露告警 -->
+    <div v-if="loaded && canaryLeakCount > 0" class="alert-panel canary-alert" style="margin-bottom:20px">
+      <div class="alert-header">
+        <span class="alert-icon">🐤</span>
+        <span class="alert-title" style="color:#D97706">检测到 {{ canaryLeakCount }} 次 Prompt 泄露</span>
+      </div>
+      <div style="font-size:var(--text-sm);color:var(--text-secondary);padding:4px 0">
+        Agent 响应中包含了 Canary Token，表明 System Prompt 内容被泄露（OWASP LLM06）
+      </div>
+    </div>
+
+    <!-- v10.1: 预算超限告警 -->
+    <div v-if="loaded && budgetViolationCount > 0" class="alert-panel budget-alert" style="margin-bottom:20px">
+      <div class="alert-header">
+        <span class="alert-icon">📊</span>
+        <span class="alert-title" style="color:#EA580C">检测到 {{ budgetViolationCount }} 次预算超限</span>
+      </div>
+      <div style="font-size:var(--text-sm);color:var(--text-secondary);padding:4px 0">
+        Agent 工具调用或 Token 使用量超出预算限制（OWASP LLM08 Excessive Agency）
+      </div>
+    </div>
+
     <!-- Stat Cards -->
     <div class="ov-cards" v-if="loaded">
       <StatCard :iconSvg="svgRobot" :value="stats.total" label="总工具调用" color="blue" />
       <StatCard :iconSvg="svgAlert" :value="stats.high_risk_count" label="高危调用" color="red" />
       <StatCard :iconSvg="svgFlag" :value="stats.flagged_count" label="已标记" color="yellow" />
       <StatCard :iconSvg="svgPercent" :value="stats.high_risk_rate" label="24h高危率" color="purple" />
+      <StatCard v-if="canaryLeakCount > 0" :iconSvg="svgCanary" :value="canaryLeakCount" label="Prompt 泄露" color="yellow" />
+      <StatCard v-if="budgetViolationCount > 0" :iconSvg="svgBudget" :value="budgetViolationCount" label="预算超限" color="red" />
     </div>
     <div class="ov-cards" v-else>
       <Skeleton type="card" /><Skeleton type="card" /><Skeleton type="card" /><Skeleton type="card" />
@@ -154,6 +178,8 @@ const svgPercent = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" 
 const svgTrend = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
 const svgBar = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="12" width="4" height="8"/><rect x="10" y="8" width="4" height="12"/><rect x="17" y="4" width="4" height="16"/></svg>'
 const svgShieldCheck = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
+const svgCanary = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 15h8"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/></svg>'
+const svgBudget = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>'
 
 const riskColors = { low: '#6B7280', medium: '#3B82F6', high: '#F59E0B', critical: '#EF4444' }
 const criticalTools = new Set(['exec', 'shell', 'bash', 'run_command', 'execute_command'])
@@ -177,6 +203,10 @@ const pieData = ref([])
 const highRiskRecords = ref([])
 const expandedIds = ref(new Set())
 const highRiskRef = ref(null)
+
+// v10.1: Canary + Budget
+const canaryLeakCount = ref(0)
+const budgetViolationCount = ref(0)
 
 // 安全告警
 const alertCount = computed(() => highRiskRecords.value.filter(r => r.flagged || r.risk_level === 'critical').length)
@@ -265,6 +295,16 @@ async function loadData() {
     highRiskRecords.value = [...(d.records || []), ...(d2.records || [])].sort((a, b) => b.id - a.id).slice(0, 20)
   } catch { highRiskRecords.value = [] }
 
+  // v10.1: 加载 Canary 和 Budget 统计
+  try {
+    const cs = await api('/api/v1/llm/canary/status')
+    canaryLeakCount.value = cs.leak_count || 0
+  } catch { canaryLeakCount.value = 0 }
+  try {
+    const bs = await api('/api/v1/llm/budget/status')
+    budgetViolationCount.value = bs.violations_24h || 0
+  } catch { budgetViolationCount.value = 0 }
+
   loaded.value = true
 }
 
@@ -293,6 +333,17 @@ onUnmounted(() => clearInterval(timer))
 .alert-time { color: var(--text-tertiary); font-size: var(--text-xs); }
 .alert-reason { color: var(--text-secondary); font-size: var(--text-xs); margin-left: auto; }
 .alert-link { font-size: var(--text-sm); color: #EF4444; cursor: pointer; text-decoration: underline; }
+
+/* v10.1: Canary 告警样式 */
+.canary-alert {
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
+/* v10.1: Budget 告警样式 */
+.budget-alert {
+  background: rgba(234, 88, 12, 0.08);
+  border: 1px solid rgba(234, 88, 12, 0.25);
+}
 
 /* 展开/收起 */
 .expand-toggle { width: 30px; text-align: center; }

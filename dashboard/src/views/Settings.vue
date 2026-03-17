@@ -157,6 +157,61 @@
           <input type="text" v-model="highRiskToolsStr" class="llm-input" placeholder="exec, shell, bash" />
         </div>
 
+        <!-- v10.1: Canary Token -->
+        <div class="llm-section-title">🐤 Canary Token</div>
+        <label class="llm-checkbox"><input type="checkbox" v-model="canaryEnabled" /> 启用 Canary Token 注入</label>
+        <div class="llm-row" v-if="canaryEnabled">
+          <span class="llm-label">Token</span>
+          <span class="llm-val" style="font-family:var(--font-mono);font-size:var(--text-xs)">{{ canaryStatus.token || '(未配置)' }}</span>
+          <button class="btn btn-sm" @click="rotateCanary" style="margin-left:8px;font-size:11px;padding:2px 8px">轮换</button>
+        </div>
+        <div class="llm-row" v-if="canaryEnabled">
+          <span class="llm-label">泄露动作</span>
+          <select v-model="canaryAlertAction" class="llm-input-sm" style="width:100px">
+            <option value="log">log</option>
+            <option value="warn">warn</option>
+            <option value="block">block</option>
+          </select>
+        </div>
+        <label class="llm-checkbox" v-if="canaryEnabled"><input type="checkbox" v-model="canaryAutoRotate" /> 每24小时自动轮换</label>
+        <div class="llm-row" v-if="canaryEnabled">
+          <span class="llm-label">最近泄露</span>
+          <span class="llm-val" :style="{ color: (canaryStatus.leak_count || 0) > 0 ? 'var(--color-danger)' : 'var(--text-secondary)' }">{{ canaryStatus.leak_count || 0 }} 次</span>
+        </div>
+
+        <!-- v10.1: Response Budget -->
+        <div class="llm-section-title">📊 Response Budget</div>
+        <label class="llm-checkbox"><input type="checkbox" v-model="budgetEnabled" /> 启用预算控制</label>
+        <div v-if="budgetEnabled">
+          <div class="llm-row">
+            <span class="llm-label">最大工具调用</span>
+            <input type="number" v-model.number="budgetMaxTools" class="llm-input-sm" min="1" max="100" /> <span class="llm-hint">次/请求</span>
+          </div>
+          <div class="llm-row">
+            <span class="llm-label">单类工具</span>
+            <input type="number" v-model.number="budgetMaxSingle" class="llm-input-sm" min="1" max="50" /> <span class="llm-hint">次/请求</span>
+          </div>
+          <div class="llm-row">
+            <span class="llm-label">最大 Token</span>
+            <input type="number" v-model.number="budgetMaxTokens" class="llm-input-sm" style="width:100px" min="1000" max="10000000" step="10000" /> <span class="llm-hint">Token/请求</span>
+          </div>
+          <div class="llm-row">
+            <span class="llm-label">超限动作</span>
+            <select v-model="budgetAction" class="llm-input-sm" style="width:100px">
+              <option value="warn">warn</option>
+              <option value="block">block</option>
+            </select>
+          </div>
+          <div class="llm-row">
+            <span class="llm-label">工具限制</span>
+            <input type="text" v-model="budgetToolLimitsStr" class="llm-input" placeholder="exec=3, shell=2" />
+          </div>
+          <div class="llm-row">
+            <span class="llm-label">24h超限</span>
+            <span class="llm-val" :style="{ color: (budgetStatus.violations_24h || 0) > 0 ? 'var(--color-warning)' : 'var(--text-secondary)' }">{{ budgetStatus.violations_24h || 0 }} 次</span>
+          </div>
+        </div>
+
         <!-- 保存按钮 -->
         <div style="margin-top:var(--space-4);display:flex;align-items:center;gap:var(--space-3)">
           <button class="btn btn-sm" @click="saveLLMConfig" :disabled="llmSaving">
@@ -239,6 +294,60 @@ const highRiskToolsStr = computed({
     if (llmConfig.value?.security) {
       llmConfig.value.security.high_risk_tool_list = v.split(',').map(s => s.trim()).filter(Boolean)
     }
+  }
+})
+
+// v10.1: Canary Token 状态
+const canaryStatus = ref({ token: '', leak_count: 0, last_leak: '' })
+const canaryEnabled = computed({
+  get: () => llmConfig.value?.security?.canary_token?.enabled ?? true,
+  set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.enabled = v }
+})
+const canaryAlertAction = computed({
+  get: () => llmConfig.value?.security?.canary_token?.alert_action || 'warn',
+  set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.alert_action = v }
+})
+const canaryAutoRotate = computed({
+  get: () => llmConfig.value?.security?.canary_token?.auto_rotate ?? false,
+  set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.auto_rotate = v }
+})
+
+// v10.1: Response Budget 状态
+const budgetStatus = ref({ violations_24h: 0, total_violations: 0 })
+const budgetEnabled = computed({
+  get: () => llmConfig.value?.security?.response_budget?.enabled ?? false,
+  set: (v) => { if (llmConfig.value?.security?.response_budget) llmConfig.value.security.response_budget.enabled = v }
+})
+const budgetMaxTools = computed({
+  get: () => llmConfig.value?.security?.response_budget?.max_tool_calls_per_req || 20,
+  set: (v) => { if (llmConfig.value?.security?.response_budget) llmConfig.value.security.response_budget.max_tool_calls_per_req = v }
+})
+const budgetMaxSingle = computed({
+  get: () => llmConfig.value?.security?.response_budget?.max_single_tool_per_req || 5,
+  set: (v) => { if (llmConfig.value?.security?.response_budget) llmConfig.value.security.response_budget.max_single_tool_per_req = v }
+})
+const budgetMaxTokens = computed({
+  get: () => llmConfig.value?.security?.response_budget?.max_tokens_per_req || 100000,
+  set: (v) => { if (llmConfig.value?.security?.response_budget) llmConfig.value.security.response_budget.max_tokens_per_req = v }
+})
+const budgetAction = computed({
+  get: () => llmConfig.value?.security?.response_budget?.over_budget_action || 'warn',
+  set: (v) => { if (llmConfig.value?.security?.response_budget) llmConfig.value.security.response_budget.over_budget_action = v }
+})
+const budgetToolLimitsStr = computed({
+  get: () => {
+    const limits = llmConfig.value?.security?.response_budget?.tool_limits
+    if (!limits || typeof limits !== 'object') return ''
+    return Object.entries(limits).map(([k, v]) => `${k}=${v}`).join(', ')
+  },
+  set: (v) => {
+    if (!llmConfig.value?.security?.response_budget) return
+    const limits = {}
+    v.split(',').map(s => s.trim()).filter(Boolean).forEach(pair => {
+      const [k, val] = pair.split('=').map(s => s.trim())
+      if (k && val) limits[k] = parseInt(val) || 5
+    })
+    llmConfig.value.security.response_budget.tool_limits = limits
   }
 })
 
@@ -380,11 +489,41 @@ async function loadLLMConfig() {
     if (!d.audit) d.audit = { log_system_prompt: false, log_tool_input: true, log_tool_result: true, max_preview_len: 500 }
     if (!d.cost_alert) d.cost_alert = { daily_limit_usd: 50, webhook_url: '' }
     if (!d.security) d.security = { scan_pii_in_response: true, block_high_risk_tools: false, high_risk_tool_list: ['exec','shell','bash'], prompt_injection_scan: true }
+    if (!d.security.canary_token) d.security.canary_token = { enabled: true, auto_rotate: false, alert_action: 'warn' }
+    if (!d.security.response_budget) d.security.response_budget = { enabled: false, max_tool_calls_per_req: 20, max_single_tool_per_req: 5, max_tokens_per_req: 100000, over_budget_action: 'warn', tool_limits: {} }
     llmConfig.value = d
+    // 加载 canary 和 budget 状态
+    loadCanaryStatus()
+    loadBudgetStatus()
   } catch {
     llmConfig.value = null
   }
   llmConfigLoading.value = false
+}
+
+async function loadCanaryStatus() {
+  try {
+    const d = await api('/api/v1/llm/canary/status')
+    canaryStatus.value = d
+  } catch {}
+}
+
+async function loadBudgetStatus() {
+  try {
+    const d = await api('/api/v1/llm/budget/status')
+    budgetStatus.value = d
+  } catch {}
+}
+
+async function rotateCanary() {
+  try {
+    const d = await apiPost('/api/v1/llm/canary/rotate', {})
+    showToast('Canary Token 已轮换', 'success')
+    canaryStatus.value.token = d.token
+    loadCanaryStatus()
+  } catch (e) {
+    showToast('轮换失败: ' + e.message, 'error')
+  }
 }
 
 async function saveLLMConfig() {

@@ -34,12 +34,32 @@ type LLMCostAlertConfig struct {
 	WebhookURL    string  `yaml:"webhook_url" json:"webhook_url"`
 }
 
-// LLMSecurityConfig LLM 安全策略配置（v9.1）
+// LLMSecurityConfig LLM 安全策略配置（v9.1, v10.1 Canary Token + Response Budget）
 type LLMSecurityConfig struct {
 	ScanPIIInResponse   bool     `yaml:"scan_pii_in_response" json:"scan_pii_in_response"`
 	BlockHighRiskTools  bool     `yaml:"block_high_risk_tools" json:"block_high_risk_tools"`
 	HighRiskToolList    []string `yaml:"high_risk_tool_list" json:"high_risk_tool_list"`
 	PromptInjectionScan bool     `yaml:"prompt_injection_scan" json:"prompt_injection_scan"`
+	CanaryToken         CanaryTokenConfig    `yaml:"canary_token" json:"canary_token"`
+	ResponseBudget      ResponseBudgetConfig `yaml:"response_budget" json:"response_budget"`
+}
+
+// CanaryTokenConfig Canary Token 配置（v10.1 Prompt 泄露检测）
+type CanaryTokenConfig struct {
+	Enabled     bool   `yaml:"enabled" json:"enabled"`           // 默认 true
+	Token       string `yaml:"token" json:"token"`               // 自动生成的 token
+	AutoRotate  bool   `yaml:"auto_rotate" json:"auto_rotate"`   // 每24h自动轮换 token
+	AlertAction string `yaml:"alert_action" json:"alert_action"` // "log" / "warn" / "block"，默认 "warn"
+}
+
+// ResponseBudgetConfig Agent 行为预算配置（v10.1 防止 Agent 失控）
+type ResponseBudgetConfig struct {
+	Enabled             bool           `yaml:"enabled" json:"enabled"`
+	MaxToolCallsPerReq  int            `yaml:"max_tool_calls_per_req" json:"max_tool_calls_per_req"`   // 单次请求最大工具调用数，默认 20
+	MaxSingleToolPerReq int            `yaml:"max_single_tool_per_req" json:"max_single_tool_per_req"` // 单类工具最大调用数，默认 5
+	MaxTokensPerReq     int            `yaml:"max_tokens_per_req" json:"max_tokens_per_req"`           // 单次请求最大 token 数，默认 100000
+	OverBudgetAction    string         `yaml:"over_budget_action" json:"over_budget_action"`           // "warn" / "block"，默认 "warn"
+	ToolLimits          map[string]int `yaml:"tool_limits" json:"tool_limits"`                         // 特定工具自定义限制
 }
 
 // LLMTargetConfig LLM 上游配置

@@ -32,10 +32,11 @@ var modelPricing = map[string]struct{ InputPer1M, OutputPer1M float64 }{
 
 // LLMAuditContext 代理请求的审计上下文
 type LLMAuditContext struct {
-	TraceID   string
-	StartTime time.Time
-	Model     string
-	ReqBody   []byte
+	TraceID     string
+	StartTime   time.Time
+	Model       string
+	ReqBody     []byte
+	CanaryToken string // v10.1: 本次请求注入的 canary token
 }
 
 // NewLLMAuditor 创建 LLM 审计器
@@ -83,6 +84,11 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk ON llm_tool_calls(risk_level)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tool ON llm_tool_calls(tool_name)`)
 
+	// v10.1: Canary Token + Response Budget 扩展列
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN canary_leaked INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN budget_exceeded INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN budget_violations TEXT`)
+
 	return &LLMAuditor{
 		db:       db,
 		cfg:      cfg,
@@ -112,15 +118,23 @@ func (la *LLMAuditor) ClassifyToolRisk(toolName string) string {
 }
 
 // RecordCall 写入一条 LLM 调用记录，返回插入的 ID
-func (la *LLMAuditor) RecordCall(ts string, traceID, model string, reqTokens, respTokens, totalTokens int, latencyMs float64, statusCode int, hasToolUse bool, toolCount int, errMsg string) (int64, error) {
+func (la *LLMAuditor) RecordCall(ts string, traceID, model string, reqTokens, respTokens, totalTokens int, latencyMs float64, statusCode int, hasToolUse bool, toolCount int, errMsg string, canaryLeaked bool, budgetExceeded bool, budgetViolations string) (int64, error) {
 	toolUse := 0
 	if hasToolUse {
 		toolUse = 1
 	}
+	canaryVal := 0
+	if canaryLeaked {
+		canaryVal = 1
+	}
+	budgetVal := 0
+	if budgetExceeded {
+		budgetVal = 1
+	}
 	result, err := la.db.Exec(`INSERT INTO llm_calls
-		(timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, toolUse, toolCount, errMsg)
+		(timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, canary_leaked, budget_exceeded, budget_violations)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, toolUse, toolCount, errMsg, canaryVal, budgetVal, budgetViolations)
 	if err != nil {
 		return 0, err
 	}
@@ -348,6 +362,87 @@ func ParseSSEEvents(events []byte) *AnthropicResponseInfo {
 	return info
 }
 
+// ============================================================
+// v10.1 Budget Check
+// ============================================================
+
+// BudgetCheckResult 预算检查结果
+type BudgetCheckResult struct {
+	Exceeded   bool              `json:"exceeded"`
+	Violations []BudgetViolation `json:"violations"`
+}
+
+// BudgetViolation 预算超限详情
+type BudgetViolation struct {
+	Type     string `json:"type"`                // "total_tools" / "single_tool" / "tokens"
+	Limit    int    `json:"limit"`
+	Actual   int    `json:"actual"`
+	ToolName string `json:"tool_name,omitempty"` // 仅 single_tool 类型
+}
+
+// CheckBudget 检查预算是否超限
+func (la *LLMAuditor) CheckBudget(toolNames []string, totalTokens int, cfg ResponseBudgetConfig) BudgetCheckResult {
+	result := BudgetCheckResult{}
+
+	// 总工具调用数检查
+	maxTools := cfg.MaxToolCallsPerReq
+	if maxTools <= 0 {
+		maxTools = 20
+	}
+	if len(toolNames) > maxTools {
+		result.Exceeded = true
+		result.Violations = append(result.Violations, BudgetViolation{
+			Type:   "total_tools",
+			Limit:  maxTools,
+			Actual: len(toolNames),
+		})
+	}
+
+	// 单类工具调用数检查
+	toolCounts := map[string]int{}
+	for _, name := range toolNames {
+		toolCounts[name]++
+	}
+	maxSingle := cfg.MaxSingleToolPerReq
+	if maxSingle <= 0 {
+		maxSingle = 5
+	}
+	for toolName, count := range toolCounts {
+		limit := maxSingle
+		// 检查特定工具自定义限制
+		if cfg.ToolLimits != nil {
+			if customLimit, ok := cfg.ToolLimits[toolName]; ok {
+				limit = customLimit
+			}
+		}
+		if count > limit {
+			result.Exceeded = true
+			result.Violations = append(result.Violations, BudgetViolation{
+				Type:     "single_tool",
+				Limit:    limit,
+				Actual:   count,
+				ToolName: toolName,
+			})
+		}
+	}
+
+	// Token 数检查
+	maxTokens := cfg.MaxTokensPerReq
+	if maxTokens <= 0 {
+		maxTokens = 100000
+	}
+	if totalTokens > maxTokens {
+		result.Exceeded = true
+		result.Violations = append(result.Violations, BudgetViolation{
+			Type:   "tokens",
+			Limit:  maxTokens,
+			Actual: totalTokens,
+		})
+	}
+
+	return result
+}
+
 // ProcessResponse 处理完整的非流式响应
 func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, respBody []byte) {
 	defer func() { recover() }()
@@ -378,7 +473,28 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 		}
 	}
 
-	callID, err := la.RecordCall(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, statusCode, info.HasToolUse, info.ToolCount, errMsg)
+	// v10.1: Canary Token 泄露检测
+	canaryLeaked := false
+	if ctx.CanaryToken != "" && strings.Contains(string(respBody), ctx.CanaryToken) {
+		canaryLeaked = true
+		log.Printf("[Canary] ⚠️ 检测到 Prompt 泄露! trace_id=%s model=%s", ctx.TraceID, model)
+	}
+
+	// v10.1: Response Budget 检查
+	budgetExceeded := false
+	budgetViolationsJSON := ""
+	if la.proxyCfg != nil && la.proxyCfg.Security.ResponseBudget.Enabled {
+		budgetResult := la.CheckBudget(info.ToolNames, info.TotalTokens, la.proxyCfg.Security.ResponseBudget)
+		if budgetResult.Exceeded {
+			budgetExceeded = true
+			if vj, err := json.Marshal(budgetResult.Violations); err == nil {
+				budgetViolationsJSON = string(vj)
+			}
+			log.Printf("[Budget] ⚠️ 预算超限! trace_id=%s violations=%d", ctx.TraceID, len(budgetResult.Violations))
+		}
+	}
+
+	callID, err := la.RecordCall(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, statusCode, info.HasToolUse, info.ToolCount, errMsg, canaryLeaked, budgetExceeded, budgetViolationsJSON)
 	if err != nil {
 		log.Printf("[LLMAudit] 写入 llm_call 失败: %v", err)
 		return
@@ -416,7 +532,28 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 		model = info.Model
 	}
 
-	callID, err := la.RecordCall(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, 200, info.HasToolUse, info.ToolCount, "")
+	// v10.1: Canary Token 泄露检测（SSE 流）
+	canaryLeaked := false
+	if ctx.CanaryToken != "" && strings.Contains(string(events), ctx.CanaryToken) {
+		canaryLeaked = true
+		log.Printf("[Canary] ⚠️ SSE 流中检测到 Prompt 泄露! trace_id=%s model=%s", ctx.TraceID, model)
+	}
+
+	// v10.1: Response Budget 检查
+	budgetExceeded := false
+	budgetViolationsJSON := ""
+	if la.proxyCfg != nil && la.proxyCfg.Security.ResponseBudget.Enabled {
+		budgetResult := la.CheckBudget(info.ToolNames, info.TotalTokens, la.proxyCfg.Security.ResponseBudget)
+		if budgetResult.Exceeded {
+			budgetExceeded = true
+			if vj, err := json.Marshal(budgetResult.Violations); err == nil {
+				budgetViolationsJSON = string(vj)
+			}
+			log.Printf("[Budget] ⚠️ SSE 预算超限! trace_id=%s violations=%d", ctx.TraceID, len(budgetResult.Violations))
+		}
+	}
+
+	callID, err := la.RecordCall(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, 200, info.HasToolUse, info.ToolCount, "", canaryLeaked, budgetExceeded, budgetViolationsJSON)
 	if err != nil {
 		log.Printf("[LLMAudit] 写入 llm_call(SSE) 失败: %v", err)
 		return
@@ -671,7 +808,7 @@ func (la *LLMAuditor) QueryCalls(model, hasToolUse, from, to string, limit, offs
 
 	if limit <= 0 { limit = 50 }
 	if limit > 1000 { limit = 1000 }
-	query := "SELECT id, timestamp, COALESCE(trace_id,''), COALESCE(model,''), request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, COALESCE(error_message,'') FROM llm_calls " + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	query := "SELECT id, timestamp, COALESCE(trace_id,''), COALESCE(model,''), request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, COALESCE(error_message,''), COALESCE(canary_leaked,0), COALESCE(budget_exceeded,0), COALESCE(budget_violations,'') FROM llm_calls " + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := la.db.Query(query, args...)
@@ -682,10 +819,10 @@ func (la *LLMAuditor) QueryCalls(model, hasToolUse, from, to string, limit, offs
 
 	var records []map[string]interface{}
 	for rows.Next() {
-		var id, reqTok, respTok, totalTok, statusCode, hasToolUseV, toolCount int
-		var ts, traceID, modelV, errMsg string
+		var id, reqTok, respTok, totalTok, statusCode, hasToolUseV, toolCount, canaryLeakedV, budgetExceededV int
+		var ts, traceID, modelV, errMsg, budgetViolationsV string
 		var latencyMs float64
-		if rows.Scan(&id, &ts, &traceID, &modelV, &reqTok, &respTok, &totalTok, &latencyMs, &statusCode, &hasToolUseV, &toolCount, &errMsg) != nil {
+		if rows.Scan(&id, &ts, &traceID, &modelV, &reqTok, &respTok, &totalTok, &latencyMs, &statusCode, &hasToolUseV, &toolCount, &errMsg, &canaryLeakedV, &budgetExceededV, &budgetViolationsV) != nil {
 			continue
 		}
 		records = append(records, map[string]interface{}{
@@ -694,6 +831,9 @@ func (la *LLMAuditor) QueryCalls(model, hasToolUse, from, to string, limit, offs
 			"latency_ms": latencyMs, "status_code": statusCode,
 			"has_tool_use": hasToolUseV != 0, "tool_count": toolCount,
 			"error_message": errMsg,
+			"canary_leaked": canaryLeakedV != 0,
+			"budget_exceeded": budgetExceededV != 0,
+			"budget_violations": budgetViolationsV,
 		})
 	}
 	return records, total, nil
@@ -871,6 +1011,113 @@ func (la *LLMAuditor) ToolTimeline(hours int) ([]map[string]interface{}, error) 
 }
 
 // ============================================================
+// v10.1 Canary Token + Budget 查询
+// ============================================================
+
+// CanaryStatus 返回 canary token 状态
+func (la *LLMAuditor) CanaryStatus() map[string]interface{} {
+	var leakCount int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE canary_leaked=1").Scan(&leakCount)
+
+	var lastLeak string
+	la.db.QueryRow("SELECT COALESCE(MAX(timestamp),'') FROM llm_calls WHERE canary_leaked=1").Scan(&lastLeak)
+
+	return map[string]interface{}{
+		"leak_count": leakCount,
+		"last_leak":  lastLeak,
+	}
+}
+
+// QueryCanaryLeaks 查询 canary 泄露事件列表
+func (la *LLMAuditor) QueryCanaryLeaks(limit, offset int) ([]map[string]interface{}, int, error) {
+	if limit <= 0 { limit = 50 }
+	if limit > 1000 { limit = 1000 }
+
+	var total int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE canary_leaked=1").Scan(&total)
+
+	rows, err := la.db.Query(`SELECT id, timestamp, COALESCE(trace_id,''), COALESCE(model,''), request_tokens, response_tokens, total_tokens, latency_ms, status_code, tool_count
+		FROM llm_calls WHERE canary_leaked=1 ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var records []map[string]interface{}
+	for rows.Next() {
+		var id, reqTok, respTok, totalTok, statusCode, toolCount int
+		var ts, traceID, modelV string
+		var latencyMs float64
+		if rows.Scan(&id, &ts, &traceID, &modelV, &reqTok, &respTok, &totalTok, &latencyMs, &statusCode, &toolCount) != nil {
+			continue
+		}
+		records = append(records, map[string]interface{}{
+			"id": id, "timestamp": ts, "trace_id": traceID, "model": modelV,
+			"request_tokens": reqTok, "response_tokens": respTok, "total_tokens": totalTok,
+			"latency_ms": latencyMs, "status_code": statusCode, "tool_count": toolCount,
+		})
+	}
+	return records, total, nil
+}
+
+// BudgetStatus 返回 budget 状态和统计
+func (la *LLMAuditor) BudgetStatus() map[string]interface{} {
+	since24h := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	var violations24h int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE budget_exceeded=1 AND timestamp>=?", since24h).Scan(&violations24h)
+
+	var totalViolations int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE budget_exceeded=1").Scan(&totalViolations)
+
+	return map[string]interface{}{
+		"violations_24h":   violations24h,
+		"total_violations": totalViolations,
+	}
+}
+
+// QueryBudgetViolations 查询预算超限事件列表
+func (la *LLMAuditor) QueryBudgetViolations(limit, offset int) ([]map[string]interface{}, int, error) {
+	if limit <= 0 { limit = 50 }
+	if limit > 1000 { limit = 1000 }
+
+	var total int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE budget_exceeded=1").Scan(&total)
+
+	rows, err := la.db.Query(`SELECT id, timestamp, COALESCE(trace_id,''), COALESCE(model,''), request_tokens, response_tokens, total_tokens, latency_ms, status_code, tool_count, COALESCE(budget_violations,'')
+		FROM llm_calls WHERE budget_exceeded=1 ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var records []map[string]interface{}
+	for rows.Next() {
+		var id, reqTok, respTok, totalTok, statusCode, toolCount int
+		var ts, traceID, modelV, violationsJSON string
+		var latencyMs float64
+		if rows.Scan(&id, &ts, &traceID, &modelV, &reqTok, &respTok, &totalTok, &latencyMs, &statusCode, &toolCount, &violationsJSON) != nil {
+			continue
+		}
+		rec := map[string]interface{}{
+			"id": id, "timestamp": ts, "trace_id": traceID, "model": modelV,
+			"request_tokens": reqTok, "response_tokens": respTok, "total_tokens": totalTok,
+			"latency_ms": latencyMs, "status_code": statusCode, "tool_count": toolCount,
+		}
+		// 解析 violations JSON
+		if violationsJSON != "" {
+			var violations []BudgetViolation
+			if json.Unmarshal([]byte(violationsJSON), &violations) == nil {
+				rec["violations"] = violations
+			} else {
+				rec["violations_raw"] = violationsJSON
+			}
+		}
+		records = append(records, rec)
+	}
+	return records, total, nil
+}
+
+// ============================================================
 // 演示数据
 // ============================================================
 
@@ -951,8 +1198,8 @@ func (la *LLMAuditor) SeedDemoData(db *sql.DB) (int, int) {
 	}
 
 	callStmt, err := tx.Prepare(`INSERT INTO llm_calls
-		(timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+		(timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, canary_leaked, budget_exceeded, budget_violations)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		tx.Rollback()
 		return 0, 0
@@ -1007,7 +1254,7 @@ func (la *LLMAuditor) SeedDemoData(db *sql.DB) (int, int) {
 			hasToolUse = 1
 		}
 
-		result, err := callStmt.Exec(ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, hasToolUse, toolCount, errMsg)
+		result, err := callStmt.Exec(ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, hasToolUse, toolCount, errMsg, 0, 0, "")
 		if err != nil {
 			return
 		}
@@ -1070,6 +1317,47 @@ func (la *LLMAuditor) SeedDemoData(db *sql.DB) (int, int) {
 	callStmt.Close()
 	toolStmt.Close()
 	tx.Commit()
+
+	// v10.1: 注入 Canary 泄露 + Budget 超限的演示数据
+	canaryCount := 2 + rng.Intn(2)  // 2-3 条
+	budgetCount := 3 + rng.Intn(3)  // 3-5 条
+	for i := 0; i < canaryCount; i++ {
+		offsetSec := rng.Int63n(3 * 24 * 3600) // 过去 3 天
+		ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
+		traceID := fmt.Sprintf("llm-canary-%08x", rng.Uint32())
+		model := "claude-sonnet-4-20250514"
+		reqTokens := 1500 + rng.Intn(3001)
+		respTokens := 500 + rng.Intn(2001)
+		totalTokens := reqTokens + respTokens
+		latencyMs := 800.0 + rng.Float64()*3000.0
+		db.Exec(`INSERT INTO llm_calls (timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, canary_leaked, budget_exceeded, budget_violations) VALUES (?,?,?,?,?,?,?,200,0,0,'',1,0,'')`,
+			ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs)
+		callsInserted++
+	}
+	for i := 0; i < budgetCount; i++ {
+		offsetSec := rng.Int63n(5 * 24 * 3600) // 过去 5 天
+		ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
+		traceID := fmt.Sprintf("llm-budget-%08x", rng.Uint32())
+		model := "claude-opus-4-20250514"
+		reqTokens := 5000 + rng.Intn(10001)
+		respTokens := 3000 + rng.Intn(5001)
+		totalTokens := reqTokens + respTokens
+		latencyMs := 2000.0 + rng.Float64()*5000.0
+		toolCount := 15 + rng.Intn(20) // 15-34 工具调用
+		violations := []BudgetViolation{
+			{Type: "total_tools", Limit: 20, Actual: toolCount},
+		}
+		if rng.Float64() < 0.5 {
+			violations = append(violations, BudgetViolation{Type: "single_tool", Limit: 5, Actual: 8 + rng.Intn(5), ToolName: "exec"})
+		}
+		if totalTokens > 100000 {
+			violations = append(violations, BudgetViolation{Type: "tokens", Limit: 100000, Actual: totalTokens})
+		}
+		violationsJSON, _ := json.Marshal(violations)
+		db.Exec(`INSERT INTO llm_calls (timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, canary_leaked, budget_exceeded, budget_violations) VALUES (?,?,?,?,?,?,?,200,1,?,''  ,0,1,?)`,
+			ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, toolCount, string(violationsJSON))
+		callsInserted++
+	}
 
 	return callsInserted, toolsInserted
 }

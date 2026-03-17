@@ -155,7 +155,7 @@ func TestLLMAuditor_RecordAndQuery(t *testing.T) {
 	defer db.Close()
 
 	// Record a call
-	callID, err := auditor.RecordCall("2026-01-01T00:00:00Z", "trace-1", "claude-sonnet-4-20250514", 100, 50, 150, 1000.0, 200, true, 2, "")
+	callID, err := auditor.RecordCall("2026-01-01T00:00:00Z", "trace-1", "claude-sonnet-4-20250514", 100, 50, 150, 1000.0, 200, true, 2, "", false, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,11 +206,11 @@ func TestLLMAuditor_Stats(t *testing.T) {
 	defer db.Close()
 
 	// Seed some data
-	callID1, _ := auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, true, 2, "")
+	callID1, _ := auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, true, 2, "", false, false, "")
 	auditor.RecordToolCall(callID1, "2026-01-01T00:00:00Z", "exec", "", "")
 	auditor.RecordToolCall(callID1, "2026-01-01T00:00:00Z", "read_file", "", "")
 
-	callID2, _ := auditor.RecordCall("2026-01-01T01:00:00Z", "t2", "gpt-4", 200, 100, 300, 2000, 200, false, 0, "")
+	callID2, _ := auditor.RecordCall("2026-01-01T01:00:00Z", "t2", "gpt-4", 200, 100, 300, 2000, 200, false, 0, "", false, false, "")
 	_ = callID2
 
 	stats, err := auditor.ToolStats()
@@ -238,7 +238,7 @@ func TestLLMAuditor_Timeline(t *testing.T) {
 	auditor, db := setupTestLLMAuditor(t)
 	defer db.Close()
 
-	callID, _ := auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, true, 1, "")
+	callID, _ := auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, true, 1, "", false, false, "")
 	auditor.RecordToolCall(callID, "2026-01-01T00:00:00Z", "exec", "", "")
 
 	timeline, err := auditor.ToolTimeline(24)
@@ -264,8 +264,8 @@ func TestLLMAuditor_Overview(t *testing.T) {
 	defer db.Close()
 
 	// Seed data
-	auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, false, 0, "")
-	auditor.RecordCall("2026-01-01T01:00:00Z", "t2", "claude-sonnet-4-20250514", 200, 100, 300, 2000, 500, false, 0, "server error")
+	auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, false, 0, "", false, false, "")
+	auditor.RecordCall("2026-01-01T01:00:00Z", "t2", "claude-sonnet-4-20250514", 200, 100, 300, 2000, 500, false, 0, "server error", false, false, "")
 
 	overview, err := auditor.Overview()
 	if err != nil {

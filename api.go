@@ -52,6 +52,7 @@ type ManagementAPI struct {
 	// v9.0 LLM 侧审计
 	llmAuditor      *LLMAuditor        // v9.0 LLM 审计器
 	llmRuleEngine   *LLMRuleEngine     // v10.0 LLM 规则引擎
+	llmProxy        *LLMProxy          // v10.1 LLM 代理引用（用于 canary token 操作）
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -285,6 +286,18 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			api.handleLLMRulesUpdate(w, r)
 		case strings.HasPrefix(path, "/api/v1/llm/rules/") && method == "DELETE":
 			api.handleLLMRulesDelete(w, r)
+		// v10.1: Canary Token API（不需要 llmAuditor 来获取状态，但需要用于查询泄露）
+		case path == "/api/v1/llm/canary/status" && method == "GET":
+			api.handleCanaryStatus(w, r)
+		case path == "/api/v1/llm/canary/rotate" && method == "POST":
+			api.handleCanaryRotate(w, r)
+		case path == "/api/v1/llm/canary/leaks" && method == "GET":
+			api.handleCanaryLeaks(w, r)
+		// v10.1: Response Budget API
+		case path == "/api/v1/llm/budget/status" && method == "GET":
+			api.handleBudgetStatus(w, r)
+		case path == "/api/v1/llm/budget/violations" && method == "GET":
+			api.handleBudgetViolations(w, r)
 		default:
 			if api.llmAuditor == nil {
 				jsonResponse(w, 404, map[string]string{"error": "LLM proxy not enabled"})
@@ -2030,6 +2043,8 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		"count":           inserted,
 		"llm_calls":       llmCallsInserted,
 		"llm_tool_calls":  llmToolCallsInserted,
+		"canary_leaks":    "included",
+		"budget_violations": "included",
 	})
 }
 
@@ -2426,6 +2441,19 @@ func (api *ManagementAPI) handleLLMConfigGet(w http.ResponseWriter, r *http.Requ
 			"block_high_risk_tools": cfg.Security.BlockHighRiskTools,
 			"high_risk_tool_list":   cfg.Security.HighRiskToolList,
 			"prompt_injection_scan": cfg.Security.PromptInjectionScan,
+			"canary_token": map[string]interface{}{
+				"enabled":      cfg.Security.CanaryToken.Enabled,
+				"auto_rotate":  cfg.Security.CanaryToken.AutoRotate,
+				"alert_action": cfg.Security.CanaryToken.AlertAction,
+			},
+			"response_budget": map[string]interface{}{
+				"enabled":               cfg.Security.ResponseBudget.Enabled,
+				"max_tool_calls_per_req":  cfg.Security.ResponseBudget.MaxToolCallsPerReq,
+				"max_single_tool_per_req": cfg.Security.ResponseBudget.MaxSingleToolPerReq,
+				"max_tokens_per_req":      cfg.Security.ResponseBudget.MaxTokensPerReq,
+				"over_budget_action":      cfg.Security.ResponseBudget.OverBudgetAction,
+				"tool_limits":            cfg.Security.ResponseBudget.ToolLimits,
+			},
 		},
 	}
 	jsonResponse(w, 200, result)
@@ -2452,6 +2480,19 @@ func (api *ManagementAPI) handleLLMConfigPut(w http.ResponseWriter, r *http.Requ
 			BlockHighRiskTools  *bool    `json:"block_high_risk_tools"`
 			HighRiskToolList    []string `json:"high_risk_tool_list"`
 			PromptInjectionScan *bool    `json:"prompt_injection_scan"`
+			CanaryToken *struct {
+				Enabled     *bool   `json:"enabled"`
+				AutoRotate  *bool   `json:"auto_rotate"`
+				AlertAction *string `json:"alert_action"`
+			} `json:"canary_token"`
+			ResponseBudget *struct {
+				Enabled             *bool          `json:"enabled"`
+				MaxToolCallsPerReq  *int           `json:"max_tool_calls_per_req"`
+				MaxSingleToolPerReq *int           `json:"max_single_tool_per_req"`
+				MaxTokensPerReq     *int           `json:"max_tokens_per_req"`
+				OverBudgetAction    *string        `json:"over_budget_action"`
+				ToolLimits          map[string]int `json:"tool_limits"`
+			} `json:"response_budget"`
 		} `json:"security"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2486,6 +2527,21 @@ func (api *ManagementAPI) handleLLMConfigPut(w http.ResponseWriter, r *http.Requ
 		if req.Security.BlockHighRiskTools != nil { cfg.Security.BlockHighRiskTools = *req.Security.BlockHighRiskTools }
 		if req.Security.HighRiskToolList != nil { cfg.Security.HighRiskToolList = req.Security.HighRiskToolList }
 		if req.Security.PromptInjectionScan != nil { cfg.Security.PromptInjectionScan = *req.Security.PromptInjectionScan }
+		// v10.1: Canary Token
+		if req.Security.CanaryToken != nil {
+			if req.Security.CanaryToken.Enabled != nil { cfg.Security.CanaryToken.Enabled = *req.Security.CanaryToken.Enabled }
+			if req.Security.CanaryToken.AutoRotate != nil { cfg.Security.CanaryToken.AutoRotate = *req.Security.CanaryToken.AutoRotate }
+			if req.Security.CanaryToken.AlertAction != nil { cfg.Security.CanaryToken.AlertAction = *req.Security.CanaryToken.AlertAction }
+		}
+		// v10.1: Response Budget
+		if req.Security.ResponseBudget != nil {
+			if req.Security.ResponseBudget.Enabled != nil { cfg.Security.ResponseBudget.Enabled = *req.Security.ResponseBudget.Enabled }
+			if req.Security.ResponseBudget.MaxToolCallsPerReq != nil { cfg.Security.ResponseBudget.MaxToolCallsPerReq = *req.Security.ResponseBudget.MaxToolCallsPerReq }
+			if req.Security.ResponseBudget.MaxSingleToolPerReq != nil { cfg.Security.ResponseBudget.MaxSingleToolPerReq = *req.Security.ResponseBudget.MaxSingleToolPerReq }
+			if req.Security.ResponseBudget.MaxTokensPerReq != nil { cfg.Security.ResponseBudget.MaxTokensPerReq = *req.Security.ResponseBudget.MaxTokensPerReq }
+			if req.Security.ResponseBudget.OverBudgetAction != nil { cfg.Security.ResponseBudget.OverBudgetAction = *req.Security.ResponseBudget.OverBudgetAction }
+			if req.Security.ResponseBudget.ToolLimits != nil { cfg.Security.ResponseBudget.ToolLimits = req.Security.ResponseBudget.ToolLimits }
+		}
 	}
 
 	// 同步更新 llmAuditor 的审计配置
@@ -2555,12 +2611,33 @@ func (api *ManagementAPI) saveLLMConfig() error {
 	}
 
 	// security
-	llmProxy["security"] = map[string]interface{}{
+	securityMap := map[string]interface{}{
 		"scan_pii_in_response":  cfg.Security.ScanPIIInResponse,
 		"block_high_risk_tools": cfg.Security.BlockHighRiskTools,
 		"high_risk_tool_list":   cfg.Security.HighRiskToolList,
 		"prompt_injection_scan": cfg.Security.PromptInjectionScan,
 	}
+	// v10.1: canary_token
+	canaryMap := map[string]interface{}{
+		"enabled":      cfg.Security.CanaryToken.Enabled,
+		"token":        cfg.Security.CanaryToken.Token,
+		"auto_rotate":  cfg.Security.CanaryToken.AutoRotate,
+		"alert_action": cfg.Security.CanaryToken.AlertAction,
+	}
+	securityMap["canary_token"] = canaryMap
+	// v10.1: response_budget
+	budgetMap := map[string]interface{}{
+		"enabled":               cfg.Security.ResponseBudget.Enabled,
+		"max_tool_calls_per_req":  cfg.Security.ResponseBudget.MaxToolCallsPerReq,
+		"max_single_tool_per_req": cfg.Security.ResponseBudget.MaxSingleToolPerReq,
+		"max_tokens_per_req":      cfg.Security.ResponseBudget.MaxTokensPerReq,
+		"over_budget_action":      cfg.Security.ResponseBudget.OverBudgetAction,
+	}
+	if cfg.Security.ResponseBudget.ToolLimits != nil {
+		budgetMap["tool_limits"] = cfg.Security.ResponseBudget.ToolLimits
+	}
+	securityMap["response_budget"] = budgetMap
+	llmProxy["security"] = securityMap
 
 	// v10.0: 规则
 	if len(cfg.Rules) > 0 {
@@ -2838,6 +2915,133 @@ func (api *ManagementAPI) persistLLMRules(rules []LLMRule) {
 	} else {
 		log.Printf("[LLM规则] 已持久化 %d 条规则到 %s", len(rules), api.cfgPath)
 	}
+}
+
+// ============================================================
+// v10.1 Canary Token API
+// ============================================================
+
+// handleCanaryStatus GET /api/v1/llm/canary/status — Canary Token 状态
+func (api *ManagementAPI) handleCanaryStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := api.cfg.LLMProxy.Security.CanaryToken
+	result := map[string]interface{}{
+		"enabled":      cfg.Enabled,
+		"auto_rotate":  cfg.AutoRotate,
+		"alert_action": cfg.AlertAction,
+	}
+	// 脱敏显示 token
+	if cfg.Token != "" {
+		if len(cfg.Token) > 20 {
+			result["token"] = cfg.Token[:20] + "..."
+		} else {
+			result["token"] = cfg.Token
+		}
+	}
+	// 查询泄露统计
+	if api.llmAuditor != nil {
+		canaryStats := api.llmAuditor.CanaryStatus()
+		result["leak_count"] = canaryStats["leak_count"]
+		result["last_leak"] = canaryStats["last_leak"]
+	} else {
+		result["leak_count"] = 0
+		result["last_leak"] = ""
+	}
+	jsonResponse(w, 200, result)
+}
+
+// handleCanaryRotate POST /api/v1/llm/canary/rotate — 手动轮换 Token
+func (api *ManagementAPI) handleCanaryRotate(w http.ResponseWriter, r *http.Request) {
+	if api.llmProxy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM proxy not enabled"})
+		return
+	}
+	newToken := api.llmProxy.RotateCanaryToken()
+	api.cfg.LLMProxy.Security.CanaryToken.Token = newToken
+	// 写回配置文件
+	if err := api.saveLLMConfig(); err != nil {
+		log.Printf("[Canary] 持久化新 token 失败: %v", err)
+	}
+	// 脱敏
+	display := newToken
+	if len(display) > 20 {
+		display = display[:20] + "..."
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "rotated",
+		"token":  display,
+	})
+}
+
+// handleCanaryLeaks GET /api/v1/llm/canary/leaks — 泄露事件列表
+func (api *ManagementAPI) handleCanaryLeaks(w http.ResponseWriter, r *http.Request) {
+	if api.llmAuditor == nil {
+		jsonResponse(w, 200, map[string]interface{}{"records": []interface{}{}, "total": 0})
+		return
+	}
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil { limit = n }
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil { offset = n }
+	}
+	records, total, err := api.llmAuditor.QueryCanaryLeaks(limit, offset)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if records == nil { records = []map[string]interface{}{} }
+	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": total})
+}
+
+// ============================================================
+// v10.1 Response Budget API
+// ============================================================
+
+// handleBudgetStatus GET /api/v1/llm/budget/status — Budget 配置和统计
+func (api *ManagementAPI) handleBudgetStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := api.cfg.LLMProxy.Security.ResponseBudget
+	result := map[string]interface{}{
+		"enabled":               cfg.Enabled,
+		"max_tool_calls_per_req":  cfg.MaxToolCallsPerReq,
+		"max_single_tool_per_req": cfg.MaxSingleToolPerReq,
+		"max_tokens_per_req":      cfg.MaxTokensPerReq,
+		"over_budget_action":      cfg.OverBudgetAction,
+		"tool_limits":            cfg.ToolLimits,
+	}
+	if api.llmAuditor != nil {
+		budgetStats := api.llmAuditor.BudgetStatus()
+		result["violations_24h"] = budgetStats["violations_24h"]
+		result["total_violations"] = budgetStats["total_violations"]
+	} else {
+		result["violations_24h"] = 0
+		result["total_violations"] = 0
+	}
+	jsonResponse(w, 200, result)
+}
+
+// handleBudgetViolations GET /api/v1/llm/budget/violations — 预算超限事件列表
+func (api *ManagementAPI) handleBudgetViolations(w http.ResponseWriter, r *http.Request) {
+	if api.llmAuditor == nil {
+		jsonResponse(w, 200, map[string]interface{}{"records": []interface{}{}, "total": 0})
+		return
+	}
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil { limit = n }
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil { offset = n }
+	}
+	records, total, err := api.llmAuditor.QueryBudgetViolations(limit, offset)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if records == nil { records = []map[string]interface{}{} }
+	jsonResponse(w, 200, map[string]interface{}{"records": records, "total": total})
 }
 
 // writeV51Metrics 写入 v5.1 Prometheus 指标
