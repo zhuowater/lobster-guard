@@ -1905,6 +1905,26 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// 同步更新内存中的 ruleHits 计数器，让概览页的饼图和 TOP5 有数据
+	if api.ruleHits != nil {
+		rulesByGroup := map[string][]string{
+			"injection": {"prompt_injection_en", "sql_injection", "command_injection", "xss_detection"},
+			"jailbreak": {"jailbreak_dan", "jailbreak_roleplay", "system_prompt_extract"},
+			"pii":       {"pii_credit_card", "pii_ssn", "pii_phone"},
+			"custom":    {"custom_keyword", "competitor_mention"},
+		}
+		rng2 := rand.New(rand.NewSource(time.Now().UnixNano()))
+		for group, rules := range rulesByGroup {
+			for _, rule := range rules {
+				hits := 5 + rng2.Intn(40) // 5-44 hits per rule
+				for i := 0; i < hits; i++ {
+					api.ruleHits.RecordWithGroup(rule, group)
+				}
+			}
+		}
+		log.Printf("[Demo] 注入了规则命中统计数据")
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":    true,
