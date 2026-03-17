@@ -19,7 +19,14 @@
 
     <!-- Rules Management -->
     <div class="card" style="margin-bottom:20px">
-      <div class="card-header"><span class="card-icon">⚙️</span><span class="card-title">规则管理</span></div>
+      <div class="card-header">
+        <span class="card-icon">⚙️</span><span class="card-title">规则管理</span>
+        <div class="card-actions">
+          <button class="btn btn-sm btn-green" @click="openCreateEditor">➕ 新建规则</button>
+          <button class="btn btn-sm" @click="exportRules" title="导出规则为 YAML">📥 导出</button>
+          <button class="btn btn-sm" @click="showImport = true" title="从 YAML 导入规则">📤 导入</button>
+        </div>
+      </div>
       <div class="tab-header">
         <button class="tab-btn" :class="{ active: activeTab === 'inbound' }" @click="activeTab = 'inbound'">入站规则</button>
         <button class="tab-btn" :class="{ active: activeTab === 'outbound' }" @click="activeTab = 'outbound'">出站规则</button>
@@ -41,6 +48,10 @@
               <div v-if="row.patterns && row.patterns.length"><b style="color:var(--neon-blue)">模式:</b>
                 <pre style="background:rgba(0,0,0,.3);padding:8px;border-radius:6px;margin-top:4px;font-size:.75rem;overflow-x:auto;color:var(--neon-green)">{{ row.patterns.join('\n') }}</pre>
               </div>
+              <div style="margin-top:8px;display:flex;gap:8px">
+                <button class="btn btn-sm" @click.stop="openEditEditor(row)">✏️ 编辑</button>
+                <button class="btn btn-sm btn-red" @click.stop="confirmDeleteRule(row)">🗑️ 删除</button>
+              </div>
             </div>
           </template>
         </DataTable>
@@ -59,14 +70,107 @@
       </div>
     </div>
 
+    <!-- Regex Tester Standalone -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <span class="card-icon">🔍</span><span class="card-title">正则表达式测试器</span>
+      </div>
+      <div style="padding:0 16px 16px">
+        <RegexTester />
+      </div>
+    </div>
+
     <!-- Rule Templates -->
-    <div class="card">
+    <div class="card" style="margin-bottom:20px">
       <div class="card-header">
         <span class="card-icon">📖</span><span class="card-title">规则模板</span>
         <div class="card-actions"><button class="btn btn-sm" @click="loadTemplates">🔄 刷新</button></div>
       </div>
-      <DataTable :columns="templateColumns" :data="templates" :loading="templatesLoading" empty-text="暂无规则模板" empty-icon="📖" />
+      <div v-if="templatesLoading" style="padding:16px;text-align:center;color:var(--text-dim)">加载中...</div>
+      <div v-else-if="templates.length === 0" style="padding:16px;text-align:center;color:var(--text-dim)">暂无规则模板</div>
+      <div v-else class="template-list">
+        <div v-for="tmpl in templates" :key="tmpl.name" class="template-card">
+          <div class="template-header" @click="toggleTemplate(tmpl.name)">
+            <div class="template-info">
+              <span class="template-icon">{{ templateIcon(tmpl.name) }}</span>
+              <div>
+                <div class="template-name">{{ templateDisplayName(tmpl.name) }}</div>
+                <div class="template-desc">{{ templateDescription(tmpl.name) }}</div>
+              </div>
+            </div>
+            <div class="template-stats">
+              <span class="tag tag-info">{{ tmpl.rule_count }} 条规则</span>
+              <span v-if="tmpl.groups && tmpl.groups.length" class="template-groups">
+                {{ tmpl.groups.length }} 个分组
+              </span>
+              <span class="expand-arrow" :class="{ expanded: expandedTemplate === tmpl.name }">▶</span>
+            </div>
+          </div>
+          <div v-if="expandedTemplate === tmpl.name" class="template-detail">
+            <div v-if="templateDetailLoading" style="padding:12px;text-align:center;color:var(--text-dim)">加载中...</div>
+            <div v-else-if="templateRules.length === 0" style="padding:12px;text-align:center;color:var(--text-dim)">无规则</div>
+            <table v-else class="mini-table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>动作</th>
+                  <th>优先级</th>
+                  <th>分组</th>
+                  <th>模式数</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="rule in templateRules" :key="rule.name">
+                  <td>{{ rule.name }}</td>
+                  <td><span class="tag tag-info" style="font-size:.7rem">{{ rule.type || 'keyword' }}</span></td>
+                  <td><span class="tag" :class="actTag(rule.action)" style="font-size:.7rem">{{ rule.action }}</span></td>
+                  <td>{{ rule.priority }}</td>
+                  <td>
+                    <span v-if="rule.group" class="tag" :style="{ background: groupColor(rule.group), color: '#fff', fontSize: '.7rem' }">{{ rule.group }}</span>
+                    <span v-else>--</span>
+                  </td>
+                  <td>{{ (rule.patterns || []).length }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <!-- Import Modal -->
+    <Teleport to="body">
+      <div v-if="showImport" class="modal-overlay" @click.self="showImport = false">
+        <div class="import-panel">
+          <div class="import-header">
+            <span>📤</span>
+            <span style="font-weight:600;flex:1">导入规则 (YAML)</span>
+            <button class="editor-close" @click="showImport = false">✕</button>
+          </div>
+          <div class="import-body">
+            <div style="margin-bottom:12px">
+              <input type="file" accept=".yaml,.yml" @change="handleFileUpload" ref="fileInput" style="display:none" />
+              <button class="btn btn-sm" @click="$refs.fileInput.click()">📁 选择 YAML 文件</button>
+              <span v-if="importFileName" style="margin-left:8px;font-size:.82rem;color:var(--text-dim)">{{ importFileName }}</span>
+            </div>
+            <textarea v-model="importYaml" rows="10" placeholder="或直接粘贴 YAML 内容..." class="import-textarea"></textarea>
+            <div v-if="importPreview" class="import-preview">
+              <div><b>预览:</b> {{ importPreview.total }} 条规则</div>
+              <div v-if="importPreview.new_count > 0" style="color:var(--neon-green)">新增: {{ importPreview.new_count }} 条 ({{ importPreview.new_rules?.join(', ') }})</div>
+              <div v-if="importPreview.override_count > 0" style="color:var(--neon-yellow)">覆盖: {{ importPreview.override_count }} 条 ({{ importPreview.override_rules?.join(', ') }})</div>
+            </div>
+          </div>
+          <div class="import-footer">
+            <button class="btn btn-sm" @click="previewImport" :disabled="!importYaml.trim()">🔍 预览</button>
+            <button class="btn btn-sm btn-green" @click="doImport" :disabled="!importYaml.trim()">✅ 确认导入</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Rule Editor -->
+    <RuleEditor :visible="editorVisible" :rule="editingRule" @close="editorVisible = false" @save="saveRule" />
 
     <!-- Confirm modal -->
     <ConfirmModal :visible="confirmVisible" :title="confirmTitle" :message="confirmMessage" :type="confirmType" @confirm="doConfirm" @cancel="confirmVisible = false" />
@@ -75,10 +179,12 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { api, apiPost } from '../api.js'
+import { api, apiPost, apiPut, apiDelete, downloadFile } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import RuleEditor from '../components/RuleEditor.vue'
+import RegexTester from '../components/RegexTester.vue'
 
 const activeTab = ref('inbound')
 
@@ -118,12 +224,19 @@ const outboundColumns = [
 // Templates
 const templates = ref([])
 const templatesLoading = ref(false)
-const templateColumns = [
-  { key: 'name', label: '名称', sortable: true },
-  { key: 'description', label: '描述', sortable: false },
-  { key: 'rule_count', label: '规则数', sortable: true },
-  { key: 'category', label: '分类', sortable: true },
-]
+const expandedTemplate = ref(null)
+const templateRules = ref([])
+const templateDetailLoading = ref(false)
+
+// Editor
+const editorVisible = ref(false)
+const editingRule = ref(null) // null = create, object = edit
+
+// Import
+const showImport = ref(false)
+const importYaml = ref('')
+const importFileName = ref('')
+const importPreview = ref(null)
 
 // Confirm
 const confirmVisible = ref(false)
@@ -132,10 +245,20 @@ const confirmMessage = ref('')
 const confirmType = ref('warning')
 let confirmAction = null
 
-const groupColors = { jailbreak: '#ff6b6b', injection: '#ffa94d', social_engineering: '#69db7c', pii: '#74c0fc', sensitive: '#b197fc', roleplay: '#e599f7', command_injection: '#ff8787' }
+const groupColors = { jailbreak: '#ff6b6b', injection: '#ffa94d', social_engineering: '#69db7c', pii: '#74c0fc', sensitive: '#b197fc', roleplay: '#e599f7', command_injection: '#ff8787', evasion: '#845ef7', data_exfil: '#f06595' }
 function groupColor(g) { return groupColors[g] || '#868e96' }
 function actTag(a) { a = (a || '').toLowerCase(); return a === 'block' ? 'tag-block' : a === 'warn' ? 'tag-warn' : a === 'log' ? 'tag-log' : 'tag-pass' }
 function fmtTime(ts) { if (!ts) return '--'; const d = new Date(ts); return isNaN(d.getTime()) ? String(ts) : d.toLocaleString('zh-CN', { hour12: false }) }
+
+const templateMeta = {
+  general: { icon: '🌐', name: '通用模板', desc: '越狱、注入、社会工程、敏感信息等基础规则' },
+  financial: { icon: '🏦', name: '金融模板', desc: '交易注入、账户泄露、金融欺诈、合规违规等' },
+  medical: { icon: '🏥', name: '医疗模板', desc: '病历泄露、处方操纵、患者隐私等' },
+  government: { icon: '🏛️', name: '政务模板', desc: '公文泄露、权限冒充、数据安全等' },
+}
+function templateIcon(name) { return templateMeta[name]?.icon || '📋' }
+function templateDisplayName(name) { return templateMeta[name]?.name || name }
+function templateDescription(name) { return templateMeta[name]?.desc || '' }
 
 async function loadRuleHits() {
   hitsLoading.value = true
@@ -146,9 +269,9 @@ async function loadRuleHits() {
 async function loadInbound() {
   inboundLoading.value = true
   try {
-    const d = await api('/api/v1/inbound-rules')
+    const d = await api('/api/v1/inbound-rules?detail=1')
     const list = d.rules || []
-    inboundRules.value = list.map(r => ({ ...r, patterns_count: r.patterns_count ?? r.pattern_count ?? '--' }))
+    inboundRules.value = list.map(r => ({ ...r, patterns_count: r.patterns_count ?? (r.patterns ? r.patterns.length : '--') }))
     if (d.version && typeof d.version === 'object') inboundMeta.value = d.version
     else inboundMeta.value = null
   } catch { inboundRules.value = [] }
@@ -165,6 +288,116 @@ async function loadTemplates() {
   templatesLoading.value = true
   try { const d = await api('/api/v1/rule-templates'); templates.value = d.templates || [] } catch { templates.value = [] }
   templatesLoading.value = false
+}
+
+async function toggleTemplate(name) {
+  if (expandedTemplate.value === name) {
+    expandedTemplate.value = null
+    templateRules.value = []
+    return
+  }
+  expandedTemplate.value = name
+  templateDetailLoading.value = true
+  templateRules.value = []
+  try {
+    const d = await api('/api/v1/rule-templates/detail?name=' + encodeURIComponent(name))
+    templateRules.value = d.rules || []
+  } catch (e) {
+    showToast('加载模板详情失败: ' + e.message, 'error')
+    templateRules.value = []
+  }
+  templateDetailLoading.value = false
+}
+
+// Rule Editor
+function openCreateEditor() {
+  editingRule.value = null
+  editorVisible.value = true
+}
+
+function openEditEditor(row) {
+  // Need to fetch full rule details (with patterns)
+  editingRule.value = row
+  editorVisible.value = true
+}
+
+async function saveRule(data) {
+  try {
+    if (editingRule.value) {
+      // Update
+      await apiPut('/api/v1/inbound-rules/update', data)
+      showToast('规则已更新: ' + data.name, 'success')
+    } else {
+      // Create
+      await apiPost('/api/v1/inbound-rules/add', data)
+      showToast('规则已创建: ' + data.name, 'success')
+    }
+    editorVisible.value = false
+    loadInbound()
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error')
+  }
+}
+
+function confirmDeleteRule(row) {
+  confirmTitle.value = '删除规则'
+  confirmMessage.value = `确认删除规则 "${row.name}"？此操作不可恢复。`
+  confirmType.value = 'danger'
+  confirmAction = async () => {
+    try {
+      await apiDelete('/api/v1/inbound-rules/delete', { name: row.name })
+      showToast('规则已删除: ' + row.name, 'success')
+      loadInbound()
+    } catch (e) {
+      showToast('删除失败: ' + e.message, 'error')
+    }
+  }
+  confirmVisible.value = true
+}
+
+// Import/Export
+async function exportRules() {
+  try {
+    await downloadFile(location.origin + '/api/v1/rules/export', 'lobster-guard-rules.yaml')
+    showToast('规则导出成功', 'success')
+  } catch (e) {
+    showToast('导出失败: ' + e.message, 'error')
+  }
+}
+
+function handleFileUpload(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  importFileName.value = file.name
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    importYaml.value = ev.target.result
+    importPreview.value = null
+  }
+  reader.readAsText(file)
+}
+
+async function previewImport() {
+  try {
+    const d = await apiPost('/api/v1/rules/import?preview=1', { yaml: importYaml.value })
+    importPreview.value = d
+  } catch (e) {
+    showToast('预览失败: ' + e.message, 'error')
+  }
+}
+
+async function doImport() {
+  try {
+    const d = await apiPost('/api/v1/rules/import', { yaml: importYaml.value })
+    showToast(`导入成功: ${d.imported} 条规则 (新增 ${d.new_count}, 覆盖 ${d.override_count})`, 'success')
+    showImport.value = false
+    importYaml.value = ''
+    importFileName.value = ''
+    importPreview.value = null
+    loadInbound()
+  } catch (e) {
+    showToast('导入失败: ' + e.message, 'error')
+  }
 }
 
 function confirmResetHits() {
@@ -192,3 +425,92 @@ function doConfirm() {
 
 onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadTemplates() })
 </script>
+
+<style scoped>
+.template-list { padding: 0 16px 16px; }
+.template-card {
+  border: 1px solid rgba(0,212,255,.12);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.template-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; cursor: pointer;
+  transition: background .2s;
+}
+.template-header:hover { background: rgba(0,212,255,.05); }
+.template-info { display: flex; align-items: center; gap: 10px; }
+.template-icon { font-size: 1.3rem; }
+.template-name { font-weight: 600; font-size: .9rem; color: var(--text); }
+.template-desc { font-size: .78rem; color: var(--text-dim); margin-top: 2px; }
+.template-stats { display: flex; align-items: center; gap: 10px; }
+.template-groups { font-size: .75rem; color: var(--text-dim); }
+.expand-arrow {
+  font-size: .7rem; color: var(--text-dim);
+  transition: transform .2s;
+  display: inline-block;
+}
+.expand-arrow.expanded { transform: rotate(90deg); }
+.template-detail {
+  border-top: 1px solid rgba(0,212,255,.08);
+  background: rgba(0,0,0,.15);
+  max-height: 400px; overflow-y: auto;
+}
+.mini-table {
+  width: 100%; border-collapse: collapse; font-size: .8rem;
+}
+.mini-table th {
+  text-align: left; padding: 8px 12px; color: var(--text-dim);
+  border-bottom: 1px solid rgba(0,212,255,.1); font-weight: 500;
+  font-size: .75rem; text-transform: uppercase;
+}
+.mini-table td {
+  padding: 6px 12px; border-bottom: 1px solid rgba(0,212,255,.05);
+  color: var(--text);
+}
+.mini-table tr:hover td { background: rgba(0,212,255,.03); }
+
+/* Import modal */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.6); z-index: 1000;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 60px;
+  animation: fadeIn .2s;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.import-panel {
+  background: var(--bg-card); border: 1px solid rgba(0,212,255,.25);
+  border-radius: var(--radius); width: 600px; max-width: 95vw;
+  box-shadow: 0 16px 64px rgba(0,0,0,.5);
+  animation: slideUp .25s ease-out;
+}
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+.import-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 16px 20px; border-bottom: 1px solid rgba(0,212,255,.1);
+  color: var(--text);
+}
+.editor-close {
+  background: none; border: none; color: var(--text-dim); font-size: 1.2rem;
+  cursor: pointer; padding: 4px 8px; border-radius: 4px;
+}
+.editor-close:hover { background: rgba(255,255,255,.1); color: var(--text); }
+.import-body { padding: 20px; }
+.import-textarea {
+  width: 100%; background: rgba(0,0,0,.3); color: var(--text);
+  border: 1px solid rgba(0,212,255,.2); border-radius: 6px;
+  padding: 10px; font-family: 'Courier New', monospace; font-size: .82rem;
+  resize: vertical;
+}
+.import-textarea:focus { border-color: var(--neon-blue); outline: none; }
+.import-preview {
+  margin-top: 12px; padding: 10px; background: rgba(0,0,0,.2);
+  border-radius: 6px; font-size: .82rem; color: var(--text);
+}
+.import-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 20px; border-top: 1px solid rgba(0,212,255,.1);
+}
+</style>

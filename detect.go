@@ -561,6 +561,28 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 	return r
 }
 
+// GetRuleConfigs 返回当前入站规则的原始配置列表（v6.3 CRUD 用）
+func (re *RuleEngine) GetRuleConfigs() []InboundRuleConfig {
+	re.mu.RLock()
+	defer re.mu.RUnlock()
+	cp := make([]InboundRuleConfig, len(re.ruleConfigs))
+	for i, c := range re.ruleConfigs {
+		rc := InboundRuleConfig{
+			Name:     c.Name,
+			Patterns: make([]string, len(c.Patterns)),
+			Action:   c.Action,
+			Category: c.Category,
+			Priority: c.Priority,
+			Message:  c.Message,
+			Type:     c.Type,
+			Group:    c.Group,
+		}
+		copy(rc.Patterns, c.Patterns)
+		cp[i] = rc
+	}
+	return cp
+}
+
 // ListPIIPatterns 返回当前 PII 模式列表（v3.11 API 展示用）
 func (re *RuleEngine) ListPIIPatterns() []map[string]string {
 	re.mu.RLock()

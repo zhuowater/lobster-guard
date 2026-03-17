@@ -48,6 +48,24 @@ export async function apiPost(path, body) {
 }
 
 /**
+ * PUT 请求
+ * @param {string} path
+ * @param {object} body
+ */
+export async function apiPut(path, body) {
+  return api(path, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+/**
+ * DELETE 请求（带 body）
+ * @param {string} path
+ * @param {object} body
+ */
+export async function apiDelete(path, body) {
+  return api(path, { method: 'DELETE', body: JSON.stringify(body) })
+}
+
+/**
  * 下载文件（blob）
  * @param {string} url - 完整 URL
  */
