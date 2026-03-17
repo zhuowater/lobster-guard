@@ -18,19 +18,23 @@
     >
       <template #empty-hint>请配置 upstream 或等待服务注册</template>
       <template #cell-healthy="{ row }">
-        <span class="dot" :class="row.healthy ? 'dot-healthy' : 'dot-unhealthy'"></span>
-        {{ row.healthy ? '健康' : '异常' }}
+        <div class="health-badge" :class="row.healthy ? 'health-ok' : 'health-err'">
+          <span class="dot dot-sm" :class="row.healthy ? 'dot-healthy' : 'dot-unhealthy'"></span>
+          {{ row.healthy ? '健康' : '异常' }}
+        </div>
       </template>
       <template #cell-last_heartbeat="{ row }">
         {{ fmtTime(row.last_heartbeat) }}
       </template>
       <template #expand="{ row }">
-        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.82rem">
-          <div><b style="color:var(--color-primary)">ID:</b> {{ row.id }}</div>
-          <div><b style="color:var(--color-primary)">地址:</b> {{ row.address || row.addr || row.host }}:{{ row.port }}</div>
-          <div><b style="color:var(--color-primary)">静态:</b> {{ row.static ? '是' : '否' }}</div>
-          <div v-if="row.tags"><b style="color:var(--color-primary)">Tags:</b> {{ JSON.stringify(row.tags) }}</div>
-          <div v-if="row.load"><b style="color:var(--color-primary)">负载:</b> {{ JSON.stringify(row.load) }}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px 24px;font-size:.82rem">
+          <div><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">ID</span><span style="font-weight:500">{{ row.id }}</span></div>
+          <div><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">地址</span><span style="font-weight:500;font-family:var(--font-mono)">{{ row.address || row.addr || row.host }}:{{ row.port }}</span></div>
+          <div><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">静态</span><span style="font-weight:500">{{ row.static ? '是' : '否' }}</span></div>
+          <div><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">用户数</span><span style="font-weight:500;color:var(--color-primary)">{{ row.user_count || 0 }}</span></div>
+          <div v-if="row.tags"><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">Tags</span><span style="font-weight:500">{{ JSON.stringify(row.tags) }}</span></div>
+          <div v-if="row.load"><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">负载</span><span style="font-weight:500">{{ JSON.stringify(row.load) }}</span></div>
+          <div><span style="color:var(--text-tertiary);font-size:var(--text-xs);display:block;margin-bottom:2px">最后心跳</span><span style="font-weight:500">{{ fmtTime(row.last_heartbeat) }}</span></div>
         </div>
       </template>
     </DataTable>
@@ -71,3 +75,12 @@ async function loadUpstreams() {
 
 onMounted(loadUpstreams)
 </script>
+
+<style scoped>
+.health-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 10px; border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 500;
+}
+.health-ok { background: var(--color-success-dim); color: var(--color-success); }
+.health-err { background: var(--color-danger-dim); color: var(--color-danger); }
+</style>

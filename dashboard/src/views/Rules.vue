@@ -48,11 +48,15 @@
               <div v-if="row.patterns && row.patterns.length"><b style="color:var(--color-primary)">模式:</b>
                 <pre style="background:var(--bg-base);padding:8px;border-radius:var(--radius-md);margin-top:4px;font-size:var(--text-xs);overflow-x:auto;color:var(--color-success);border:1px solid var(--border-subtle)">{{ row.patterns.join('\n') }}</pre>
               </div>
-              <div style="margin-top:8px;display:flex;gap:8px">
-                <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row)">编辑</button>
-                <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row)">删除</button>
-              </div>
             </div>
+          </template>
+          <template #actions="{ row }">
+            <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row)" title="编辑">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row)" style="margin-left:4px" title="删除">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
           </template>
         </DataTable>
         <div class="rule-meta" v-if="inboundMeta">

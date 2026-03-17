@@ -1,13 +1,32 @@
 <template>
   <div>
-    <!-- Token -->
+    <!-- Auth Settings -->
     <div class="card" style="margin-bottom:20px">
-      <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span><span class="card-title">Token 管理</span></div>
-      <div class="token-section">
-        <label style="font-size:.85rem;color:var(--text-secondary)">🔑 Bearer Token:</label>
-        <input type="password" v-model="tokenValue" placeholder="输入 Bearer Token" />
-        <button class="btn" @click="doSaveToken">保存</button>
-        <button class="btn btn-red" @click="doClearToken">清除</button>
+      <div class="card-header">
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+        <span class="card-title">认证设置</span>
+      </div>
+      <div class="settings-section">
+        <label class="settings-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Bearer Token
+        </label>
+        <div class="token-input-wrap">
+          <input
+            :type="showToken ? 'text' : 'password'"
+            v-model="tokenValue"
+            placeholder="输入 Bearer Token"
+            class="token-input"
+          />
+          <button class="token-toggle" @click="showToken = !showToken" :title="showToken ? '隐藏' : '显示'">
+            <svg v-if="showToken" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <div class="token-actions">
+          <button class="btn btn-sm" @click="doSaveToken">保存</button>
+          <button class="btn btn-danger btn-sm" @click="doClearToken">清除</button>
+        </div>
       </div>
     </div>
 
@@ -15,12 +34,11 @@
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span><span class="card-title">系统信息</span>
-        <div class="card-actions"><button class="btn btn-sm" @click="refreshHealth">刷新</button></div>
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" @click="refreshHealth">刷新</button></div>
       </div>
       <div v-if="!appState.health" class="loading">加载中...</div>
       <div v-else>
         <div class="status-grid">
-          <!-- Ring chart -->
           <div class="ring-chart">
             <svg width="100" height="100" viewBox="0 0 100 100">
               <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8" />
@@ -39,8 +57,6 @@
             <div class="status-row"><span class="status-key">限流</span><span class="status-val">{{ rlText }}</span></div>
           </div>
         </div>
-
-        <!-- Bridge -->
         <div v-if="health.mode === 'bridge' && health.bridge" style="margin-top:16px;border-top:1px solid var(--border-subtle);padding-top:12px">
           <div style="font-size:.85rem;color:var(--color-primary);font-weight:600;margin-bottom:8px">Bridge 状态</div>
           <div class="status-row"><span class="status-key">连接</span><span class="status-val"><span class="dot" :class="health.bridge.connected ? 'dot-healthy' : 'dot-unhealthy'"></span>{{ health.bridge.connected ? '已连接' : '已断开' }}</span></div>
@@ -55,8 +71,8 @@
       <div class="card-header">
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span><span class="card-title">备份管理</span>
         <div class="card-actions">
-          <button class="btn btn btn-sm" @click="createBackup">创建备份</button>
-          <button class="btn btn-sm" @click="loadBackups">刷新</button>
+          <button class="btn btn-sm" @click="createBackup">创建备份</button>
+          <button class="btn btn-ghost btn-sm" @click="loadBackups">刷新</button>
         </div>
       </div>
       <div v-if="backupsLoading" class="loading">加载中...</div>
@@ -96,6 +112,7 @@ import ConfirmModal from '../components/ConfirmModal.vue'
 
 const appState = inject('appState')
 const tokenValue = ref(getToken())
+const showToken = ref(false)
 
 const backups = ref([])
 const backupsLoading = ref(false)
@@ -121,7 +138,7 @@ const ringOffset = computed(() => C - pct.value / 100 * C)
 const ringColor = computed(() => pct.value >= 80 ? 'var(--color-success)' : (pct.value >= 50 ? 'var(--color-warning)' : 'var(--color-danger)'))
 const statusText = computed(() => { const s = health.value.status; return s === 'healthy' ? '健康' : (s === 'degraded' ? '降级' : '异常') })
 const statusColor = computed(() => { const s = health.value.status; return s === 'healthy' ? 'var(--color-success)' : (s === 'degraded' ? 'var(--color-warning)' : 'var(--color-danger)') })
-const rlText = computed(() => { const rl = health.value.rate_limiter; if (!rl || !rl.enabled) return '未启用'; return `${rl.global_rps || '?'} rps (全局) / ${rl.per_sender_rps || '?'} rps (每用户)` })
+const rlText = computed(() => { const rl = health.value.rate_limiter; if (!rl || !rl.enabled) return '未启用'; return `${rl.global_rps || '?'} rps / ${rl.per_sender_rps || '?'} rps` })
 
 const healthCheckList = computed(() => {
   const checks = appState.health?.checks
@@ -155,7 +172,7 @@ function doSaveToken() {
 function doClearToken() { clearToken(); tokenValue.value = ''; showToast('Token 已清除', 'success') }
 
 async function refreshHealth() {
-  try { const d = await api('/healthz'); updateHealth(d) } catch { /* ignore */ }
+  try { const d = await api('/healthz'); updateHealth(d) } catch {}
 }
 
 async function loadBackups() {
@@ -182,3 +199,35 @@ function doConfirm() { confirmVisible.value = false; if (confirmAction) confirmA
 
 onMounted(() => { loadBackups() })
 </script>
+
+<style scoped>
+.settings-section { margin-bottom: var(--space-4); }
+.settings-label {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500;
+  margin-bottom: var(--space-2);
+}
+.token-input-wrap {
+  position: relative; display: inline-flex; align-items: center;
+  width: 320px; max-width: 100%;
+}
+.token-input {
+  width: 100%;
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); color: var(--text-primary);
+  padding: var(--space-2) 40px var(--space-2) var(--space-3);
+  font-size: var(--text-sm); outline: none; font-family: var(--font-mono);
+  transition: border-color var(--transition-fast);
+}
+.token-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-dim); }
+.token-toggle {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-tertiary); cursor: pointer;
+  padding: 4px; border-radius: var(--radius-sm); display: flex; align-items: center;
+  transition: all var(--transition-fast);
+}
+.token-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
+.token-actions {
+  display: flex; gap: var(--space-2); margin-top: var(--space-3);
+}
+</style>

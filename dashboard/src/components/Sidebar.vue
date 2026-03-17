@@ -73,6 +73,7 @@ const statusText = computed(() => {
   padding: var(--space-4) var(--space-4) var(--space-3); display: flex; align-items: center; gap: var(--space-3);
   border-bottom: 1px solid var(--border-subtle); min-height: 60px;
   overflow: hidden; white-space: nowrap;
+  background: var(--gradient-surface);
 }
 .sidebar-logo { font-size: 1.75rem; flex-shrink: 0; }
 .sidebar-brand-text { display: flex; flex-direction: column; overflow: hidden; transition: opacity var(--transition-normal), width var(--transition-normal); }
