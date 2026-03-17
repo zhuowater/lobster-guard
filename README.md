@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.1.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-6.0.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
@@ -80,11 +80,11 @@
  | |_| (_) | |_) \__ \ ||  __/ | |_____| (_| | |_| | (_| | |  | |_
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
-        龙虾卫士 - AI Agent 安全网关 v5.1.0
+        龙虾卫士 - AI Agent 安全网关 v6.0.0
         入站检测 | 出站拦截 | 亲和路由 | 多通道插件 | Bridge Mode
 
 ┌─────────────────────────────────────────────────┐
-│                  配置摘要 v5.1                   │
+│                  配置摘要 v6.0                   │
 ├─────────────────────────────────────────────────┤
 │ 消息通道:    lanxin                             │
 │ 接入模式:    webhook                            │
