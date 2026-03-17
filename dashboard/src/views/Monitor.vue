@@ -15,30 +15,31 @@
       <div style="display:flex;gap:20px;flex-wrap:wrap">
         <div style="flex:2;min-width:300px">
           <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">📈 QPS 曲线（最近 60 秒）</div>
-          <div style="display:flex;align-items:flex-end;gap:1px;height:100px;background:rgba(0,0,0,.2);border-radius:6px;padding:4px;overflow:hidden">
-            <div v-for="(s, i) in rt.slots" :key="i" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0" :title="`in=${s.inbound} out=${s.outbound} blk=${s.block}`">
-              <div v-if="s.block > 0" :style="{ width: '100%', height: barH(s.block) + 'px', background: 'var(--neon-red)', borderRadius: '1px', minHeight: '1px' }"></div>
-              <div v-if="s.outbound > 0" :style="{ width: '100%', height: barH(s.outbound) + 'px', background: 'var(--neon-green)', borderRadius: '1px', minHeight: '1px' }"></div>
-              <div v-if="s.inbound > 0" :style="{ width: '100%', height: barH(s.inbound) + 'px', background: 'var(--neon-blue)', borderRadius: '1px', minHeight: '1px' }"></div>
-              <div v-if="s.inbound + s.outbound === 0" style="width:100%;height:1px;background:rgba(255,255,255,.05)"></div>
-            </div>
-          </div>
-          <div style="display:flex;gap:12px;margin-top:4px;font-size:.65rem;color:var(--text-dim)">
-            <span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-blue);border-radius:2px;margin-right:2px"></span>入站</span>
-            <span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-green);border-radius:2px;margin-right:2px"></span>出站</span>
-            <span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-red);border-radius:2px;margin-right:2px"></span>拦截</span>
-          </div>
+          <TrendChart
+            :data="qpsChartData"
+            :lines="qpsLines"
+            :xLabels="qpsXLabels"
+            :height="130"
+          />
         </div>
         <div style="flex:1;min-width:280px">
           <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">🚨 攻击实时流</div>
-          <div style="max-height:160px;overflow-y:auto;background:rgba(0,0,0,.2);border-radius:6px;padding:6px">
+          <div class="attack-timeline" style="max-height:220px;overflow-y:auto;background:rgba(0,0,0,.2);border-radius:6px;padding:6px">
             <div v-if="!rt.events.length" style="color:var(--text-dim);font-size:.8rem;text-align:center;padding:20px">暂无攻击事件 ✅</div>
-            <div v-for="(e, i) in [...rt.events].reverse()" :key="i" style="padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.04);font-size:.75rem;display:flex;gap:6px;align-items:center">
-              <span style="color:var(--text-dim);font-size:.65rem">{{ e.time?.substring(11, 19) }}</span>
-              <span :style="{ color: e.action === 'block' ? 'var(--neon-red)' : 'var(--neon-yellow)', fontWeight: 600, fontSize: '.7rem' }">{{ e.action }}</span>
-              <span style="color:var(--text-dim)">[{{ e.direction === 'inbound' ? '入' : '出' }}]</span>
-              <span>{{ e.sender_id || '--' }}</span>
-              <span style="color:var(--text-dim);font-size:.7rem;font-family:monospace">{{ (e.trace_id || '--').substring(0, 8) }}</span>
+            <div v-for="(e, i) in [...rt.events].reverse()" :key="i" class="timeline-item" :class="{ 'timeline-new': i < newEventCount }">
+              <div class="timeline-time">{{ e.time?.substring(11, 19) }}</div>
+              <div class="timeline-dot" :style="{ background: e.action === 'block' ? 'var(--neon-red)' : 'var(--neon-yellow)' }"></div>
+              <div class="timeline-card">
+                <div class="timeline-card-header">
+                  <span :style="{ color: e.action === 'block' ? 'var(--neon-red)' : 'var(--neon-yellow)', fontWeight: 600, fontSize: '.75rem' }">{{ e.action === 'block' ? '🛡️ BLOCK' : '⚠️ WARN' }}</span>
+                  <span class="timeline-direction">[{{ e.direction === 'inbound' ? '入站' : '出站' }}]</span>
+                </div>
+                <div class="timeline-card-body">
+                  <span v-if="e.sender_id" class="timeline-sender">{{ e.sender_id }}</span>
+                  <span v-if="e.reason" class="timeline-reason">{{ e.reason }}</span>
+                  <span v-if="e.trace_id" class="timeline-trace">{{ (e.trace_id || '').substring(0, 8) }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -110,16 +111,40 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { api, apiPost } from '../api.js'
 import { showToast } from '../stores/app.js'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import TrendChart from '../components/TrendChart.vue'
 
 const rt = reactive({ totalRequests: 0, totalBlocks: 0, blockRate: '0', avgLatency: '0', slots: [], events: [] })
+const newEventCount = ref(0)
 const ws = reactive({ active: 0, total: 0, mode: '--', connections: [] })
 const wsLoading = ref(false)
 const rl = reactive({ enabled: false, allowed: 0, limited: 0, rate: '0', top: [] })
 const rlLoading = ref(false)
 const confirmVisible = ref(false)
 
-const maxV = computed(() => { let m = 1; for (const s of rt.slots) { const t = s.inbound + s.outbound; if (t > m) m = t }; return m })
-function barH(v) { return Math.max(0, Math.round(v / maxV.value * 80)) }
+// QPS chart data from realtime slots
+const qpsChartData = computed(() => {
+  return rt.slots.map(s => ({
+    inbound: s.inbound || 0,
+    outbound: s.outbound || 0,
+    block: s.block || 0,
+  }))
+})
+
+const qpsLines = [
+  { key: 'inbound', color: '#00d4ff', label: '入站' },
+  { key: 'outbound', color: '#00ff88', label: '出站' },
+  { key: 'block', color: '#ff4466', label: '拦截' },
+]
+
+const qpsXLabels = computed(() => {
+  const n = rt.slots.length
+  return rt.slots.map((_, i) => {
+    if (i % 10 === 0 || i === n - 1) return (n - i) + 's'
+    return ''
+  })
+})
+
+let prevEventCount = 0
 
 async function loadRealtime() {
   try {
@@ -129,7 +154,11 @@ async function loadRealtime() {
     rt.blockRate = d.block_rate != null ? d.block_rate.toFixed(1) : '0'
     rt.avgLatency = d.avg_latency_ms != null ? d.avg_latency_ms.toFixed(1) : '0'
     rt.slots = d.slots || []
-    rt.events = d.events || []
+    const events = d.events || []
+    const newCount = events.length - prevEventCount
+    newEventCount.value = Math.max(0, newCount)
+    prevEventCount = events.length
+    rt.events = events
   } catch { /* ignore */ }
 }
 
@@ -168,3 +197,38 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(realtimeTimer))
 </script>
+
+<style scoped>
+/* Timeline styles */
+.timeline-item {
+  display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px;
+  border-bottom: 1px solid rgba(255,255,255,.03); animation: timeline-in .4s ease-out both;
+}
+.timeline-new { animation: timeline-flash .6s ease-out; }
+@keyframes timeline-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes timeline-flash {
+  0% { background: rgba(0,212,255,.15); }
+  100% { background: transparent; }
+}
+.timeline-time {
+  font-size: .65rem; color: var(--text-dim); font-family: monospace;
+  min-width: 55px; flex-shrink: 0; padding-top: 2px;
+}
+.timeline-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+  box-shadow: 0 0 6px currentColor;
+}
+.timeline-card {
+  flex: 1; min-width: 0; background: rgba(0,0,0,.15); border-radius: 6px;
+  padding: 4px 8px; border-left: 2px solid rgba(0,212,255,.2);
+}
+.timeline-card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.timeline-direction { font-size: .7rem; color: var(--text-dim); }
+.timeline-card-body { display: flex; gap: 8px; flex-wrap: wrap; font-size: .73rem; }
+.timeline-sender { color: var(--text); font-weight: 500; }
+.timeline-reason { color: var(--text-dim); }
+.timeline-trace { font-family: monospace; color: var(--neon-blue); font-size: .68rem; }
+</style>

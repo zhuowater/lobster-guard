@@ -7,11 +7,31 @@
       </div>
     </div>
 
-    <!-- Timeline chart -->
-    <div v-if="timelineHtml" v-html="timelineHtml" style="margin-bottom:16px"></div>
+    <!-- Timeline trend chart -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">📈 请求趋势</div>
+      <TrendChart v-if="timelineData.length"
+        :data="timelineChartData"
+        :lines="timelineLines"
+        :xLabels="timelineXLabels"
+        :height="140"
+        :timeRanges="[{label:'24h',value:'24h'},{label:'7d',value:'7d'}]"
+        :currentRange="timelineRange"
+        @rangeChange="onTimelineRangeChange"
+      />
+      <div v-else style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:12px">暂无趋势数据</div>
+    </div>
 
     <!-- Filters -->
     <div class="filters">
+      <div class="date-range-picker">
+        <label class="date-label">📅 开始</label>
+        <input type="datetime-local" v-model="filters.start_time" class="date-input" />
+        <label class="date-label">至</label>
+        <input type="datetime-local" v-model="filters.end_time" class="date-input" />
+        <button class="btn btn-sm" @click="applyDateRange" title="按日期范围筛选">📅 筛选</button>
+        <button v-if="filters.start_time || filters.end_time" class="btn btn-sm" @click="clearDateRange" title="清除日期范围" style="background:rgba(255,255,255,.1)">✕</button>
+      </div>
       <select v-model="filters.direction" @change="loadLogs">
         <option value="">全部方向</option>
         <option value="inbound">入站</option>
@@ -109,19 +129,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { api, apiPost, downloadFile, getToken } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import TrendChart from '../components/TrendChart.vue'
 
 const loading = ref(false)
 const logs = ref([])
-const timelineHtml = ref('')
+const timelineData = ref([])
+const timelineRange = ref('24h')
 const auditStatsHtml = ref('')
 const archives = ref([])
 
-const filters = reactive({ direction: '', action: '', sender_id: '', app_id: '', trace_id: '', q: '' })
+const filters = reactive({ direction: '', action: '', sender_id: '', app_id: '', trace_id: '', q: '', start_time: '', end_time: '' })
 
 const columns = [
   { key: 'timestamp', label: '时间', sortable: true },
@@ -147,6 +169,44 @@ function actTag(a) { a = (a || '').toLowerCase(); return a === 'block' ? 'tag-bl
 function rowClass(row) { const a = (row.action || '').toLowerCase(); return a === 'block' ? 'row-block' : a === 'warn' ? 'row-warn' : '' }
 function formatSize(bytes) { const kb = Math.round((bytes || 0) / 1024); return kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB' }
 
+// Timeline chart
+const timelineChartData = computed(() => {
+  return timelineData.value.map(t => ({
+    pass: t.pass || 0,
+    block: t.block || 0,
+    warn: t.warn || 0,
+  }))
+})
+
+const timelineLines = [
+  { key: 'pass', color: '#00ff88', label: 'Pass' },
+  { key: 'block', color: '#ff4466', label: 'Block' },
+  { key: 'warn', color: '#ffcc00', label: 'Warn' },
+]
+
+const timelineXLabels = computed(() => {
+  return timelineData.value.map(t => {
+    const h = t.hour || ''
+    if (timelineRange.value === '7d') return h.substring(5, 10)
+    return h.substring(11, 13) + 'h'
+  })
+})
+
+function onTimelineRangeChange(range) {
+  timelineRange.value = range
+  loadTimeline()
+}
+
+function applyDateRange() {
+  loadLogs()
+}
+
+function clearDateRange() {
+  filters.start_time = ''
+  filters.end_time = ''
+  loadLogs()
+}
+
 async function loadLogs() {
   loading.value = true
   const params = []
@@ -156,6 +216,8 @@ async function loadLogs() {
   if (filters.app_id) params.push('app_id=' + encodeURIComponent(filters.app_id))
   if (filters.trace_id) params.push('trace_id=' + encodeURIComponent(filters.trace_id))
   if (filters.q) params.push('q=' + encodeURIComponent(filters.q))
+  if (filters.start_time) params.push('start_time=' + encodeURIComponent(new Date(filters.start_time).toISOString()))
+  if (filters.end_time) params.push('end_time=' + encodeURIComponent(new Date(filters.end_time).toISOString()))
   const qs = params.length ? '?' + params.join('&') : ''
   try { const d = await api('/api/v1/audit/logs' + qs); logs.value = d.logs || [] } catch { logs.value = [] }
   loading.value = false
@@ -163,31 +225,10 @@ async function loadLogs() {
 
 async function loadTimeline() {
   try {
-    const d = await api('/api/v1/audit/timeline?hours=24')
-    const tl = d.timeline || []
-    if (!tl.length) { timelineHtml.value = ''; return }
-    let maxVal = 1
-    for (const t of tl) { const s = (t.pass || 0) + (t.block || 0) + (t.warn || 0); if (s > maxVal) maxVal = s }
-    let h = '<div style="font-size:.82rem;color:var(--text-dim);margin-bottom:6px;font-weight:600">📈 最近 24 小时趋势</div>'
-    h += '<div style="display:flex;align-items:flex-end;gap:2px;height:80px;padding:0 2px">'
-    for (let i = 0; i < tl.length; i++) {
-      const p = tl[i].pass || 0, b = tl[i].block || 0, w = tl[i].warn || 0, total = p + b + w
-      const hPct = Math.max(2, Math.round(total / maxVal * 70))
-      let pH = total > 0 ? Math.round(p / total * hPct) : 0, bH = total > 0 ? Math.round(b / total * hPct) : 0, wH = total > 0 ? Math.round(w / total * hPct) : 0
-      if (pH + bH + wH < hPct && total > 0) pH += (hPct - pH - bH - wH)
-      const hr = tl[i].hour ? tl[i].hour.substring(11, 13) : ''
-      h += `<div style="flex:1;display:flex;flex-direction:column;align-items:center;min-width:0" title="${hr}h: pass=${p} block=${b} warn=${w}">`
-      h += '<div style="width:100%;display:flex;flex-direction:column-reverse">'
-      if (pH > 0) h += `<div style="height:${pH}px;background:var(--neon-green);border-radius:1px;min-height:1px"></div>`
-      if (wH > 0) h += `<div style="height:${wH}px;background:var(--neon-yellow);border-radius:1px;min-height:1px"></div>`
-      if (bH > 0) h += `<div style="height:${bH}px;background:var(--neon-red);border-radius:1px;min-height:1px"></div>`
-      h += '</div>'
-      if (i % 4 === 0) h += `<div style="font-size:.55rem;color:var(--text-dim);margin-top:2px">${hr}</div>`
-      h += '</div>'
-    }
-    h += '</div><div style="display:flex;gap:12px;margin-top:4px;font-size:.65rem;color:var(--text-dim)"><span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-green);border-radius:2px;margin-right:2px"></span>pass</span><span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-yellow);border-radius:2px;margin-right:2px"></span>warn</span><span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-red);border-radius:2px;margin-right:2px"></span>block</span></div>'
-    timelineHtml.value = h
-  } catch { timelineHtml.value = '' }
+    const hours = timelineRange.value === '7d' ? 168 : 24
+    const d = await api('/api/v1/audit/timeline?hours=' + hours)
+    timelineData.value = d.timeline || []
+  } catch { timelineData.value = [] }
 }
 
 async function exportAudit(fmt) {
@@ -249,3 +290,18 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(refreshTimer))
 </script>
+
+<style scoped>
+.date-range-picker {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: rgba(0,0,0,.15); border-radius: 6px; padding: 4px 8px;
+  border: 1px solid rgba(0,212,255,.1);
+}
+.date-label { font-size: .75rem; color: var(--text-dim); white-space: nowrap; }
+.date-input {
+  background: rgba(0,0,0,.3); border: 1px solid rgba(0,212,255,.2);
+  border-radius: 4px; color: var(--text); padding: 3px 6px; font-size: .78rem;
+  outline: none; color-scheme: dark;
+}
+.date-input:focus { border-color: var(--neon-blue); }
+</style>

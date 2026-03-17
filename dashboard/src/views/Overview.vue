@@ -11,9 +11,17 @@
     <!-- Trend + Health -->
     <div class="ov-row">
       <div class="card">
-        <div class="card-header"><span class="card-icon">📈</span><span class="card-title">24h 请求趋势</span></div>
+        <div class="card-header"><span class="card-icon">📈</span><span class="card-title">请求趋势</span></div>
         <div v-if="!trendData.length" class="empty"><div class="empty-icon">📈</div>暂无趋势数据</div>
-        <div v-else v-html="trendSvg"></div>
+        <TrendChart v-else
+          :data="trendChartData"
+          :lines="trendLines"
+          :xLabels="trendXLabels"
+          :height="170"
+          :timeRanges="[{label:'24h',value:'24h'},{label:'7d',value:'7d'}]"
+          :currentRange="trendRange"
+          @rangeChange="onTrendRangeChange"
+        />
       </div>
       <div class="card">
         <div class="card-header"><span class="card-icon">🏥</span><span class="card-title">健康状态</span></div>
@@ -28,36 +36,51 @@
       </div>
     </div>
 
-    <!-- Attacks + Top Rules -->
+    <!-- Pie + Top Rules -->
     <div class="ov-row">
       <div class="card">
-        <div class="card-header"><span class="card-icon">🚨</span><span class="card-title">最近攻击事件</span></div>
-        <div v-if="!recentAttacks.length" class="empty"><div class="empty-icon">✅</div>暂无攻击事件<div class="empty-hint">系统安全运行中</div></div>
-        <div v-else class="table-wrap">
-          <table>
-            <thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
-            <tbody>
-              <tr v-for="a in recentAttacks" :key="a.id" class="row-block" style="cursor:pointer" @click="$router.push('/audit')">
-                <td>{{ fmtTime(a.timestamp || a.time) }}</td>
-                <td>{{ a.direction === 'inbound' ? '入站' : '出站' }}</td>
-                <td>{{ a.sender_id || '--' }}</td>
-                <td>{{ a.reason || '--' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="card-header"><span class="card-icon">🧩</span><span class="card-title">拦截类型分布</span></div>
+        <div v-if="!pieData.length" class="empty"><div class="empty-icon">🧩</div>暂无拦截数据</div>
+        <PieChart v-else :data="pieData" :size="180" />
       </div>
       <div class="card">
         <div class="card-header"><span class="card-icon">🎯</span><span class="card-title">规则命中 TOP5</span></div>
         <div v-if="!topRules.length" class="empty"><div class="empty-icon">🎯</div>暂无命中数据</div>
         <div v-else>
           <div class="hbar-row" v-for="(r, i) in topRules" :key="r.name">
+            <span class="hbar-rank">#{{ i + 1 }}</span>
             <span class="hbar-name" :title="r.name">{{ r.name }}</span>
             <div class="hbar-track">
-              <div class="hbar-fill" :style="{ width: Math.max(5, r.pct) + '%', background: barColors[i % barColors.length] }">{{ r.hits }}</div>
+              <div class="hbar-fill hbar-fill-anim" :style="{ '--target-w': Math.max(5, r.pct) + '%', background: barColors[i % barColors.length] }">{{ r.hits }}</div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Heatmap -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><span class="card-icon">🔥</span><span class="card-title">7 天攻击频率热力图</span></div>
+      <div v-if="!heatmapData.length" class="empty"><div class="empty-icon">🔥</div>暂无热力图数据</div>
+      <HeatMap v-else :data="heatmapData" title="" />
+    </div>
+
+    <!-- Recent Attacks -->
+    <div class="card">
+      <div class="card-header"><span class="card-icon">🚨</span><span class="card-title">最近攻击事件</span></div>
+      <div v-if="!recentAttacks.length" class="empty"><div class="empty-icon">✅</div>暂无攻击事件<div class="empty-hint">系统安全运行中</div></div>
+      <div v-else class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr v-for="a in recentAttacks" :key="a.id" class="row-block" style="cursor:pointer" @click="$router.push('/audit')">
+              <td>{{ fmtTime(a.timestamp || a.time) }}</td>
+              <td>{{ a.direction === 'inbound' ? '入站' : '出站' }}</td>
+              <td>{{ a.sender_id || '--' }}</td>
+              <td>{{ a.reason || '--' }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -67,14 +90,21 @@
 import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
 import StatCard from '../components/StatCard.vue'
+import TrendChart from '../components/TrendChart.vue'
+import PieChart from '../components/PieChart.vue'
+import HeatMap from '../components/HeatMap.vue'
 
 const appState = inject('appState')
 const barColors = ['#00d4ff', '#00ff88', '#ffcc00', '#ff4466', '#9b59b6']
+const pieColors = ['#ff4466', '#ffa94d', '#00d4ff', '#00ff88', '#9b59b6', '#74c0fc', '#e599f7', '#ffcc00']
 
 const stats = ref({ total: '--', blocked: '--', warned: '--', rate: '--' })
 const trendData = ref([])
+const trendRange = ref('24h')
 const recentAttacks = ref([])
 const topRules = ref([])
+const pieData = ref([])
+const heatmapData = ref([])
 
 function fmtTime(ts) {
   if (!ts) return '--'
@@ -103,46 +133,44 @@ const healthBars = computed(() => {
   return result
 })
 
-const trendSvg = computed(() => {
-  const tl = trendData.value
-  if (!tl.length) return ''
-  const W = 600, H = 140, PX = 40, PY = 10, GW = W - PX * 2, GH = H - PY * 2
-  let maxV = 1
-  for (const t of tl) { const s = (t.pass || 0) + (t.block || 0) + (t.warn || 0); if (s > maxV) maxV = s }
-
-  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:160px" xmlns="http://www.w3.org/2000/svg">`
-  // Grid
-  for (let g = 0; g <= 4; g++) {
-    const gy = PY + GH * g / 4
-    svg += `<line x1="${PX}" y1="${gy}" x2="${W - PX}" y2="${gy}" stroke="rgba(255,255,255,0.06)" stroke-width="0.5"/>`
-    svg += `<text x="${PX - 4}" y="${gy + 4}" fill="#8892b0" font-size="8" text-anchor="end">${Math.round(maxV * (4 - g) / 4)}</text>`
-  }
-  // X labels
-  const step = Math.max(1, Math.floor(tl.length / 6))
-  for (let i = 0; i < tl.length; i += step) {
-    const x = PX + (i / (tl.length - 1 || 1)) * GW
-    const hr = tl[i].hour ? tl[i].hour.substring(11, 13) : ''
-    svg += `<text x="${x}" y="${H - 2}" fill="#8892b0" font-size="8" text-anchor="middle">${hr}h</text>`
-  }
-  // Total line
-  const totalPts = tl.map((t, i) => {
-    const tot = (t.pass || 0) + (t.block || 0) + (t.warn || 0)
-    const x = PX + (i / (tl.length - 1 || 1)) * GW
-    const y = PY + GH - (tot / maxV) * GH
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-  svg += `<polyline points="${totalPts}" fill="none" stroke="#00d4ff" stroke-width="2" stroke-linejoin="round" opacity="0.8"/>`
-  // Block line
-  const blockPts = tl.map((t, i) => {
-    const x = PX + (i / (tl.length - 1 || 1)) * GW
-    const y = PY + GH - ((t.block || 0) / maxV) * GH
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-  svg += `<polyline points="${blockPts}" fill="none" stroke="#ff4466" stroke-width="1.5" stroke-linejoin="round" opacity="0.7"/>`
-  svg += '</svg>'
-  svg += '<div style="display:flex;gap:12px;margin-top:4px;font-size:.65rem;color:var(--text-dim)"><span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-blue);border-radius:2px;margin-right:2px"></span>总请求</span><span><span style="display:inline-block;width:8px;height:8px;background:var(--neon-red);border-radius:2px;margin-right:2px"></span>拦截</span></div>'
-  return svg
+// Trend chart data
+const trendChartData = computed(() => {
+  return trendData.value.map(t => ({
+    total: (t.pass || 0) + (t.block || 0) + (t.warn || 0),
+    block: t.block || 0,
+    warn: t.warn || 0,
+  }))
 })
+
+const trendLines = [
+  { key: 'total', color: '#00d4ff', label: '总请求' },
+  { key: 'block', color: '#ff4466', label: '拦截' },
+  { key: 'warn', color: '#ffcc00', label: '告警' },
+]
+
+const trendXLabels = computed(() => {
+  return trendData.value.map(t => {
+    const h = t.hour || ''
+    if (trendRange.value === '7d') {
+      // Show date for 7d
+      return h.substring(5, 10) + '\n' + h.substring(11, 13) + 'h'
+    }
+    return h.substring(11, 13) + 'h'
+  })
+})
+
+function onTrendRangeChange(range) {
+  trendRange.value = range
+  loadTrend()
+}
+
+async function loadTrend() {
+  try {
+    const hours = trendRange.value === '7d' ? 168 : 24
+    const d = await api('/api/v1/audit/timeline?hours=' + hours)
+    trendData.value = d.timeline || []
+  } catch { trendData.value = [] }
+}
 
 async function loadData() {
   try {
@@ -158,10 +186,7 @@ async function loadData() {
     stats.value = { total, blocked, warned, rate: rate + '%' }
   } catch { /* ignore */ }
 
-  try {
-    const d = await api('/api/v1/audit/timeline?hours=24')
-    trendData.value = d.timeline || []
-  } catch { trendData.value = [] }
+  await loadTrend()
 
   try {
     const d = await api('/api/v1/audit/logs?action=block&limit=5')
@@ -175,7 +200,43 @@ async function loadData() {
     const top = list.slice(0, 5)
     const maxH = top.length ? (top[0].hits || 1) : 1
     topRules.value = top.map(r => ({ ...r, pct: (r.hits / maxH) * 100 }))
-  } catch { topRules.value = [] }
+
+    // Build pie data from groups
+    const groupMap = {}
+    for (const r of list) {
+      const g = r.group || 'other'
+      if (!groupMap[g]) groupMap[g] = 0
+      groupMap[g] += r.hits || 0
+    }
+    const groups = Object.entries(groupMap).sort((a, b) => b[1] - a[1])
+    pieData.value = groups.map(([label, value], i) => ({
+      label,
+      value,
+      color: pieColors[i % pieColors.length],
+    }))
+  } catch {
+    topRules.value = []
+    pieData.value = []
+  }
+
+  // Load heatmap data (7d × 24h)
+  try {
+    const d = await api('/api/v1/audit/timeline?hours=168')
+    const tl = d.timeline || []
+    // Aggregate into 7×24 matrix
+    const matrix = Array.from({ length: 7 }, () => Array(24).fill(0))
+    const now = new Date()
+    for (const t of tl) {
+      if (!t.hour) continue
+      const dt = new Date(t.hour)
+      if (isNaN(dt.getTime())) continue
+      const diffDays = Math.floor((now - dt) / 86400000)
+      const dayIdx = 6 - Math.min(6, diffDays)
+      const hourIdx = dt.getHours()
+      matrix[dayIdx][hourIdx] += (t.block || 0) + (t.warn || 0)
+    }
+    heatmapData.value = matrix
+  } catch { heatmapData.value = [] }
 }
 
 let refreshTimer = null
@@ -185,3 +246,17 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(refreshTimer))
 </script>
+
+<style scoped>
+.hbar-rank {
+  width: 24px; font-size: .72rem; color: var(--neon-blue); font-weight: 700; text-align: center; flex-shrink: 0;
+}
+.hbar-fill-anim {
+  width: 0;
+  animation: hbar-grow .8s ease-out forwards;
+}
+@keyframes hbar-grow {
+  from { width: 0; }
+  to { width: var(--target-w); }
+}
+</style>
