@@ -19,7 +19,7 @@ func setupTestLLMAuditor(t *testing.T) (*LLMAuditor, *sql.DB) {
 		LogToolResult: true,
 		MaxPreviewLen: 500,
 	}
-	auditor := NewLLMAuditor(db, cfg)
+	auditor := NewLLMAuditor(db, cfg, nil)
 	return auditor, db
 }
 

@@ -90,8 +90,86 @@
       </div>
     </div>
 
+    <!-- LLM 代理配置 -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2"/></svg></span>
+        <span class="card-title">LLM 代理配置</span>
+      </div>
+      <Skeleton v-if="llmConfigLoading" type="text" />
+      <div v-else-if="!llmConfig" style="color:var(--text-tertiary);font-size:var(--text-sm)">
+        LLM 代理未启用 · <a href="https://github.com/lobster-guard/docs/llm-proxy" target="_blank" style="color:var(--color-primary)">查看文档</a>
+      </div>
+      <div v-else>
+        <!-- 启用状态 & 监听端口 -->
+        <div class="llm-row">
+          <span class="llm-label">启用状态</span>
+          <span class="llm-val">
+            <span class="dot dot-sm" :class="llmConfig.enabled ? 'dot-healthy' : 'dot-unhealthy'"></span>
+            {{ llmConfig.enabled ? '已启用' : '未启用' }}
+          </span>
+        </div>
+        <div class="llm-row">
+          <span class="llm-label">监听端口</span>
+          <span class="llm-val" style="font-family:var(--font-mono)">{{ llmConfig.listen || '--' }}</span>
+        </div>
+
+        <!-- 上游目标 -->
+        <div class="llm-section-title">上游目标</div>
+        <div v-if="llmConfig.targets && llmConfig.targets.length" class="llm-targets">
+          <div v-for="t in llmConfig.targets" :key="t.name" class="llm-target-row">
+            <code>{{ t.name }}</code>
+            <span style="color:var(--text-tertiary)">{{ t.upstream }}</span>
+            <span class="llm-tag">{{ t.api_key_header }}</span>
+          </div>
+        </div>
+        <div v-else style="color:var(--text-tertiary);font-size:var(--text-sm)">无上游目标</div>
+
+        <!-- 审计配置 -->
+        <div class="llm-section-title">审计配置</div>
+        <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_input" /> 记录工具调用输入</label>
+        <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_result" /> 记录工具调用结果</label>
+        <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_system_prompt" /> 记录 System Prompt</label>
+        <div class="llm-row" style="margin-top:8px">
+          <span class="llm-label">摘要长度</span>
+          <input type="number" v-model.number="llmConfig.audit.max_preview_len" class="llm-input-sm" min="100" max="5000" /> <span class="llm-hint">字符</span>
+        </div>
+
+        <!-- 成本预警 -->
+        <div class="llm-section-title">成本预警</div>
+        <div class="llm-row">
+          <span class="llm-label">日限额</span>
+          <span class="llm-hint" style="margin-right:4px">$</span>
+          <input type="number" v-model.number="llmConfig.cost_alert.daily_limit_usd" class="llm-input-sm" min="0" step="5" /> <span class="llm-hint">USD</span>
+        </div>
+        <div class="llm-row">
+          <span class="llm-label">Webhook</span>
+          <input type="text" v-model="llmConfig.cost_alert.webhook_url" class="llm-input" placeholder="https://..." />
+        </div>
+
+        <!-- 安全策略 -->
+        <div class="llm-section-title">安全策略</div>
+        <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.scan_pii_in_response" /> 扫描响应中的 PII</label>
+        <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.prompt_injection_scan" /> 扫描请求中的 Prompt Injection</label>
+        <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.block_high_risk_tools" /> 拦截高危工具调用</label>
+        <div class="llm-row" style="margin-top:8px">
+          <span class="llm-label">高危工具</span>
+          <input type="text" v-model="highRiskToolsStr" class="llm-input" placeholder="exec, shell, bash" />
+        </div>
+
+        <!-- 保存按钮 -->
+        <div style="margin-top:var(--space-4);display:flex;align-items:center;gap:var(--space-3)">
+          <button class="btn btn-sm" @click="saveLLMConfig" :disabled="llmSaving">
+            {{ llmSaving ? '保存中...' : '保存配置' }}
+          </button>
+          <span class="llm-restart-hint">⚠️ 部分变更需重启生效</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Backups -->
     <div class="card" style="margin-bottom:20px">
+
       <div class="card-header">
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span><span class="card-title">备份管理</span>
         <div class="card-actions">
@@ -129,7 +207,7 @@
 
 <script setup>
 import { ref, computed, inject, onMounted } from 'vue'
-import { api, apiPost, apiDelete, saveToken, clearToken, getToken } from '../api.js'
+import { api, apiPost, apiPut, apiDelete, saveToken, clearToken, getToken } from '../api.js'
 import { showToast, updateHealth } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
@@ -150,6 +228,19 @@ const confirmTitle = ref('')
 const confirmMessage = ref('')
 const confirmType = ref('danger')
 let confirmAction = null
+
+// LLM 代理配置
+const llmConfigLoading = ref(true)
+const llmConfig = ref(null)
+const llmSaving = ref(false)
+const highRiskToolsStr = computed({
+  get: () => llmConfig.value?.security?.high_risk_tool_list?.join(', ') || '',
+  set: (v) => {
+    if (llmConfig.value?.security) {
+      llmConfig.value.security.high_risk_tool_list = v.split(',').map(s => s.trim()).filter(Boolean)
+    }
+  }
+})
 
 const backupColumns = [
   { key: 'name', label: '文件名', sortable: true },
@@ -280,7 +371,39 @@ function confirmDeleteBackup(row) {
 
 function doConfirm() { confirmVisible.value = false; if (confirmAction) confirmAction() }
 
-onMounted(() => { loadBackups() })
+// LLM 配置管理
+async function loadLLMConfig() {
+  llmConfigLoading.value = true
+  try {
+    const d = await api('/api/v1/llm/config')
+    // 确保所有嵌套对象存在
+    if (!d.audit) d.audit = { log_system_prompt: false, log_tool_input: true, log_tool_result: true, max_preview_len: 500 }
+    if (!d.cost_alert) d.cost_alert = { daily_limit_usd: 50, webhook_url: '' }
+    if (!d.security) d.security = { scan_pii_in_response: true, block_high_risk_tools: false, high_risk_tool_list: ['exec','shell','bash'], prompt_injection_scan: true }
+    llmConfig.value = d
+  } catch {
+    llmConfig.value = null
+  }
+  llmConfigLoading.value = false
+}
+
+async function saveLLMConfig() {
+  if (!llmConfig.value) return
+  llmSaving.value = true
+  try {
+    const d = await apiPut('/api/v1/llm/config', llmConfig.value)
+    if (d.need_restart) {
+      showToast('配置已保存（部分变更需重启生效）', 'success')
+    } else {
+      showToast('LLM 配置已保存', 'success')
+    }
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error')
+  }
+  llmSaving.value = false
+}
+
+onMounted(() => { loadBackups(); loadLLMConfig() })
 </script>
 
 <style scoped>
@@ -313,4 +436,41 @@ onMounted(() => { loadBackups() })
 .token-actions {
   display: flex; gap: var(--space-2); margin-top: var(--space-3);
 }
+/* LLM 配置区样式 */
+.llm-row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 6px; font-size: var(--text-sm); }
+.llm-label { color: var(--text-secondary); min-width: 80px; flex-shrink: 0; }
+.llm-val { color: var(--text-primary); display: flex; align-items: center; gap: var(--space-1); }
+.llm-section-title {
+  font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-tertiary); margin: 16px 0 8px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.llm-targets { display: flex; flex-direction: column; gap: 4px; }
+.llm-target-row {
+  display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm);
+  padding: 4px 8px; background: var(--bg-elevated); border-radius: var(--radius-sm);
+}
+.llm-target-row code { background: var(--bg-base); padding: 1px 6px; border-radius: 3px; font-size: var(--text-xs); font-family: var(--font-mono); color: var(--color-primary); }
+.llm-tag { font-size: 10px; padding: 1px 6px; border-radius: 9999px; background: rgba(99,102,241,0.12); color: var(--color-primary); }
+.llm-checkbox {
+  display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-primary);
+  cursor: pointer; margin-bottom: 4px;
+}
+.llm-checkbox input[type="checkbox"] {
+  accent-color: var(--color-primary); width: 16px; height: 16px; cursor: pointer;
+}
+.llm-input-sm {
+  width: 80px; background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm); color: var(--text-primary);
+  padding: 4px 8px; font-size: var(--text-sm); outline: none; font-family: var(--font-mono);
+}
+.llm-input-sm:focus { border-color: var(--color-primary); }
+.llm-input {
+  flex: 1; max-width: 320px; background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm); color: var(--text-primary);
+  padding: 4px 8px; font-size: var(--text-sm); outline: none;
+}
+.llm-input:focus { border-color: var(--color-primary); }
+.llm-hint { font-size: var(--text-xs); color: var(--text-tertiary); }
+.llm-restart-hint { font-size: var(--text-xs); color: var(--color-warning); }
 </style>

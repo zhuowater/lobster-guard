@@ -222,7 +222,7 @@ func main() {
 	var llmAuditor *LLMAuditor
 	var llmProxy *LLMProxy
 	if cfg.LLMProxy.Enabled {
-		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig)
+		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)
 		llmProxy = NewLLMProxy(cfg.LLMProxy, llmAuditor)
 		go func() {
 			if err := llmProxy.Start(); err != nil {

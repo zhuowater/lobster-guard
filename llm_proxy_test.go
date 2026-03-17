@@ -22,7 +22,7 @@ func setupTestLLMProxy(t *testing.T, handler http.HandlerFunc) (*LLMProxy, *sql.
 		LogToolResult: true,
 		MaxPreviewLen: 500,
 	}
-	auditor := NewLLMAuditor(db, cfg)
+	auditor := NewLLMAuditor(db, cfg, nil)
 
 	// Mock upstream
 	upstream := httptest.NewServer(handler)
@@ -165,7 +165,7 @@ func TestLLMProxy_NoTarget(t *testing.T) {
 	}
 	defer db.Close()
 
-	auditor := NewLLMAuditor(db, LLMAuditConfig{MaxPreviewLen: 500})
+	auditor := NewLLMAuditor(db, LLMAuditConfig{MaxPreviewLen: 500}, nil)
 	proxy := NewLLMProxy(LLMProxyConfig{
 		Enabled: true,
 		Listen:  ":0",

@@ -265,25 +265,33 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDownloadBackup(w, r)
 	// v9.0 LLM 侧安全审计 API
 	case strings.HasPrefix(path, "/api/v1/llm/"):
-		if api.llmAuditor == nil {
-			jsonResponse(w, 404, map[string]string{"error": "LLM proxy not enabled"})
-			return
-		}
+		// LLM config 端点不需要 llmAuditor（即使 LLM 未启用也要能读写配置）
 		switch {
-		case path == "/api/v1/llm/status" && method == "GET":
-			api.handleLLMStatus(w, r)
-		case path == "/api/v1/llm/overview" && method == "GET":
-			api.handleLLMOverview(w, r)
-		case path == "/api/v1/llm/calls" && method == "GET":
-			api.handleLLMCalls(w, r)
-		case path == "/api/v1/llm/tools" && method == "GET":
-			api.handleLLMTools(w, r)
-		case path == "/api/v1/llm/tools/stats" && method == "GET":
-			api.handleLLMToolStats(w, r)
-		case path == "/api/v1/llm/tools/timeline" && method == "GET":
-			api.handleLLMToolTimeline(w, r)
+		case path == "/api/v1/llm/config" && method == "GET":
+			api.handleLLMConfigGet(w, r)
+		case path == "/api/v1/llm/config" && method == "PUT":
+			api.handleLLMConfigPut(w, r)
 		default:
-			w.WriteHeader(404)
+			if api.llmAuditor == nil {
+				jsonResponse(w, 404, map[string]string{"error": "LLM proxy not enabled"})
+				return
+			}
+			switch {
+			case path == "/api/v1/llm/status" && method == "GET":
+				api.handleLLMStatus(w, r)
+			case path == "/api/v1/llm/overview" && method == "GET":
+				api.handleLLMOverview(w, r)
+			case path == "/api/v1/llm/calls" && method == "GET":
+				api.handleLLMCalls(w, r)
+			case path == "/api/v1/llm/tools" && method == "GET":
+				api.handleLLMTools(w, r)
+			case path == "/api/v1/llm/tools/stats" && method == "GET":
+				api.handleLLMToolStats(w, r)
+			case path == "/api/v1/llm/tools/timeline" && method == "GET":
+				api.handleLLMToolTimeline(w, r)
+			default:
+				w.WriteHeader(404)
+			}
 		}
 	default:
 		w.WriteHeader(404)
@@ -2346,6 +2354,186 @@ func (api *ManagementAPI) handleLLMToolTimeline(w http.ResponseWriter, r *http.R
 	}
 	if timeline == nil { timeline = []map[string]interface{}{} }
 	jsonResponse(w, 200, map[string]interface{}{"timeline": timeline, "hours": hours})
+}
+
+// handleLLMConfigGet GET /api/v1/llm/config — 获取 LLM 代理完整配置（脱敏）
+func (api *ManagementAPI) handleLLMConfigGet(w http.ResponseWriter, r *http.Request) {
+	cfg := api.cfg.LLMProxy
+	// 脱敏: targets 中不返回 API key 值（header 名可以返回）
+	targets := make([]map[string]interface{}, len(cfg.Targets))
+	for i, t := range cfg.Targets {
+		targets[i] = map[string]interface{}{
+			"name":           t.Name,
+			"upstream":       t.Upstream,
+			"path_prefix":    t.PathPrefix,
+			"api_key_header": t.APIKeyHeader,
+		}
+	}
+	result := map[string]interface{}{
+		"enabled": cfg.Enabled,
+		"listen":  cfg.Listen,
+		"targets": targets,
+		"audit": map[string]interface{}{
+			"log_system_prompt": cfg.AuditConfig.LogSystemPrompt,
+			"log_tool_input":    cfg.AuditConfig.LogToolInput,
+			"log_tool_result":   cfg.AuditConfig.LogToolResult,
+			"max_preview_len":   cfg.AuditConfig.MaxPreviewLen,
+		},
+		"timeout_sec": cfg.TimeoutSec,
+		"cost_alert": map[string]interface{}{
+			"daily_limit_usd": cfg.CostAlert.DailyLimitUSD,
+			"webhook_url":     cfg.CostAlert.WebhookURL,
+		},
+		"security": map[string]interface{}{
+			"scan_pii_in_response":  cfg.Security.ScanPIIInResponse,
+			"block_high_risk_tools": cfg.Security.BlockHighRiskTools,
+			"high_risk_tool_list":   cfg.Security.HighRiskToolList,
+			"prompt_injection_scan": cfg.Security.PromptInjectionScan,
+		},
+	}
+	jsonResponse(w, 200, result)
+}
+
+// handleLLMConfigPut PUT /api/v1/llm/config — 更新 LLM 代理配置（写回 config.yaml）
+func (api *ManagementAPI) handleLLMConfigPut(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled    *bool `json:"enabled"`
+		Listen     string `json:"listen"`
+		Audit      *struct {
+			LogSystemPrompt *bool `json:"log_system_prompt"`
+			LogToolInput    *bool `json:"log_tool_input"`
+			LogToolResult   *bool `json:"log_tool_result"`
+			MaxPreviewLen   *int  `json:"max_preview_len"`
+		} `json:"audit"`
+		TimeoutSec *int `json:"timeout_sec"`
+		CostAlert  *struct {
+			DailyLimitUSD *float64 `json:"daily_limit_usd"`
+			WebhookURL    *string  `json:"webhook_url"`
+		} `json:"cost_alert"`
+		Security *struct {
+			ScanPIIInResponse   *bool    `json:"scan_pii_in_response"`
+			BlockHighRiskTools  *bool    `json:"block_high_risk_tools"`
+			HighRiskToolList    []string `json:"high_risk_tool_list"`
+			PromptInjectionScan *bool    `json:"prompt_injection_scan"`
+		} `json:"security"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+
+	// 更新内存配置
+	cfg := &api.cfg.LLMProxy
+	needRestart := false
+	if req.Enabled != nil && *req.Enabled != cfg.Enabled {
+		cfg.Enabled = *req.Enabled
+		needRestart = true
+	}
+	if req.Listen != "" && req.Listen != cfg.Listen {
+		cfg.Listen = req.Listen
+		needRestart = true
+	}
+	if req.Audit != nil {
+		if req.Audit.LogSystemPrompt != nil { cfg.AuditConfig.LogSystemPrompt = *req.Audit.LogSystemPrompt }
+		if req.Audit.LogToolInput != nil { cfg.AuditConfig.LogToolInput = *req.Audit.LogToolInput }
+		if req.Audit.LogToolResult != nil { cfg.AuditConfig.LogToolResult = *req.Audit.LogToolResult }
+		if req.Audit.MaxPreviewLen != nil { cfg.AuditConfig.MaxPreviewLen = *req.Audit.MaxPreviewLen }
+	}
+	if req.TimeoutSec != nil { cfg.TimeoutSec = *req.TimeoutSec }
+	if req.CostAlert != nil {
+		if req.CostAlert.DailyLimitUSD != nil { cfg.CostAlert.DailyLimitUSD = *req.CostAlert.DailyLimitUSD }
+		if req.CostAlert.WebhookURL != nil { cfg.CostAlert.WebhookURL = *req.CostAlert.WebhookURL }
+	}
+	if req.Security != nil {
+		if req.Security.ScanPIIInResponse != nil { cfg.Security.ScanPIIInResponse = *req.Security.ScanPIIInResponse }
+		if req.Security.BlockHighRiskTools != nil { cfg.Security.BlockHighRiskTools = *req.Security.BlockHighRiskTools }
+		if req.Security.HighRiskToolList != nil { cfg.Security.HighRiskToolList = req.Security.HighRiskToolList }
+		if req.Security.PromptInjectionScan != nil { cfg.Security.PromptInjectionScan = *req.Security.PromptInjectionScan }
+	}
+
+	// 同步更新 llmAuditor 的审计配置
+	if api.llmAuditor != nil && req.Audit != nil {
+		api.llmAuditor.cfg = cfg.AuditConfig
+	}
+
+	// 写回 config.yaml
+	if err := api.saveLLMConfig(); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("[LLM配置] 配置已更新并写回 %s", api.cfgPath)
+	result := map[string]interface{}{
+		"status":       "ok",
+		"need_restart": needRestart,
+	}
+	if needRestart {
+		result["message"] = "部分配置变更（enabled/listen）需要重启服务生效"
+	}
+	jsonResponse(w, 200, result)
+}
+
+// saveLLMConfig 将 LLM 代理配置写回 config.yaml
+func (api *ManagementAPI) saveLLMConfig() error {
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("解析配置文件失败: %w", err)
+	}
+
+	cfg := api.cfg.LLMProxy
+	llmProxy := map[string]interface{}{
+		"enabled":    cfg.Enabled,
+		"listen":     cfg.Listen,
+		"timeout_sec": cfg.TimeoutSec,
+	}
+
+	// targets
+	targets := make([]interface{}, len(cfg.Targets))
+	for i, t := range cfg.Targets {
+		targets[i] = map[string]interface{}{
+			"name":           t.Name,
+			"upstream":       t.Upstream,
+			"path_prefix":    t.PathPrefix,
+			"api_key_header": t.APIKeyHeader,
+		}
+	}
+	llmProxy["targets"] = targets
+
+	// audit
+	llmProxy["audit"] = map[string]interface{}{
+		"log_system_prompt": cfg.AuditConfig.LogSystemPrompt,
+		"log_tool_input":    cfg.AuditConfig.LogToolInput,
+		"log_tool_result":   cfg.AuditConfig.LogToolResult,
+		"max_preview_len":   cfg.AuditConfig.MaxPreviewLen,
+	}
+
+	// cost_alert
+	llmProxy["cost_alert"] = map[string]interface{}{
+		"daily_limit_usd": cfg.CostAlert.DailyLimitUSD,
+		"webhook_url":     cfg.CostAlert.WebhookURL,
+	}
+
+	// security
+	llmProxy["security"] = map[string]interface{}{
+		"scan_pii_in_response":  cfg.Security.ScanPIIInResponse,
+		"block_high_risk_tools": cfg.Security.BlockHighRiskTools,
+		"high_risk_tool_list":   cfg.Security.HighRiskToolList,
+		"prompt_injection_scan": cfg.Security.PromptInjectionScan,
+	}
+
+	raw["llm_proxy"] = llmProxy
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %w", err)
+	}
+	return nil
 }
 
 // writeV51Metrics 写入 v5.1 Prometheus 指标

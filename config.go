@@ -22,7 +22,23 @@ type LLMProxyConfig struct {
 	Targets      []LLMTargetConfig `yaml:"targets" json:"targets"`
 	AuditConfig  LLMAuditConfig    `yaml:"audit" json:"audit"`
 	TimeoutSec   int               `yaml:"timeout_sec" json:"timeout_sec"`
-	MaxBodyBytes int64             `yaml:"max_body_bytes" json:"max_body_bytes"`
+	MaxBodyBytes int64             `yaml:"max_body_bytes" json:"max_body_bytes,omitempty"`
+	CostAlert    LLMCostAlertConfig `yaml:"cost_alert" json:"cost_alert"`
+	Security     LLMSecurityConfig  `yaml:"security" json:"security"`
+}
+
+// LLMCostAlertConfig LLM 成本预警配置（v9.1）
+type LLMCostAlertConfig struct {
+	DailyLimitUSD float64 `yaml:"daily_limit_usd" json:"daily_limit_usd"`
+	WebhookURL    string  `yaml:"webhook_url" json:"webhook_url"`
+}
+
+// LLMSecurityConfig LLM 安全策略配置（v9.1）
+type LLMSecurityConfig struct {
+	ScanPIIInResponse   bool     `yaml:"scan_pii_in_response" json:"scan_pii_in_response"`
+	BlockHighRiskTools  bool     `yaml:"block_high_risk_tools" json:"block_high_risk_tools"`
+	HighRiskToolList    []string `yaml:"high_risk_tool_list" json:"high_risk_tool_list"`
+	PromptInjectionScan bool     `yaml:"prompt_injection_scan" json:"prompt_injection_scan"`
 }
 
 // LLMTargetConfig LLM 上游配置
