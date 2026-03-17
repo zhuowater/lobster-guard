@@ -195,8 +195,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleGetUser(w, r)
 	case path == "/api/v1/route-policies" && method == "GET":
 		api.handleListRoutePolicies(w, r)
+	case path == "/api/v1/route-policies" && method == "POST":
+		api.handleCreateRoutePolicy(w, r)
 	case path == "/api/v1/route-policies/test" && method == "POST":
 		api.handleTestRoutePolicy(w, r)
+	case strings.HasPrefix(path, "/api/v1/route-policies/") && method == "PUT":
+		api.handleUpdateRoutePolicy(w, r)
+	case strings.HasPrefix(path, "/api/v1/route-policies/") && method == "DELETE":
+		api.handleDeleteRoutePolicy(w, r)
 	// v3.11 规则绑定 API
 	case path == "/api/v1/rule-bindings" && method == "GET":
 		api.handleListRuleBindings(w, r)
@@ -890,6 +896,142 @@ func (api *ManagementAPI) handleTestRoutePolicy(w http.ResponseWriter, r *http.R
 		"upstream_id":  policy.UpstreamID,
 		"user_info":    info,
 	})
+}
+
+// saveRoutePolicies 将策略列表写回 config.yaml（读取→修改 route_policies 字段→写回）
+func (api *ManagementAPI) saveRoutePolicies(policies []RoutePolicyConfig) error {
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	// 转换为 []interface{} 以保证 yaml marshal 正确
+	policyList := make([]interface{}, len(policies))
+	for i, p := range policies {
+		m := map[string]interface{}{}
+		match := map[string]interface{}{}
+		if p.Match.Department != "" {
+			match["department"] = p.Match.Department
+		}
+		if p.Match.EmailSuffix != "" {
+			match["email_suffix"] = p.Match.EmailSuffix
+		}
+		if p.Match.Email != "" {
+			match["email"] = p.Match.Email
+		}
+		if p.Match.AppID != "" {
+			match["app_id"] = p.Match.AppID
+		}
+		if p.Match.Default {
+			match["default"] = true
+		}
+		m["match"] = match
+		m["upstream_id"] = p.UpstreamID
+		policyList[i] = m
+	}
+	raw["route_policies"] = policyList
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %w", err)
+	}
+	log.Printf("[策略路由] 已保存 %d 条策略到 %s", len(policies), api.cfgPath)
+	return nil
+}
+
+// respondPolicies 返回更新后的策略列表（CRUD 共用）
+func (api *ManagementAPI) respondPolicies(w http.ResponseWriter, policies []RoutePolicyConfig) {
+	jsonResponse(w, 200, map[string]interface{}{"policies": policies, "total": len(policies)})
+}
+
+// handleCreateRoutePolicy POST /api/v1/route-policies — 新增策略
+func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	var req RoutePolicyConfig
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if api.policyEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "route policy engine not initialized"})
+		return
+	}
+	// 追加
+	policies := api.policyEng.ListPolicies()
+	policies = append(policies, req)
+	// 更新内存
+	api.policyEng.SetPolicies(policies)
+	// 写回文件
+	if err := api.saveRoutePolicies(policies); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[策略路由] 新增策略: upstream_id=%s", req.UpstreamID)
+	api.respondPolicies(w, policies)
+}
+
+// handleUpdateRoutePolicy PUT /api/v1/route-policies/:index — 修改策略
+func (api *ManagementAPI) handleUpdateRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	// 解析 index
+	idxStr := strings.TrimPrefix(r.URL.Path, "/api/v1/route-policies/")
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid index: " + idxStr})
+		return
+	}
+	var req RoutePolicyConfig
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if api.policyEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "route policy engine not initialized"})
+		return
+	}
+	policies := api.policyEng.ListPolicies()
+	if idx < 0 || idx >= len(policies) {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("policy index %d out of range (total %d)", idx, len(policies))})
+		return
+	}
+	policies[idx] = req
+	api.policyEng.SetPolicies(policies)
+	if err := api.saveRoutePolicies(policies); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[策略路由] 修改策略 #%d: upstream_id=%s", idx, req.UpstreamID)
+	api.respondPolicies(w, policies)
+}
+
+// handleDeleteRoutePolicy DELETE /api/v1/route-policies/:index — 删除策略
+func (api *ManagementAPI) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	idxStr := strings.TrimPrefix(r.URL.Path, "/api/v1/route-policies/")
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid index: " + idxStr})
+		return
+	}
+	if api.policyEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "route policy engine not initialized"})
+		return
+	}
+	policies := api.policyEng.ListPolicies()
+	if idx < 0 || idx >= len(policies) {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("policy index %d out of range (total %d)", idx, len(policies))})
+		return
+	}
+	policies = append(policies[:idx], policies[idx+1:]...)
+	api.policyEng.SetPolicies(policies)
+	if err := api.saveRoutePolicies(policies); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[策略路由] 删除策略 #%d", idx)
+	api.respondPolicies(w, policies)
 }
 
 // ============================================================

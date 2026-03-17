@@ -1060,6 +1060,14 @@ func (rpe *RoutePolicyEngine) ListPolicies() []RoutePolicyConfig {
 	return result
 }
 
+// SetPolicies 替换策略列表（用于 CRUD 操作后更新内存）
+func (rpe *RoutePolicyEngine) SetPolicies(policies []RoutePolicyConfig) {
+	rpe.mu.Lock()
+	defer rpe.mu.Unlock()
+	rpe.policies = make([]RoutePolicyConfig, len(policies))
+	copy(rpe.policies, policies)
+}
+
 // TestMatch 测试某个用户会命中哪条策略
 func (rpe *RoutePolicyEngine) TestMatch(info *UserInfo, appID string) (int, *RoutePolicyConfig, bool) {
 	if info == nil {

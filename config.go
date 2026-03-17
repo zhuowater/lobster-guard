@@ -148,17 +148,17 @@ type StaticUpstreamConfig struct {
 
 // RoutePolicyConfig 路由策略配置（v3.9）
 type RoutePolicyConfig struct {
-	Match      RoutePolicyMatch `yaml:"match"`
-	UpstreamID string           `yaml:"upstream_id"`
+	Match      RoutePolicyMatch `yaml:"match" json:"match"`
+	UpstreamID string           `yaml:"upstream_id" json:"upstream_id"`
 }
 
 // RoutePolicyMatch 策略匹配条件
 type RoutePolicyMatch struct {
-	Department  string `yaml:"department,omitempty"`
-	EmailSuffix string `yaml:"email_suffix,omitempty"`
-	Email       string `yaml:"email,omitempty"`
-	AppID       string `yaml:"app_id,omitempty"`
-	Default     bool   `yaml:"default,omitempty"`
+	Department  string `yaml:"department,omitempty" json:"department,omitempty"`
+	EmailSuffix string `yaml:"email_suffix,omitempty" json:"email_suffix,omitempty"`
+	Email       string `yaml:"email,omitempty" json:"email,omitempty"`
+	AppID       string `yaml:"app_id,omitempty" json:"app_id,omitempty"`
+	Default     bool   `yaml:"default,omitempty" json:"default,omitempty"`
 }
 
 func loadConfig(path string) (*Config, error) {
