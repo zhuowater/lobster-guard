@@ -558,6 +558,27 @@ func main() {
 	}
 	mgmtAPI.evolutionEngine = evolutionEngine
 
+	// v18.3: 自适应决策引擎
+	var adaptiveEngine *AdaptiveDecisionEngine
+	if cfg.AdaptiveDecision.Enabled {
+		adaptiveEngine = NewAdaptiveDecisionEngine(logger.DB(), envelopeMgr, cfg.AdaptiveDecision)
+		fmt.Println("[初始化] ✅ 自适应决策引擎已启用（贝叶斯误伤率优化）")
+	} else {
+		fmt.Println("[初始化] ⚠️ 自适应决策引擎: 未启用")
+	}
+	inbound.adaptiveEngine = adaptiveEngine
+	mgmtAPI.adaptiveEngine = adaptiveEngine
+
+	// v18.3: 奇点蜜罐引擎
+	var singularityEngine *SingularityEngine
+	if cfg.Singularity.Enabled {
+		singularityEngine = NewSingularityEngine(logger.DB(), honeypotEngine, envelopeMgr, cfg.Singularity)
+		fmt.Println("[初始化] ✅ 奇点蜜罐已启用")
+	} else {
+		fmt.Println("[初始化] ⚠️ 奇点蜜罐: 未启用")
+	}
+	mgmtAPI.singularityEngine = singularityEngine
+
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
 	bgScheduler := NewBackgroundScheduler(cfg, attackChainEng, behaviorProfileEng)
 	chainMin := cfg.ChainAnalysisIntervalMin

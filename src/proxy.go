@@ -124,6 +124,8 @@ type InboundProxy struct {
 	envelopeMgr *EnvelopeManager
 	// v18.1 事件总线
 	eventBus *EventBus
+	// v18.3 自适应决策
+	adaptiveEngine *AdaptiveDecisionEngine
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -694,6 +696,16 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	act := detectResult.Action; if act == "" { act = "pass" }
 	_ = eventType
+
+	// v18.3: 自适应决策 — 基于贝叶斯误伤率分析可能降级 block→warn
+	if ip.adaptiveEngine != nil && act == "block" {
+		newAction, proof := ip.adaptiveEngine.ShouldDowngrade(senderID, act)
+		if newAction != act {
+			act = newAction
+			reason = fmt.Sprintf("adaptive_downgrade: P(FP)=%.3f [%.3f,%.3f]", proof.PosteriorMean, proof.PosteriorLower, proof.PosteriorUpper)
+		}
+	}
+
 	ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, traceID)
 
 	// v18.0: 执行信封

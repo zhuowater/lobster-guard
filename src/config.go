@@ -214,6 +214,9 @@ type Config struct {
 	// v19.0 对抗性自进化
 	EvolutionEnabled     bool `yaml:"evolution_enabled"`
 	EvolutionIntervalMin int  `yaml:"evolution_interval_min"` // 默认 360（6小时）
+	// v18.3 自适应决策 + 奇点蜜罐
+	AdaptiveDecision AdaptiveDecisionConfig `yaml:"adaptive_decision"`
+	Singularity      SingularityConfig      `yaml:"singularity"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）

@@ -130,6 +130,9 @@ type ManagementAPI struct {
 	eventBus *EventBus
 	// v19.0 对抗性自进化引擎
 	evolutionEngine *EvolutionEngine
+	// v18.3 自适应决策 + 奇点蜜罐
+	adaptiveEngine    *AdaptiveDecisionEngine
+	singularityEngine *SingularityEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -743,6 +746,32 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v17.0: 态势大屏聚合 API
 	case path == "/api/v1/bigscreen/data" && method == "GET":
 		api.handleBigScreenData(w, r)
+
+	// v18.3: 自适应决策 API
+	case path == "/api/v1/adaptive/stats" && method == "GET":
+		api.handleAdaptiveStats(w, r)
+	case strings.HasPrefix(path, "/api/v1/adaptive/proof/") && method == "GET":
+		api.handleAdaptiveProof(w, r)
+	case path == "/api/v1/adaptive/feedback" && method == "POST":
+		api.handleAdaptiveFeedback(w, r)
+	case path == "/api/v1/adaptive/config" && method == "GET":
+		api.handleAdaptiveConfigGet(w, r)
+	case path == "/api/v1/adaptive/config" && method == "PUT":
+		api.handleAdaptiveConfigPut(w, r)
+
+	// v18.3: 奇点蜜罐 API
+	case path == "/api/v1/singularity/config" && method == "GET":
+		api.handleSingularityConfigGet(w, r)
+	case path == "/api/v1/singularity/config" && method == "PUT":
+		api.handleSingularityConfigPut(w, r)
+	case path == "/api/v1/singularity/templates" && method == "GET":
+		api.handleSingularityTemplates(w, r)
+	case path == "/api/v1/singularity/recommend" && method == "GET":
+		api.handleSingularityRecommend(w, r)
+	case path == "/api/v1/singularity/budget" && method == "GET":
+		api.handleSingularityBudget(w, r)
+	case path == "/api/v1/singularity/history" && method == "GET":
+		api.handleSingularityHistory(w, r)
 
 	// v19.0: 对抗性自进化 API
 	case path == "/api/v1/evolution/run" && method == "POST":
