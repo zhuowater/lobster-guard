@@ -492,6 +492,24 @@ func main() {
 	mgmtAPI.sessionCorrelator = sessionCorrelator // v17.3
 	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
+	// v18.0: 执行信封 — 密码学审计链
+	var envelopeMgr *EnvelopeManager
+	if cfg.EnvelopeEnabled && cfg.EnvelopeSecretKey != "" {
+		envelopeMgr = NewEnvelopeManager(logger.DB(), cfg.EnvelopeSecretKey)
+		fmt.Println("[初始化] ✅ 执行信封已启用（密码学审计链）")
+	} else {
+		fmt.Println("[初始化] ⚠️ 执行信封: 未启用")
+	}
+	// v18.0: 注入执行信封到各数据通道
+	if envelopeMgr != nil {
+		inbound.envelopeMgr = envelopeMgr
+		outbound.envelopeMgr = envelopeMgr
+		if llmProxy != nil {
+			llmProxy.envelopeMgr = envelopeMgr
+		}
+		mgmtAPI.envelopeMgr = envelopeMgr
+	}
+
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
 	bgScheduler := NewBackgroundScheduler(cfg, attackChainEng, behaviorProfileEng)
 	chainMin := cfg.ChainAnalysisIntervalMin

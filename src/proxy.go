@@ -120,6 +120,8 @@ type InboundProxy struct {
 	pipeline        *DetectPipeline
 	// v15.0 蜜罐引擎
 	honeypot *HoneypotEngine
+	// v18.0 执行信封
+	envelopeMgr *EnvelopeManager
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -278,6 +280,11 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			act = "pass"
 		}
 		ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+
+		// v18.0: 执行信封
+		if ip.envelopeMgr != nil {
+			ip.envelopeMgr.Seal(bridgeTraceID, "inbound", msgText, act, detectResult.MatchedRules, senderID)
+		}
 
 		// 指标采集
 		if ip.metrics != nil {
@@ -669,6 +676,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = eventType
 	ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, traceID)
 
+	// v18.0: 执行信封
+	if ip.envelopeMgr != nil {
+		ip.envelopeMgr.Seal(traceID, "inbound", msgText, act, detectResult.MatchedRules, senderID)
+	}
+
 	// 指标采集
 	if ip.metrics != nil {
 		ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
@@ -847,6 +859,8 @@ type OutboundProxy struct {
 	honeypot *HoneypotEngine
 	// v18 出站 trace 关联
 	traceCorrelator *TraceCorrelator
+	// v18.0 执行信封
+	envelopeMgr *EnvelopeManager
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {
@@ -962,6 +976,15 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v3.6 规则命中统计
 	if op.ruleHits != nil && result.RuleName != "" {
 		op.ruleHits.Record(result.RuleName)
+	}
+
+	// v18.0: 执行信封
+	if op.envelopeMgr != nil {
+		var envRules []string
+		if result.RuleName != "" {
+			envRules = []string{result.RuleName}
+		}
+		op.envelopeMgr.Seal(outTraceID, "outbound", text, result.Action, envRules, "")
 	}
 
 	switch result.Action {

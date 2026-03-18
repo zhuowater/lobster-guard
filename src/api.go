@@ -124,6 +124,8 @@ type ManagementAPI struct {
 	layoutStore *LayoutStore
 	// v17.3 会话关联
 	sessionCorrelator *SessionCorrelator
+	// v18.0 执行信封
+	envelopeMgr *EnvelopeManager
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -685,6 +687,18 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleLayoutUpdate(w, r)
 	case strings.HasPrefix(path, "/api/v1/layouts/") && method == "DELETE":
 		api.handleLayoutDelete(w, r)
+
+	// v18.0 执行信封 API
+	case strings.HasPrefix(path, "/api/v1/envelopes/verify/") && method == "GET":
+		api.handleEnvelopeVerify(w, r)
+	case strings.HasPrefix(path, "/api/v1/envelopes/chain/") && method == "GET":
+		api.handleEnvelopeChainVerify(w, r)
+	case path == "/api/v1/envelopes/list" && method == "GET":
+		api.handleEnvelopeList(w, r)
+	case path == "/api/v1/envelopes/stats" && method == "GET":
+		api.handleEnvelopeStats(w, r)
+	case path == "/api/v1/envelopes/config" && method == "PUT":
+		api.handleEnvelopeConfigUpdate(w, r)
 
 	// v18: 概览摘要聚合 API
 	case path == "/api/v1/overview/summary" && method == "GET":

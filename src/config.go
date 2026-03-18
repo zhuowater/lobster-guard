@@ -202,6 +202,9 @@ type Config struct {
 	// v17.3 IM↔LLM 会话关联
 	SessionIdleTimeoutMin      int `yaml:"session_idle_timeout_min"`      // 会话空闲超时（分钟），默认 60。同一用户超过此时间没发新消息则切新会话
 	SessionFPWindowSec         int `yaml:"session_fp_window_sec"`         // 内容指纹匹配窗口（秒），默认 300。LLM 请求在此窗口内匹配 IM 消息指纹
+	// v18.0 执行信封 — 密码学审计链
+	EnvelopeEnabled   bool   `yaml:"envelope_enabled"`    // 开关，默认 false
+	EnvelopeSecretKey string `yaml:"envelope_secret_key"` // HMAC 签名密钥（必须配置才能启用）
 }
 
 // AuthConfig 认证配置（v14.1）

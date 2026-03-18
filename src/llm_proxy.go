@@ -31,6 +31,8 @@ type LLMProxy struct {
 	canaryToken string
 	// v17.3 IM↔LLM 会话关联
 	sessionCorrelator *SessionCorrelator
+	// v18.0 执行信封
+	envelopeMgr *EnvelopeManager
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -166,14 +168,24 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// v10.0: 请求侧规则检测
+	var llmReqDecision string
+	var llmReqRules []string
 	if lp.ruleEngine != nil && len(bodyBytes) > 0 {
 		reqMatches := lp.ruleEngine.CheckRequest(string(bodyBytes))
 		if len(reqMatches) > 0 {
 			action, topMatch := HighestPriorityAction(reqMatches)
+			llmReqDecision = action
+			for _, m := range reqMatches {
+				llmReqRules = append(llmReqRules, m.RuleName)
+			}
 			switch action {
 			case "block":
 				log.Printf("[LLM规则] 请求被阻断: rule=%s category=%s pattern=%q",
 					topMatch.RuleID, topMatch.Category, topMatch.Pattern)
+				// v18.0: 执行信封（block 也要记录）
+				if lp.envelopeMgr != nil {
+					lp.envelopeMgr.Seal(traceID, "llm_request", string(bodyBytes), "block", llmReqRules, "")
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(403)
 				fmt.Fprintf(w, `{"error":"Request blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
@@ -187,6 +199,14 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					topMatch.RuleID, topMatch.Category)
 			}
 		}
+	}
+	// v18.0: 执行信封 — 请求侧（非 block 的也要记录）
+	if lp.envelopeMgr != nil {
+		decision := llmReqDecision
+		if decision == "" {
+			decision = "pass"
+		}
+		lp.envelopeMgr.Seal(traceID, "llm_request", string(bodyBytes), decision, llmReqRules, "")
 	}
 
 	// 构建上游请求
@@ -264,14 +284,24 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// v10.0: 响应侧规则检测
+		var llmRespDecision string
+		var llmRespRules []string
 		if lp.ruleEngine != nil && len(respBody) > 0 {
 			respMatches := lp.ruleEngine.CheckResponse(string(respBody))
 			if len(respMatches) > 0 {
 				action, topMatch := HighestPriorityAction(respMatches)
+				llmRespDecision = action
+				for _, m := range respMatches {
+					llmRespRules = append(llmRespRules, m.RuleName)
+				}
 				switch action {
 				case "block":
 					log.Printf("[LLM规则] 响应被阻断: rule=%s category=%s",
 						topMatch.RuleID, topMatch.Category)
+					// v18.0: 执行信封
+					if lp.envelopeMgr != nil {
+						lp.envelopeMgr.Seal(traceID, "llm_response", string(respBody), "block", llmRespRules, "")
+					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(403)
 					fmt.Fprintf(w, `{"error":"Response blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
@@ -293,6 +323,14 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						topMatch.RuleID, topMatch.Category)
 				}
 			}
+		}
+		// v18.0: 执行信封 — 响应侧（非 block 的也要记录）
+		if lp.envelopeMgr != nil {
+			decision := llmRespDecision
+			if decision == "" {
+				decision = "pass"
+			}
+			lp.envelopeMgr.Seal(traceID, "llm_response", string(respBody), decision, llmRespRules, "")
 		}
 
 		w.WriteHeader(resp.StatusCode)
@@ -331,12 +369,28 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		go func() {
 			respMatches := lp.ruleEngine.CheckResponse(string(eventData))
 			if len(respMatches) > 0 {
-				_, topMatch := HighestPriorityAction(respMatches)
+				action, topMatch := HighestPriorityAction(respMatches)
 				if topMatch != nil {
 					log.Printf("[LLM规则] SSE 响应检测: rule=%s category=%s action=%s (流式模式仅记录)",
 						topMatch.RuleID, topMatch.Category, topMatch.Action)
 				}
+				// v18.0: 执行信封 — SSE 响应侧
+				if lp.envelopeMgr != nil {
+					var rules []string
+					for _, m := range respMatches {
+						rules = append(rules, m.RuleName)
+					}
+					lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), action, rules, "")
+				}
+			} else if lp.envelopeMgr != nil {
+				// 无规则匹配时也记录 pass 信封
+				lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), "pass", nil, "")
 			}
+		}()
+	} else if lp.envelopeMgr != nil && len(eventData) > 0 {
+		// 规则引擎不存在但信封管理器存在
+		go func() {
+			lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), "pass", nil, "")
 		}()
 	}
 
