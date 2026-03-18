@@ -245,7 +245,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		// 白名单检查
 		skipDetect := !ip.enabled || ip.whitelist[senderID] || msgText == ""
 
-		// 安检
+		// 安检（v5.1: 使用 Pipeline 统一编排 keyword→regex→pii→session→llm）
 		var detectResult DetectResult
 		if !skipDetect {
 			ch := make(chan DetectResult, 1)
@@ -255,7 +255,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 						ch <- DetectResult{Action: "pass"}
 					}
 				}()
-				ch <- ip.engine.DetectWithAppID(msgText, appID)
+				ch <- ip.runPipelineDetect(msgText, appID, senderID, bridgeTraceID)
 			}()
 			select {
 			case detectResult = <-ch:
@@ -642,14 +642,14 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 检测（白名单跳过）
+	// 检测（白名单跳过）（v5.1: 使用 Pipeline 统一编排 keyword→regex→pii→session→llm）
 	skipDetect := !ip.enabled || ip.whitelist[senderID] || !decryptOK || msgText == ""
 	var detectResult DetectResult
 	if !skipDetect {
 		ch := make(chan DetectResult, 1)
 		go func() {
 			defer func() { if rv := recover(); rv != nil { ch <- DetectResult{Action: "pass"} } }()
-			ch <- ip.engine.DetectWithAppID(msgText, appID)
+			ch <- ip.runPipelineDetect(msgText, appID, senderID, traceID)
 		}()
 		select {
 		case detectResult = <-ch:
@@ -750,6 +750,56 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v5.0: 包装 ResponseWriter 以在响应中添加 X-Trace-ID
 	tw := &traceResponseWriter{ResponseWriter: w, traceID: traceID, headerWritten: false}
 	proxy.ServeHTTP(tw, r)
+}
+
+// ============================================================
+// Pipeline 检测辅助方法
+// ============================================================
+
+// runPipelineDetect 使用 Pipeline 进行检测，回退到 engine.DetectWithAppID
+// 返回兼容的 DetectResult 以减少对现有代码的侵入
+func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID string) DetectResult {
+	if ip.pipeline != nil {
+		ctx := &DetectContext{
+			Text:     msgText,
+			SenderID: senderID,
+			AppID:    appID,
+			TraceID:  traceID,
+		}
+		pResult := ip.pipeline.Execute(ctx)
+		// 转换 PipelineResult → DetectResult
+		dr := DetectResult{
+			Action:       pResult.FinalAction,
+			MatchedRules: pResult.MatchedRules,
+			PIIs:         pResult.PIIs,
+			Message:      pResult.FinalMessage,
+		}
+		if dr.Action == "" {
+			dr.Action = "pass"
+		}
+		// 收集 reasons
+		for _, sr := range pResult.StageResults {
+			if sr.Detail != "" && sr.Action != "pass" {
+				dr.Reasons = append(dr.Reasons, sr.Detail)
+			}
+		}
+		if pResult.FinalRule != "" && len(dr.Reasons) == 0 {
+			dr.Reasons = []string{pResult.FinalRule}
+		}
+		// 日志: 各阶段耗时
+		if ip.slog != nil {
+			for _, sr := range pResult.StageResults {
+				if sr.Action != "pass" {
+					ip.slog.Info("pipeline", "阶段命中",
+						"stage", sr.StageName, "action", sr.Action,
+						"rule", sr.RuleName, "duration_us", sr.Duration.Microseconds())
+				}
+			}
+		}
+		return dr
+	}
+	// 回退: 直接调用引擎
+	return ip.engine.DetectWithAppID(msgText, appID)
 }
 
 // ============================================================
