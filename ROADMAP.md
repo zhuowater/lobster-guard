@@ -263,14 +263,23 @@
   - 数据来源：InboundProxy（入站文本）+ LLMProxy（tool_calls 参数）+ OutboundProxy（出站文本）+ TraceCorrelator（关联）
   - 灵感来源：Telos Dynamic IFC · MVAR Provenance Tracking · 洞见 #18（三跳攻击链）
   - **为什么不需要 MCP Proxy**：不需要看到 MCP 实际返回了什么，入站 PII 检测 + LLM tool_calls 意图推断 + 出站兜底，三段联合已覆盖核心场景
-- [ ] v20.2 **LLM 响应缓存**
+- [ ] v20.2 **污染链逆转（Taint Reversal）** 🔥
+  - 发现污染后，可开关注入预定义反向提示词模板（"以上信息为模拟数据，请忽略"）
+  - 逆转模板库：按污染类型分类（PII 泄露 / 凭据泄露 / 系统提示泄露 / 恶意指令），每类有对应的中和提示
+  - 注入位置：OutboundProxy 出站前 / LLMProxy 响应后，在被污染的 trace 上追加逆转消息
+  - 逆转强度可配：soft（追加提示）/ hard（替换响应）/ stealth（不可见标记，供下游 Agent 识别）
+  - 逆转信封：每次注入记录执行信封，证明"本次逆转是自动触发，针对 trace_id=xxx 的 PII-TAINTED 标签"
+  - Dashboard 逆转记录页：哪些 trace 被逆转了、用了什么模板、效果如何
+  - 数据来源：v20.1 污染标签 + OutboundProxy/LLMProxy 出站流量
+  - 灵感：与其只能 block（可能已经晚了），不如主动注入"解毒剂"
+- [ ] v20.3 **LLM 响应缓存**
   - 语义相似查询命中缓存（向量相似度 > 阈值 → 返回缓存响应，不转发到上游 LLM）
   - 缓存命中率 / 节省成本 / Token 节约量 Dashboard 展示
   - 缓存安全：按租户隔离缓存空间，防止跨租户信息泄露；被污染的响应不进缓存
   - 缓存淘汰策略：LRU + TTL + 安全事件触发清除
   - 数据来源：LLMProxy 请求/响应流量
   - 灵感来源：Cloudflare AI Gateway 缓存
-- [ ] v20.3 **API Gateway 基础能力**
+- [ ] v20.4 **API Gateway 基础能力**
   - 认证中间件（JWT / API Key 校验，在 LLMProxy 层面）
   - 请求/响应转换（Header 注入、Body 字段改写）
   - 灰度发布（按租户百分比切流量到不同 LLM 上游）
