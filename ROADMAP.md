@@ -166,23 +166,23 @@
 
 > v18-v20 所有功能仅依赖 InboundProxy（IM→OpenClaw）、OutboundProxy（OpenClaw→IM）、LLMProxy（OpenClaw→LLM API）三条已有数据通道，零外部改造
 
-### v18.x — 密码学信任根 · 事件总线 🔥
+### v18.x — 密码学信任根 · 事件总线 ✅
 > 日志不只是记录，是数学证明 | 理论基础：Gödel 不完备定理（安全无法自证→用密码学逼近可证明）
 > 依赖：✅ 纯内部改造（审计层 + 新增 Webhook 出站）
 
-- [ ] v18.0 **执行信封 + 密码学审计链**
+- [x] v18.0 **执行信封 + 密码学审计链 + Merkle Tree**
   - 每个安全决策生成 Execution Envelope（TraceID + RequestHash + Decision + Rules + Nonce + HMAC-SHA256 签名）
   - 审计日志从"我说我记了"变成"数学证明我记了"——不可否认、不可篡改
   - 信封链验证 API：给定 trace_id，验证整条证据链完整性
   - 数据来源：InboundProxy/OutboundProxy/LLMProxy 已有的审计日志，加签名层即可
   - 灵感来源：MVAR Governed Runtime · TrustAgentAI Cryptographic Receipts
-- [ ] v18.1 **Webhook 事件总线 + 动作链**
+- [x] v18.1 **Webhook 事件总线 + 动作链**
   - 安全事件推送到外部系统（SIEM / 钉钉 / 飞书 / Slack / 邮件 / 自定义 URL）
   - 动作链编排：告警 → 触发工作流（发邮件 + 调 API + 创建工单 + 封禁用户）
   - 事件过滤器：按严重级别 / 事件类型 / 租户筛选推送
   - SDK（Go/Python/JS）：第三方系统接入龙虾卫士事件流
   - 数据来源：AlertNotifier 已有告警事件，封装为 Webhook 推送
-- [ ] v18.2 **工程化基础**
+- [x] v18.2 **工程化基础**
   - OpenAPI/Swagger 自动生成（~227 API 全部有 spec）
   - Docker 官方镜像 + docker-compose 一键部署
   - 自身配置安全加固（config.yaml 敏感字段加密存储、API token 轮换机制）
