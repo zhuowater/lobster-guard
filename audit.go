@@ -21,9 +21,11 @@ import (
 // ============================================================
 
 type AuditLogger struct {
-	db   *sql.DB
-	mu   sync.Mutex
-	stmt *sql.Stmt
+	db        *sql.DB
+	mu        sync.Mutex
+	stmt      *sql.Stmt
+	stmtT     *sql.Stmt      // v14.0: 带 tenant_id 的 prepared statement
+	tenantMgr *TenantManager // v14.0: 用于自动解析租户
 }
 
 func NewAuditLogger(db *sql.DB) (*AuditLogger, error) {
@@ -31,7 +33,16 @@ func NewAuditLogger(db *sql.DB) (*AuditLogger, error) {
 		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id,trace_id)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil { return nil, err }
-	return &AuditLogger{db: db, stmt: stmt}, nil
+	// v14.0: 带 tenant_id 的 prepared statement（如果列不存在则不初始化）
+	stmtT, _ := db.Prepare(`INSERT INTO audit_log
+		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id,trace_id,tenant_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+	return &AuditLogger{db: db, stmt: stmt, stmtT: stmtT}, nil
+}
+
+// SetTenantManager 设置租户管理器引用（用于自动解析租户）
+func (al *AuditLogger) SetTenantManager(tm *TenantManager) {
+	al.tenantMgr = tm
 }
 
 func (al *AuditLogger) Log(dir, sender, action, reason, preview, hash string, latMs float64, upstreamID, appID string) {
@@ -43,13 +54,20 @@ func (al *AuditLogger) LogWithTrace(dir, sender, action, reason, preview, hash s
 		defer func() { recover() }()
 		al.mu.Lock(); defer al.mu.Unlock()
 		if rs := []rune(preview); len(rs) > 200 { preview = string(rs[:200]) + "..." }
-		al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, traceID)
+		// v14.0: 自动解析租户
+		if al.tenantMgr != nil && al.stmtT != nil {
+			tenantID := al.tenantMgr.ResolveTenant(sender, appID)
+			al.stmtT.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, traceID, tenantID)
+		} else {
+			al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, traceID)
+		}
 	}()
 }
 
 func (al *AuditLogger) Close() {
 	if al == nil { return }
 	if al.stmt != nil { al.stmt.Close() }
+	if al.stmtT != nil { al.stmtT.Close() }
 }
 
 // DB returns the underlying database handle

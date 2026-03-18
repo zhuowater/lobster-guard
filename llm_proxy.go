@@ -205,6 +205,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	// v14.0: 从请求头提取租户 ID
+	tenantID := r.Header.Get("X-Tenant-Id")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// 审计上下文
 	auditCtx := &LLMAuditContext{
 		TraceID:      traceID,
@@ -212,6 +218,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Model:        model,
 		ReqBody:      bodyBytes,
 		CanaryToken:  activeCanaryToken,
+		TenantID:     tenantID,
 	}
 
 	// 复制响应 headers

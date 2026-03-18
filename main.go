@@ -216,11 +216,11 @@ func main() {
 
 	// v14.0: 初始化租户管理器
 	tenantMgr := NewTenantManager(db)
-	_ = tenantMgr // 传给 ManagementAPI
 
 	logger, err := NewAuditLogger(db)
 	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
+	logger.SetTenantManager(tenantMgr) // v14.0: 审计日志自动解析租户
 
 	// v9.0: LLM 代理（可选）
 	var llmAuditor *LLMAuditor

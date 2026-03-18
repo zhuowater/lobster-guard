@@ -294,6 +294,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleTenantList(w, r)
 	case path == "/api/v1/tenants" && method == "POST":
 		api.handleTenantCreate(w, r)
+	case path == "/api/v1/tenants/resolve" && method == "GET":
+		api.handleTenantResolve(w, r)
+	// v14.0 租户成员 API（必须在通配 tenants/:id GET 之前）
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/members") && method == "GET":
+		api.handleTenantMemberList(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/members") && method == "POST":
+		api.handleTenantMemberAdd(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.Contains(path, "/members/") && method == "DELETE":
+		api.handleTenantMemberDelete(w, r)
+	// v14.0 租户安全配置 API
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/config") && method == "GET":
+		api.handleTenantConfigGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/config") && method == "PUT":
+		api.handleTenantConfigUpdate(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "GET":
 		api.handleTenantGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "PUT":
@@ -2392,7 +2406,52 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 					ts, traceID, model, reqTokens, respTokens, reqTokens+respTokens, 300.0+rng.Float64()*2000.0, seed.tenantID)
 			}
 		}
-		log.Printf("[Demo] 创建了 %d 个演示租户 + 差异化数据", tenantsCreated)
+		// v14.0 闭环: 注入成员映射
+		demoMembers := []struct {
+			tenantID, matchType, matchValue, desc string
+		}{
+			{"security-team", "sender_id", "sec-user-01", "安全员-王刚"},
+			{"security-team", "sender_id", "sec-user-02", "安全员-李明"},
+			{"security-team", "sender_id", "sec-user-03", "安全员-赵强"},
+			{"security-team", "app_id", "bot-security", "安全扫描Bot"},
+			{"security-team", "pattern", "sec-*", "安全部门前缀"},
+			{"product-team", "sender_id", "pm-user-01", "产品-张婷"},
+			{"product-team", "sender_id", "pm-user-02", "产品-刘洋"},
+			{"product-team", "sender_id", "pm-user-03", "产品-陈辉"},
+			{"product-team", "sender_id", "pm-user-04", "产品-孙丽"},
+			{"product-team", "sender_id", "pm-user-05", "产品-周星"},
+			{"product-team", "app_id", "bot-product", "产品助手Bot"},
+			{"product-team", "pattern", "pm-*", "产品部门前缀"},
+		}
+		for _, m := range demoMembers {
+			api.tenantMgr.AddMember(m.tenantID, m.matchType, m.matchValue, m.desc)
+		}
+
+		// v14.0: 注入租户安全配置
+		secCfg := &TenantConfig{
+			TenantID:       "security-team",
+			DisabledRules:  "roleplay_cn,roleplay_en",
+			StrictMode:     true,
+			CanaryEnabled:  true,
+			BudgetEnabled:  true,
+			BudgetMaxTokens: 50000,
+			BudgetMaxTools:  10,
+			ToolBlacklist:  "exec,shell,bash,run_command",
+			AlertLevel:     "medium",
+		}
+		api.tenantMgr.UpdateConfig(secCfg)
+		prodCfg := &TenantConfig{
+			TenantID:       "product-team",
+			DisabledRules:  "sensitive_keywords",
+			StrictMode:     false,
+			CanaryEnabled:  true,
+			BudgetEnabled:  false,
+			ToolBlacklist:  "exec,curl",
+			AlertLevel:     "high",
+		}
+		api.tenantMgr.UpdateConfig(prodCfg)
+
+		log.Printf("[Demo] 创建了 %d 个演示租户 + 成员映射 + 安全配置", tenantsCreated)
 	}
 
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
@@ -4238,5 +4297,141 @@ func (api *ManagementAPI) handleTenantDelete(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// ============================================================
+// v14.0 租户成员映射 API
+// ============================================================
+
+// handleTenantMemberList GET /api/v1/tenants/:id/members — 列出成员映射
+func (api *ManagementAPI) handleTenantMemberList(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	// 从 /api/v1/tenants/xxx/members 提取 xxx
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	id := strings.TrimSuffix(path, "/members")
+	members, err := api.tenantMgr.ListMembers(id)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"members": members, "total": len(members)})
+}
+
+// handleTenantMemberAdd POST /api/v1/tenants/:id/members — 添加成员映射
+func (api *ManagementAPI) handleTenantMemberAdd(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(path, "/members")
+
+	var body struct {
+		MatchType   string `json:"match_type"`
+		MatchValue  string `json:"match_value"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := api.tenantMgr.AddMember(tenantID, body.MatchType, body.MatchValue, body.Description); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "added"})
+}
+
+// handleTenantMemberDelete DELETE /api/v1/tenants/:id/members/:mid — 删除成员映射
+func (api *ManagementAPI) handleTenantMemberDelete(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	// /api/v1/tenants/xxx/members/123
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	parts := strings.SplitN(path, "/members/", 2)
+	if len(parts) != 2 {
+		jsonResponse(w, 400, map[string]string{"error": "invalid path"})
+		return
+	}
+	mid, err := strconv.Atoi(parts[1])
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid member id"})
+		return
+	}
+	if err := api.tenantMgr.RemoveMember(mid); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": mid})
+}
+
+// handleTenantResolve GET /api/v1/tenants/resolve?sender_id=&app_id= — 测试租户解析
+func (api *ManagementAPI) handleTenantResolve(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	senderID := r.URL.Query().Get("sender_id")
+	appID := r.URL.Query().Get("app_id")
+	tenantID := api.tenantMgr.ResolveTenant(senderID, appID)
+	jsonResponse(w, 200, map[string]interface{}{
+		"sender_id": senderID,
+		"app_id":    appID,
+		"tenant_id": tenantID,
+	})
+}
+
+// ============================================================
+// v14.0 租户安全配置 API
+// ============================================================
+
+// handleTenantConfigGet GET /api/v1/tenants/:id/config — 获取租户安全配置
+func (api *ManagementAPI) handleTenantConfigGet(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(path, "/config")
+	if !api.tenantMgr.Exists(tenantID) {
+		jsonResponse(w, 404, map[string]string{"error": "tenant not found"})
+		return
+	}
+	cfg := api.tenantMgr.GetConfig(tenantID)
+	// 附加全局入站规则列表（用于 UI 展示可禁用的规则）
+	var globalRules []string
+	if api.inboundEngine != nil {
+		for _, rc := range api.inboundEngine.GetRuleConfigs() {
+			globalRules = append(globalRules, rc.Name)
+		}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"config": cfg, "global_rules": globalRules})
+}
+
+// handleTenantConfigUpdate PUT /api/v1/tenants/:id/config — 更新租户安全配置
+func (api *ManagementAPI) handleTenantConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(path, "/config")
+
+	var cfg TenantConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	cfg.TenantID = tenantID
+	if err := api.tenantMgr.UpdateConfig(&cfg); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "config": cfg})
 }
 

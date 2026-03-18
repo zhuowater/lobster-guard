@@ -2,7 +2,7 @@
   <div class="tenants-page">
     <div class="page-header">
       <h1 class="page-title">🏢 租户管理</h1>
-      <p class="page-desc">安全域隔离 — 每个租户独立管理 Agent、规则和审计数据</p>
+      <p class="page-desc">安全域隔离 — 每个租户独立管理成员、安全策略和审计数据</p>
       <button class="btn-primary" @click="showCreateModal = true">+ 创建租户</button>
     </div>
 
@@ -30,8 +30,8 @@
             <span class="stat-label">LLM 调用</span>
           </div>
           <div class="stat-item">
-            <span class="stat-value">{{ t.user_count || 0 }}</span>
-            <span class="stat-label">用户</span>
+            <span class="stat-value">{{ t.member_count || 0 }}</span>
+            <span class="stat-label">成员</span>
           </div>
           <div class="stat-item">
             <span class="stat-value">{{ fmtNum(t.block_count || 0) }}</span>
@@ -39,10 +39,100 @@
           </div>
         </div>
 
+        <!-- Tab 切换 -->
+        <div class="card-tabs">
+          <button class="tab-btn" :class="{active: activeTab[t.id] === 'members'}" @click="setTab(t.id, 'members')">📋 成员</button>
+          <button class="tab-btn" :class="{active: activeTab[t.id] === 'security'}" @click="setTab(t.id, 'security'); loadTenantConfig(t.id)">🔒 安全策略</button>
+        </div>
+
+        <!-- 成员映射 Tab -->
+        <div class="card-section" v-if="activeTab[t.id] === 'members'">
+          <div class="section-header">
+            <span class="section-title">成员映射 ({{ (members[t.id] || []).length }})</span>
+            <button class="btn-xs btn-primary" @click="openAddMember(t.id)">+ 添加</button>
+          </div>
+          <div class="member-list" v-if="(members[t.id] || []).length > 0">
+            <div class="member-item" v-for="m in members[t.id]" :key="m.id">
+              <span class="member-icon">{{ m.match_type === 'sender_id' ? '👤' : m.match_type === 'app_id' ? '📱' : '🔣' }}</span>
+              <span class="member-type">{{ matchTypeLabel(m.match_type) }}</span>
+              <span class="member-value">{{ m.match_value }}</span>
+              <span class="member-desc" v-if="m.description">{{ m.description }}</span>
+              <button class="btn-icon btn-danger-icon" @click="removeMember(t.id, m.id)" title="删除">✕</button>
+            </div>
+          </div>
+          <div class="empty-hint" v-else>暂无成员映射，点击"添加"绑定用户到此租户</div>
+        </div>
+
+        <!-- 安全策略 Tab -->
+        <div class="card-section" v-if="activeTab[t.id] === 'security'">
+          <div class="config-section" v-if="tenantConfigs[t.id]">
+            <div class="config-group">
+              <div class="config-group-title">入站规则</div>
+              <div class="config-field">
+                <label>禁用的规则</label>
+                <input class="form-input" v-model="tenantConfigs[t.id].disabled_rules" placeholder="逗号分隔，如 roleplay_cn,roleplay_en" />
+                <div class="field-hint">这些全局规则将对此租户禁用</div>
+              </div>
+            </div>
+            <div class="config-group">
+              <div class="config-group-title">LLM 安全</div>
+              <div class="config-row">
+                <label class="check-label">
+                  <input type="checkbox" v-model="tenantConfigs[t.id].canary_enabled" />
+                  Canary Token 检测
+                </label>
+                <label class="check-label">
+                  <input type="checkbox" v-model="tenantConfigs[t.id].budget_enabled" />
+                  Response Budget
+                </label>
+              </div>
+              <div class="config-row" v-if="tenantConfigs[t.id].budget_enabled">
+                <div class="config-field compact">
+                  <label>Token 上限</label>
+                  <input class="form-input" type="number" v-model.number="tenantConfigs[t.id].budget_max_tokens" placeholder="0=使用全局" />
+                </div>
+                <div class="config-field compact">
+                  <label>工具数上限</label>
+                  <input class="form-input" type="number" v-model.number="tenantConfigs[t.id].budget_max_tools" placeholder="0=使用全局" />
+                </div>
+              </div>
+              <div class="config-field">
+                <label>工具黑名单</label>
+                <input class="form-input" v-model="tenantConfigs[t.id].tool_blacklist" placeholder="逗号分隔，如 exec,shell,curl" />
+              </div>
+            </div>
+            <div class="config-group">
+              <div class="config-group-title">告警</div>
+              <div class="config-row">
+                <div class="config-field compact">
+                  <label>通知阈值</label>
+                  <select class="form-input" v-model="tenantConfigs[t.id].alert_level">
+                    <option value="low">低 (low)</option>
+                    <option value="medium">中 (medium)</option>
+                    <option value="high">高 (high)</option>
+                    <option value="critical">严重 (critical)</option>
+                  </select>
+                </div>
+                <div class="config-field compact flex1">
+                  <label>Webhook</label>
+                  <input class="form-input" v-model="tenantConfigs[t.id].alert_webhook" placeholder="https://..." />
+                </div>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button class="btn-sm btn-primary" @click="saveTenantConfig(t.id)" :disabled="savingConfig[t.id]">
+                {{ savingConfig[t.id] ? '保存中...' : '💾 保存配置' }}
+              </button>
+              <span class="save-hint">配置已保存，运行时联动 v14.1 实施</span>
+            </div>
+          </div>
+          <div class="empty-hint" v-else>加载中...</div>
+        </div>
+
         <div class="card-meta">
           <span v-if="t.strict_mode" class="meta-tag tag-strict">严格模式</span>
-          <span v-if="t.max_agents" class="meta-tag">Agent ≤{{ t.max_agents }}</span>
-          <span v-if="t.max_rules" class="meta-tag">规则 ≤{{ t.max_rules }}</span>
+          <span v-if="t.max_agents" class="meta-tag tag-coming-soon" title="即将推出">Agent ≤{{ t.max_agents }} 🚧</span>
+          <span v-if="t.max_rules" class="meta-tag tag-coming-soon" title="即将推出">规则 ≤{{ t.max_rules }} 🚧</span>
         </div>
 
         <div class="card-actions">
@@ -70,16 +160,6 @@
             <label>描述</label>
             <input v-model="form.description" placeholder="可选描述" class="form-input" />
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>最大 Agent 数</label>
-              <input v-model.number="form.max_agents" type="number" min="0" class="form-input" placeholder="0=无限" />
-            </div>
-            <div class="form-group">
-              <label>最大规则数</label>
-              <input v-model.number="form.max_rules" type="number" min="0" class="form-input" placeholder="0=无限" />
-            </div>
-          </div>
           <div class="form-group form-check">
             <label class="check-label">
               <input type="checkbox" v-model="form.strict_mode" />
@@ -96,11 +176,43 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 添加成员 Modal -->
+    <Transition name="modal-fade">
+      <div class="modal-overlay" v-if="showMemberModal" @click.self="showMemberModal = false">
+        <div class="modal-content">
+          <h3 class="modal-title">添加成员映射</h3>
+          <div class="form-group">
+            <label>匹配类型</label>
+            <select v-model="memberForm.match_type" class="form-input">
+              <option value="sender_id">👤 用户 ID (sender_id)</option>
+              <option value="app_id">📱 应用 ID (app_id)</option>
+              <option value="pattern">🔣 模式匹配 (pattern)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>匹配值</label>
+            <input v-model="memberForm.match_value" :placeholder="memberPlaceholder" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label>备注（可选）</label>
+            <input v-model="memberForm.description" placeholder="如 安全团队-张三" class="form-input" />
+          </div>
+          <div class="modal-actions">
+            <button class="btn-outline" @click="showMemberModal = false">取消</button>
+            <button class="btn-primary" @click="submitMember" :disabled="submitting">
+              {{ submitting ? '添加中...' : '确认添加' }}
+            </button>
+          </div>
+          <div class="form-error" v-if="memberError">{{ memberError }}</div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import { setTenant } from '../stores/app.js'
 import { useRouter } from 'vue-router'
@@ -108,18 +220,83 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const showToast = inject('showToast')
 const tenants = ref([])
+const members = reactive({})          // tenantId → TenantMember[]
+const tenantConfigs = reactive({})     // tenantId → TenantConfig
+const savingConfig = reactive({})      // tenantId → bool
+const activeTab = reactive({})         // tenantId → 'members' | 'security'
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
+const showMemberModal = ref(false)
 const submitting = ref(false)
 const formError = ref('')
+const memberError = ref('')
 const form = ref({ id: '', name: '', description: '', max_agents: 0, max_rules: 0, strict_mode: false })
+const memberForm = ref({ tenant_id: '', match_type: 'sender_id', match_value: '', description: '' })
+
+const memberPlaceholder = computed(() => {
+  switch (memberForm.value.match_type) {
+    case 'sender_id': return '如 user-001'
+    case 'app_id': return '如 bot-security'
+    case 'pattern': return '如 sec-* 或 admin-?'
+    default: return ''
+  }
+})
 
 async function loadTenants() {
   try {
     const d = await api('/api/v1/tenants')
     tenants.value = d.tenants || []
+    // 初始化 tab + 加载成员
+    for (const t of tenants.value) {
+      if (!activeTab[t.id]) activeTab[t.id] = 'members'
+      loadMembers(t.id)
+    }
   } catch (e) {
     tenants.value = []
+  }
+}
+
+async function loadMembers(tenantId) {
+  try {
+    const d = await api('/api/v1/tenants/' + tenantId + '/members')
+    members[tenantId] = d.members || []
+  } catch (e) {
+    members[tenantId] = []
+  }
+}
+
+async function loadTenantConfig(tenantId) {
+  if (tenantConfigs[tenantId]) return // 已加载
+  try {
+    const d = await api('/api/v1/tenants/' + tenantId + '/config')
+    tenantConfigs[tenantId] = d.config || {}
+  } catch (e) {
+    tenantConfigs[tenantId] = { canary_enabled: true, budget_enabled: true, alert_level: 'high' }
+  }
+}
+
+async function saveTenantConfig(tenantId) {
+  savingConfig[tenantId] = true
+  try {
+    await apiPut('/api/v1/tenants/' + tenantId + '/config', tenantConfigs[tenantId])
+    showToast('安全配置已保存')
+  } catch (e) {
+    alert('保存失败: ' + e.message)
+  } finally {
+    savingConfig[tenantId] = false
+  }
+}
+
+function setTab(tenantId, tab) {
+  activeTab[tenantId] = tab
+}
+
+function matchTypeLabel(type) {
+  switch (type) {
+    case 'sender_id': return '用户'
+    case 'app_id': return '应用'
+    case 'pattern': return '模式'
+    default: return type
   }
 }
 
@@ -132,13 +309,19 @@ function fmtNum(n) {
 function switchToTenant(id) {
   setTenant(id)
   router.push('/overview')
-  setTimeout(() => router.go(0), 100) // refresh
+  setTimeout(() => router.go(0), 100)
 }
 
 function openEdit(t) {
   form.value = { id: t.id, name: t.name, description: t.description || '', max_agents: t.max_agents || 0, max_rules: t.max_rules || 0, strict_mode: t.strict_mode || false }
   formError.value = ''
   showEditModal.value = true
+}
+
+function openAddMember(tenantId) {
+  memberForm.value = { tenant_id: tenantId, match_type: 'sender_id', match_value: '', description: '' }
+  memberError.value = ''
+  showMemberModal.value = true
 }
 
 function closeModals() {
@@ -173,6 +356,42 @@ async function submitForm() {
   }
 }
 
+async function submitMember() {
+  memberError.value = ''
+  if (!memberForm.value.match_value) {
+    memberError.value = '匹配值不能为空'
+    return
+  }
+  submitting.value = true
+  try {
+    await apiPost('/api/v1/tenants/' + memberForm.value.tenant_id + '/members', {
+      match_type: memberForm.value.match_type,
+      match_value: memberForm.value.match_value,
+      description: memberForm.value.description
+    })
+    showToast('成员映射已添加')
+    showMemberModal.value = false
+    await loadMembers(memberForm.value.tenant_id)
+    await loadTenants()
+  } catch (e) {
+    memberError.value = e.message || '添加失败'
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function removeMember(tenantId, memberId) {
+  if (!confirm('确定删除此成员映射？')) return
+  try {
+    await apiDelete('/api/v1/tenants/' + tenantId + '/members/' + memberId)
+    showToast('成员映射已删除')
+    await loadMembers(tenantId)
+    await loadTenants()
+  } catch (e) {
+    alert('删除失败: ' + e.message)
+  }
+}
+
 async function confirmDelete(t) {
   if (!confirm(`确定要删除租户 "${t.name}" (${t.id}) 吗？\n\n⚠️ 删除后该租户的数据不会被自动清除，但将无法通过 Dashboard 访问。`)) return
   try {
@@ -193,7 +412,7 @@ onMounted(loadTenants)
 .page-title { font-size: var(--text-xl); font-weight: 700; color: var(--text-primary); margin: 0; }
 .page-desc { flex: 1; font-size: var(--text-sm); color: var(--text-tertiary); min-width: 200px; margin: 0; }
 
-.tenant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-4); }
+.tenant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: var(--space-4); }
 
 .tenant-card {
   background: var(--bg-surface); border: 1px solid var(--border-subtle);
@@ -206,10 +425,7 @@ onMounted(loadTenants)
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .card-title { display: flex; align-items: center; gap: var(--space-2); font-weight: 700; font-size: var(--text-base); color: var(--text-primary); }
 .card-icon { font-size: 1.2em; }
-.card-badge {
-  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px;
-  text-transform: uppercase; letter-spacing: 0.05em;
-}
+.card-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
 .badge-active { background: rgba(16, 185, 129, 0.15); color: #10B981; }
 .badge-inactive { background: rgba(239, 68, 68, 0.15); color: #EF4444; }
 
@@ -224,12 +440,55 @@ onMounted(loadTenants)
 .stat-value { display: block; font-size: var(--text-sm); font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); }
 .stat-label { font-size: 10px; color: var(--text-tertiary); }
 
+/* Tabs */
+.card-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border-subtle); }
+.tab-btn {
+  background: transparent; border: none; padding: 6px 12px; font-size: var(--text-xs);
+  color: var(--text-tertiary); cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+}
+.tab-btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+.tab-btn:hover { color: var(--text-primary); }
+
+/* Card Section (members & security) */
+.card-section { min-height: 60px; }
+.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+.section-title { font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
+
+/* Member list */
+.member-list { display: flex; flex-direction: column; gap: 4px; }
+.member-item {
+  display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px;
+  background: var(--bg-elevated); border-radius: var(--radius-sm); font-size: var(--text-xs);
+}
+.member-icon { flex-shrink: 0; }
+.member-type { color: var(--text-tertiary); min-width: 28px; }
+.member-value { font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
+.member-desc { color: var(--text-tertiary); margin-left: auto; }
+.btn-icon { background: none; border: none; cursor: pointer; padding: 2px 4px; font-size: 12px; opacity: 0.5; transition: opacity 0.15s; }
+.btn-icon:hover { opacity: 1; }
+.btn-danger-icon { color: #EF4444; }
+.empty-hint { font-size: var(--text-xs); color: var(--text-tertiary); padding: var(--space-2) 0; text-align: center; }
+
+/* Config sections */
+.config-group { margin-bottom: var(--space-3); }
+.config-group-title { font-size: 11px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--space-2); }
+.config-field { margin-bottom: var(--space-2); }
+.config-field label { display: block; font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
+.config-field.compact { flex: 1; min-width: 0; }
+.flex1 { flex: 2 !important; }
+.config-row { display: flex; gap: var(--space-3); align-items: flex-start; flex-wrap: wrap; margin-bottom: var(--space-2); }
+.field-hint { font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
+.config-actions { display: flex; align-items: center; gap: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); }
+.save-hint { font-size: 10px; color: var(--text-tertiary); }
+
 .card-meta { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .meta-tag {
   font-size: 10px; padding: 2px 6px; border-radius: var(--radius-sm);
   background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border-subtle);
 }
 .tag-strict { background: rgba(239, 68, 68, 0.1); color: #EF4444; border-color: rgba(239, 68, 68, 0.3); }
+.tag-coming-soon { opacity: 0.5; text-decoration: line-through; }
 
 .card-actions { display: flex; gap: var(--space-2); margin-top: auto; }
 
@@ -248,6 +507,7 @@ onMounted(loadTenants)
 }
 .btn-outline:hover { border-color: var(--color-primary); color: var(--text-primary); }
 .btn-sm { padding: 4px 12px; font-size: var(--text-xs); }
+.btn-xs { padding: 2px 8px; font-size: 10px; }
 .btn-danger {
   background: transparent; color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3);
   padding: 4px 12px; border-radius: var(--radius-md); font-size: var(--text-xs);

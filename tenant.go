@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -34,6 +35,17 @@ type TenantSummary struct {
 	LLMCalls    int64 `json:"llm_calls"`
 	BlockCount  int64 `json:"block_count"`
 	UserCount   int   `json:"user_count"`
+	MemberCount int   `json:"member_count"`
+}
+
+// TenantMember 租户成员映射
+type TenantMember struct {
+	ID          int    `json:"id"`
+	TenantID    string `json:"tenant_id"`
+	MatchType   string `json:"match_type"`   // "sender_id" | "app_id" | "pattern"
+	MatchValue  string `json:"match_value"`  // 具体值或通配符模式
+	Description string `json:"description"`  // 备注
+	CreatedAt   string `json:"created_at"`
 }
 
 // TenantManager 租户管理器
@@ -41,16 +53,31 @@ type TenantManager struct {
 	db      *sql.DB
 	tenants map[string]*Tenant
 	mu      sync.RWMutex
+
+	// 成员映射缓存（v14.0 闭环）
+	memberMu      sync.RWMutex
+	senderMap     map[string]string // sender_id → tenant_id (精确匹配)
+	appMap        map[string]string // app_id → tenant_id (精确匹配)
+	patternRules  []patternEntry    // pattern 规则列表
+}
+
+// patternEntry 通配符匹配规则
+type patternEntry struct {
+	Pattern  string
+	TenantID string
 }
 
 // NewTenantManager 创建租户管理器
 func NewTenantManager(db *sql.DB) *TenantManager {
 	tm := &TenantManager{
-		db:      db,
-		tenants: make(map[string]*Tenant),
+		db:        db,
+		tenants:   make(map[string]*Tenant),
+		senderMap: make(map[string]string),
+		appMap:    make(map[string]string),
 	}
 	tm.initSchema()
 	tm.loadAll()
+	tm.loadMemberCache()
 	return tm
 }
 
@@ -68,6 +95,18 @@ func (tm *TenantManager) initSchema() {
 		strict_mode INTEGER DEFAULT 0
 	)`)
 
+	// 租户成员映射表（v14.0 闭环）
+	tm.db.Exec(`CREATE TABLE IF NOT EXISTS tenant_members (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tenant_id TEXT NOT NULL,
+		match_type TEXT NOT NULL,
+		match_value TEXT NOT NULL,
+		description TEXT DEFAULT '',
+		created_at TEXT NOT NULL,
+		UNIQUE(tenant_id, match_type, match_value)
+	)`)
+	tm.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tenant_members_tenant ON tenant_members(tenant_id)`)
+
 	// 默认租户
 	tm.db.Exec(`INSERT OR IGNORE INTO tenants (id, name, description, created_at, enabled) 
 		VALUES ('default', '默认租户', '系统默认安全域', ?, 1)`,
@@ -83,6 +122,9 @@ func (tm *TenantManager) initSchema() {
 	tm.db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id)`)
 	tm.db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
 	tm.db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
+
+	// 租户安全配置表（v14.0 策略）
+	tm.initConfigSchema()
 
 	log.Println("[初始化] ✅ 租户体系 schema 就绪")
 }
@@ -240,6 +282,8 @@ func (tm *TenantManager) GetSummary(id string) *TenantSummary {
 	tm.db.QueryRow(`SELECT COUNT(*) FROM llm_calls WHERE tenant_id=?`, id).Scan(&s.LLMCalls)
 	// 用户数
 	tm.db.QueryRow(`SELECT COUNT(DISTINCT sender_id) FROM audit_log WHERE tenant_id=?`, id).Scan(&s.UserCount)
+	// 成员数
+	tm.db.QueryRow(`SELECT COUNT(*) FROM tenant_members WHERE tenant_id=?`, id).Scan(&s.MemberCount)
 
 	return s
 }
@@ -255,6 +299,246 @@ func (tm *TenantManager) ListSummaries() []*TenantSummary {
 		}
 	}
 	return summaries
+}
+
+// ============================================================
+// 成员映射管理（v14.0 闭环）
+// ============================================================
+
+// loadMemberCache 从数据库加载成员映射到内存缓存
+func (tm *TenantManager) loadMemberCache() {
+	rows, err := tm.db.Query(`SELECT tenant_id, match_type, match_value FROM tenant_members`)
+	if err != nil {
+		log.Printf("[租户] 加载成员映射失败: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	tm.memberMu.Lock()
+	defer tm.memberMu.Unlock()
+	tm.senderMap = make(map[string]string)
+	tm.appMap = make(map[string]string)
+	tm.patternRules = nil
+
+	count := 0
+	for rows.Next() {
+		var tenantID, matchType, matchValue string
+		if rows.Scan(&tenantID, &matchType, &matchValue) != nil {
+			continue
+		}
+		switch matchType {
+		case "sender_id":
+			tm.senderMap[matchValue] = tenantID
+		case "app_id":
+			tm.appMap[matchValue] = tenantID
+		case "pattern":
+			tm.patternRules = append(tm.patternRules, patternEntry{Pattern: matchValue, TenantID: tenantID})
+		}
+		count++
+	}
+	log.Printf("[租户] 加载了 %d 条成员映射 (sender=%d, app=%d, pattern=%d)",
+		count, len(tm.senderMap), len(tm.appMap), len(tm.patternRules))
+}
+
+// ResolveTenant 根据 sender_id 和 app_id 解析租户
+// 优先级：精确 sender_id > 精确 app_id > 通配符 pattern > "default"
+func (tm *TenantManager) ResolveTenant(senderID, appID string) string {
+	tm.memberMu.RLock()
+	defer tm.memberMu.RUnlock()
+
+	// 1. 精确匹配 sender_id
+	if senderID != "" {
+		if tid, ok := tm.senderMap[senderID]; ok {
+			return tid
+		}
+	}
+
+	// 2. 精确匹配 app_id
+	if appID != "" {
+		if tid, ok := tm.appMap[appID]; ok {
+			return tid
+		}
+	}
+
+	// 3. 通配符 pattern 匹配（用 filepath.Match 支持 * 和 ? ）
+	for _, p := range tm.patternRules {
+		if senderID != "" {
+			if matched, _ := filepath.Match(p.Pattern, senderID); matched {
+				return p.TenantID
+			}
+		}
+		if appID != "" {
+			if matched, _ := filepath.Match(p.Pattern, appID); matched {
+				return p.TenantID
+			}
+		}
+	}
+
+	// 4. 兜底
+	return "default"
+}
+
+// AddMember 添加成员映射
+func (tm *TenantManager) AddMember(tenantID, matchType, matchValue, description string) error {
+	if tenantID == "" || matchType == "" || matchValue == "" {
+		return fmt.Errorf("tenant_id, match_type, match_value 不能为空")
+	}
+	if matchType != "sender_id" && matchType != "app_id" && matchType != "pattern" {
+		return fmt.Errorf("match_type 必须是 sender_id/app_id/pattern")
+	}
+	if !tm.Exists(tenantID) {
+		return fmt.Errorf("租户 %q 不存在", tenantID)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := tm.db.Exec(`INSERT INTO tenant_members (tenant_id, match_type, match_value, description, created_at)
+		VALUES (?, ?, ?, ?, ?)`, tenantID, matchType, matchValue, description, now)
+	if err != nil {
+		return fmt.Errorf("添加成员映射失败: %w", err)
+	}
+
+	// 刷新内存缓存
+	tm.loadMemberCache()
+	log.Printf("[租户] 添加成员映射: %s/%s=%s (%s)", tenantID, matchType, matchValue, description)
+	return nil
+}
+
+// RemoveMember 删除成员映射
+func (tm *TenantManager) RemoveMember(id int) error {
+	result, err := tm.db.Exec(`DELETE FROM tenant_members WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("删除成员映射失败: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("成员映射 #%d 不存在", id)
+	}
+	// 刷新内存缓存
+	tm.loadMemberCache()
+	log.Printf("[租户] 删除成员映射 #%d", id)
+	return nil
+}
+
+// ListMembers 列出租户的所有成员映射
+func (tm *TenantManager) ListMembers(tenantID string) ([]TenantMember, error) {
+	rows, err := tm.db.Query(`SELECT id, tenant_id, match_type, match_value, description, created_at FROM tenant_members WHERE tenant_id=? ORDER BY id ASC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []TenantMember
+	for rows.Next() {
+		var m TenantMember
+		if rows.Scan(&m.ID, &m.TenantID, &m.MatchType, &m.MatchValue, &m.Description, &m.CreatedAt) != nil {
+			continue
+		}
+		members = append(members, m)
+	}
+	if members == nil {
+		members = []TenantMember{}
+	}
+	return members, nil
+}
+
+// ============================================================
+// 租户安全配置（v14.0 策略）
+// ============================================================
+
+// TenantConfig 租户安全策略配置
+type TenantConfig struct {
+	TenantID       string `json:"tenant_id"`
+	DisabledRules  string `json:"disabled_rules"`    // 逗号分隔的禁用规则名
+	ExtraRulesYAML string `json:"extra_rules_yaml"`  // 租户额外规则（YAML格式）
+	StrictMode     bool   `json:"strict_mode"`
+	CanaryEnabled  bool   `json:"canary_enabled"`
+	BudgetEnabled  bool   `json:"budget_enabled"`
+	BudgetMaxTokens int   `json:"budget_max_tokens"` // 0=使用全局
+	BudgetMaxTools  int   `json:"budget_max_tools"`  // 0=使用全局
+	ToolBlacklist  string `json:"tool_blacklist"`     // 逗号分隔
+	AlertLevel     string `json:"alert_level"`        // low/medium/high/critical
+	AlertWebhook   string `json:"alert_webhook"`      // 租户专属 webhook
+	UpdatedAt      string `json:"updated_at"`
+}
+
+// initConfigSchema 初始化租户安全配置表
+func (tm *TenantManager) initConfigSchema() {
+	tm.db.Exec(`CREATE TABLE IF NOT EXISTS tenant_configs (
+		tenant_id TEXT PRIMARY KEY,
+		disabled_rules TEXT DEFAULT '',
+		extra_rules_yaml TEXT DEFAULT '',
+		strict_mode INTEGER DEFAULT 0,
+		canary_enabled INTEGER DEFAULT 1,
+		budget_enabled INTEGER DEFAULT 1,
+		budget_max_tokens INTEGER DEFAULT 0,
+		budget_max_tools INTEGER DEFAULT 0,
+		tool_blacklist TEXT DEFAULT '',
+		alert_level TEXT DEFAULT 'high',
+		alert_webhook TEXT DEFAULT '',
+		updated_at TEXT DEFAULT ''
+	)`)
+}
+
+// GetConfig 获取租户安全配置（不存在则返回默认值）
+func (tm *TenantManager) GetConfig(tenantID string) *TenantConfig {
+	cfg := &TenantConfig{
+		TenantID:      tenantID,
+		CanaryEnabled: true,
+		BudgetEnabled: true,
+		AlertLevel:    "high",
+	}
+
+	var strict, canary, budget int
+	err := tm.db.QueryRow(`SELECT disabled_rules, extra_rules_yaml, strict_mode, canary_enabled, budget_enabled, budget_max_tokens, budget_max_tools, tool_blacklist, alert_level, alert_webhook, updated_at FROM tenant_configs WHERE tenant_id=?`, tenantID).Scan(
+		&cfg.DisabledRules, &cfg.ExtraRulesYAML, &strict, &canary, &budget,
+		&cfg.BudgetMaxTokens, &cfg.BudgetMaxTools, &cfg.ToolBlacklist,
+		&cfg.AlertLevel, &cfg.AlertWebhook, &cfg.UpdatedAt)
+	if err != nil {
+		// 不存在，返回默认值
+		return cfg
+	}
+	cfg.StrictMode = strict != 0
+	cfg.CanaryEnabled = canary != 0
+	cfg.BudgetEnabled = budget != 0
+	return cfg
+}
+
+// UpdateConfig 更新租户安全配置（upsert）
+func (tm *TenantManager) UpdateConfig(cfg *TenantConfig) error {
+	if cfg.TenantID == "" {
+		return fmt.Errorf("tenant_id 不能为空")
+	}
+	if !tm.Exists(cfg.TenantID) {
+		return fmt.Errorf("租户 %q 不存在", cfg.TenantID)
+	}
+	if cfg.AlertLevel == "" {
+		cfg.AlertLevel = "high"
+	}
+	cfg.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	_, err := tm.db.Exec(`INSERT INTO tenant_configs (tenant_id, disabled_rules, extra_rules_yaml, strict_mode, canary_enabled, budget_enabled, budget_max_tokens, budget_max_tools, tool_blacklist, alert_level, alert_webhook, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(tenant_id) DO UPDATE SET
+			disabled_rules=excluded.disabled_rules,
+			extra_rules_yaml=excluded.extra_rules_yaml,
+			strict_mode=excluded.strict_mode,
+			canary_enabled=excluded.canary_enabled,
+			budget_enabled=excluded.budget_enabled,
+			budget_max_tokens=excluded.budget_max_tokens,
+			budget_max_tools=excluded.budget_max_tools,
+			tool_blacklist=excluded.tool_blacklist,
+			alert_level=excluded.alert_level,
+			alert_webhook=excluded.alert_webhook,
+			updated_at=excluded.updated_at`,
+		cfg.TenantID, cfg.DisabledRules, cfg.ExtraRulesYAML,
+		boolToInt(cfg.StrictMode), boolToInt(cfg.CanaryEnabled), boolToInt(cfg.BudgetEnabled),
+		cfg.BudgetMaxTokens, cfg.BudgetMaxTools, cfg.ToolBlacklist,
+		cfg.AlertLevel, cfg.AlertWebhook, cfg.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("更新租户配置失败: %w", err)
+	}
+	log.Printf("[租户] 更新安全配置: %s", cfg.TenantID)
+	return nil
 }
 
 // ============================================================
