@@ -235,13 +235,10 @@ func main() {
 	var llmProxy *LLMProxy
 	var llmRuleEngine *LLMRuleEngine
 	if cfg.LLMProxy.Enabled {
-		// v10.0: 初始化 LLM 规则引擎
-		llmRules := cfg.LLMProxy.Rules
-		if len(llmRules) == 0 {
-			llmRules = defaultLLMRules
-		}
+		// v10.0: 初始化 LLM 规则引擎（v18: 合并用户配置 + 默认规则）
+		llmRules := mergeLLMRuleDefaults(cfg.LLMProxy.Rules)
 		llmRuleEngine = NewLLMRuleEngine(llmRules)
-		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则", len(llmRules))
+		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则 (用户%d+默认补充)", len(llmRules), len(cfg.LLMProxy.Rules))
 
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)
 		llmProxy = NewLLMProxy(cfg.LLMProxy, llmAuditor, llmRuleEngine)

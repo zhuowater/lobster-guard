@@ -133,6 +133,54 @@ var defaultLLMRules = []LLMRule{
 	{ID: "llm-ta-001", Name: "Excessive Repetition", Category: "token_abuse", Direction: "request", Type: "regex",
 		Patterns: []string{`(?i)(AAAA{100,}|\.{100,}|={100,}|\s{200,})`}, // 超长重复字符
 		Action: "warn", Enabled: true, Priority: 5},
+
+	// v18: 响应方向 — System Prompt 泄露检测
+	{ID: "llm-resp-001", Name: "System Prompt Leak", Category: "pii_leak", Direction: "response", Type: "regex",
+		Patterns: []string{
+			`(?i)my\s+system\s+prompt\s+is`,
+			`(?i)my\s+instructions?\s+(are|is)`,
+			`(?i)here\s+(is|are)\s+my\s+(system\s+)?prompt`,
+			`(?i)i\s+was\s+instructed\s+to`,
+		},
+		Action: "warn", Enabled: true, Priority: 15},
+
+	// v18: 响应方向 — 恶意代码/命令注入检测
+	{ID: "llm-resp-002", Name: "Malicious Code in Response", Category: "sensitive_topic", Direction: "response", Type: "regex",
+		Patterns: []string{
+			`(?i)os\.system\s*\(\s*['\"].*rm\s+-rf`,
+			`(?i)subprocess\.call\s*\(\s*\[.*curl.*bash`,
+			`(?i)exec\s*\(\s*['\"].*wget.*\|.*sh`,
+			`(?i)\beval\s*\(\s*['\"].*fetch\(`,
+		},
+		Action: "block", Enabled: true, Priority: 20},
+
+	// v18: 响应方向 — 凭据/密钥泄露（补充 llm-pii-003 的覆盖面）
+	{ID: "llm-resp-003", Name: "Credential Leak in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+		Patterns: []string{
+			`(?i)(database|db)\s+password\s+(is|=)\s*\S+`,
+			`(?i)api[_ ]key\s+(is|=)\s*\S+`,
+			`(?i)(access|auth)[_ ]token\s+(is|=)\s*\S+`,
+		},
+		Action: "block", Enabled: true, Priority: 20},
+}
+
+// mergeLLMRuleDefaults 合并用户配置与默认规则（用户同 ID 规则覆盖默认）
+func mergeLLMRuleDefaults(userRules []LLMRule) []LLMRule {
+	if len(userRules) == 0 {
+		return defaultLLMRules
+	}
+	userIDs := make(map[string]bool)
+	for _, r := range userRules {
+		userIDs[r.ID] = true
+	}
+	merged := make([]LLMRule, len(userRules))
+	copy(merged, userRules)
+	for _, d := range defaultLLMRules {
+		if !userIDs[d.ID] {
+			merged = append(merged, d)
+		}
+	}
+	return merged
 }
 
 // NewLLMRuleEngine 创建 LLM 规则引擎

@@ -625,7 +625,41 @@ type OutboundRuleEngine struct {
 }
 
 func NewOutboundRuleEngine(configs []OutboundRuleConfig) *OutboundRuleEngine {
-	return &OutboundRuleEngine{rules: compileOutboundRules(configs)}
+	// v18: 合并用户配置 + 内置默认规则（去重：用户配置同名规则覆盖默认）
+	merged := mergeOutboundDefaults(configs)
+	return &OutboundRuleEngine{rules: compileOutboundRules(merged)}
+}
+
+// getDefaultOutboundRules 内置出站规则（PII + 凭据 + 恶意命令）
+func getDefaultOutboundRules() []OutboundRuleConfig {
+	return []OutboundRuleConfig{
+		// 默认规则 priority=0，用户自定义规则 priority>0 时自动优先
+		{Name: "pii_id_card", Patterns: []string{`\d{17}[\dXx]`}, Action: "warn", Priority: 0, Message: "检测到身份证号"},
+		{Name: "pii_phone", Patterns: []string{`(?:^|\D)1[3-9]\d{9}(?:\D|$)`}, Action: "warn", Priority: 0, Message: "检测到手机号"},
+		{Name: "pii_bank_card", Patterns: []string{`(?:^|\D)(62|4[0-9]|5[1-5])\d{14,17}(?:\D|$)`}, Action: "warn", Priority: 0, Message: "检测到银行卡号"},
+		{Name: "credential_password", Patterns: []string{`(?i)(password|passwd|secret_key)\s*[:=]\s*\S+`}, Action: "block", Priority: 0, Message: "检测到密码/密钥泄露"},
+		{Name: "credential_api_key", Patterns: []string{`(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16})`}, Action: "block", Priority: 0, Message: "检测到API Key泄露"},
+		{Name: "malicious_command", Patterns: []string{`(?i)rm\s+-rf\s+/`, `(?i)curl\s+.{0,50}\|\s*bash`, `(?i)wget\s+.{0,50}\|\s*bash`}, Action: "block", Priority: 0, Message: "检测到恶意命令"},
+	}
+}
+
+// mergeOutboundDefaults 合并默认规则和用户配置（用户同名规则覆盖默认）
+func mergeOutboundDefaults(userConfigs []OutboundRuleConfig) []OutboundRuleConfig {
+	defaults := getDefaultOutboundRules()
+	userNames := make(map[string]bool)
+	for _, c := range userConfigs {
+		userNames[c.Name] = true
+	}
+	var merged []OutboundRuleConfig
+	// 先放用户规则
+	merged = append(merged, userConfigs...)
+	// 再放未被覆盖的默认规则
+	for _, d := range defaults {
+		if !userNames[d.Name] {
+			merged = append(merged, d)
+		}
+	}
+	return merged
 }
 
 func compileOutboundRules(configs []OutboundRuleConfig) []OutboundRule {

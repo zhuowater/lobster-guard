@@ -793,12 +793,13 @@ func TestOutboundRulesAPI_List(t *testing.T) {
 	if !ok {
 		t.Fatal("expected 'rules' array")
 	}
-	if len(rules) != 2 {
-		t.Fatalf("expected 2 outbound rules, got %d", len(rules))
+	// v18: 用户2条 + 默认规则合并，至少有用户配的2条
+	if len(rules) < 2 {
+		t.Fatalf("expected at least 2 outbound rules, got %d", len(rules))
 	}
 	total, ok := result["total"].(float64)
-	if !ok || int(total) != 2 {
-		t.Fatalf("expected total=2, got %v", result["total"])
+	if !ok || int(total) < 2 {
+		t.Fatalf("expected total>=2, got %v", result["total"])
 	}
 }
 
