@@ -282,7 +282,7 @@
   - 缓存淘汰策略：LRU + TTL + 安全事件触发清除
   - 数据来源：LLMProxy 请求/响应流量
   - 灵感来源：Cloudflare AI Gateway 缓存
-- [ ] v20.4 **API Gateway 基础能力**
+- [x] v20.4 **API Gateway 基础能力**
   - 认证中间件（JWT / API Key 校验，在 LLMProxy 层面）
   - 请求/响应转换（Header 注入、Body 字段改写）
   - 灰度发布（按租户百分比切流量到不同 LLM 上游）
