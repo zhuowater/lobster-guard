@@ -130,6 +130,8 @@ type InboundProxy struct {
 	semanticDetector *SemanticDetector
 	// v19.2 蜜罐深度交互引擎
 	honeypotDeep *HoneypotDeepEngine
+	// v20.1 污染追踪引擎
+	taintTracker *TaintTracker
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -271,6 +273,14 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			case detectResult = <-ch:
 			case <-time.After(ip.timeout):
 				detectResult = DetectResult{Action: "pass", Reasons: []string{"timeout"}}
+			}
+		}
+
+		// v20.1: 入站污染标记
+		if ip.taintTracker != nil {
+			taintEntry := ip.taintTracker.MarkTainted(bridgeTraceID, msgText, "inbound")
+			if taintEntry != nil {
+				log.Printf("[桥接入站] 🏷️ 污染标记 sender=%s trace=%s labels=%v", senderID, bridgeTraceID, taintEntry.Labels)
 			}
 		}
 
@@ -714,6 +724,14 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// v20.1: 入站污染标记
+	if ip.taintTracker != nil {
+		taintEntry := ip.taintTracker.MarkTainted(traceID, msgText, "inbound")
+		if taintEntry != nil {
+			log.Printf("[入站] 🏷️ 污染标记 sender=%s trace=%s labels=%v", senderID, traceID, taintEntry.Labels)
+		}
+	}
+
 	ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, traceID)
 
 	// v18.0: 执行信封
@@ -925,6 +943,8 @@ type OutboundProxy struct {
 	envelopeMgr *EnvelopeManager
 	// v18.1 事件总线
 	eventBus *EventBus
+	// v20.1 污染追踪引擎
+	taintTracker *TaintTracker
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {
@@ -1034,6 +1054,37 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(403)
 			w.Write([]byte(`{"errcode":403,"errmsg":"honeypot detonation detected","detail":"outbound message contains tracked watermark"}`))
 			return
+		}
+	}
+
+	// v20.1: 出站污染追踪检查（血统级阻断）
+	if op.taintTracker != nil && outTraceID != "" {
+		taintDecision := op.taintTracker.CheckOutbound(outTraceID)
+		if taintDecision.Tainted {
+			latMs := float64(time.Since(start).Microseconds()) / 1000.0
+			upstreamID := r.Header.Get("X-Upstream-Id")
+			taintReason := fmt.Sprintf("taint_%s: labels=%v %s", taintDecision.Action, taintDecision.Labels, taintDecision.Reason)
+			pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
+			op.logger.LogWithTrace("outbound", recipient, "taint_"+taintDecision.Action, taintReason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
+			if taintDecision.Action == "block" {
+				log.Printf("[出站] 🔒 污染阻断 trace=%s labels=%v", outTraceID, taintDecision.Labels)
+				if op.eventBus != nil {
+					op.eventBus.Emit(&SecurityEvent{
+						Type: "taint_block", Severity: "high", Domain: "outbound",
+						TraceID: outTraceID, SenderID: recipient,
+						Summary: fmt.Sprintf("污染阻断: %v", taintDecision.Labels),
+						Details: map[string]interface{}{"labels": taintDecision.Labels, "reason": taintDecision.Reason},
+					})
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(403)
+				w.Write([]byte(fmt.Sprintf(`{"errcode":403,"errmsg":"tainted data blocked","labels":%q,"trace_id":%q}`,
+					strings.Join(taintDecision.Labels, ","), outTraceID)))
+				return
+			}
+			if taintDecision.Action == "warn" {
+				log.Printf("[出站] ⚠️ 污染告警放行 trace=%s labels=%v", outTraceID, taintDecision.Labels)
+			}
 		}
 	}
 

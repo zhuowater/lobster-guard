@@ -39,6 +39,8 @@ type LLMProxy struct {
 	semanticDetector *SemanticDetector
 	// v20.0 工具策略引擎
 	toolPolicy *ToolPolicyEngine
+	// v20.1 污染追踪引擎
+	taintTracker *TaintTracker
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -224,6 +226,11 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// v20.1: LLM 请求侧污染传播
+	if lp.taintTracker != nil {
+		lp.taintTracker.Propagate(traceID, "llm_request", "user message forwarded to LLM")
+	}
+
 	// v18.0: 执行信封 — 请求侧（非 block 的也要记录）
 	if lp.envelopeMgr != nil {
 		decision := llmReqDecision
@@ -379,6 +386,11 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+
+		// v20.1: LLM 响应侧污染传播
+		if lp.taintTracker != nil {
+			lp.taintTracker.Propagate(traceID, "llm_response", "LLM response received")
 		}
 
 		// v18.0: 执行信封 — 响应侧（非 block 的也要记录）

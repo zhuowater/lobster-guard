@@ -609,6 +609,22 @@ func main() {
 		llmProxy.toolPolicy = toolPolicyEngine
 	}
 
+	// v20.1: 信息流污染追踪
+	var taintTracker *TaintTracker
+	if cfg.TaintTracker.Enabled {
+		taintTracker = NewTaintTracker(db, cfg.TaintTracker)
+		fmt.Printf("[初始化] ✅ 信息流污染追踪已启用 (action=%s, ttl=%d分钟, PII模式=%d)\n",
+			taintTracker.config.Action, taintTracker.config.TTLMinutes, len(piiPatterns))
+	} else {
+		fmt.Println("[初始化] ⚠️ 信息流污染追踪: 未启用")
+	}
+	mgmtAPI.taintTracker = taintTracker
+	inbound.taintTracker = taintTracker
+	outbound.taintTracker = taintTracker
+	if llmProxy != nil {
+		llmProxy.taintTracker = taintTracker
+	}
+
 	mgmtAPI.honeypotDeep = honeypotDeep
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector
@@ -738,6 +754,10 @@ func main() {
 	sig := <-quit
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
+	// v20.1: 停止污染追踪引擎
+	if taintTracker != nil {
+		taintTracker.Stop()
+	}
 	// v19.0: 停止自进化引擎
 	if evolutionEngine != nil {
 		evolutionEngine.StopAutoEvolution()

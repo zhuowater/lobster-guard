@@ -223,6 +223,8 @@ type Config struct {
 	HoneypotDeep HoneypotDeepConfig `yaml:"honeypot_deep"`
 	// v20.0 工具策略引擎
 	ToolPolicy ToolPolicyConfig `yaml:"tool_policy"`
+	// v20.1 信息流污染追踪
+	TaintTracker TaintConfig `yaml:"taint_tracker"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）

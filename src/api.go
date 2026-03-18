@@ -139,6 +139,8 @@ type ManagementAPI struct {
 	honeypotDeep *HoneypotDeepEngine
 	// v20.0 工具策略引擎
 	toolPolicy *ToolPolicyEngine
+	// v20.1 污染追踪引擎
+	taintTracker *TaintTracker
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -839,6 +841,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleToolPolicyConfigUpdate(w, r)
 	case path == "/api/v1/tools/evaluate" && method == "POST":
 		api.handleToolPolicyEvaluate(w, r)
+
+	// v20.1: 污染追踪 API
+	case path == "/api/v1/taint/stats" && method == "GET":
+		api.handleTaintStats(w, r)
+	case path == "/api/v1/taint/active" && method == "GET":
+		api.handleTaintActive(w, r)
+	case strings.HasPrefix(path, "/api/v1/taint/trace/") && method == "GET":
+		api.handleTaintTrace(w, r)
+	case path == "/api/v1/taint/config" && method == "GET":
+		api.handleTaintConfigGet(w, r)
+	case path == "/api/v1/taint/config" && method == "PUT":
+		api.handleTaintConfigUpdate(w, r)
+	case path == "/api/v1/taint/scan" && method == "POST":
+		api.handleTaintScan(w, r)
 
 	default:
 		w.WriteHeader(404)
