@@ -213,7 +213,50 @@
 2. Plan   — 新功能设计 + 旧功能适配清单 + 闭环检查表
 3. Build  — 新功能 + 旧功能适配一起实现，不拆开
 4. Verify — 验证所有相关路径都通，不只验新功能
+5. E2E    — 运行端到端模拟流量测试，验证数据流全链路闭环
 ```
+
+## 🔴 端到端模拟测试（每次迭代必须执行）
+
+**API**: `POST /api/v1/simulate/traffic`
+
+**核心原则**: 不直接 INSERT 假数据，所有模拟数据必须流过完整业务管道。
+
+**执行时机**:
+- 每个版本 Build 完成后、提交前
+- 修复任何数据流相关 bug 后
+- 新增检测规则/引擎后
+
+**9 个验证场景**:
+
+| # | 场景 | 验证链路 |
+|---|------|---------|
+| 1 | 正常对话 | 入站→LLM→Prompt追踪→出站, trace_id全链路 |
+| 2 | Prompt Injection | RuleEngine.Detect → block/warn |
+| 3 | 敏感信息泄露 | LLM tool_call → 出站PII检测 |
+| 4 | 异常行为模式 | 高频请求 + 高危工具注入 |
+| 5 | 蜜罐引爆 | ShouldTrigger → RecordTrigger → CheckDetonation → BLOCKED |
+| 6 | LLM多轮对话 | 5轮混合模型 + 7种工具 → 会话回放双向完整 |
+| 7 | Canary泄露+Budget | canary_leaked + budget_exceeded 标记 |
+| 8 | 多Agent画像 | 5种行为模式 → Agent风险分级 |
+| 9 | LLM响应过滤 | CheckResponse + 出站规则 + PII检测 |
+
+**后台分析自动触发**:
+- AttackChainEngine.AnalyzeChains
+- BehaviorProfileEngine.ScanAllActive
+- AnomalyDetector.CheckNow
+
+**验证检查项** (跑完后人工/自动确认):
+- [ ] 会话回放：查任意 trace_id 能看到入站+出站双向事件
+- [ ] Agent 画像：refresh-all 后 risk-top 包含模拟 Agent
+- [ ] 蜜罐引爆：watermark 注入→出站检测→BLOCKED
+- [ ] 攻击链：AnalyzeChains 发现 ≥1 条链
+- [ ] 异常检测：CheckNow 产生告警
+- [ ] LLM 规则：CheckRequest/CheckResponse 匹配预期动作
+
+**发现问题时**: 不是修模拟数据，是修业务代码。模拟暴露的就是真实缺陷。
+
+**迭代演进**: 每新增一个功能模块，同步在 simulate/traffic 中增加对应验证场景。
 
 ## 版本演进逻辑
 
