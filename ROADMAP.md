@@ -111,10 +111,7 @@
 
 - [x] v12.0 **报告模板引擎**（日报/周报/月报 · HTML 内联 CSS 邮件友好 · 聚合全数据源 · 智能建议 · iframe 预览 · LLM 审计导出 CSV/JSON · 闭环联动概览页+通知中心）
 
-- [ ] v12.1 **审计导出**
-  - CSV / JSON / XLSX 导出（IM 审计 + LLM 审计 + Tool Calls）
-  - 时间范围 + 筛选条件
-  - 批量导出 API（支持自动化合规流水线）
+- [x] v12.1 **审计导出增强**（IM 导出加 from/to 时间范围 · 支持 since 简写 · QueryLogsExFull 完整查询接口 · 零依赖不加 XLSX，CSV 足够）
 
 ### v13.x — 会话回放 · Prompt 管理
 > 对标 Langfuse 的 Tracing + Prompt Management
@@ -195,7 +192,7 @@ v8:     运维工具箱 + 策略路由管理 ✅
 v9:     双安全域（LLM 反向代理 + 成本看板 + 安全告警）✅
 v10:    LLM 规则引擎 + Canary Token + Shadow Mode + 功能闭环修复 ✅
 v11:    攻击者画像 ✅ + 驾驶舱 ✅ + 异常检测 ✅ + 闭环修复 ✅ + 数据口径统一 ✅
-v12:    报告引擎 ✅ + 审计导出 ← 进行中
+v12:    报告引擎 ✅ + 审计导出 ✅
 v13:    会话回放 + Prompt 追踪
 v14:    多租户 + 企业权限
 v15:    主题 + i18n + 移动端

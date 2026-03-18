@@ -68,6 +68,11 @@ func (al *AuditLogger) QueryLogsEx(direction, action, senderID, appID, q string,
 
 // QueryLogsExTrace 支持 trace_id 筛选
 func (al *AuditLogger) QueryLogsExTrace(direction, action, senderID, appID, q, traceID string, limit int) ([]map[string]interface{}, error) {
+	return al.QueryLogsExFull(direction, action, senderID, appID, q, traceID, "", "", limit)
+}
+
+// QueryLogsExFull 完整查询（支持 from/to 时间范围）
+func (al *AuditLogger) QueryLogsExFull(direction, action, senderID, appID, q, traceID, from, to string, limit int) ([]map[string]interface{}, error) {
 	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
 	var args []interface{}
 	if direction != "" { query += ` AND direction=?`; args = append(args, direction) }
@@ -76,6 +81,8 @@ func (al *AuditLogger) QueryLogsExTrace(direction, action, senderID, appID, q, t
 	if appID != "" { query += ` AND app_id=?`; args = append(args, appID) }
 	if q != "" { query += ` AND content_preview LIKE ?`; args = append(args, "%"+q+"%") }
 	if traceID != "" { query += ` AND trace_id=?`; args = append(args, traceID) }
+	if from != "" { query += ` AND timestamp >= ?`; args = append(args, from) }
+	if to != "" { query += ` AND timestamp <= ?`; args = append(args, to) }
 	query += ` ORDER BY id DESC`
 	if limit <= 0 { limit = 50 }
 	if limit > 10000 { limit = 10000 }

@@ -778,13 +778,19 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 	senderID := r.URL.Query().Get("sender_id")
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
+	from := r.URL.Query().Get("from")   // v12.1: 时间范围起始 (RFC3339 或 since 格式)
+	to := r.URL.Query().Get("to")       // v12.1: 时间范围结束
+	// 支持 since 简写: from=24h → 转为 RFC3339
+	if from != "" && !strings.Contains(from, "T") {
+		from = parseSinceParam(from)
+	}
 	limit := 1000
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil { limit = n }
 	}
 	if limit > 10000 { limit = 10000 }
 
-	logs, err := api.logger.QueryLogsEx(direction, action, senderID, appID, q, limit)
+	logs, err := api.logger.QueryLogsExFull(direction, action, senderID, appID, q, "", from, to, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
