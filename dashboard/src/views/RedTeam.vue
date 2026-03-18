@@ -88,6 +88,7 @@
             </div>
             <div class="vuln-desc">{{ v.description }}</div>
             <div class="vuln-suggestion" v-if="v.suggestion">💡 {{ v.suggestion }}</div>
+            <a class="vuln-fix-link" @click.stop="$router.push(v.category && v.category.startsWith('LLM') ? '/llm-rules' : '/rules')">🔧 前往规则页修复 →</a>
           </div>
         </div>
       </div>
@@ -179,7 +180,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api, apiPost, apiDelete } from '../api.js'
+
+const router = useRouter()
 
 const loading = ref(true)
 const running = ref(false)
@@ -421,4 +425,5 @@ onMounted(loadReports)
   .rate-stats { justify-content: center; }
   .page-header { flex-direction: column; gap: var(--space-3); align-items: flex-start; }
 }
+.vuln-fix-link{display:inline-block;margin-top:6px;color:var(--color-primary);cursor:pointer;font-size:12px;text-decoration:none}.vuln-fix-link:hover{text-decoration:underline}
 </style>

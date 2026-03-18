@@ -56,7 +56,7 @@
               <span class="rank-num">#{{ score.rank }}</span>
               <span class="rank-medal">{{ rankMedal(score.rank) }}</span>
             </div>
-            <div class="tenant-name">{{ score.tenant_name }}</div>
+            <a class="tenant-name link-accent" @click.stop="$router.push('/tenants')">{{ score.tenant_name }}</a>
             <div class="card-stats">
               <span class="stat" title="健康分">
                 <span class="stat-label">健康</span>
@@ -531,4 +531,5 @@ onMounted(loadAll)
   .card-stats { margin-left: 0; }
   .sla-config-panel { flex-direction: column; }
 }
+.link-accent{color:var(--color-primary);cursor:pointer;text-decoration:none}.link-accent:hover{text-decoration:underline}
 </style>

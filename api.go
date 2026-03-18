@@ -660,6 +660,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1/layouts/") && method == "DELETE":
 		api.handleLayoutDelete(w, r)
 
+	// v18: 概览摘要聚合 API
+	case path == "/api/v1/overview/summary" && method == "GET":
+		api.handleOverviewSummary(w, r)
+
 	// v17.0: 态势大屏聚合 API
 	case path == "/api/v1/bigscreen/data" && method == "GET":
 		api.handleBigScreenData(w, r)
@@ -5824,6 +5828,83 @@ func (api *ManagementAPI) handleBehaviorPatterns(w http.ResponseWriter, r *http.
 	})
 }
 
+// handleOverviewSummary GET /api/v1/overview/summary — v18 概览页摘要聚合
+func (mapi *ManagementAPI) handleOverviewSummary(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	result := map[string]interface{}{}
+
+	// 红队最新报告
+	if mapi.redTeamEngine != nil {
+		reports, err := mapi.redTeamEngine.ListReports(tenantID, 1)
+		if err == nil && len(reports) > 0 {
+			result["redteam"] = reports[0]
+		}
+	}
+
+	// 蜜罐统计
+	if mapi.honeypotEngine != nil {
+		stats := mapi.honeypotEngine.GetStats(tenantID)
+		result["honeypot"] = stats
+	}
+
+	// 攻击链统计
+	if mapi.attackChainEng != nil {
+		stats := mapi.attackChainEng.GetStats(tenantID)
+		result["attack_chains"] = stats
+	}
+
+	// 排行榜 TOP3
+	if mapi.leaderboardEng != nil {
+		entries := mapi.leaderboardEng.GetLeaderboard()
+		top := entries
+		if len(top) > 3 {
+			top = top[:3]
+		}
+		result["leaderboard"] = top
+	}
+
+	// 行为异常
+	if mapi.behaviorProfileEng != nil {
+		anomalies, err := mapi.behaviorProfileEng.ListAnomalies(tenantID, "", 5)
+		if err == nil {
+			highRisk := 0
+			for _, a := range anomalies {
+				if a.Severity == "high" || a.Severity == "critical" {
+					highRisk++
+				}
+			}
+			result["behavior"] = map[string]interface{}{
+				"anomaly_count":  len(anomalies),
+				"high_risk":      highRisk,
+			}
+		}
+	}
+
+	// A/B 测试
+	if mapi.abTestEngine != nil {
+		tests, err := mapi.abTestEngine.List(tenantID, "")
+		if err == nil {
+			active := 0
+			for _, t := range tests {
+				if t.Status == "running" {
+					active++
+				}
+			}
+			result["ab_testing"] = map[string]interface{}{
+				"active_tests": active,
+				"total_tests":  len(tests),
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
 // handleBigScreenData GET /api/v1/bigscreen/data — v17.0 态势大屏聚合数据
 func (mapi *ManagementAPI) handleBigScreenData(w http.ResponseWriter, r *http.Request) {
 	tenantID := r.URL.Query().Get("tenant")
@@ -5860,6 +5941,24 @@ func (mapi *ManagementAPI) handleBigScreenData(w http.ResponseWriter, r *http.Re
 	}
 	result["trend_total"] = totalArr
 	result["trend_blocked"] = blockedArr
+
+	// v18: QPS 和在线 Agent
+	if mapi.realtime != nil {
+		snap := mapi.realtime.Snapshot()
+		slotCount := int64(len(snap.Slots))
+		if slotCount > 0 {
+			result["qps"] = float64(snap.TotalReq) / float64(slotCount)
+		}
+	}
+	upstreams := mapi.pool.ListUpstreams()
+	healthyCount := 0
+	for _, up := range upstreams {
+		if up.Healthy {
+			healthyCount++
+		}
+	}
+	result["online_agents"] = healthyCount
+	result["upstreams_total"] = len(upstreams)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)

@@ -86,8 +86,9 @@
             <div class="tl-event-content">
               <div class="tl-event-header">
                 <span class="tl-time mono">{{ fmtTime(ev.timestamp) }}</span>
-                <span class="tl-agent">{{ ev.agent_id }}</span>
+                <a class="tl-agent link-accent" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(ev.agent_id))">{{ ev.agent_id }}</a>
                 <span class="tl-type-tag" :class="'tag-' + ev.event_type">{{ ev.event_type }}</span>
+                <a v-if="ev.source === 'honeypot' || ev.event_type === 'honeypot_trigger'" class="link-accent" style="font-size:11px;margin-left:6px" @click.stop="$router.push('/honeypot')">🍯 蜜罐 →</a>
               </div>
               <div class="tl-event-detail">"{{ ev.detail }}"</div>
             </div>
@@ -384,4 +385,5 @@ onMounted(() => {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .chain-footer { flex-direction: column; align-items: flex-start; }
 }
+.link-accent{color:var(--color-primary);cursor:pointer;text-decoration:none}.link-accent:hover{text-decoration:underline}
 </style>

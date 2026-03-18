@@ -108,6 +108,43 @@
     <!-- Heatmap -->
     <div class="card" style="margin-bottom:20px"><div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span><span class="card-title">7 天攻击频率热力图</span></div>
       <Skeleton v-if="!loaded" type="chart"/><EmptyState v-else-if="!heatmapData.length" :iconSvg="svgGrid" title="暂无热力图数据" description="系统运行 24 小时后将生成攻击频率热力图"/><HeatMap v-else :data="heatmapData" title=""/></div>
+    <!-- 安全洞察（v14-v17 功能摘要） -->
+    <div class="card" style="margin-bottom:20px" v-if="summaryLoaded">
+      <div class="card-header"><span class="card-icon">🔍</span><span class="card-title">安全洞察</span></div>
+      <div class="insight-grid">
+        <div class="insight-card" @click="router.push('/redteam')">
+          <div class="insight-header">🎯 红队测试</div>
+          <div class="insight-value" :class="summaryRedteamClass">{{ summaryRedteamRate }}%</div>
+          <div class="insight-sub">检测率 · {{ summaryRedteamVulns }} 个漏洞</div>
+        </div>
+        <div class="insight-card" @click="router.push('/honeypot')">
+          <div class="insight-header">🍯 蜜罐</div>
+          <div class="insight-value">{{ summary.honeypot?.total_triggers || 0 }}</div>
+          <div class="insight-sub">触发 · {{ summary.honeypot?.total_detonated || 0 }} 引爆</div>
+        </div>
+        <div class="insight-card" @click="router.push('/attack-chains')">
+          <div class="insight-header">🔗 攻击链</div>
+          <div class="insight-value" :class="(summary.attack_chains?.critical_chains||0) > 0 ? 'danger' : ''">{{ summary.attack_chains?.active_chains || 0 }}</div>
+          <div class="insight-sub">活跃链 · {{ summary.attack_chains?.critical_chains || 0 }} 高危</div>
+        </div>
+        <div class="insight-card" @click="router.push('/leaderboard')">
+          <div class="insight-header">🏆 排行榜</div>
+          <div class="insight-value">{{ summaryTopTenant }}</div>
+          <div class="insight-sub">{{ summaryTopScore }} 分 · TOP1</div>
+        </div>
+        <div class="insight-card" @click="router.push('/behavior')">
+          <div class="insight-header">🧠 行为画像</div>
+          <div class="insight-value" :class="(summary.behavior?.high_risk||0) > 0 ? 'warning' : ''">{{ summary.behavior?.anomaly_count || 0 }}</div>
+          <div class="insight-sub">行为突变 · {{ summary.behavior?.high_risk || 0 }} 高风险</div>
+        </div>
+        <div class="insight-card" @click="router.push('/ab-testing')">
+          <div class="insight-header">🔬 A/B 测试</div>
+          <div class="insight-value">{{ summary.ab_testing?.active_tests || 0 }}</div>
+          <div class="insight-sub">进行中 · {{ summary.ab_testing?.total_tests || 0 }} 总计</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Recent Attacks -->
     <div class="card"><div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span class="card-title">最近攻击事件</span></div>
       <Skeleton v-if="!loaded" type="table"/><EmptyState v-else-if="!recentAttacks.length" :iconSvg="svgShieldCheck" title="当前环境安全" description="没有检测到攻击事件"/>
@@ -140,6 +177,13 @@ const svgTarget='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" str
 const svgGrid='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>'
 const svgShieldCheck='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
 const loaded=ref(false),stats=ref({total:'--',blocked:'--',warned:'--',rate:'--'}),trendData=ref([]),trendRange=ref('24h'),recentAttacks=ref([]),topRules=ref([]),pieData=ref([]),heatmapData=ref([]),highRiskUserCount=ref(0)
+// v18: 安全洞察摘要
+const summary=ref({}),summaryLoaded=ref(false)
+const summaryRedteamRate=computed(()=>{const r=summary.value.redteam;return r?(r.pass_rate||0).toFixed(1):'--'})
+const summaryRedteamVulns=computed(()=>{const r=summary.value.redteam;return r?(r.failed||0):0})
+const summaryRedteamClass=computed(()=>{const v=parseFloat(summaryRedteamRate.value);return v>=80?'success':v>=50?'warning':'danger'})
+const summaryTopTenant=computed(()=>{const lb=summary.value.leaderboard;return lb&&lb.length?lb[0].tenant_name||lb[0].tenant_id:'--'})
+const summaryTopScore=computed(()=>{const lb=summary.value.leaderboard;return lb&&lb.length?lb[0].health_score:'--'})
 const healthScore=ref(null),showScoreDetail=ref(false),systemHealth=ref(null),refreshInterval=ref(localStorage.getItem('overview_refresh')||'30000'),anomalyStatus=ref(null)
 // v11.4: 全局时间范围选择器
 const timeRange=ref(localStorage.getItem('overview_time_range')||'24h')
@@ -193,7 +237,8 @@ async function loadData(){
 function onRefreshChange(){localStorage.setItem('overview_refresh',refreshInterval.value);setupTimer()}
 let refreshTimer=null
 function setupTimer(){clearInterval(refreshTimer);const ms=parseInt(refreshInterval.value);if(ms>0)refreshTimer=setInterval(()=>{loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus()},ms)}
-onMounted(()=>{trendRange.value=timeRange.value==='24h'?'24h':'7d';loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus();setupTimer()})
+async function loadSummary(){try{summary.value=await api('/api/v1/overview/summary');summaryLoaded.value=true}catch{summaryLoaded.value=false}}
+onMounted(()=>{trendRange.value=timeRange.value==='24h'?'24h':'7d';loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus();loadSummary();setupTimer()})
 onUnmounted(()=>clearInterval(refreshTimer))
 </script>
 <style scoped>
@@ -257,4 +302,13 @@ onUnmounted(()=>clearInterval(refreshTimer))
 .time-range-select:hover{background:var(--color-primary);color:#fff}
 .time-badge{display:inline-block;padding:1px 6px;border-radius:9999px;font-size:10px;font-weight:600;color:var(--text-tertiary);background:rgba(107,114,128,0.15);margin-left:4px;vertical-align:middle;line-height:1.4}
 @media(max-width:768px){.cockpit-body{flex-direction:column}.cockpit-left,.cockpit-right{width:100%}}
+/* v18: 安全洞察 */
+.insight-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.insight-card{background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:16px;cursor:pointer;transition:all var(--transition-fast)}
+.insight-card:hover{border-color:var(--color-primary);box-shadow:0 0 12px rgba(99,102,241,0.15)}
+.insight-header{font-size:12px;color:var(--text-tertiary);margin-bottom:8px}
+.insight-value{font-size:28px;font-weight:700;color:var(--text-primary)}
+.insight-sub{font-size:11px;color:var(--text-tertiary);margin-top:4px}
+.insight-value.danger{color:var(--color-danger)}.insight-value.warning{color:var(--color-warning)}.insight-value.success{color:var(--color-success)}
+@media(max-width:900px){.insight-grid{grid-template-columns:repeat(2,1fr)}}
 </style>

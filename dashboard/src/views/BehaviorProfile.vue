@@ -22,7 +22,7 @@
            :class="{'profile-critical': p.risk_level==='critical', 'profile-high': p.risk_level==='high', 'profile-elevated': p.risk_level==='elevated'}">
         <div class="profile-header">
           <div class="profile-id">
-            <span class="profile-name">{{ p.agent_id }}</span>
+            <a class="profile-name link-accent" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(p.agent_id))">{{ p.agent_id }}</a>
             <span class="profile-display" v-if="p.display_name && p.display_name !== p.agent_id">{{ p.display_name }}</span>
           </div>
           <span class="risk-badge" :class="'risk-' + p.risk_level">
@@ -69,6 +69,7 @@
           <div class="anomaly-item" v-for="a in p.anomalies.slice(0,5)" :key="a.id">
             <span class="anomaly-severity" :class="'sev-' + a.severity">{{ sevIcon(a.severity) }}</span>
             <span class="anomaly-desc">{{ a.description }}</span>
+            <a class="link-accent" style="font-size:11px;margin-left:auto" @click.stop="$router.push('/attack-chains')">🔗 攻击链 →</a>
           </div>
         </div>
 
@@ -314,4 +315,5 @@ onUnmounted(() => clearInterval(timer))
 .modal-body { padding: 20px; }
 .detail-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: var(--text-sm); border-bottom: 1px solid rgba(255,255,255,.04); }
 .dl { color: var(--text-tertiary); font-weight: 600; }
+.link-accent{color:var(--color-primary);cursor:pointer;text-decoration:none}.link-accent:hover{text-decoration:underline}
 </style>

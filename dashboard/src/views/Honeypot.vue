@@ -73,7 +73,7 @@
         <div v-for="t in triggers" :key="t.id" class="trigger-card" :class="{ detonated: t.detonated }">
           <div class="trigger-header">
             <span class="trigger-time">{{ formatTime(t.timestamp) }}</span>
-            <span class="trigger-sender">{{ t.sender_id }}</span>
+            <a class="trigger-sender link-accent" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(t.sender_id))">{{ t.sender_id }}</a>
             <span class="trigger-tpl">{{ typeIcon(t.trigger_type) }} {{ t.template_name }}</span>
             <span v-if="t.detonated" class="trigger-boom">💣 已引爆</span>
             <span v-else class="trigger-active">🔖 活跃</span>
@@ -83,6 +83,7 @@
             <div class="trigger-row"><span class="label">假响应:</span> <code class="value">{{ truncate(t.fake_response, 80) }}</code></div>
             <div class="trigger-row"><span class="label">水印:</span> <code class="watermark">{{ t.watermark }}</code></div>
             <div v-if="t.detonated" class="trigger-row"><span class="label">引爆时间:</span> <span class="value danger">{{ formatTime(t.detonated_at) }}</span></div>
+            <div v-if="t.trace_id" class="trigger-row"><span class="label">会话:</span> <a class="link-accent" @click.stop="router.push('/sessions/' + t.trace_id)">查看会话回放 →</a></div>
           </div>
         </div>
         <div v-if="triggers.length === 0" class="empty-state">暂无触发记录</div>
@@ -165,7 +166,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
+
+const router = useRouter()
 
 const activeTab = ref('templates')
 const stats = ref({ active_templates: 0, total_triggers: 0, total_detonated: 0, active_watermarks: 0 })
@@ -279,6 +283,7 @@ onMounted(() => { loadStats(); loadTemplates(); loadTriggers() })
 .trigger-header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); flex-wrap: wrap; }
 .trigger-time { font-size: var(--text-xs); color: var(--text-tertiary); font-family: var(--font-mono); }
 .trigger-sender { font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500; }
+.link-accent{color:var(--color-primary);cursor:pointer;text-decoration:none}.link-accent:hover{text-decoration:underline}
 .trigger-tpl { font-size: var(--text-sm); color: var(--text-primary); }
 .trigger-boom { font-size: var(--text-xs); color: #EF4444; font-weight: 600; }
 .trigger-active { font-size: var(--text-xs); color: #22C55E; }

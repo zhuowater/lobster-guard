@@ -75,6 +75,30 @@
       </div>
     </div>
 
+    <!-- 安全洞察快捷入口（v18） -->
+    <div class="llm-insight-row" v-if="llmSummaryLoaded">
+      <div class="llm-insight-card" @click="router.push('/honeypot')">
+        <span class="llm-insight-icon">🍯</span>
+        <span class="llm-insight-num">{{ llmSummary.honeypot?.total_triggers || 0 }}</span>
+        <span class="llm-insight-label">蜜罐触发</span>
+      </div>
+      <div class="llm-insight-card" @click="router.push('/ab-testing')">
+        <span class="llm-insight-icon">🔬</span>
+        <span class="llm-insight-num">{{ llmSummary.ab_testing?.active_tests || 0 }} / {{ llmSummary.ab_testing?.total_tests || 0 }}</span>
+        <span class="llm-insight-label">A/B 测试</span>
+      </div>
+      <div class="llm-insight-card" @click="router.push('/attack-chains')">
+        <span class="llm-insight-icon">🔗</span>
+        <span class="llm-insight-num" :class="(llmSummary.attack_chains?.critical_chains||0)>0?'llm-insight-danger':''">{{ llmSummary.attack_chains?.active_chains || 0 }}</span>
+        <span class="llm-insight-label">攻击链</span>
+      </div>
+      <div class="llm-insight-card" @click="router.push('/behavior')">
+        <span class="llm-insight-icon">🧠</span>
+        <span class="llm-insight-num" :class="(llmSummary.behavior?.high_risk||0)>0?'llm-insight-warn':''">{{ llmSummary.behavior?.anomaly_count || 0 }}</span>
+        <span class="llm-insight-label">行为异常</span>
+      </div>
+    </div>
+
     <!-- 成本看板 -->
     <div class="ov-row" v-if="loaded" style="margin-bottom:20px">
       <div class="card">
@@ -207,6 +231,29 @@
         </table>
       </div>
     </div>
+
+    <!-- 安全洞察 -->
+    <div class="card" v-if="llmSummaryLoaded" style="margin-top:16px">
+      <div class="card-header"><span class="card-icon">🔍</span><span class="card-title">安全洞察</span></div>
+      <div class="llm-insight-grid">
+        <div class="llm-insight-card" @click="router.push('/honeypot')">
+          <span class="llm-insight-icon">🍯</span>
+          <div><div class="llm-insight-val">{{ llmSummary.honeypot?.total_triggers || 0 }}</div><div class="llm-insight-label">蜜罐触发 · {{ llmSummary.honeypot?.total_detonated || 0 }} 引爆</div></div>
+        </div>
+        <div class="llm-insight-card" @click="router.push('/attack-chains')">
+          <span class="llm-insight-icon">🔗</span>
+          <div><div class="llm-insight-val">{{ llmSummary.attack_chains?.active_chains || 0 }}</div><div class="llm-insight-label">攻击链 · {{ llmSummary.attack_chains?.critical_chains || 0 }} 高危</div></div>
+        </div>
+        <div class="llm-insight-card" @click="router.push('/ab-testing')">
+          <span class="llm-insight-icon">🔬</span>
+          <div><div class="llm-insight-val">{{ llmSummary.ab_testing?.active_tests || 0 }}</div><div class="llm-insight-label">A/B 测试进行中</div></div>
+        </div>
+        <div class="llm-insight-card" @click="router.push('/behavior')">
+          <span class="llm-insight-icon">🧠</span>
+          <div><div class="llm-insight-val">{{ llmSummary.behavior?.anomaly_count || 0 }}</div><div class="llm-insight-label">行为突变 · {{ llmSummary.behavior?.high_risk || 0 }} 高风险</div></div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -266,6 +313,9 @@ const trendRange = ref('24h')
 const timelineData = ref([])
 // v13.1 Prompt 版本追踪
 const promptInfo = ref(null)
+// v18: 安全洞察
+const llmSummary = ref({}), llmSummaryLoaded = ref(false)
+async function loadLLMSummary() { try { llmSummary.value = await api('/api/v1/overview/summary'); llmSummaryLoaded.value = true } catch { llmSummaryLoaded.value = false } }
 
 function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
@@ -387,7 +437,7 @@ async function loadData() {
 
 let timer = null
 function setupLLMTimer() { clearInterval(timer); const ms = parseInt(refreshInterval.value); if (ms > 0) timer = setInterval(() => { loadData(); loadOwaspMatrix() }, ms) }
-onMounted(() => { loadData(); loadOwaspMatrix(); setupLLMTimer() })
+onMounted(() => { loadData(); loadOwaspMatrix(); loadLLMSummary(); setupLLMTimer() })
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -445,4 +495,18 @@ code { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; fon
 .time-range-select{background:var(--bg-elevated);border:1px solid var(--color-primary);border-radius:var(--radius-sm);color:var(--color-primary);font-size:var(--text-xs);font-weight:600;padding:3px 8px;cursor:pointer;transition:all .2s}
 .time-range-select:hover{background:var(--color-primary);color:#fff}
 @media(max-width:768px) { .owasp-grid { grid-template-columns: repeat(2, 1fr); } }
+.llm-insight-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:4px}
+.llm-insight-card{display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);cursor:pointer;transition:all .2s}
+.llm-insight-card:hover{border-color:var(--color-primary);box-shadow:0 0 10px rgba(99,102,241,0.15)}
+.llm-insight-icon{font-size:1.5rem}
+.llm-insight-val{font-size:20px;font-weight:700;color:var(--text-primary)}
+.llm-insight-label{font-size:11px;color:var(--text-tertiary);margin-top:2px}
+@media(max-width:900px){.llm-insight-grid{grid-template-columns:repeat(2,1fr)}}
+/* Top insight row */
+.llm-insight-row{display:flex;gap:10px;margin-bottom:16px}
+.llm-insight-row .llm-insight-card{flex:1;flex-direction:column;align-items:center;text-align:center;padding:10px 8px}
+.llm-insight-num{font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono)}
+.llm-insight-danger{color:#EF4444!important}
+.llm-insight-warn{color:#F59E0B!important}
+@media(max-width:900px){.llm-insight-row{flex-wrap:wrap}.llm-insight-row .llm-insight-card{min-width:calc(50% - 8px)}}
 </style>

@@ -141,6 +141,8 @@ function exitBigScreen(){ try{document.exitFullscreen()}catch{}; router.push('/o
 const healthScore = ref(null)
 const statsData = ref(null)
 const prevStats = ref(null)
+const realtimeSnap = ref(null)
+const uniqueAgents = ref(0)
 const owaspMatrix = ref([])
 const chainStats = ref(null)
 const leaderboard = ref([])
@@ -157,12 +159,17 @@ const cIdx = ref(0)
 function sc(s){ return s>=90?'#22c55e':s>=70?'#84cc16':s>=50?'#f59e0b':s>=30?'#f97316':'#ef4444' }
 
 const metrics = computed(()=>{
-  const hs=healthScore.value, st=statsData.value, ps=prevStats.value
-  const score=hs?hs.score:0, qps=st?(st.requests_per_sec||st.qps||0):0
-  const tot=st?(st.total_requests||0):0, blk=st?(st.blocked_requests||0):0
-  const br=tot>0?(blk/tot*100):0, ag=st?(st.active_agents||st.online_agents||st.registered_agents||0):0
+  const hs=healthScore.value, st=statsData.value, ps=prevStats.value, rt=realtimeSnap.value
+  const score=hs?hs.score:0
+  // QPS: prefer realtime snapshot, fallback to stats
+  const qps=rt?(rt.total_req||0)/Math.max(rt.slots?.length||60,1):st?(st.requests_per_sec||st.qps||0):0
+  const tot=st?(st.total||st.total_requests||0):0, blk=st?(st.blocked||st.blocked_requests||0):0
+  const br=tot>0?(blk/tot*100):0
+  // Agent count: prefer unique_senders from stats, fallback to audit distinct senders, then upstreams
+  const auDistinct=auditEvents.value?[...new Set(auditEvents.value.filter(e=>e.sender_id).map(e=>e.sender_id))].length:0
+  const ag=st?(st.unique_senders||st.active_agents||0):0 || auDistinct || uniqueAgents.value || 0
   const pq=ps?(ps.requests_per_sec||ps.qps||0):qps
-  const pt=ps?(ps.total_requests||0):tot, pb=ps?(ps.blocked_requests||0):blk
+  const pt=ps?(ps.total||ps.total_requests||0):tot, pb=ps?(ps.blocked||ps.blocked_requests||0):blk
   const pbr=pt>0?(pb/pt*100):br
   const pScore=hs&&hs.trend&&hs.trend.length>=2?hs.trend[hs.trend.length-2].score:score
   return [
@@ -196,19 +203,35 @@ function startCarousel(){if(carouselT)clearInterval(carouselT);carouselT=setInte
 
 async function fetchAll(){
   try{
-    const [st,hs,lb,cs,hp,au]=await Promise.allSettled([api('/api/v1/stats'),api('/api/v1/health/score'),api('/api/v1/leaderboard'),api('/api/v1/attack-chains/stats'),api('/api/v1/honeypot/stats'),api('/api/v1/audit/logs?limit=30')])
+    const [st,hs,lb,cs,hp,au,rt,hz]=await Promise.allSettled([api('/api/v1/stats'),api('/api/v1/health/score'),api('/api/v1/leaderboard'),api('/api/v1/attack-chains/stats'),api('/api/v1/honeypot/stats'),api('/api/v1/audit/logs?limit=30'),api('/api/v1/metrics/realtime'),api('/healthz')])
     if(st.status==='fulfilled'){prevStats.value=statsData.value;statsData.value=st.value}
     if(hs.status==='fulfilled')healthScore.value=hs.value
-    if(lb.status==='fulfilled')leaderboard.value=Array.isArray(lb.value)?lb.value:(lb.value.leaderboard||[])
+    if(lb.status==='fulfilled')leaderboard.value=Array.isArray(lb.value)?lb.value:(lb.value.leaderboard||lb.value.scores||[])
     if(cs.status==='fulfilled')chainStats.value=cs.value
     if(hp.status==='fulfilled')hpStats.value=hp.value
     if(au.status==='fulfilled'){const l=Array.isArray(au.value)?au.value:(au.value.logs||au.value.items||[]);auditEvents.value=l}
+    if(rt.status==='fulfilled')realtimeSnap.value=rt.value
+    // Derive unique agents from healthz upstreams or stats
+    if(hz.status==='fulfilled'){
+      const h=hz.value
+      const ups=h?.checks?.upstream||h?.upstreams||{}
+      uniqueAgents.value=ups.healthy||ups.total||0
+    }
   }catch(e){console.error('[BigScreen]',e)}
 }
 async function fetchOwasp(){
-  try{const d=await api('/api/v1/health/score');if(d&&d.owasp_matrix)owaspMatrix.value=d.owasp_matrix}catch{}
-  if(!owaspMatrix.value.length){try{const d=await api('/api/v1/owasp/matrix');if(Array.isArray(d))owaspMatrix.value=d}catch{}}
-  try{const d=await api('/api/v1/bigscreen/data');if(d){if(d.owasp_matrix&&d.owasp_matrix.length)owaspMatrix.value=d.owasp_matrix;if(d.trend_total)trendData.value.total=d.trend_total;if(d.trend_blocked)trendData.value.blocked=d.trend_blocked}}catch{}
+  // Prefer bigscreen/data which includes OWASP matrix + trend data
+  try{
+    const d=await api('/api/v1/bigscreen/data')
+    if(d){
+      if(d.owasp_matrix&&d.owasp_matrix.length)owaspMatrix.value=d.owasp_matrix
+      if(d.trend_total)trendData.value.total=d.trend_total
+      if(d.trend_blocked)trendData.value.blocked=d.trend_blocked
+    }
+  }catch{
+    // Fallback: try health score owasp matrix
+    try{const d=await api('/api/v1/health/score');if(d&&d.owasp_matrix)owaspMatrix.value=d.owasp_matrix}catch{}
+  }
 }
 async function fetchCarousel(){
   try{

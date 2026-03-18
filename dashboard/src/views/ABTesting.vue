@@ -93,6 +93,7 @@
             <span v-if="test.winner === 'B'"> — 版本 B 在安全性上显著优于版本 A</span>
             <span v-else-if="test.winner === 'A'"> — 版本 A 在安全性上更优</span>
             <span v-else-if="test.winner === 'tie'"> — 两个版本差异不显著</span>
+            <a class="link-accent" style="margin-left:12px;font-size:12px" @click.stop="$router.push('/prompts')">📝 Prompt 追踪 →</a>
           </div>
           <div v-if="test.recommendation" class="ab-conclusion-line">💡 {{ test.recommendation }}</div>
         </div>
@@ -416,4 +417,5 @@ onMounted(loadTests)
   .ab-divider { height: 1px; width: 100%; }
   .form-row { flex-direction: column; }
 }
+.link-accent{color:var(--color-primary);cursor:pointer;text-decoration:none}.link-accent:hover{text-decoration:underline}
 </style>

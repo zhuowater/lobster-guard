@@ -35,7 +35,17 @@ function authHeaders() {
  * 排除不需要 tenant 的路径
  */
 function injectTenantParam(path) {
-  const skipPaths = ['/healthz', '/api/v1/tenants', '/api/v1/system/', '/api/v1/config', '/api/v1/demo/', '/api/v1/notifications', '/api/v1/llm/status', '/api/v1/llm/rules', '/api/v1/auth/', '/api/v1/redteam', '/api/v1/leaderboard']
+  const skipPaths = [
+    '/healthz',
+    '/api/v1/tenants',        // 租户管理本身是全局的
+    '/api/v1/system/',         // 系统设置是全局的
+    '/api/v1/config',          // 配置是全局的
+    '/api/v1/demo/',           // Demo seed/clear 是全局的
+    '/api/v1/auth/',           // 认证是全局的
+    '/api/v1/layouts',         // 布局是用户级的，不是租户级
+    '/api/v1/bigscreen/',      // 大屏聚合是全局的
+    '/api/v1/op-audit',        // 操作审计是全局的
+  ]
   for (const sp of skipPaths) {
     if (path.startsWith(sp)) return path
   }
