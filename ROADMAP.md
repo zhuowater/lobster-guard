@@ -212,9 +212,9 @@
   - Go 插件 + WASM 插件双模式（Go 高性能 / WASM 跨语言安全沙箱）
   - 更多通道插件：Slack / Teams / Telegram / Discord
 
-### v20.x — LLM 流量深度分析 · 响应缓存 🔥🔥
-> 把 LLM 反向代理的数据吃干榨净 | 理论基础：Shannon 信息论（安全有物理成本下限）
-> 依赖：✅ 纯 LLMProxy 已有流量（tool_calls 解析 + 响应缓存 + 成本优化）
+### v20.x — LLM 深度分析 · 信息流污染追踪 · 响应缓存 🔥🔥🔥
+> 把三条数据通道吃干榨净 | 理论基础：Shannon 信息论（安全有物理成本下限）
+> 依赖：✅ 纯已有流量（InboundProxy + LLMProxy + OutboundProxy + trace_id 关联）
 
 - [ ] v20.0 **LLM tool_calls 深度解析 + 策略管控**
   - LLMProxy 已经能看到 LLM 响应中的 `tool_calls`（LLM 决定要调什么工具）
@@ -222,16 +222,26 @@
   - 示例：LLM 请求调用 `execute_code` / `shell_exec` → 根据策略 block/warn/log
   - 示例：LLM 请求读取 `/etc/passwd` 或 `~/.ssh/` → 自动阻断
   - tool_calls 审计增强：记录每次工具调用的名称、参数摘要、风险等级
-  - Dashboard 工具调用统计页：热门工具 TOP10 / 高危调用趋势 / 按 Agent 维度聚合
+  - Dashboard 工具调用统计页：热门工具 TOP10 / 高危调用趋势 / 按租户聚合
   - 数据来源：LLMProxy.handleSSEResponse + LLMAuditor.llm_tool_calls 表（已有）
-- [ ] v20.1 **LLM 响应缓存**
+- [ ] v20.1 **信息流污染追踪（Taint Propagation）** 🔥
+  - 入站打标：InboundProxy 检测入站消息含 PII（手机号/身份证/银行卡/姓名）→ 给 trace_id 打 `PII-TAINTED` 标签
+  - LLM 阶段传播：该 trace_id 的 LLM 请求必然携带被污染的用户消息 → 标签跟着 trace_id 走
+  - tool_calls 意图推断：LLM 的 tool_calls 参数含敏感查询（`SELECT * FROM customers`）→ 追加 `DATA-QUERY-TAINTED`
+  - 出站血统检查：OutboundProxy 看到此 trace_id 是 `PII-TAINTED` → 即使出站文本被 LLM 改写/摘要过、正则匹不到原始 PII，也能基于血统阻断或告警
+  - 污染标签类型：`PII-TAINTED` / `CONFIDENTIAL` / `CREDENTIAL` / `INTERNAL-ONLY`
+  - Dashboard 污染追踪页：按 trace_id 展示完整污染链路（入站标记→LLM传播→出站决策）
+  - 数据来源：InboundProxy（入站文本）+ LLMProxy（tool_calls 参数）+ OutboundProxy（出站文本）+ TraceCorrelator（关联）
+  - 灵感来源：Telos Dynamic IFC · MVAR Provenance Tracking · 洞见 #18（三跳攻击链）
+  - **为什么不需要 MCP Proxy**：不需要看到 MCP 实际返回了什么，入站 PII 检测 + LLM tool_calls 意图推断 + 出站兜底，三段联合已覆盖核心场景
+- [ ] v20.2 **LLM 响应缓存**
   - 语义相似查询命中缓存（向量相似度 > 阈值 → 返回缓存响应，不转发到上游 LLM）
   - 缓存命中率 / 节省成本 / Token 节约量 Dashboard 展示
-  - 缓存安全：按租户隔离缓存空间，防止跨租户信息泄露
+  - 缓存安全：按租户隔离缓存空间，防止跨租户信息泄露；被污染的响应不进缓存
   - 缓存淘汰策略：LRU + TTL + 安全事件触发清除
   - 数据来源：LLMProxy 请求/响应流量
   - 灵感来源：Cloudflare AI Gateway 缓存
-- [ ] v20.2 **API Gateway 基础能力**
+- [ ] v20.3 **API Gateway 基础能力**
   - 认证中间件（JWT / API Key 校验，在 LLMProxy 层面）
   - 请求/响应转换（Header 注入、Body 字段改写）
   - 灰度发布（按租户百分比切流量到不同 LLM 上游）
@@ -242,10 +252,10 @@
 ### Phase 2: 架构演进 — 需要上下游配合或龙虾卫士新增代理能力
 
 > v21+ 需要与 OpenClaw 协议约定（Header/Webhook）或新增 MCP Proxy 能力
-> 集中处理 Agent 身份识别、MCP 工具调用可见性、信息流追踪等架构问题
+> 集中处理 Agent 身份识别、MCP 工具调用可见性等架构问题
 
-### v21.x — Agent 身份 · MCP 代理 🔥🔥
-> 看见 Agent，看见 MCP | 这是 Phase 2 的基础设施版本
+### v21.x — Agent 身份 · MCP 代理 · 意图声明 🔥🔥
+> 看见 Agent，看见 MCP | Phase 2 的基础设施版本
 > 依赖：🔧 需要 OpenClaw 侧协议配合（Header 约定）+ 龙虾卫士新增 MCP Proxy 端口
 
 - [ ] v21.0 **Agent 身份识别协议**
@@ -259,7 +269,8 @@
   - 支持 MCP HTTP SSE 传输协议（拦截 `tools/call` / `tools/list` 等方法）
   - OpenClaw 配置 MCP Server 地址指向龙虾卫士 → 龙虾卫士转发到真实 MCP Server
   - 完整审计：工具名称 / 输入参数 / 输出结果 / 延迟 / 风险标签
-  - MCP 调用与 LLM tool_calls 通过 trace_id 关联：LLM 决定调什么（v20）↔ 实际调了什么（v21）
+  - MCP 调用与 LLM tool_calls 通过 trace_id 关联：LLM 决定调什么（v20.0）↔ 实际调了什么（v21.1）
+  - MCP 返回数据的真实 PII 检测 → 补充 v20.1 的污染标签（从意图推断升级为事实确认）
 - [ ] v21.2 **意图声明式安全 + Policy-as-Code**
   - Agent 注册时提交意图声明（YAML）：允许的 MCP 工具、允许的数据范围、允许的行为模式
   - 运行时校验：MCP 调用超出声明范围 → 直接阻断
@@ -267,21 +278,18 @@
   - 灵感来源：Telos Intent Declaration · Kvlar Policy-as-Code · AvaKill YAML Policy
   - 理论基础：停机问题/Rice 定理（完美检测不可能 → 白名单优于黑名单）
 
-### v22.x — 信息流追踪 · 蠕虫检测 🔥🔥
-> 数据从哪来，到哪去 | 理论基础：Shannon 信息论
-> 依赖：🔧 需要 v21 的 Agent 身份 + MCP Proxy 作为基础设施
+### v22.x — 跨 Agent 安全 · 蠕虫检测 🔥🔥
+> 当有了 Agent 身份，才能做跨 Agent 分析 | 理论基础：洞见 #33/#35（蠕虫化 + 涌现安全）
+> 依赖：🔧 需要 v21 的 Agent 身份识别 + MCP Proxy
 
-- [ ] v22.0 **信息流污染追踪（Taint Propagation）**
-  - 在 MCP Proxy 层面为数据打"污染标签"：PII-TAINTED / CONFIDENTIAL / INTERNAL-ONLY
-  - 追踪数据流向：MCP 读取 → LLM 处理（LLMProxy 可见）→ 出站响应（OutboundProxy 可见）
-  - 出站检查看数据血统——祖先包含敏感源 → 阻断，不再只靠正则匹配
-  - 跨 Agent 污染传播检测（Agent A 的敏感输出成了 Agent B 的输入）
-  - 灵感来源：Telos Dynamic IFC · MVAR Provenance Tracking · 洞见 #18/#33（三跳/四跳攻击链）
+- [ ] v22.0 **跨 Agent 污染传播检测**
+  - Agent A 的敏感输出 → 成了 Agent B 的输入 → 污染标签跨 Agent 传播
+  - 需要 Agent 身份才能区分"A 发出的"和"B 收到的"
+  - 与 v20.1 的 trace 级污染追踪互补：v20.1 追踪单次会话内，v22.0 追踪跨 Agent 间
 - [ ] v22.1 **跨 Agent 蠕虫检测**
   - 检测 Agent→Agent 感染链模式（洞见 #33 第四跳蠕虫化）
   - 感染拓扑图可视化（传播路径、感染时间线）
   - 自动隔离已感染 Agent（切断路由、标记污染）
-  - 依赖 v21 的 Agent 身份识别才能区分不同 Agent 的行为
 
 ### v23.x — AI 安全助手 · 生态平台 🔥
 > 安全运营副驾驶 + 社区生态 | 理论基础：Nash 均衡（安全均衡需要被设计）+ 涌现安全
@@ -417,10 +425,10 @@ v17:     态势感知大屏 + 可拖拽布局
 Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
   v18:     密码学信任根 + 事件总线 + 工程化 (Docker/CI/OpenAPI)
   v19:     对抗性自进化 + 语义检测模型 + 插件 SDK
-  v20:     LLM tool_calls 深度分析 + 响应缓存 + API Gateway
+  v20:     LLM tool_calls 深度分析 + 信息流污染追踪 + 响应缓存 + API Gateway
 Phase 2 — 架构演进（需要上下游协议配合 + 新增 MCP Proxy）:
   v21:     Agent 身份协议 + MCP Proxy(:8445) + 意图声明
-  v22:     信息流污染追踪 + 跨 Agent 蠕虫检测
+  v22:     跨 Agent 污染传播 + 蠕虫检测
   v23:     AI 安全助手 + Guardrail 市场 + OTel
   v24:     分布式部署 + PostgreSQL + 弹性伸缩
 
@@ -429,8 +437,8 @@ Phase 2 — 架构演进（需要上下游协议配合 + 新增 MCP Proxy）:
   v6-v9:   AI Agent 安全管控平台（防御 + 可视化 + 审计）
   v10-v13: AI Agent 安全运营中心（分析 + 洞察 + 合规）
   v14-v17: 安全治理 + 态势感知（治理 + 主动防御 + 智能分析）
-  v18-v20: 可证明安全 + 自进化防御 + LLM 深度分析（Phase 1 纯流量）
-  v21-v22: Agent 身份 + MCP 管控 + 信息流追踪（Phase 2 架构演进）
+  v18-v20: 可证明安全 + 自进化 + 信息流追踪（Phase 1 纯流量，把已有数据吃干榨净）
+  v21-v22: Agent 身份 + MCP 管控 + 跨 Agent 安全（Phase 2 架构演进）
   v23-v24: 安全运营副驾驶 + 企业级分布式（AI 原生安全运营）
 ```
 
@@ -440,9 +448,9 @@ Phase 2 — 架构演进（需要上下游协议配合 + 新增 MCP Proxy）:
 |------|---------|---------|
 | v18 | Gödel 不完备定理 | 安全无法自证 → 用密码学逼近可证明 |
 | v19 | 熵增定律 + 耗散结构 | 安全退化是物理必然 → 持续注入能量（红队）对抗熵增（自进化） |
-| v20 | Shannon 信息论 | LLM 流量已有丰富信息 → 吃干榨净 tool_calls + 缓存优化 |
+| v20 | Shannon 信息论 + 洞见 #18 | trace_id 就是污染载体 → 三段联合追踪（入站标记→LLM传播→出站拦截）|
 | v21 | 停机问题 / Rice 定理 | 完美检测不可能 → 白名单（意图声明）+ 看见 MCP 才能管 MCP |
-| v22 | 洞见 #18/#33 三跳/四跳 | 数据血统追踪 → 跨 Agent 污染传播检测 |
+| v22 | 洞见 #33/#35 蠕虫/涌现 | 跨 Agent 污染传播 → 需要 Agent 身份才能做 |
 | v23 | Nash 均衡 + 涌现安全 | 安全均衡需要被设计 → AI 辅助全局视角 |
 | v24 | CAP 定理 | 分布式安全三选二 → 明确权衡选择 |
 
@@ -452,9 +460,9 @@ Phase 2 — 架构演进（需要上下游协议配合 + 新增 MCP Proxy）:
 |------|--------|
 | v18 | 日志不只是记录，是**密码学证据** |
 | v19 | 安全系统**自己攻击自己、自己修复自己** |
-| v20 | 不需要看到 MCP，**LLM 的 tool_calls 已经泄露了 Agent 的意图** |
+| v20 | 不检测内容，**追踪数据的血统**；不需要看到 MCP，**trace_id 串起三段就够了** |
 | v21 | 不猜 Agent 身份，**让 Agent 自报家门**（协议约定） |
-| v22 | 不检测内容，**追踪数据的血统** |
+| v22 | 单 Agent 安全 ≠ 多 Agent 安全，**蠕虫在 Agent 之间传播** |
 | v23 | 安全运营不是看 Dashboard，是**跟安全助手对话** |
 | v24 | 单二进制 → 集群，但**零配置迁移** |
 
