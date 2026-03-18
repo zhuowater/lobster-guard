@@ -82,11 +82,15 @@
         <span v-else>--</span>
       </template>
       <template #cell-trace_id="{ row }">
-        <span style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-primary);cursor:pointer"
-              :title="row.trace_id"
-              @click.stop="filters.trace_id = row.trace_id; loadLogs()">
-          {{ (row.trace_id || '--').substring(0, 8) }}{{ row.trace_id && row.trace_id.length > 8 ? '...' : '' }}
+        <span v-if="row.trace_id" style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-primary);cursor:pointer;display:inline-flex;align-items:center;gap:4px"
+              :title="'点击查看会话回放: ' + row.trace_id">
+          <span @click.stop="$router.push('/sessions/' + encodeURIComponent(row.trace_id))">
+            {{ row.trace_id.substring(0, 8) }}{{ row.trace_id.length > 8 ? '...' : '' }}
+          </span>
+          <span style="font-size:10px;opacity:0.6" @click.stop="$router.push('/sessions/' + encodeURIComponent(row.trace_id))">▶</span>
+          <span style="font-size:10px;opacity:0.4;margin-left:2px" @click.stop="filters.trace_id = row.trace_id; loadLogs()" title="筛选此 trace">🔍</span>
         </span>
+        <span v-else style="font-size:var(--text-xs);color:var(--text-tertiary)">--</span>
       </template>
       <template #cell-content_preview="{ row }">
         <span style="max-width:300px;overflow:hidden;text-overflow:ellipsis;display:inline-block" :title="row.content_preview">
