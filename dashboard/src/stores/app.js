@@ -21,6 +21,35 @@ export const appState = reactive({
 export const currentTenant = ref(localStorage.getItem('lg_tenant') || 'default')
 export const tenantList = ref([])
 
+// v14.1: 认证状态
+const AUTH_TOKEN_KEY = 'lg_auth_token'
+export const authToken = ref(localStorage.getItem(AUTH_TOKEN_KEY) || '')
+export const currentUser = ref(null)
+
+/** v14.1: 登录 — 保存 token 和用户信息 */
+export function loginUser(token, user) {
+  authToken.value = token
+  currentUser.value = user
+  localStorage.setItem(AUTH_TOKEN_KEY, token)
+}
+
+/** v14.1: 登出 — 清除认证状态 */
+export function logoutUser() {
+  authToken.value = ''
+  currentUser.value = null
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+}
+
+/** v14.1: 是否已认证（有 JWT token 或旧的 management token） */
+export function isAuthenticated() {
+  return !!authToken.value || !!localStorage.getItem('lobster_guard_token')
+}
+
+/** v14.1: 获取 JWT token */
+export function getAuthToken() {
+  return authToken.value
+}
+
 /** 设置当前租户 */
 export function setTenant(id) {
   currentTenant.value = id
@@ -72,5 +101,7 @@ export const appStorePlugin = {
     app.provide('showToast', showToast)
     app.provide('currentTenant', currentTenant)
     app.provide('tenantList', tenantList)
+    app.provide('currentUser', currentUser)
+    app.provide('authToken', authToken)
   }
 }

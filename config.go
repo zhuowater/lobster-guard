@@ -194,6 +194,16 @@ type Config struct {
 	DetectCacheSize        int      `yaml:"detect_cache_size"`        // 检测缓存大小（默认 1000）
 	// v9.0 LLM 代理
 	LLMProxy               LLMProxyConfig `yaml:"llm_proxy" json:"llm_proxy"` // LLM 侧反向代理配置
+	// v14.1 登录认证
+	Auth                   AuthConfig     `yaml:"auth" json:"auth"`
+}
+
+// AuthConfig 认证配置（v14.1）
+type AuthConfig struct {
+	Enabled          bool   `yaml:"enabled" json:"enabled"`                     // 默认 false，向后兼容
+	JWTSecret        string `yaml:"jwt_secret" json:"-"`                        // JWT 签名密钥
+	DefaultPassword  string `yaml:"default_password" json:"-"`                  // 初始管理员密码
+	TokenExpireHours int    `yaml:"token_expire_hours" json:"token_expire_hours"` // JWT 过期时间（小时）
 }
 
 type OutboundRuleConfig struct {

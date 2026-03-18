@@ -52,6 +52,25 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         {{ formattedUptime }}
       </div>
+      <!-- v14.1: 用户信息 + 登出 -->
+      <div class="user-menu" v-if="authUser" ref="userMenuWrap">
+        <button class="user-btn" @click="userMenuOpen = !userMenuOpen">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="user-name">{{ authUser.display_name || authUser.username }}</span>
+          <span class="user-role-badge" :class="'role-' + authUser.role">{{ authUser.role }}</span>
+        </button>
+        <div class="user-dropdown" v-if="userMenuOpen">
+          <div class="user-dropdown-info">
+            <div class="user-dropdown-name">{{ authUser.display_name || authUser.username }}</div>
+            <div class="user-dropdown-role">{{ roleLabel(authUser.role) }}</div>
+          </div>
+          <div class="user-dropdown-divider"></div>
+          <button class="user-dropdown-item" @click="doLogout">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            退出登录
+          </button>
+        </div>
+      </div>
     </div>
   </header>
 </template>
@@ -59,8 +78,8 @@
 <script setup>
 import { inject, computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../api.js'
-import { currentTenant, setTenant, updateTenantList } from '../stores/app.js'
+import { api, clearToken } from '../api.js'
+import { currentTenant, setTenant, updateTenantList, currentUser, logoutUser } from '../stores/app.js'
 
 defineEmits(['toggleMobile'])
 const appState = inject('appState')
@@ -86,6 +105,42 @@ function onTenantChange(e) {
   setTenant(e.target.value)
   // Reload current page to refresh data with new tenant
   router.go(0)
+}
+
+// v14.1: 用户菜单
+const userMenuOpen = ref(false)
+const userMenuWrap = ref(null)
+const authUser = ref(null)
+
+async function loadAuthUser() {
+  try {
+    const d = await api('/api/v1/auth/me')
+    authUser.value = d
+    if (d.username) {
+      currentUser.value = d
+    }
+  } catch {
+    authUser.value = null
+  }
+}
+
+function roleLabel(role) {
+  const map = { admin: '管理员', operator: '运维', viewer: '只读' }
+  return map[role] || role
+}
+
+async function doLogout() {
+  try { await api('/api/v1/auth/logout', { method: 'POST' }) } catch {}
+  logoutUser()
+  clearToken()
+  userMenuOpen.value = false
+  router.push('/login')
+}
+
+function onUserMenuClickOutside(e) {
+  if (userMenuWrap.value && !userMenuWrap.value.contains(e.target)) {
+    userMenuOpen.value = false
+  }
 }
 
 // v11.1: 通知中心
@@ -166,8 +221,8 @@ function onKeydown(e) {
   }
 }
 
-onMounted(() => { document.addEventListener('keydown', onKeydown); document.addEventListener('click', onClickOutside); loadNotifications(); notifTimer = setInterval(loadNotifications, 60000); loadTenants() })
-onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document.removeEventListener('click', onClickOutside); clearInterval(notifTimer) })
+onMounted(() => { document.addEventListener('keydown', onKeydown); document.addEventListener('click', onClickOutside); document.addEventListener('click', onUserMenuClickOutside); loadNotifications(); notifTimer = setInterval(loadNotifications, 60000); loadTenants(); loadAuthUser() })
+onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document.removeEventListener('click', onClickOutside); document.removeEventListener('click', onUserMenuClickOutside); clearInterval(notifTimer) })
 </script>
 
 <style scoped>
@@ -280,4 +335,39 @@ onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document
 }
 .tenant-select:hover { border-color: var(--color-primary); }
 .tenant-select:focus { border-color: var(--color-primary); }
+/* v14.1: 用户菜单 */
+.user-menu { position: relative; }
+.user-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: 1px solid transparent; color: var(--text-secondary);
+  cursor: pointer; padding: 4px 8px; border-radius: var(--radius-md);
+  font-size: var(--text-xs); font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+}
+.user-btn:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-default); }
+.user-name { font-weight: 500; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-role-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.role-admin { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.role-operator { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.role-viewer { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
+.user-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 6px;
+  min-width: 180px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: 300;
+  overflow: hidden;
+}
+.user-dropdown-info { padding: 12px 14px; }
+.user-dropdown-name { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+.user-dropdown-role { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 2px; }
+.user-dropdown-divider { height: 1px; background: var(--border-subtle); }
+.user-dropdown-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; padding: 10px 14px; font-size: var(--text-sm);
+  font-family: var(--font-sans); transition: all var(--transition-fast);
+}
+.user-dropdown-item:hover { background: var(--bg-elevated); color: #f87171; }
 </style>

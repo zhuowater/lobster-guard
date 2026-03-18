@@ -1,21 +1,25 @@
-/** @module api - API 调用封装（v14.0: 自动注入 tenant 参数） */
-import { getCurrentTenant } from './stores/app.js'
+/** @module api - API 调用封装（v14.1: JWT 认证 + 401 自动跳转 + tenant 注入） */
+import { getCurrentTenant, getAuthToken, logoutUser } from './stores/app.js'
 
 const TOKEN_KEY = 'lobster_guard_token'
+const AUTH_TOKEN_KEY = 'lg_auth_token'
 
-/** 获取保存的 Token */
+/** 获取保存的 Token（优先 JWT，降级旧 token） */
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || ''
+  return localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || ''
 }
 
-/** 保存 Token */
+/** 保存 Token（兼容旧接口） */
 export function saveToken(token) {
+  // 同时保存到两个 key（兼容旧代码读取 lobster_guard_token）
   localStorage.setItem(TOKEN_KEY, token)
+  localStorage.setItem(AUTH_TOKEN_KEY, token)
 }
 
 /** 清除 Token */
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(AUTH_TOKEN_KEY)
 }
 
 /** 构造认证头 */
@@ -28,19 +32,30 @@ function authHeaders() {
 
 /**
  * v14.0: 为 URL 自动添加 tenant 参数
- * 排除不需要 tenant 的路径（healthz、tenants管理、系统配置等）
+ * 排除不需要 tenant 的路径
  */
 function injectTenantParam(path) {
-  // 这些路径不注入 tenant（全局路由 or 租户管理本身）
-  const skipPaths = ['/healthz', '/api/v1/tenants', '/api/v1/system/', '/api/v1/config', '/api/v1/demo/', '/api/v1/notifications', '/api/v1/llm/status', '/api/v1/llm/rules']
+  const skipPaths = ['/healthz', '/api/v1/tenants', '/api/v1/system/', '/api/v1/config', '/api/v1/demo/', '/api/v1/notifications', '/api/v1/llm/status', '/api/v1/llm/rules', '/api/v1/auth/', '/api/v1/redteam']
   for (const sp of skipPaths) {
     if (path.startsWith(sp)) return path
   }
 
   const tenant = getCurrentTenant()
-  if (!tenant || tenant === 'default') return path // default 不注入，后端会默认
+  if (!tenant || tenant === 'default') return path
   const sep = path.includes('?') ? '&' : '?'
   return path + sep + 'tenant=' + encodeURIComponent(tenant)
+}
+
+/**
+ * v14.1: 处理 401 响应 — 自动跳转登录页
+ */
+function handle401() {
+  logoutUser()
+  clearToken()
+  // 如果不在登录页，跳转
+  if (!window.location.hash.includes('/login')) {
+    window.location.hash = '#/login'
+  }
 }
 
 /**
@@ -53,6 +68,10 @@ export async function api(path, opts = {}) {
   opts.headers = authHeaders()
   const url = location.origin + injectTenantParam(path)
   const res = await fetch(url, opts)
+  if (res.status === 401) {
+    handle401()
+    throw new Error('Unauthorized')
+  }
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.json()
 }
@@ -93,6 +112,10 @@ export async function downloadFile(url, filename) {
   const t = getToken()
   if (t) headers['Authorization'] = 'Bearer ' + t
   const res = await fetch(url, { headers })
+  if (res.status === 401) {
+    handle401()
+    throw new Error('Unauthorized')
+  }
   const blob = await res.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)

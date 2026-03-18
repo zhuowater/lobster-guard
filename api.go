@@ -4,12 +4,14 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -19,6 +21,38 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// contextKey 用于 context 传递用户信息
+type contextKey string
+
+const userContextKey contextKey = "auth_user"
+
+// getUserFromContext 从 context 中获取当前认证用户
+func getUserFromContext(r *http.Request) *User {
+	if u, ok := r.Context().Value(userContextKey).(*User); ok {
+		return u
+	}
+	return nil
+}
+
+// getRequestIP 提取客户端 IP
+func getRequestIP(r *http.Request) string {
+	// X-Forwarded-For
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.SplitN(xff, ",", 2)
+		return strings.TrimSpace(parts[0])
+	}
+	// X-Real-IP
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// RemoteAddr
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
 
 // ============================================================
 // 管理 API v2.0
@@ -69,6 +103,10 @@ type ManagementAPI struct {
 	promptTracker *PromptTracker
 	// v14.0 租户管理器
 	tenantMgr *TenantManager
+	// v14.2 红队引擎
+	redTeamEngine *RedTeamEngine
+	// v14.1 认证管理器
+	authManager *AuthManager
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -121,6 +159,33 @@ func jsonResponse(w http.ResponseWriter, code int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// checkAuth 统一认证检查（v14.1）
+// 返回 user（可能为 nil）和 authenticated 状态
+func (api *ManagementAPI) checkAuth(r *http.Request) (*User, bool) {
+	// 尝试 JWT 验证（无论 auth 启用与否，只要 authManager 存在就尝试）
+	if api.authManager != nil {
+		tokenStr := ExtractTokenFromRequest(r.Header.Get("Authorization"), r.Header.Get("Cookie"))
+		if tokenStr != "" {
+			user, err := api.authManager.ValidateToken(tokenStr)
+			if err == nil {
+				return user, true
+			}
+		}
+	}
+
+	// JWT 验证失败或没有 JWT → 回退到旧的 Bearer token
+	if api.checkManagementAuth(r) {
+		return nil, true
+	}
+
+	// auth 未启用且旧 token 也无效
+	if api.authManager == nil || !api.authManager.enabled {
+		return nil, false
+	}
+
+	return nil, false
+}
+
 func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
@@ -148,6 +213,18 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v14.1: 登录接口（无需认证）
+	if path == "/api/v1/auth/login" && method == "POST" {
+		api.handleAuthLogin(w, r)
+		return
+	}
+
+	// v14.1: 检查认证状态（前端用来判断是否需要登录）
+	if path == "/api/v1/auth/check" && method == "GET" {
+		api.handleAuthCheck(w, r)
+		return
+	}
+
 	// 服务注册相关（使用 registration token）
 	if strings.HasPrefix(path, "/api/v1/register") || strings.HasPrefix(path, "/api/v1/heartbeat") || strings.HasPrefix(path, "/api/v1/deregister") {
 		if !api.checkRegistrationAuth(r) {
@@ -167,9 +244,44 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 管理接口（使用 management token）
-	if !api.checkManagementAuth(r) {
+	// 统一认证检查（v14.1 兼容旧模式）
+	user, authenticated := api.checkAuth(r)
+	if !authenticated {
 		jsonResponse(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// 将用户信息放入 context
+	if user != nil {
+		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
+	}
+
+	// v14.1: 认证相关路由（需登录）
+	switch {
+	case path == "/api/v1/auth/logout" && method == "POST":
+		api.handleAuthLogout(w, r)
+		return
+	case path == "/api/v1/auth/me" && method == "GET":
+		api.handleAuthMe(w, r)
+		return
+	case path == "/api/v1/auth/password" && method == "POST":
+		api.handleAuthPassword(w, r)
+		return
+	// v14.1: 用户管理（admin only）— 使用独立路径避免和现有 /api/v1/users 冲突
+	case path == "/api/v1/auth/users" && method == "GET":
+		api.handleAuthUserList(w, r)
+		return
+	case path == "/api/v1/auth/users" && method == "POST":
+		api.handleAuthUserCreate(w, r)
+		return
+	case strings.HasPrefix(path, "/api/v1/auth/users/") && method == "PUT":
+		api.handleAuthUserUpdate(w, r)
+		return
+	case strings.HasPrefix(path, "/api/v1/auth/users/") && method == "DELETE":
+		api.handleAuthUserDelete(w, r)
+		return
+	case path == "/api/v1/op-audit" && method == "GET":
+		api.handleOpAudit(w, r)
 		return
 	}
 
@@ -387,6 +499,17 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAnomalyStatus(w, r)
 	case strings.HasPrefix(path, "/api/v1/anomaly/metric/") && method == "GET":
 		api.handleAnomalyMetric(w, r)
+	// v14.2 Red Team Autopilot API
+	case path == "/api/v1/redteam/run" && method == "POST":
+		api.handleRedTeamRun(w, r)
+	case path == "/api/v1/redteam/reports" && method == "GET":
+		api.handleRedTeamReportList(w, r)
+	case path == "/api/v1/redteam/vectors" && method == "GET":
+		api.handleRedTeamVectors(w, r)
+	case strings.HasPrefix(path, "/api/v1/redteam/reports/") && method == "DELETE":
+		api.handleRedTeamReportDelete(w, r)
+	case strings.HasPrefix(path, "/api/v1/redteam/reports/") && method == "GET":
+		api.handleRedTeamReportGet(w, r)
 	// v9.0 LLM 侧安全审计 API
 	case strings.HasPrefix(path, "/api/v1/llm/"):
 		// LLM config 端点不需要 llmAuditor（即使 LLM 未启用也要能读写配置）
@@ -2454,6 +2577,13 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 创建了 %d 个演示租户 + 成员映射 + 安全配置", tenantsCreated)
 	}
 
+	// v14.1: 注入演示用户
+	usersCreated := 0
+	if api.authManager != nil {
+		usersCreated = api.authManager.SeedDemoUsers()
+		log.Printf("[Demo] 创建/更新了 %d 个演示用户", usersCreated)
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":                true,
@@ -2467,6 +2597,7 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		"replay_sessions":   len(replayTraceIDs),
 		"prompt_versions":   promptVersionsInserted,
 		"tenants_created":   tenantsCreated,
+		"users_created":     usersCreated,
 	})
 }
 
@@ -4433,5 +4564,425 @@ func (api *ManagementAPI) handleTenantConfigUpdate(w http.ResponseWriter, r *htt
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "config": cfg})
+}
+
+// ============================================================
+// v14.1 认证 API handlers
+// ============================================================
+
+// handleAuthLogin POST /api/v1/auth/login — 用户登录
+func (api *ManagementAPI) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 400, map[string]string{"error": "auth not initialized"})
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Password == "" {
+		jsonResponse(w, 400, map[string]string{"error": "username and password required"})
+		return
+	}
+
+	ip := getRequestIP(r)
+	token, user, err := api.authManager.Login(req.Username, req.Password, ip)
+	if err != nil {
+		jsonResponse(w, 401, map[string]string{"error": err.Error()})
+		return
+	}
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"token": token,
+		"user": map[string]interface{}{
+			"id":           user.ID,
+			"username":     user.Username,
+			"display_name": user.DisplayName,
+			"role":         user.Role,
+			"tenant_id":    user.TenantID,
+		},
+	})
+}
+
+// handleAuthCheck GET /api/v1/auth/check — 检查认证状态（前端路由守卫用）
+func (api *ManagementAPI) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	authEnabled := api.authManager != nil && api.authManager.enabled
+	result := map[string]interface{}{
+		"auth_enabled": authEnabled,
+	}
+
+	if !authEnabled {
+		// auth 未启用，检查旧 token
+		result["authenticated"] = api.checkManagementAuth(r)
+		jsonResponse(w, 200, result)
+		return
+	}
+
+	// 检查 JWT
+	tokenStr := ExtractTokenFromRequest(r.Header.Get("Authorization"), r.Header.Get("Cookie"))
+	if tokenStr == "" {
+		// 也尝试旧 token
+		if api.checkManagementAuth(r) {
+			result["authenticated"] = true
+			jsonResponse(w, 200, result)
+			return
+		}
+		result["authenticated"] = false
+		jsonResponse(w, 200, result)
+		return
+	}
+
+	user, err := api.authManager.ValidateToken(tokenStr)
+	if err != nil {
+		result["authenticated"] = false
+		jsonResponse(w, 200, result)
+		return
+	}
+
+	result["authenticated"] = true
+	result["user"] = map[string]interface{}{
+		"id":           user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"tenant_id":    user.TenantID,
+	}
+	jsonResponse(w, 200, result)
+}
+
+// handleAuthLogout POST /api/v1/auth/logout — 登出
+func (api *ManagementAPI) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	user := getUserFromContext(r)
+	username := "unknown"
+	if user != nil {
+		username = user.Username
+	}
+	if api.authManager != nil {
+		api.authManager.LogOperation(username, "logout", "用户登出", getRequestIP(r))
+	}
+	jsonResponse(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleAuthMe GET /api/v1/auth/me — 当前用户信息
+func (api *ManagementAPI) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	user := getUserFromContext(r)
+	if user == nil {
+		// auth 未启用或使用旧 token
+		jsonResponse(w, 200, map[string]interface{}{
+			"username":     "admin",
+			"display_name": "管理员",
+			"role":         "admin",
+			"tenant_id":    "",
+			"auth_enabled": false,
+		})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"id":           user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"tenant_id":    user.TenantID,
+		"enabled":      user.Enabled,
+		"created_at":   user.CreatedAt,
+		"last_login":   user.LastLogin,
+		"auth_enabled": true,
+	})
+}
+
+// handleAuthPassword POST /api/v1/auth/password — 修改密码
+func (api *ManagementAPI) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 400, map[string]string{"error": "auth not initialized"})
+		return
+	}
+	user := getUserFromContext(r)
+	if user == nil {
+		jsonResponse(w, 401, map[string]string{"error": "login required"})
+		return
+	}
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := api.authManager.ChangePassword(user.Username, req.OldPassword, req.NewPassword); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	api.authManager.LogOperation(user.Username, "password_change", "修改密码", getRequestIP(r))
+	jsonResponse(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleAuthUserList GET /api/v1/auth/users — 用户列表（admin only）
+func (api *ManagementAPI) handleAuthUserList(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 400, map[string]string{"error": "auth not initialized"})
+		return
+	}
+	user := getUserFromContext(r)
+	if user != nil && !user.IsAdmin() {
+		jsonResponse(w, 403, map[string]string{"error": "admin only"})
+		return
+	}
+	users, err := api.authManager.ListUsers()
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"users": users, "total": len(users)})
+}
+
+// handleAuthUserCreate POST /api/v1/auth/users — 创建用户（admin only）
+func (api *ManagementAPI) handleAuthUserCreate(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 400, map[string]string{"error": "auth not initialized"})
+		return
+	}
+	user := getUserFromContext(r)
+	if user != nil && !user.IsAdmin() {
+		jsonResponse(w, 403, map[string]string{"error": "admin only"})
+		return
+	}
+	var req struct {
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		DisplayName string `json:"display_name"`
+		Role        string `json:"role"`
+		TenantID    string `json:"tenant_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+	newUser, err := api.authManager.CreateUser(req.Username, req.Password, req.DisplayName, req.Role, req.TenantID)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if api.authManager != nil && user != nil {
+		api.authManager.LogOperation(user.Username, "user_create", "创建用户: "+req.Username, getRequestIP(r))
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "created", "user": newUser})
+}
+
+// handleAuthUserUpdate PUT /api/v1/auth/users/:id — 更新用户（admin only）
+func (api *ManagementAPI) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 400, map[string]string{"error": "auth not initialized"})
+		return
+	}
+	user := getUserFromContext(r)
+	if user != nil && !user.IsAdmin() {
+		jsonResponse(w, 403, map[string]string{"error": "admin only"})
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/auth/users/")
+	id, err := parseUserID(idStr)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid user id"})
+		return
+	}
+
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Role        string `json:"role"`
+		TenantID    string `json:"tenant_id"`
+		Enabled     *bool  `json:"enabled"`
+		Password    string `json:"password"` // 可选：重置密码
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	if err := api.authManager.UpdateUser(id, req.DisplayName, req.Role, req.TenantID, enabled); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 如果提供了新密码，重置密码
+	if req.Password != "" {
+		if err := api.authManager.ResetPassword(id, req.Password); err != nil {
+			jsonResponse(w, 400, map[string]string{"error": "更新成功但重置密码失败: " + err.Error()})
+			return
+		}
+	}
+
+	if api.authManager != nil && user != nil {
+		api.authManager.LogOperation(user.Username, "user_update", fmt.Sprintf("更新用户 #%d", id), getRequestIP(r))
+	}
+	jsonResponse(w, 200, map[string]string{"status": "updated"})
+}
+
+// handleAuthUserDelete DELETE /api/v1/auth/users/:id — 删除用户（admin only）
+func (api *ManagementAPI) handleAuthUserDelete(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 400, map[string]string{"error": "auth not initialized"})
+		return
+	}
+	user := getUserFromContext(r)
+	if user != nil && !user.IsAdmin() {
+		jsonResponse(w, 403, map[string]string{"error": "admin only"})
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/auth/users/")
+	id, err := parseUserID(idStr)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid user id"})
+		return
+	}
+
+	currentUsername := ""
+	if user != nil {
+		currentUsername = user.Username
+	}
+
+	if err := api.authManager.DeleteUser(id, currentUsername); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if api.authManager != nil && user != nil {
+		api.authManager.LogOperation(user.Username, "user_delete", fmt.Sprintf("删除用户 #%d", id), getRequestIP(r))
+	}
+	jsonResponse(w, 200, map[string]string{"status": "deleted"})
+}
+
+// handleOpAudit GET /api/v1/op-audit — 操作审计日志（admin only）
+func (api *ManagementAPI) handleOpAudit(w http.ResponseWriter, r *http.Request) {
+	if api.authManager == nil {
+		jsonResponse(w, 200, map[string]interface{}{"entries": []interface{}{}, "total": 0})
+		return
+	}
+	user := getUserFromContext(r)
+	if user != nil && !user.IsAdmin() {
+		jsonResponse(w, 403, map[string]string{"error": "admin only"})
+		return
+	}
+
+	username := r.URL.Query().Get("username")
+	action := r.URL.Query().Get("action")
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	entries, err := api.authManager.QueryOpAudit(username, action, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"entries": entries, "total": len(entries)})
+}
+
+// ============================================================
+// v14.2 Red Team Autopilot API
+// ============================================================
+
+// handleRedTeamRun POST /api/v1/redteam/run — 执行红队测试
+func (api *ManagementAPI) handleRedTeamRun(w http.ResponseWriter, r *http.Request) {
+	if api.redTeamEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "red team engine not available"})
+		return
+	}
+	var req struct {
+		TenantID string `json:"tenant_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.TenantID == "" {
+		req.TenantID = "default"
+	}
+
+	report, err := api.redTeamEngine.RunAttack(req.TenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, report)
+}
+
+// handleRedTeamReportList GET /api/v1/redteam/reports — 报告列表
+func (api *ManagementAPI) handleRedTeamReportList(w http.ResponseWriter, r *http.Request) {
+	if api.redTeamEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "red team engine not available"})
+		return
+	}
+	tenantID := r.URL.Query().Get("tenant")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20
+	if limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	reports, err := api.redTeamEngine.ListReports(tenantID, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"reports": reports, "total": len(reports)})
+}
+
+// handleRedTeamReportGet GET /api/v1/redteam/reports/:id — 报告详情
+func (api *ManagementAPI) handleRedTeamReportGet(w http.ResponseWriter, r *http.Request) {
+	if api.redTeamEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "red team engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/redteam/reports/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "report id required"})
+		return
+	}
+
+	report, err := api.redTeamEngine.GetReport(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, report)
+}
+
+// handleRedTeamReportDelete DELETE /api/v1/redteam/reports/:id — 删除报告
+func (api *ManagementAPI) handleRedTeamReportDelete(w http.ResponseWriter, r *http.Request) {
+	if api.redTeamEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "red team engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/redteam/reports/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "report id required"})
+		return
+	}
+
+	if err := api.redTeamEngine.DeleteReport(id); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// handleRedTeamVectors GET /api/v1/redteam/vectors — 攻击向量库
+func (api *ManagementAPI) handleRedTeamVectors(w http.ResponseWriter, r *http.Request) {
+	if api.redTeamEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "red team engine not available"})
+		return
+	}
+	vectors := api.redTeamEngine.GetAttackVectors()
+	jsonResponse(w, 200, map[string]interface{}{"vectors": vectors, "total": len(vectors)})
 }
 

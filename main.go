@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "14.0.0"
+	AppVersion = "14.1.0"
 )
 
 var startTime = time.Now()
@@ -217,6 +217,14 @@ func main() {
 	// v14.0: 初始化租户管理器
 	tenantMgr := NewTenantManager(db)
 
+	// v14.1: 初始化认证管理器
+	authMgr := NewAuthManager(db, &cfg.Auth)
+	if cfg.Auth.Enabled {
+		fmt.Println("[初始化] ✅ 登录认证: 已启用")
+	} else {
+		fmt.Println("[初始化] ⚠️ 登录认证: 未启用（使用 Bearer token 模式）")
+	}
+
 	logger, err := NewAuditLogger(db)
 	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
@@ -389,6 +397,7 @@ func main() {
 
 	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy, store, shutdownMgr, realtime)
 	mgmtAPI.tenantMgr = tenantMgr // v14.0
+	mgmtAPI.authManager = authMgr // v14.1
 	// v5.1: 注入智能检测组件
 	mgmtAPI.sessionDetector = sessionDetector
 	mgmtAPI.llmDetector = llmDetector
@@ -419,6 +428,11 @@ func main() {
 	}
 	mgmtAPI.promptTracker = promptTracker
 	fmt.Println("[初始化] ✅ Prompt 版本追踪器已就绪 (自动检测 System Prompt 变化)")
+
+	// v14.2: Red Team Autopilot
+	redTeamEngine := NewRedTeamEngine(logger.DB(), engine)
+	mgmtAPI.redTeamEngine = redTeamEngine
+	fmt.Println("[初始化] ✅ Red Team Autopilot 引擎已就绪 (35 攻击向量, OWASP LLM Top10)")
 
 	// v12.0: 报告引擎
 	reportEngine := NewReportEngine(logger.DB(), "/var/lib/lobster-guard/reports/")

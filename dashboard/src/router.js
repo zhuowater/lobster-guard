@@ -1,7 +1,9 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { isAuthenticated } from './stores/app.js'
 
 const routes = [
   { path: '/', redirect: '/overview' },
+  { path: '/login', name: 'login', component: () => import('./views/Login.vue'), meta: { title: '登录', public: true } },
   { path: '/overview', name: 'overview', component: () => import('./views/Overview.vue'), meta: { title: '概览', icon: '📊', group: 'im' } },
   { path: '/upstream', name: 'upstream', component: () => import('./views/Upstream.vue'), meta: { title: '上游', icon: '🔗', group: 'im' } },
   { path: '/routes', name: 'routes', component: () => import('./views/Routes.vue'), meta: { title: '路由', icon: '🗺️', group: 'im' } },
@@ -19,6 +21,7 @@ const routes = [
   { path: '/anomaly', name: 'anomaly', component: () => import('./views/AnomalyDetection.vue'), meta: { title: '异常检测', icon: '📊', group: 'system' } },
   { path: '/reports', name: 'reports', component: () => import('./views/Reports.vue'), meta: { title: '报告', icon: '📄', group: 'system' } },
   { path: '/tenants', name: 'tenants', component: () => import('./views/Tenants.vue'), meta: { title: '租户', icon: '🏢', group: 'system' } },
+  { path: '/redteam', name: 'redteam', component: () => import('./views/RedTeam.vue'), meta: { title: '红队测试', icon: '🎯', group: 'system' } },
   { path: '/ops', name: 'ops', component: () => import('./views/Operations.vue'), meta: { title: '运维', icon: '🔧', group: 'system' } },
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { title: '设置', icon: '⚙️', group: 'system' } },
 ]
@@ -26,6 +29,37 @@ const routes = [
 const router = createRouter({
   history: createWebHashHistory(),
   routes,
+})
+
+// v14.1: 路由守卫 — 未认证时跳转登录页
+router.beforeEach(async (to) => {
+  // 公开页面不需要认证
+  if (to.meta.public) return true
+
+  // 检查本地是否有 token
+  if (isAuthenticated()) return true
+
+  // 没有 token → 检查后端 auth 是否启用
+  try {
+    const res = await fetch(location.origin + '/api/v1/auth/check')
+    const data = await res.json()
+
+    if (!data.auth_enabled) {
+      // auth 未启用，检查旧 token
+      if (data.authenticated) return true
+      // 旧 token 也没有，但 auth 未启用时也放行（让页面自己处理 token 输入）
+      return true
+    }
+
+    // auth 已启用但未认证 → 跳转登录
+    if (!data.authenticated) {
+      return { name: 'login' }
+    }
+    return true
+  } catch {
+    // 网络错误，放行让页面自己处理
+    return true
+  }
 })
 
 export default router
