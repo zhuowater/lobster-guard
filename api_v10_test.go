@@ -42,7 +42,7 @@ func setupV10API(t *testing.T) (*ManagementAPI, *sql.DB, func()) {
 	outEngine := NewOutboundRuleEngine(nil)
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	llmRuleEngine := NewLLMRuleEngine(defaultLLMRules)
 	healthScoreEng := NewHealthScoreEngine(db)

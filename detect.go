@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"regexp"
 	"sort"
@@ -652,6 +653,77 @@ func (ore *OutboundRuleEngine) Reload(configs []OutboundRuleConfig) {
 	newRules := compileOutboundRules(configs)
 	ore.mu.Lock(); ore.rules = newRules; ore.mu.Unlock()
 	log.Printf("[出站规则] 热更新完成，加载 %d 条规则", len(newRules))
+}
+
+// GetRuleConfigs 返回当前规则的配置表示（用于 CRUD 和持久化）
+func (ore *OutboundRuleEngine) GetRuleConfigs() []OutboundRuleConfig {
+	ore.mu.RLock()
+	defer ore.mu.RUnlock()
+	configs := make([]OutboundRuleConfig, len(ore.rules))
+	for i, rule := range ore.rules {
+		var patterns []string
+		for _, re := range rule.Regexps {
+			patterns = append(patterns, re.String())
+		}
+		configs[i] = OutboundRuleConfig{
+			Name:     rule.Name,
+			Patterns: patterns,
+			Action:   rule.Action,
+			Priority: rule.Priority,
+			Message:  rule.Message,
+		}
+	}
+	return configs
+}
+
+// AddRule 添加一条出站规则（内存更新，不涉及持久化）
+func (ore *OutboundRuleEngine) AddRule(cfg OutboundRuleConfig) error {
+	ore.mu.Lock()
+	defer ore.mu.Unlock()
+	for _, r := range ore.rules {
+		if r.Name == cfg.Name {
+			return fmt.Errorf("规则 '%s' 已存在", cfg.Name)
+		}
+	}
+	compiled := compileOutboundRules([]OutboundRuleConfig{cfg})
+	if len(compiled) == 0 {
+		return fmt.Errorf("规则 '%s' 没有有效的正则模式", cfg.Name)
+	}
+	ore.rules = append(ore.rules, compiled[0])
+	log.Printf("[出站规则] 添加规则: %s (action=%s, patterns=%d)", cfg.Name, cfg.Action, len(compiled[0].Regexps))
+	return nil
+}
+
+// UpdateRule 更新一条出站规则（内存更新，不涉及持久化）
+func (ore *OutboundRuleEngine) UpdateRule(cfg OutboundRuleConfig) error {
+	ore.mu.Lock()
+	defer ore.mu.Unlock()
+	for i, r := range ore.rules {
+		if r.Name == cfg.Name {
+			compiled := compileOutboundRules([]OutboundRuleConfig{cfg})
+			if len(compiled) == 0 {
+				return fmt.Errorf("规则 '%s' 没有有效的正则模式", cfg.Name)
+			}
+			ore.rules[i] = compiled[0]
+			log.Printf("[出站规则] 更新规则: %s", cfg.Name)
+			return nil
+		}
+	}
+	return fmt.Errorf("规则 '%s' 不存在", cfg.Name)
+}
+
+// DeleteRule 删除一条出站规则（内存更新，不涉及持久化）
+func (ore *OutboundRuleEngine) DeleteRule(name string) error {
+	ore.mu.Lock()
+	defer ore.mu.Unlock()
+	for i, r := range ore.rules {
+		if r.Name == name {
+			ore.rules = append(ore.rules[:i], ore.rules[i+1:]...)
+			log.Printf("[出站规则] 删除规则: %s", name)
+			return nil
+		}
+	}
+	return fmt.Errorf("规则 '%s' 不存在", name)
 }
 
 type OutboundDetectResult struct {

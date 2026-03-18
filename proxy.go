@@ -50,9 +50,11 @@ type InboundProxy struct {
 	llmDetector     *LLMDetector
 	detectCache     *DetectCache
 	pipeline        *DetectPipeline
+	// v15.0 蜜罐引擎
+	honeypot *HoneypotEngine
 }
 
-func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine) *InboundProxy {
+func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
 	wl := make(map[string]bool)
 	for _, id := range cfg.Whitelist { wl[id] = true }
 	mode := cfg.Mode
@@ -66,6 +68,7 @@ func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, log
 		enabled: cfg.InboundDetectEnabled, timeout: time.Duration(cfg.DetectTimeoutMs) * time.Millisecond,
 		whitelist: wl, policy: cfg.RouteDefaultPolicy, mode: mode, cfg: cfg, limiter: limiter,
 		metrics: metrics, ruleHits: ruleHits, userCache: userCache, policyEng: policyEng,
+		honeypot: honeypot,
 	}
 }
 
@@ -236,6 +239,27 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		}
 		if detectResult.Action == "warn" {
 			log.Printf("[桥接入站] 告警放行 sender=%s reasons=%v", senderID, detectResult.Reasons)
+			// v15.0: 蜜罐触发检查
+			if ip.honeypot != nil {
+				tpl, watermark := ip.honeypot.ShouldTrigger(msgText, senderID, "")
+				if tpl != nil {
+					fakeResp := ip.honeypot.GenerateFakeResponse(tpl, watermark)
+					ip.honeypot.RecordTrigger(&HoneypotTrigger{
+						TenantID:      "default",
+						SenderID:      senderID,
+						TemplateID:    tpl.ID,
+						TemplateName:  tpl.Name,
+						TriggerType:   tpl.TriggerType,
+						OriginalInput: msgText,
+						FakeResponse:  fakeResp,
+						Watermark:     watermark,
+						TraceID:       bridgeTraceID,
+					})
+					ip.logger.LogWithTrace("inbound", senderID, "honeypot", "honeypot_triggered:"+tpl.Name, msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+					log.Printf("[桥接入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s", senderID, tpl.Name, watermark)
+					return // 不转发给上游，蜜罐已介入
+				}
+			}
 		}
 
 		// 获取上游地址
@@ -608,6 +632,32 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("[入站] 告警放行 sender=%s reasons=%v trace_id=%s", senderID, detectResult.Reasons, traceID)
 		}
+		// v15.0: 蜜罐触发检查
+		if ip.honeypot != nil {
+			tpl, watermark := ip.honeypot.ShouldTrigger(msgText, senderID, "")
+			if tpl != nil {
+				fakeResp := ip.honeypot.GenerateFakeResponse(tpl, watermark)
+				ip.honeypot.RecordTrigger(&HoneypotTrigger{
+					TenantID:      "default",
+					SenderID:      senderID,
+					TemplateID:    tpl.ID,
+					TemplateName:  tpl.Name,
+					TriggerType:   tpl.TriggerType,
+					OriginalInput: msgText,
+					FakeResponse:  fakeResp,
+					Watermark:     watermark,
+					TraceID:       traceID,
+				})
+				ip.logger.LogWithTrace("inbound", senderID, "honeypot", "honeypot_triggered:"+tpl.Name, msgText, rh, latMs, upstreamID, appID, traceID)
+				log.Printf("[入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s trace_id=%s", senderID, tpl.Name, watermark, traceID)
+				// 返回蜜罐假响应而不是转发给上游
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Trace-ID", traceID)
+				w.WriteHeader(200)
+				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","honeypot_response":%q}`, fakeResp)))
+				return
+			}
+		}
 	}
 
 	// v5.0: 设置 X-Trace-ID header 传递给上游
@@ -661,9 +711,11 @@ type OutboundProxy struct {
 	ruleHits       *RuleHitStats     // v3.6 规则命中统计
 	alertNotifier  *AlertNotifier    // v3.10 告警通知器
 	realtime       *RealtimeMetrics  // v5.0 实时监控
+	// v15.0 蜜罐引擎
+	honeypot *HoneypotEngine
 }
 
-func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats) (*OutboundProxy, error) {
+func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {
 	up, err := url.Parse(cfg.LanxinUpstream)
 	if err != nil { return nil, err }
 	p := httputil.NewSingleHostReverseProxy(up)
@@ -682,7 +734,7 @@ func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEng
 	return &OutboundProxy{
 		channel: channel, inboundEngine: inboundEngine, outboundEngine: outboundEngine,
 		logger: logger, proxy: p, enabled: cfg.OutboundAuditEnabled,
-		metrics: metrics, ruleHits: ruleHits,
+		metrics: metrics, ruleHits: ruleHits, honeypot: honeypot,
 	}, nil
 }
 
@@ -727,6 +779,28 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if a, ok := m["appId"].(string); ok { outAppID = a }
 		}
 	}()
+
+	// v15.0: 蜜罐引爆检测 — 检查出站内容中是否包含蜜罐水印
+	if op.honeypot != nil && text != "" {
+		detonatedWatermarks := op.honeypot.CheckDetonation(text)
+		if len(detonatedWatermarks) > 0 {
+			latMs := float64(time.Since(start).Microseconds()) / 1000.0
+			upstreamID := r.Header.Get("X-Upstream-Id")
+			detonationReason := "honeypot_detonation:" + strings.Join(detonatedWatermarks, ",")
+			pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
+			op.logger.Log("outbound", recipient, "honeypot_detonation", detonationReason, pv, rh, latMs, upstreamID, outAppID)
+			log.Printf("[出站] 💣 蜜罐引爆检测 path=%s watermarks=%v", r.URL.Path, detonatedWatermarks)
+			if op.realtime != nil {
+				op.realtime.RecordOutbound("honeypot_detonation", time.Since(start).Microseconds())
+				op.realtime.RecordEvent("outbound", recipient, "honeypot_detonation", detonationReason, "")
+			}
+			// 阻断包含蜜罐水印的出站消息
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			w.Write([]byte(`{"errcode":403,"errmsg":"honeypot detonation detected","detail":"outbound message contains tracked watermark"}`))
+			return
+		}
+	}
 
 	// 出站规则检测
 	result := op.outboundEngine.Detect(text)

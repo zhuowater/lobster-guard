@@ -196,6 +196,9 @@ type Config struct {
 	LLMProxy               LLMProxyConfig `yaml:"llm_proxy" json:"llm_proxy"` // LLM 侧反向代理配置
 	// v14.1 登录认证
 	Auth                   AuthConfig     `yaml:"auth" json:"auth"`
+	// v18.0 后台调度
+	ChainAnalysisIntervalMin   int `yaml:"chain_analysis_interval_min"`   // 攻击链自动分析间隔（分钟），默认 5
+	BehaviorScanIntervalMin    int `yaml:"behavior_scan_interval_min"`    // 行为画像自动扫描间隔（分钟），默认 10
 }
 
 // AuthConfig 认证配置（v14.1）

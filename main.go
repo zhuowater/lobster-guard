@@ -349,7 +349,11 @@ func main() {
 	fmt.Printf("[初始化] ✅ 检测缓存: size=%d, ttl=%ds\n", cacheSize, cacheTTL)
 
 	// 创建代理
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng)
+	// v15.0: 蜜罐引擎（提前初始化，供入站/出站代理使用）
+	honeypotEngine := NewHoneypotEngine(logger.DB())
+	fmt.Println("[初始化] ✅ 蜜罐引擎已就绪 (Agent 蜜罐: 假数据+水印追踪+引爆检测)")
+
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng, honeypotEngine)
 	inbound.realtime = realtime
 	inbound.slog = slog
 	// v5.1: 注入智能检测组件
@@ -373,7 +377,7 @@ func main() {
 			fmt.Printf("[初始化] ✅ 检测链: [keyword, regex, pii] (默认)\n")
 		}
 	}
-	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits)
+	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits, honeypotEngine)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 	outbound.realtime = realtime
 
@@ -421,10 +425,6 @@ func main() {
 	sessionReplayEng := NewSessionReplayEngine(logger.DB())
 	fmt.Println("[初始化] ✅ 会话回放引擎已就绪 (trace_id 串联 IM+LLM+Tools)")
 
-	// v15.0: 蜜罐引擎
-	honeypotEngine := NewHoneypotEngine(logger.DB())
-	fmt.Println("[初始化] ✅ 蜜罐引擎已就绪 (Agent 蜜罐: 假数据+水印追踪+引爆检测)")
-
 	// v13.1: Prompt 版本追踪器
 	promptTracker := NewPromptTracker(logger.DB())
 	if llmAuditor != nil {
@@ -469,12 +469,23 @@ func main() {
 	mgmtAPI.layoutStore = NewLayoutStore(logger.DB())
 	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
+	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
+	bgScheduler := NewBackgroundScheduler(cfg, attackChainEng, behaviorProfileEng)
+	chainMin := cfg.ChainAnalysisIntervalMin
+	if chainMin <= 0 { chainMin = 5 }
+	behaviorMin := cfg.BehaviorScanIntervalMin
+	if behaviorMin <= 0 { behaviorMin = 10 }
+	fmt.Printf("[初始化] ✅ 后台调度器已就绪 (攻击链分析: %d 分钟, 行为画像扫描: %d 分钟)\n", chainMin, behaviorMin)
+
 	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go pool.HealthCheck(ctx)
 	if inbound.limiter != nil { go inbound.limiter.startCleanup(ctx) }
+
+	// v18.0: 启动后台调度器
+	bgScheduler.Start(ctx)
 
 	// v4.2: 设置关闭管理器的 cancel
 	shutdownMgr.SetCancel(cancel)
@@ -575,6 +586,8 @@ func main() {
 	sig := <-quit
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
+	// v18.0: 停止后台调度器
+	bgScheduler.Stop()
 	// v4.2: 使用 ShutdownManager 优雅关闭
 	if llmProxy != nil {
 		llmProxy.Stop()

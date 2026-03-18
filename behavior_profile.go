@@ -956,6 +956,24 @@ func (bp *BehaviorProfileEngine) ScanAndPersist(agentID, tenantID string) (*Agen
 }
 
 // ============================================================
+// 批量扫描
+// ============================================================
+
+// ScanAllActive 扫描所有活跃 Agent 的行为异常并持久化
+func (bp *BehaviorProfileEngine) ScanAllActive(tenantID string) (scanned int, anomaliesFound int) {
+	agents := bp.discoverAgents(tenantID)
+	for _, a := range agents {
+		profile, err := bp.ScanAndPersist(a.agentID, tenantID)
+		if err != nil {
+			continue
+		}
+		scanned++
+		anomaliesFound += len(profile.Anomalies)
+	}
+	return scanned, anomaliesFound
+}
+
+// ============================================================
 // Demo 数据注入
 // ============================================================
 

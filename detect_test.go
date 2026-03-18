@@ -631,7 +631,7 @@ func createTestManagementAPIWithEngine(t *testing.T) (*ManagementAPI, *RuleEngin
 	outEngine := NewOutboundRuleEngine(nil)
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, channel, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	cleanup := func() { logger.Close(); db.Close(); os.Remove(tmpDB) }
 	return api, engine, cleanup
@@ -717,7 +717,7 @@ inbound_rules:
 	outEngine := NewOutboundRuleEngine(nil)
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, tmpCfg.Name(), pool, routes, logger, engine, outEngine, inbound, channel, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/api/v1/inbound-rules/reload", nil)
@@ -773,7 +773,7 @@ func TestOutboundRulesAPI_List(t *testing.T) {
 	outEngine := NewOutboundRuleEngine(cfg.OutboundRules)
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, channel, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/v1/outbound-rules", nil)
@@ -1145,7 +1145,7 @@ func TestRuleHitStats_API(t *testing.T) {
 	ruleHits.Record("prompt_injection")
 	ruleHits.Record("pii_id_card")
 
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, ruleHits, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, ruleHits, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, channel, nil, ruleHits, nil, nil, nil, nil, nil, nil, nil)
 
 	srv := httptest.NewServer(api)
@@ -1322,7 +1322,7 @@ func TestHealthz_RuleHits(t *testing.T) {
 	ruleHits.Record("prompt_injection_en")
 	ruleHits.Record("out_rule")
 
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, ruleHits, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, ruleHits, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, channel, nil, ruleHits, nil, nil, nil, nil, nil, nil, nil)
 
 	srv := httptest.NewServer(api)

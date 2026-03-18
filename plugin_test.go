@@ -551,7 +551,7 @@ func TestWecomGETVerification_HTTP(t *testing.T) {
 	defer logger.Close()
 	engine := NewRuleEngine()
 	wp := NewWecomPlugin(token, aesKeyBase64, corpId)
-	inbound := NewInboundProxy(cfg, wp, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, wp, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	t.Run("企微 GET 验证成功", func(t *testing.T) {
 		echoStr := wecomEncrypt(t, aesKeyBase64, corpId, []byte("verify_success"))
@@ -618,7 +618,7 @@ func TestFeishuURLVerification_HTTP(t *testing.T) {
 	defer logger.Close()
 	engine := NewRuleEngine()
 	fp := NewFeishuPlugin("key", "token")
-	inbound := NewInboundProxy(cfg, fp, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, fp, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	body := []byte(`{"type":"url_verification","challenge":"http_test_challenge","token":"xxx"}`)
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))

@@ -29,6 +29,7 @@ const routes = [
   { path: '/redteam', name: 'redteam', component: () => import('./views/RedTeam.vue'), meta: { title: '红队测试', icon: '🎯', group: 'govern' } },
   { path: '/leaderboard', name: 'leaderboard', component: () => import('./views/Leaderboard.vue'), meta: { title: '排行榜', icon: '🏆', group: 'govern' } },
   { path: '/ops', name: 'ops', component: () => import('./views/Operations.vue'), meta: { title: '运维', icon: '🔧', group: 'system' } },
+  { path: '/users', name: 'users', component: () => import('./views/Users.vue'), meta: { title: '用户管理', icon: '👥', group: 'system' } },
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { title: '设置', icon: '⚙️', group: 'system' } },
   { path: '/bigscreen', name: 'bigscreen', component: () => import('./views/BigScreen.vue'), meta: { title: '态势大屏', icon: '🖥', public: true, bigscreen: true } },
 ]

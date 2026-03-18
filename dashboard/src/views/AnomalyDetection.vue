@@ -2,7 +2,7 @@
   <div>
     <div class="page-header">
       <h2><Icon name="bar-chart" :size="18" /> 异常基线检测</h2>
-      <p class="page-desc">连续运行 7 天后自动建立正常行为基线，偏离 >2σ 自动告警</p>
+      <p class="page-desc">连续运行 {{ anomalyConfig.min_ready_days || 3 }} 天后自动建立正常行为基线，偏离 >{{ anomalyConfig.warning_threshold || 2 }}σ 自动告警</p>
     </div>
 
     <!-- 顶部 StatCard 行 -->
@@ -57,6 +57,55 @@
     </div>
     <div v-else class="baseline-grid"><Skeleton type="card" v-for="i in 6" :key="i"/></div>
 
+    <!-- 检测参数配置 -->
+    <div class="section-title" style="margin-top:24px">
+      检测参数
+      <button class="btn btn-sm btn-secondary" @click="showConfig = !showConfig" style="margin-left:auto;font-size:12px">
+        {{ showConfig ? '收起' : '展开配置' }}
+      </button>
+    </div>
+    <div v-if="showConfig" class="config-panel card">
+      <div class="config-grid">
+        <div class="config-item">
+          <label>基线窗口 (天)</label>
+          <input type="number" v-model.number="anomalyConfig.window_days" min="1" max="90" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>告警阈值 (σ)</label>
+          <input type="number" v-model.number="anomalyConfig.warning_threshold" min="0.5" max="10" step="0.1" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>严重阈值 (σ)</label>
+          <input type="number" v-model.number="anomalyConfig.critical_threshold" min="1" max="20" step="0.1" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>最小标准差</label>
+          <input type="number" v-model.number="anomalyConfig.min_std_dev" min="0.1" max="100" step="0.1" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>基线就绪最少天数</label>
+          <input type="number" v-model.number="anomalyConfig.min_ready_days" min="1" max="30" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>基线更新间隔 (分钟)</label>
+          <input type="number" v-model.number="anomalyConfig.baseline_interval_min" min="1" max="1440" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>异常检查间隔 (分钟)</label>
+          <input type="number" v-model.number="anomalyConfig.check_interval_min" min="1" max="1440" class="config-input"/>
+        </div>
+        <div class="config-item">
+          <label>最大告警数</label>
+          <input type="number" v-model.number="anomalyConfig.max_alerts" min="10" max="10000" class="config-input"/>
+        </div>
+      </div>
+      <div class="config-actions">
+        <button class="btn btn-primary" @click="saveConfig" :disabled="configSaving">{{ configSaving ? '保存中...' : '保存配置' }}</button>
+        <button class="btn btn-secondary" @click="resetConfig">恢复默认</button>
+        <span v-if="configMsg" class="config-msg" :class="configMsgType">{{ configMsg }}</span>
+      </div>
+    </div>
+
     <!-- 异常告警列表 -->
     <div class="section-title" style="margin-top:24px">异常告警</div>
     <div class="card" v-if="loaded">
@@ -96,7 +145,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api.js'
+import { api, apiPut } from '../api.js'
 import Icon from '../components/Icon.vue'
 import StatCard from '../components/StatCard.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -116,6 +165,29 @@ const baselines = ref({})
 const alerts = ref([])
 const metricsData = ref([])
 const currentHour = new Date().getUTCHours()
+
+// 配置面板
+const showConfig = ref(false)
+const configSaving = ref(false)
+const configMsg = ref('')
+const configMsgType = ref('success')
+const defaultConfig = { window_days: 7, warning_threshold: 2.0, critical_threshold: 3.0, min_std_dev: 1.0, min_ready_days: 3, baseline_interval_min: 60, check_interval_min: 5, max_alerts: 100 }
+const anomalyConfig = ref({ ...defaultConfig })
+
+async function loadConfig() {
+  try { anomalyConfig.value = await api('/api/v1/anomaly/config') } catch { anomalyConfig.value = { ...defaultConfig } }
+}
+async function saveConfig() {
+  configSaving.value = true; configMsg.value = ''
+  try {
+    const d = await apiPut('/api/v1/anomaly/config', anomalyConfig.value)
+    anomalyConfig.value = d.config || anomalyConfig.value
+    configMsg.value = '✅ 配置已保存'; configMsgType.value = 'success'
+  } catch (e) { configMsg.value = '❌ ' + e.message; configMsgType.value = 'error' }
+  configSaving.value = false
+  setTimeout(() => { configMsg.value = '' }, 3000)
+}
+function resetConfig() { anomalyConfig.value = { ...defaultConfig } }
 
 const metricNames = [
   'im_requests_per_hour', 'im_blocks_per_hour', 'llm_calls_per_hour',
@@ -228,7 +300,7 @@ async function loadData() {
 }
 
 let timer = null
-onMounted(() => { loadData(); timer = setInterval(loadData, 60000) })
+onMounted(() => { loadData(); loadConfig(); timer = setInterval(loadData, 60000) })
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -289,4 +361,19 @@ onUnmounted(() => clearInterval(timer))
 .severity-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700 }
 .sev-critical { background: rgba(239,68,68,0.15); color: #EF4444 }
 .sev-warning { background: rgba(245,158,11,0.15); color: #F59E0B }
+
+/* 配置面板 */
+.config-panel { padding: 20px; margin-bottom: 16px }
+.config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px }
+.config-item { display: flex; flex-direction: column; gap: 4px }
+.config-item label { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: 600 }
+.config-input { background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 6px 10px; color: var(--text-primary); font-size: var(--text-sm); font-family: var(--font-mono); width: 100% }
+.config-input:focus { border-color: var(--color-primary); outline: none; box-shadow: 0 0 0 2px rgba(99,102,241,0.2) }
+.config-actions { display: flex; align-items: center; gap: 12px }
+.config-msg { font-size: var(--text-xs); font-weight: 600 }
+.config-msg.success { color: #10B981 }
+.config-msg.error { color: #EF4444 }
+.btn-sm { padding: 4px 10px; font-size: 12px }
+.btn-secondary { background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: var(--radius-md); cursor: pointer }
+.btn-secondary:hover { border-color: var(--color-primary); color: var(--text-primary) }
 </style>

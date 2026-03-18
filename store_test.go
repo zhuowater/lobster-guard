@@ -616,7 +616,7 @@ func TestHealthzDuringShutdown(t *testing.T) {
 	defer logger.Close()
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	shutdownMgr := NewShutdownManager(cfg)
 
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, shutdownMgr, nil)
@@ -664,7 +664,7 @@ func TestBackupAPI_Create(t *testing.T) {
 	defer logger.Close()
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil, nil)
 
@@ -697,7 +697,7 @@ func TestBackupAPI_ListAndDelete(t *testing.T) {
 	defer logger.Close()
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil, nil)
 
@@ -829,7 +829,7 @@ func TestHealthzResponse_Format(t *testing.T) {
 	defer logger.Close()
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, store, nil, nil)
 

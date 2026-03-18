@@ -49,7 +49,7 @@ func setupMgmtAPIWithRedTeam(t *testing.T) (*ManagementAPI, func()) {
 	outEngine := NewOutboundRuleEngine(nil)
 	engine := NewRuleEngine()
 	channel := NewGenericPlugin("", "")
-	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// 注入 RedTeamEngine

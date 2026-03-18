@@ -765,7 +765,7 @@ func TestUserInfoManagementAPI(t *testing.T) {
 	policyEng := NewRoutePolicyEngine(cfg.RoutePolicies)
 
 	gp := NewGenericPlugin("X-Sender-Id", "content")
-	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, userCache, policyEng)
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, userCache, policyEng, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, nil, nil, userCache, policyEng, nil, nil, nil, nil, nil)
 
 	// Pre-fetch users
@@ -1006,7 +1006,7 @@ func TestUserInfoManagementAPI_NilCache(t *testing.T) {
 
 	gp := NewGenericPlugin("X-Sender-Id", "content")
 	// nil userCache and nil policyEng — should degrade gracefully
-	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// GET /api/v1/users should return empty with message

@@ -320,6 +320,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleReloadInboundRules(w, r)
 	case path == "/api/v1/outbound-rules" && method == "GET":
 		api.handleListOutboundRules(w, r)
+	case path == "/api/v1/outbound-rules/add" && method == "POST":
+		api.handleAddOutboundRule(w, r)
+	case path == "/api/v1/outbound-rules/update" && method == "PUT":
+		api.handleUpdateOutboundRule(w, r)
+	case path == "/api/v1/outbound-rules/delete" && method == "DELETE":
+		api.handleDeleteOutboundRule(w, r)
+	case path == "/api/v1/outbound-rules/reload" && method == "POST":
+		api.handleReloadOutboundRules(w, r)
 	case path == "/api/v1/audit/logs" && method == "GET":
 		api.handleAuditLogs(w, r)
 	case path == "/api/v1/audit/export" && method == "GET":
@@ -511,6 +519,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAnomalyStatus(w, r)
 	case strings.HasPrefix(path, "/api/v1/anomaly/metric/") && method == "GET":
 		api.handleAnomalyMetric(w, r)
+	case path == "/api/v1/anomaly/config" && method == "GET":
+		api.handleAnomalyConfigGet(w, r)
+	case path == "/api/v1/anomaly/config" && method == "PUT":
+		api.handleAnomalyConfigPut(w, r)
 	// v14.3 排行榜 + SLA API
 	case path == "/api/v1/leaderboard" && method == "GET":
 		api.handleLeaderboard(w, r)
@@ -1607,6 +1619,173 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 		"rules":        rules,
 		"total":        len(rules),
 		"pii_patterns": piiPatterns,
+	})
+}
+
+// persistOutboundRules 将出站规则写回 config.yaml 的 outbound_rules 字段
+func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) error {
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	ruleList := make([]interface{}, len(configs))
+	for i, c := range configs {
+		m := map[string]interface{}{
+			"name":   c.Name,
+			"action": c.Action,
+		}
+		if c.Pattern != "" {
+			m["pattern"] = c.Pattern
+		}
+		if len(c.Patterns) > 0 {
+			m["patterns"] = c.Patterns
+		}
+		if c.Priority != 0 {
+			m["priority"] = c.Priority
+		}
+		if c.Message != "" {
+			m["message"] = c.Message
+		}
+		ruleList[i] = m
+	}
+	raw["outbound_rules"] = ruleList
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %w", err)
+	}
+	// 同步更新内存中的 cfg.OutboundRules
+	api.cfg.OutboundRules = configs
+	log.Printf("[出站规则] 已持久化 %d 条规则到 %s", len(configs), api.cfgPath)
+	return nil
+}
+
+// handleAddOutboundRule POST /api/v1/outbound-rules/add — 添加出站规则
+func (api *ManagementAPI) handleAddOutboundRule(w http.ResponseWriter, r *http.Request) {
+	var req OutboundRuleConfig
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
+		return
+	}
+	if len(req.Patterns) == 0 && req.Pattern == "" {
+		jsonResponse(w, 400, map[string]string{"error": "pattern or patterns required"})
+		return
+	}
+	if req.Action == "" {
+		req.Action = "log"
+	}
+	if req.Action != "block" && req.Action != "warn" && req.Action != "log" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/warn/log"})
+		return
+	}
+
+	if err := api.outboundEngine.AddRule(req); err != nil {
+		jsonResponse(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 持久化
+	configs := api.outboundEngine.GetRuleConfigs()
+	if err := api.persistOutboundRules(configs); err != nil {
+		log.Printf("[出站规则] 持久化失败: %v", err)
+	}
+
+	log.Printf("[出站规则CRUD] 添加规则: %s (action=%s)", req.Name, req.Action)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "added",
+		"rule":   req.Name,
+		"total":  len(configs),
+	})
+}
+
+// handleUpdateOutboundRule PUT /api/v1/outbound-rules/update — 更新出站规则
+func (api *ManagementAPI) handleUpdateOutboundRule(w http.ResponseWriter, r *http.Request) {
+	var req OutboundRuleConfig
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
+		return
+	}
+	if len(req.Patterns) == 0 && req.Pattern == "" {
+		jsonResponse(w, 400, map[string]string{"error": "pattern or patterns required"})
+		return
+	}
+	if req.Action != "" && req.Action != "block" && req.Action != "warn" && req.Action != "log" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/warn/log"})
+		return
+	}
+
+	if err := api.outboundEngine.UpdateRule(req); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 持久化
+	configs := api.outboundEngine.GetRuleConfigs()
+	if err := api.persistOutboundRules(configs); err != nil {
+		log.Printf("[出站规则] 持久化失败: %v", err)
+	}
+
+	log.Printf("[出站规则CRUD] 更新规则: %s", req.Name)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "updated",
+		"rule":   req.Name,
+		"total":  len(configs),
+	})
+}
+
+// handleDeleteOutboundRule DELETE /api/v1/outbound-rules/delete — 删除出站规则
+func (api *ManagementAPI) handleDeleteOutboundRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
+		return
+	}
+
+	if err := api.outboundEngine.DeleteRule(req.Name); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 持久化
+	configs := api.outboundEngine.GetRuleConfigs()
+	if err := api.persistOutboundRules(configs); err != nil {
+		log.Printf("[出站规则] 持久化失败: %v", err)
+	}
+
+	log.Printf("[出站规则CRUD] 删除规则: %s", req.Name)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":  "deleted",
+		"rule":    req.Name,
+		"total":   len(configs),
+	})
+}
+
+// handleReloadOutboundRules POST /api/v1/outbound-rules/reload — 重新加载出站规则
+func (api *ManagementAPI) handleReloadOutboundRules(w http.ResponseWriter, r *http.Request) {
+	newCfg, err := loadConfig(api.cfgPath)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "reload config failed: " + err.Error()})
+		return
+	}
+	api.outboundEngine.Reload(newCfg.OutboundRules)
+	api.cfg.OutboundRules = newCfg.OutboundRules
+
+	api.outboundEngine.mu.RLock()
+	ruleCount := len(api.outboundEngine.rules)
+	api.outboundEngine.mu.RUnlock()
+
+	log.Printf("[出站规则] 从配置文件重新加载了 %d 条规则", ruleCount)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":      "reloaded",
+		"rules_count": ruleCount,
 	})
 }
 
@@ -4470,6 +4649,36 @@ func (api *ManagementAPI) handleAnomalyMetric(w http.ResponseWriter, r *http.Req
 	jsonResponse(w, 200, detail)
 }
 
+// handleAnomalyConfigGet GET /api/v1/anomaly/config — 获取异常检测配置
+func (api *ManagementAPI) handleAnomalyConfigGet(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 404, map[string]string{"error": "anomaly detector not available"})
+		return
+	}
+	cfg := api.anomalyDetector.GetConfig()
+	jsonResponse(w, 200, cfg)
+}
+
+// handleAnomalyConfigPut PUT /api/v1/anomaly/config — 更新异常检测配置
+func (api *ManagementAPI) handleAnomalyConfigPut(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 404, map[string]string{"error": "anomaly detector not available"})
+		return
+	}
+	var cfg AnomalyConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	api.anomalyDetector.UpdateConfig(cfg)
+	newCfg := api.anomalyDetector.GetConfig()
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "ok",
+		"config": newCfg,
+		"note":   "Config updated. Baseline/check intervals take effect on next cycle.",
+	})
+}
+
 // ============================================================
 // v13.1 Prompt 版本追踪 API handlers
 // ============================================================
@@ -5962,4 +6171,88 @@ func (mapi *ManagementAPI) handleBigScreenData(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// ============================================================
+// v18.0 BackgroundScheduler — 攻击链自动分析 + 行为画像自动扫描
+// ============================================================
+
+// BackgroundScheduler 后台调度器，负责定时执行攻击链分析和行为画像扫描
+type BackgroundScheduler struct {
+	attackChainEng     *AttackChainEngine
+	behaviorProfileEng *BehaviorProfileEngine
+	chainInterval      time.Duration
+	behaviorInterval   time.Duration
+	cancel             context.CancelFunc
+}
+
+// NewBackgroundScheduler 创建后台调度器
+func NewBackgroundScheduler(cfg *Config, chainEng *AttackChainEngine, behaviorEng *BehaviorProfileEngine) *BackgroundScheduler {
+	chainMin := cfg.ChainAnalysisIntervalMin
+	if chainMin <= 0 {
+		chainMin = 5
+	}
+	behaviorMin := cfg.BehaviorScanIntervalMin
+	if behaviorMin <= 0 {
+		behaviorMin = 10
+	}
+	return &BackgroundScheduler{
+		attackChainEng:     chainEng,
+		behaviorProfileEng: behaviorEng,
+		chainInterval:      time.Duration(chainMin) * time.Minute,
+		behaviorInterval:   time.Duration(behaviorMin) * time.Minute,
+	}
+}
+
+// Start 启动后台调度 goroutine，需要传入一个可取消的 context
+func (s *BackgroundScheduler) Start(ctx context.Context) {
+	childCtx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
+
+	// 攻击链自动分析
+	if s.attackChainEng != nil {
+		go func() {
+			ticker := time.NewTicker(s.chainInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-childCtx.Done():
+					return
+				case <-ticker.C:
+					chains, err := s.attackChainEng.AnalyzeChains("default", 1)
+					if err != nil {
+						log.Printf("[调度器] 攻击链分析失败: %v", err)
+					} else if len(chains) > 0 {
+						log.Printf("[调度器] 攻击链分析完成: 发现 %d 条新链", len(chains))
+					}
+				}
+			}
+		}()
+	}
+
+	// 行为画像自动扫描
+	if s.behaviorProfileEng != nil {
+		go func() {
+			ticker := time.NewTicker(s.behaviorInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-childCtx.Done():
+					return
+				case <-ticker.C:
+					scanned, anomalies := s.behaviorProfileEng.ScanAllActive("default")
+					if anomalies > 0 {
+						log.Printf("[调度器] 行为画像扫描完成: 扫描 %d 个 Agent, 发现 %d 个异常", scanned, anomalies)
+					}
+				}
+			}
+		}()
+	}
+}
+
+// Stop 停止后台调度器
+func (s *BackgroundScheduler) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 }

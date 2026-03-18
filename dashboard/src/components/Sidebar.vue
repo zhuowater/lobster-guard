@@ -207,9 +207,10 @@ const governItems = [
   { path: '/reports', label: '报告', icon: 'file-up' },
 ]
 
-// 系统导航项 (3项)
+// 系统导航项 (4项)
 const sysItems = [
   { path: '/monitor', label: '监控', icon: 'activity' },
+  { path: '/users', label: '用户管理', icon: 'users' },
   { path: '/ops', label: '运维', icon: 'wrench' },
   { path: '/settings', label: '设置', icon: 'settings' },
 ]

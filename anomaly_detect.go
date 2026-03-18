@@ -15,6 +15,32 @@ import (
 // 核心类型
 // ============================================================
 
+// AnomalyConfig 异常检测可配参数
+type AnomalyConfig struct {
+	WindowDays        int     `json:"window_days" yaml:"window_days"`               // 基线窗口天数，默认 7
+	WarningThreshold  float64 `json:"warning_threshold" yaml:"warning_threshold"`   // 告警阈值（σ），默认 2.0
+	CriticalThreshold float64 `json:"critical_threshold" yaml:"critical_threshold"` // 严重阈值（σ），默认 3.0
+	MinStdDev         float64 `json:"min_std_dev" yaml:"min_std_dev"`               // 最小标准差，默认 1.0
+	MinReadyDays      int     `json:"min_ready_days" yaml:"min_ready_days"`         // 基线就绪最少天数，默认 3
+	BaselineInterval  int     `json:"baseline_interval_min" yaml:"baseline_interval_min"` // 基线更新间隔(分钟)，默认 60
+	CheckInterval     int     `json:"check_interval_min" yaml:"check_interval_min"`       // 异常检查间隔(分钟)，默认 5
+	MaxAlerts         int     `json:"max_alerts" yaml:"max_alerts"`                 // 最大告警数，默认 100
+}
+
+// DefaultAnomalyConfig 返回默认配置
+func DefaultAnomalyConfig() AnomalyConfig {
+	return AnomalyConfig{
+		WindowDays:        7,
+		WarningThreshold:  2.0,
+		CriticalThreshold: 3.0,
+		MinStdDev:         1.0,
+		MinReadyDays:      3,
+		BaselineInterval:  60,
+		CheckInterval:     5,
+		MaxAlerts:         100,
+	}
+}
+
 // AnomalyDetector 异常基线检测器
 type AnomalyDetector struct {
 	db        *sql.DB
@@ -22,6 +48,7 @@ type AnomalyDetector struct {
 	baselines map[string]*Baseline // key: metric_name
 	alerts    []AnomalyAlert
 	maxAlerts int
+	config    AnomalyConfig
 }
 
 // Baseline 一个指标的基线
@@ -79,13 +106,60 @@ func MetricDisplayName(metricName string) string {
 
 // NewAnomalyDetector 创建异常检测器
 func NewAnomalyDetector(db *sql.DB) *AnomalyDetector {
+	cfg := DefaultAnomalyConfig()
 	d := &AnomalyDetector{
 		db:        db,
 		baselines: make(map[string]*Baseline),
 		alerts:    []AnomalyAlert{},
-		maxAlerts: 100,
+		maxAlerts: cfg.MaxAlerts,
+		config:    cfg,
 	}
 	return d
+}
+
+// GetConfig 返回当前配置
+func (d *AnomalyDetector) GetConfig() AnomalyConfig {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.config
+}
+
+// UpdateConfig 更新配置（运行时热更新）
+func (d *AnomalyDetector) UpdateConfig(cfg AnomalyConfig) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// 应用边界检查
+	if cfg.WindowDays < 1 {
+		cfg.WindowDays = 1
+	}
+	if cfg.WindowDays > 90 {
+		cfg.WindowDays = 90
+	}
+	if cfg.WarningThreshold < 0.5 {
+		cfg.WarningThreshold = 0.5
+	}
+	if cfg.CriticalThreshold <= cfg.WarningThreshold {
+		cfg.CriticalThreshold = cfg.WarningThreshold + 1.0
+	}
+	if cfg.MinStdDev < 0.1 {
+		cfg.MinStdDev = 0.1
+	}
+	if cfg.MinReadyDays < 1 {
+		cfg.MinReadyDays = 1
+	}
+	if cfg.BaselineInterval < 1 {
+		cfg.BaselineInterval = 1
+	}
+	if cfg.CheckInterval < 1 {
+		cfg.CheckInterval = 1
+	}
+	if cfg.MaxAlerts < 10 {
+		cfg.MaxAlerts = 10
+	}
+	d.config = cfg
+	d.maxAlerts = cfg.MaxAlerts
+	log.Printf("[异常检测] 配置已更新: window=%dd warn=%.1fσ crit=%.1fσ minStd=%.1f baseline=%dmin check=%dmin",
+		cfg.WindowDays, cfg.WarningThreshold, cfg.CriticalThreshold, cfg.MinStdDev, cfg.BaselineInterval, cfg.CheckInterval)
 }
 
 // StartBackground 启动后台基线更新和异常检查
@@ -93,9 +167,10 @@ func (d *AnomalyDetector) StartBackground() {
 	// 启动时立即计算一次基线
 	d.UpdateBaselines()
 
+	cfg := d.GetConfig()
 	go func() {
-		baselineTicker := time.NewTicker(1 * time.Hour)
-		checkTicker := time.NewTicker(5 * time.Minute)
+		baselineTicker := time.NewTicker(time.Duration(cfg.BaselineInterval) * time.Minute)
+		checkTicker := time.NewTicker(time.Duration(cfg.CheckInterval) * time.Minute)
 		defer baselineTicker.Stop()
 		defer checkTicker.Stop()
 
@@ -140,14 +215,15 @@ func (d *AnomalyDetector) UpdateBaselines() {
 
 // computeBaseline 计算单个指标的基线
 func (d *AnomalyDetector) computeBaseline(metricName string) *Baseline {
+	cfg := d.GetConfig()
 	b := &Baseline{
 		MetricName: metricName,
-		WindowDays: 7,
+		WindowDays: cfg.WindowDays,
 		LastUpdate: time.Now().UTC(),
 	}
 
-	// 查询过去 7 天每小时的指标值
-	hourlyValues := d.queryHourlyMetric(metricName, 7)
+	// 查询过去 N 天每小时的指标值
+	hourlyValues := d.queryHourlyMetric(metricName, cfg.WindowDays)
 	if len(hourlyValues) == 0 {
 		return b
 	}
@@ -183,8 +259,8 @@ func (d *AnomalyDetector) computeBaseline(metricName string) *Baseline {
 		b.DailyStd = stdDev(dailyVals)
 	}
 
-	// 至少 3 天数据才认为基线就绪
-	b.Ready = len(dayTotals) >= 3
+	// 至少 N 天数据才认为基线就绪
+	b.Ready = len(dayTotals) >= cfg.MinReadyDays
 
 	return b
 }
@@ -308,15 +384,16 @@ func (d *AnomalyDetector) checkMetric(metricName string, currentValue float64, b
 	mean := baseline.HourlyMean[hour]
 	std := baseline.HourlyStd[hour]
 
-	if std < 1.0 {
-		std = 1.0 // 避免除零，最小标准差为 1
+	cfg := d.GetConfig()
+	if std < cfg.MinStdDev {
+		std = cfg.MinStdDev // 避免除零，最小标准差可配
 	}
 
 	deviation := math.Abs(currentValue-mean) / std
 
-	if deviation > 2.0 {
+	if deviation > cfg.WarningThreshold {
 		severity := "warning"
-		if deviation > 3.0 {
+		if deviation > cfg.CriticalThreshold {
 			severity = "critical"
 		}
 		direction := "above"

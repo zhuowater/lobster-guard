@@ -210,7 +210,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	metrics := NewMetricsCollector()
 
 	engine := NewRuleEngine()
-	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, metrics, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, metrics, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, metrics, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// 记录一些指标
@@ -281,7 +281,7 @@ func TestMetricsEndpoint_Disabled(t *testing.T) {
 	gp := NewGenericPlugin("", "")
 
 	engine := NewRuleEngine()
-	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, gp, nil, nil, nil, nil, nil, nil, nil, nil, nil) // metrics=nil
 
 	req := httptest.NewRequest("GET", "/metrics", nil)

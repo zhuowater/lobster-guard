@@ -254,7 +254,7 @@ func TestAuditExportCSV_API(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// Test CSV export
@@ -282,7 +282,7 @@ func TestAuditExportJSON_API(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/v1/audit/export?format=json", nil)
@@ -309,7 +309,7 @@ func TestAuditExportBadFormat(t *testing.T) {
 	routes := NewRouteTable(db2, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/v1/audit/export?format=xml", nil)
@@ -330,7 +330,7 @@ func TestAuditCleanup_API(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/api/v1/audit/cleanup", nil)
@@ -355,7 +355,7 @@ func TestAuditStats_API(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/v1/audit/stats", nil)
@@ -380,7 +380,7 @@ func TestAuditTimeline_API(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/v1/audit/timeline?hours=12", nil)
@@ -545,7 +545,7 @@ func TestAuditExportWithFilters(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// Export CSV with direction filter
@@ -609,7 +609,7 @@ func TestAuditLogsAPI_WithQParam(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// Test with q param
@@ -644,7 +644,7 @@ func TestServeHTTP_NewAuditEndpoints(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	engine := NewRuleEngine()
 	outEngine := NewOutboundRuleEngine(nil)
-	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, nil, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	server := httptest.NewServer(api)

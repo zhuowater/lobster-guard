@@ -364,7 +364,7 @@ func TestInboundProxy_RateLimit_Webhook(t *testing.T) {
 	routes := NewRouteTable(db, false)
 
 	gp := NewGenericPlugin("", "content")
-	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 
 	// 第 1 个请求 — 应通过（虽无上游会 502，但不应 429）
 	body := []byte(`{"content":"hello","sender_id":"user1"}`)
@@ -413,7 +413,7 @@ func TestHealthz_RateLimiter(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	gp := NewGenericPlugin("", "content")
 	engine := NewRuleEngine()
-	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, gp, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine, outboundEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
@@ -464,7 +464,7 @@ func TestManagementAPI_RateLimitEndpoints(t *testing.T) {
 	routes := NewRouteTable(db, false)
 	gp := NewGenericPlugin("", "content")
 	engine2 := NewRuleEngine()
-	inbound := NewInboundProxy(cfg, gp, engine2, logger, pool, routes, nil, nil, nil, nil)
+	inbound := NewInboundProxy(cfg, gp, engine2, logger, pool, routes, nil, nil, nil, nil, nil)
 	mgmt := NewManagementAPI(cfg, "", pool, routes, logger, engine2, outboundEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// 产生一些限流数据
