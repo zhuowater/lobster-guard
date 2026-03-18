@@ -1,0 +1,1307 @@
+openapi: 3.0.3
+info:
+  title: 龙虾卫士 (Lobster Guard) API
+  description: |
+    AI Agent 安全网关 — 管理 API 规范文档。
+    所有 `/api/v1/` 端点需要 JWT Token 或 management_token 认证。
+    认证方式：`Authorization: Bearer <token>`
+  version: 18.2.0
+  contact:
+    name: Lobster Guard Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:9090
+    description: 本地开发
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "unauthorized"
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        direction:
+          type: string
+          enum: [inbound, outbound, llm]
+        action:
+          type: string
+          enum: [allow, block, warn]
+        sender_id:
+          type: string
+        content_preview:
+          type: string
+        reason:
+          type: string
+        upstream_id:
+          type: string
+        trace_id:
+          type: string
+
+    AuditStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        blocked:
+          type: integer
+        warned:
+          type: integer
+        allowed:
+          type: integer
+        by_direction:
+          type: object
+        by_category:
+          type: object
+
+    InboundRule:
+      type: object
+      properties:
+        name:
+          type: string
+        patterns:
+          type: array
+          items:
+            type: string
+        action:
+          type: string
+          enum: [block, warn, log]
+        category:
+          type: string
+        priority:
+          type: integer
+        type:
+          type: string
+          enum: [keyword, regex]
+        group:
+          type: string
+
+    OutboundRule:
+      type: object
+      properties:
+        name:
+          type: string
+        pattern:
+          type: string
+        patterns:
+          type: array
+          items:
+            type: string
+        action:
+          type: string
+          enum: [block, warn, log]
+        priority:
+          type: integer
+        message:
+          type: string
+
+    LLMCall:
+      type: object
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        target_name:
+          type: string
+        method:
+          type: string
+        path:
+          type: string
+        status_code:
+          type: integer
+        latency_ms:
+          type: number
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        tool_calls:
+          type: integer
+        trace_id:
+          type: string
+
+    Envelope:
+      type: object
+      properties:
+        id:
+          type: string
+        audit_id:
+          type: integer
+        hmac_signature:
+          type: string
+        prev_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        verified:
+          type: boolean
+
+    EventTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [webhook, email]
+        url:
+          type: string
+        enabled:
+          type: boolean
+        events:
+          type: array
+          items:
+            type: string
+
+    RedTeamReport:
+      type: object
+      properties:
+        id:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        vectors_tested:
+          type: integer
+        vectors_passed:
+          type: integer
+        vectors_failed:
+          type: integer
+        score:
+          type: number
+
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        member_count:
+          type: integer
+        status:
+          type: string
+
+    HealthCheck:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        version:
+          type: string
+        uptime:
+          type: string
+        checks:
+          type: object
+
+    ConfigValidation:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+        checks:
+          type: object
+          properties:
+            base_issues:
+              type: integer
+            security_issues:
+              type: integer
+            total:
+              type: integer
+
+tags:
+  - name: 审计 (Audit)
+    description: 审计日志查询、统计、导出
+  - name: LLM
+    description: LLM 代理审计、调用记录、工具统计
+  - name: 入站规则 (Inbound Rules)
+    description: 入站检测规则 CRUD
+  - name: 出站规则 (Outbound Rules)
+    description: 出站检测规则 CRUD
+  - name: 信封 (Envelopes)
+    description: 执行信封密码学审计链
+  - name: 事件 (Events)
+    description: 事件总线、通知目标管理
+  - name: 红队 (Red Team)
+    description: 自动化安全测试
+  - name: 租户 (Tenants)
+    description: 多租户管理
+  - name: 系统 (System)
+    description: 健康检查、配置、诊断、指标
+
+paths:
+  # ============================================================
+  # 审计 (Audit)
+  # ============================================================
+  /api/v1/audit/stats:
+    get:
+      tags: [审计 (Audit)]
+      summary: 审计统计概览
+      description: 返回按方向、类别、动作的审计日志汇总统计
+      parameters:
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+          description: 统计时间范围（小时）
+      responses:
+        '200':
+          description: 审计统计
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStats'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/audit/logs:
+    get:
+      tags: [审计 (Audit)]
+      summary: 审计日志列表
+      description: 分页查询审计日志，支持按方向、动作、发送者过滤
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [inbound, outbound, llm]
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [allow, block, warn]
+        - name: sender_id
+          in: query
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          schema:
+            type: string
+          description: 内容关键词搜索
+      responses:
+        '200':
+          description: 审计日志列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+
+  /api/v1/audit/export:
+    get:
+      tags: [审计 (Audit)]
+      summary: 导出审计日志
+      description: 以 CSV 格式导出审计日志
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv, json]
+            default: csv
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+      responses:
+        '200':
+          description: 导出数据
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLog'
+
+  /api/v1/audit/timeline:
+    get:
+      tags: [审计 (Audit)]
+      summary: 审计时间线
+      description: 按时间段聚合的审计日志时间线数据（用于图表）
+      parameters:
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+        - name: interval
+          in: query
+          schema:
+            type: string
+            default: "1h"
+      responses:
+        '200':
+          description: 时间线数据
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buckets:
+                    type: array
+                    items:
+                      type: object
+
+  /api/v1/stats:
+    get:
+      tags: [审计 (Audit)]
+      summary: 全局统计概览
+      description: 返回系统整体请求/拦截/告警统计
+      responses:
+        '200':
+          description: 全局统计
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================================
+  # LLM
+  # ============================================================
+  /api/v1/llm/overview:
+    get:
+      tags: [LLM]
+      summary: LLM 代理概览
+      description: LLM 代理的汇总统计（调用数、Token 用量、成本）
+      responses:
+        '200':
+          description: LLM 概览
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_calls:
+                    type: integer
+                  total_tokens:
+                    type: integer
+                  total_cost_usd:
+                    type: number
+                  by_target:
+                    type: object
+
+  /api/v1/llm/status:
+    get:
+      tags: [LLM]
+      summary: LLM 代理状态
+      description: 返回 LLM 代理当前运行状态
+      responses:
+        '200':
+          description: LLM 状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  listen:
+                    type: string
+                  targets:
+                    type: array
+                    items:
+                      type: object
+
+  /api/v1/llm/calls:
+    get:
+      tags: [LLM]
+      summary: LLM 调用记录
+      description: 分页查询 LLM API 调用记录
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: target
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 调用记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calls:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LLMCall'
+                  total:
+                    type: integer
+
+  /api/v1/llm/tools:
+    get:
+      tags: [LLM]
+      summary: 工具调用记录
+      description: 查询 LLM Agent 工具调用详情
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 工具调用记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+
+  /api/v1/llm/export:
+    get:
+      tags: [LLM]
+      summary: 导出 LLM 审计日志
+      description: 导出 LLM 代理审计记录
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv, json]
+            default: csv
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+      responses:
+        '200':
+          description: 导出数据
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  # ============================================================
+  # 入站规则 (Inbound Rules)
+  # ============================================================
+  /api/v1/inbound-rules:
+    get:
+      tags: [入站规则 (Inbound Rules)]
+      summary: 获取入站规则列表
+      description: 返回所有入站检测规则
+      responses:
+        '200':
+          description: 规则列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InboundRule'
+                  source:
+                    type: string
+                  total:
+                    type: integer
+
+  /api/v1/inbound-rules/add:
+    post:
+      tags: [入站规则 (Inbound Rules)]
+      summary: 添加入站规则
+      description: 动态添加新的入站检测规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InboundRule'
+      responses:
+        '200':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  total:
+                    type: integer
+
+  /api/v1/inbound-rules/update:
+    post:
+      tags: [入站规则 (Inbound Rules)]
+      summary: 更新入站规则
+      description: 按名称更新已有入站规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InboundRule'
+      responses:
+        '200':
+          description: 更新成功
+
+  /api/v1/inbound-rules/delete:
+    post:
+      tags: [入站规则 (Inbound Rules)]
+      summary: 删除入站规则
+      description: 按名称删除入站规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              required: [name]
+      responses:
+        '200':
+          description: 删除成功
+
+  # ============================================================
+  # 出站规则 (Outbound Rules)
+  # ============================================================
+  /api/v1/outbound-rules:
+    get:
+      tags: [出站规则 (Outbound Rules)]
+      summary: 获取出站规则列表
+      description: 返回所有出站检测规则
+      responses:
+        '200':
+          description: 规则列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OutboundRule'
+                  total:
+                    type: integer
+
+  /api/v1/outbound-rules/add:
+    post:
+      tags: [出站规则 (Outbound Rules)]
+      summary: 添加出站规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutboundRule'
+      responses:
+        '200':
+          description: 添加成功
+
+  /api/v1/outbound-rules/update:
+    post:
+      tags: [出站规则 (Outbound Rules)]
+      summary: 更新出站规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutboundRule'
+      responses:
+        '200':
+          description: 更新成功
+
+  /api/v1/outbound-rules/delete:
+    post:
+      tags: [出站规则 (Outbound Rules)]
+      summary: 删除出站规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              required: [name]
+      responses:
+        '200':
+          description: 删除成功
+
+  # ============================================================
+  # 信封 (Envelopes)
+  # ============================================================
+  /api/v1/envelopes/stats:
+    get:
+      tags: [信封 (Envelopes)]
+      summary: 信封统计
+      description: 执行信封的统计信息（总数、验证状态、批次统计）
+      responses:
+        '200':
+          description: 信封统计
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  verified:
+                    type: integer
+                  failed:
+                    type: integer
+                  batches:
+                    type: integer
+
+  /api/v1/envelopes/list:
+    get:
+      tags: [信封 (Envelopes)]
+      summary: 信封列表
+      description: 分页查询执行信封
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 信封列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  envelopes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Envelope'
+                  total:
+                    type: integer
+
+  /api/v1/envelopes/verify/{id}:
+    get:
+      tags: [信封 (Envelopes)]
+      summary: 验证信封
+      description: 验证指定信封的 HMAC 签名完整性
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 验证结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  envelope:
+                    $ref: '#/components/schemas/Envelope'
+
+  /api/v1/envelopes/chain/{id}:
+    get:
+      tags: [信封 (Envelopes)]
+      summary: 信封链追溯
+      description: 追溯指定信封的完整哈希链
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 信封链
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chain:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Envelope'
+                  valid:
+                    type: boolean
+
+  /api/v1/envelopes/proof/{id}:
+    get:
+      tags: [信封 (Envelopes)]
+      summary: Merkle 证明
+      description: 获取指定信封的 Merkle Tree 包含性证明
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Merkle 证明
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  proof:
+                    type: array
+                    items:
+                      type: string
+                  root:
+                    type: string
+                  valid:
+                    type: boolean
+
+  /api/v1/envelopes/batches:
+    get:
+      tags: [信封 (Envelopes)]
+      summary: 信封批次列表
+      description: 列出所有 Merkle Tree 批次
+      responses:
+        '200':
+          description: 批次列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        batch_id:
+                          type: integer
+                        root_hash:
+                          type: string
+                        count:
+                          type: integer
+                        created_at:
+                          type: string
+                          format: date-time
+
+  # ============================================================
+  # 事件 (Events)
+  # ============================================================
+  /api/v1/events/list:
+    get:
+      tags: [事件 (Events)]
+      summary: 事件列表
+      description: 查询事件总线发出的事件记录
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: 事件类型过滤
+      responses:
+        '200':
+          description: 事件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+
+  /api/v1/events/stats:
+    get:
+      tags: [事件 (Events)]
+      summary: 事件统计
+      description: 事件总线统计（按类型、按目标）
+      responses:
+        '200':
+          description: 事件统计
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/events/targets:
+    get:
+      tags: [事件 (Events)]
+      summary: 通知目标列表
+      description: 获取所有事件通知目标（webhook 等）
+      responses:
+        '200':
+          description: 通知目标
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventTarget'
+    post:
+      tags: [事件 (Events)]
+      summary: 创建通知目标
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventTarget'
+      responses:
+        '200':
+          description: 创建成功
+
+  /api/v1/events/targets/{id}:
+    put:
+      tags: [事件 (Events)]
+      summary: 更新通知目标
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventTarget'
+      responses:
+        '200':
+          description: 更新成功
+    delete:
+      tags: [事件 (Events)]
+      summary: 删除通知目标
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/v1/events/test:
+    post:
+      tags: [事件 (Events)]
+      summary: 测试事件通知
+      description: 向指定通知目标发送测试事件
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target_id:
+                  type: string
+      responses:
+        '200':
+          description: 测试结果
+
+  # ============================================================
+  # 红队 (Red Team)
+  # ============================================================
+  /api/v1/redteam/run:
+    post:
+      tags: [红队 (Red Team)]
+      summary: 执行红队测试
+      description: 手动触发自动化红队安全测试
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                categories:
+                  type: array
+                  items:
+                    type: string
+                parallel:
+                  type: integer
+                  default: 5
+      responses:
+        '200':
+          description: 测试已启动
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+
+  /api/v1/redteam/vectors:
+    get:
+      tags: [红队 (Red Team)]
+      summary: 攻击向量列表
+      description: 获取所有可用的红队攻击向量
+      responses:
+        '200':
+          description: 攻击向量
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vectors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        category:
+                          type: string
+                        severity:
+                          type: string
+                  total:
+                    type: integer
+
+  /api/v1/redteam/reports:
+    get:
+      tags: [红队 (Red Team)]
+      summary: 红队测试报告
+      description: 获取红队测试历史报告
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: 测试报告列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RedTeamReport'
+                  total:
+                    type: integer
+
+  # ============================================================
+  # 租户 (Tenants)
+  # ============================================================
+  /api/v1/tenants:
+    get:
+      tags: [租户 (Tenants)]
+      summary: 租户列表
+      description: 获取所有租户
+      responses:
+        '200':
+          description: 租户列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tenant'
+                  total:
+                    type: integer
+    post:
+      tags: [租户 (Tenants)]
+      summary: 创建租户
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+              required: [name]
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+
+  /api/v1/tenants/{id}:
+    get:
+      tags: [租户 (Tenants)]
+      summary: 租户详情
+      description: 获取单个租户的详细信息和统计
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 租户详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Tenant'
+                  - type: object
+                    properties:
+                      stats:
+                        type: object
+
+  # ============================================================
+  # 系统 (System)
+  # ============================================================
+  /healthz:
+    get:
+      tags: [系统 (System)]
+      summary: 健康检查
+      description: 系统健康状态（无需认证）
+      security: []
+      responses:
+        '200':
+          description: 健康状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheck'
+
+  /api/v1/config:
+    get:
+      tags: [系统 (System)]
+      summary: 获取脱敏配置
+      description: 返回结构化的脱敏配置（敏感字段已遮盖）
+      responses:
+        '200':
+          description: 脱敏配置
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/config/validate:
+    get:
+      tags: [系统 (System)]
+      summary: 验证当前配置
+      description: 对运行时配置进行基础验证和安全检查
+      responses:
+        '200':
+          description: 验证结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigValidation'
+
+  /api/v1/config/view:
+    get:
+      tags: [系统 (System)]
+      summary: 查看配置文件（脱敏）
+      description: 返回原始配置文件内容（敏感值替换为 ***）
+      responses:
+        '200':
+          description: 配置文件内容
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  content:
+                    type: string
+
+  /api/v1/simulate/traffic:
+    post:
+      tags: [系统 (System)]
+      summary: 端到端模拟测试
+      description: 触发内置流量模拟器，验证全链路安全功能
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scenarios:
+                  type: array
+                  items:
+                    type: string
+                timeout_per_scenario:
+                  type: integer
+                  default: 10
+      responses:
+        '200':
+          description: 模拟测试结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  passed:
+                    type: integer
+                  failed:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+
+  /api/v1/system/diag:
+    get:
+      tags: [系统 (System)]
+      summary: 系统诊断
+      description: 返回系统诊断信息（上游连通性、规则统计等）
+      responses:
+        '200':
+          description: 诊断信息
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /metrics:
+    get:
+      tags: [系统 (System)]
+      summary: Prometheus 指标
+      description: Prometheus 格式的监控指标端点
+      security: []
+      responses:
+        '200':
+          description: Prometheus 指标
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/overview/summary:
+    get:
+      tags: [系统 (System)]
+      summary: 系统概览
+      description: Dashboard 首页的汇总统计数据
+      responses:
+        '200':
+          description: 概览数据
+          content:
+            application/json:
+              schema:
+                type: object

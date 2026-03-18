@@ -1,0 +1,18 @@
+version: "3.8"
+services:
+  lobster-guard:
+    build: .
+    image: lobster-guard:latest
+    ports:
+      - "8443:8443"   # 入站代理
+      - "8444:8444"   # 出站/LLM代理
+      - "9090:9090"   # 管理+Dashboard
+    volumes:
+      - ./config.yaml:/etc/lobster-guard/config.yaml:ro
+      - lobster-data:/var/lib/lobster-guard
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+
+volumes:
+  lobster-data:

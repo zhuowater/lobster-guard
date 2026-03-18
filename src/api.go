@@ -492,6 +492,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v8.0 运维工具箱 API
 	case path == "/api/v1/config/view" && method == "GET":
 		api.handleConfigView(w, r)
+	case path == "/api/v1/config" && method == "GET":
+		api.handleConfigGet(w, r)
+	case path == "/api/v1/config/validate" && method == "GET":
+		api.handleConfigValidate(w, r)
 	case path == "/api/v1/system/diag" && method == "GET":
 		api.handleSystemDiag(w, r)
 	case path == "/api/v1/alerts/history" && method == "GET":
@@ -3687,7 +3691,35 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 // ============================================================
 
 // sensitiveKeyRe 匹配配置文件中含敏感信息的 YAML key
-var sensitiveKeyRe = regexp.MustCompile(`(?i)(token|secret|password|api_key|aes_key|encrypt_key)`)
+var sensitiveKeyRe = regexp.MustCompile(`(?i)(token|secret|password|api_key|aes_key|encrypt_key|encryption_key)`)
+
+// handleConfigGet GET /api/v1/config — 返回脱敏的结构化配置
+func (api *ManagementAPI) handleConfigGet(w http.ResponseWriter, r *http.Request) {
+	masked := MaskSensitiveConfig(api.cfg)
+	jsonResponse(w, 200, masked)
+}
+
+// handleConfigValidate GET /api/v1/config/validate — 验证当前配置
+func (api *ManagementAPI) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
+	// 基础配置验证
+	baseIssues := validateConfig(api.cfg)
+	// 安全配置验证
+	securityIssues := ValidateConfigSecurity(api.cfg)
+
+	// 合并去重
+	allIssues := append(baseIssues, securityIssues...)
+	valid := len(allIssues) == 0
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"valid":  valid,
+		"issues": allIssues,
+		"checks": map[string]interface{}{
+			"base_issues":     len(baseIssues),
+			"security_issues": len(securityIssues),
+			"total":           len(allIssues),
+		},
+	})
+}
 
 // handleConfigView GET /api/v1/config/view — 返回脱敏运行配置
 func (api *ManagementAPI) handleConfigView(w http.ResponseWriter, r *http.Request) {

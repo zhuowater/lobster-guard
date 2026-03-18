@@ -1,13 +1,12 @@
 # lobster-guard Makefile
-# 龙虾卫士 - AI Agent 安全网关 v17.1（含 v18 系统性修复）
-# Go 源文件: 42 个 + 34 个测试 = 76 个 .go 文件
-# Go 代码: 48,484 行（业务 30,318 + 测试 18,166）
+# 龙虾卫士 - AI Agent 安全网关 v18.2（工程化基础）
+# Go 源文件: 44 个 + 35 个测试 = 79 个 .go 文件
 # Vue 前端: 48 个 Vue 文件，14,819 行
-# 测试用例: 754 个通过 | API 端点: ~227 个
+# 测试用例: 760+ 个通过 | API 端点: ~230 个
 # 外部依赖: sqlite3 + yaml.v3 + gorilla/websocket + x/crypto
 
 APP_NAME := lobster-guard
-VERSION := 17.1.0
+VERSION := 18.2.0
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_FLAGS := -ldflags="-s -w"
 
@@ -197,9 +196,24 @@ rule-hits:
 inbound-rules:
 	@curl -s -H "Authorization: Bearer $${LOBSTER_GUARD_TOKEN}" http://localhost:9090/api/v1/inbound-rules | python3 -m json.tool 2>/dev/null
 
+# Docker 构建
+.PHONY: docker
+docker:
+	docker build -t lobster-guard:latest .
+
+# Docker Compose 启动
+.PHONY: docker-compose
+docker-compose:
+	docker-compose up -d
+
+# 本地 CI（vet + test）
+.PHONY: ci-local
+ci-local:
+	cd src && CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go test -count=1 -timeout 120s ./...
+
 .PHONY: help
 help:
-	@echo "lobster-guard v17.1 Makefile 命令:"
+	@echo "lobster-guard v18.2 Makefile 命令:"
 	@echo ""
 	@echo "  构建:"
 	@echo "    make build         - 编译 Go 二进制"
@@ -232,6 +246,11 @@ help:
 	@echo "    make rate-limit    - 限流统计"
 	@echo "    make rule-hits     - 规则命中率"
 	@echo "    make inbound-rules - 入站规则列表"
+	@echo ""
+	@echo "  Docker:"
+	@echo "    make docker        - 构建 Docker 镜像"
+	@echo "    make docker-compose - Docker Compose 启动"
+	@echo "    make ci-local      - 本地 CI（vet + test）"
 	@echo ""
 	@echo "  统计:"
 	@echo "    make count         - 代码行数统计"

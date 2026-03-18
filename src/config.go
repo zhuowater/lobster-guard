@@ -208,6 +208,9 @@ type Config struct {
 	EnvelopeBatchSize int    `yaml:"envelope_batch_size"` // Merkle Tree 批次大小（默认 64）
 	// v18.1 事件总线
 	EventBus EventBusConfig `yaml:"event_bus"`
+	// v18.2 配置安全
+	ConfigEncryptionKey string `yaml:"config_encryption_key"` // 敏感字段加密密钥
+	APITokenRotation    bool   `yaml:"api_token_rotation"`    // Token 自动轮换开关
 }
 
 // EventBusConfig 事件总线配置（v18.1）
