@@ -455,6 +455,7 @@ func main() {
 	mgmtAPI.reportEngine = reportEngine
 	mgmtAPI.sessionReplayEng = sessionReplayEng
 	mgmtAPI.honeypotEngine = honeypotEngine // v15.0
+	mgmtAPI.traceCorrelator = traceCorrelator // v18
 
 	// v15.1: A/B 测试引擎
 	abTestEngine := NewABTestEngine(logger.DB())
