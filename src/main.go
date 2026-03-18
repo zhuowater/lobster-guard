@@ -352,7 +352,7 @@ func main() {
 
 	// v18: Trace 关联缓存 — 入站↔出站 trace_id 自动关联
 	traceCorrelator := NewTraceCorrelator(10000)
-	sessionCorrelator := NewSessionCorrelator(50000, 5*60*1000) // v17.3: IM↔LLM 会话关联
+	sessionCorrelator := NewSessionCorrelator(50000, 60*60*1000) // v17.3: IM↔LLM 会话关联（1小时空闲切 session）
 	if llmProxy != nil {
 		llmProxy.sessionCorrelator = sessionCorrelator
 	}

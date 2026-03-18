@@ -236,6 +236,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if sessionLink != nil {
 		auditCtx.IMTraceID = sessionLink.IMTraceID
 		auditCtx.SenderID = sessionLink.SenderID
+		auditCtx.SessionID = sessionLink.SessionID
 	}
 
 	// 复制响应 headers

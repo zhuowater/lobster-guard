@@ -42,6 +42,7 @@ type LLMAuditContext struct {
 	// v17.3: IM↔LLM 会话关联
 	IMTraceID   string // 关联的 IM 侧 trace_id（如果匹配到）
 	SenderID    string // 关联的 IM 发送者
+	SessionID   string // 会话 ID（同一用户连续对话共享）
 }
 
 // NewLLMAuditor 创建 LLM 审计器
@@ -101,7 +102,9 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	// v17.3: IM↔LLM 会话关联字段
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN im_trace_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN sender_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN session_id TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_im_trace ON llm_calls(im_trace_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls(session_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
@@ -541,7 +544,7 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 
 	// v17.3: 写入 IM↔LLM 会话关联
 	if ctx.IMTraceID != "" {
-		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, callID)
+		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=?, session_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, ctx.SessionID, callID)
 	}
 
 	// 记录工具调用
@@ -614,7 +617,7 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 
 	// v17.3: 写入 IM↔LLM 会话关联
 	if ctx.IMTraceID != "" {
-		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, callID)
+		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=?, session_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, ctx.SessionID, callID)
 	}
 
 	for i, toolName := range info.ToolNames {
