@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "14.1.0"
+	AppVersion = "14.3.0"
 )
 
 var startTime = time.Now()
@@ -421,6 +421,10 @@ func main() {
 	sessionReplayEng := NewSessionReplayEngine(logger.DB())
 	fmt.Println("[初始化] ✅ 会话回放引擎已就绪 (trace_id 串联 IM+LLM+Tools)")
 
+	// v15.0: 蜜罐引擎
+	honeypotEngine := NewHoneypotEngine(logger.DB())
+	fmt.Println("[初始化] ✅ 蜜罐引擎已就绪 (Agent 蜜罐: 假数据+水印追踪+引爆检测)")
+
 	// v13.1: Prompt 版本追踪器
 	promptTracker := NewPromptTracker(logger.DB())
 	if llmAuditor != nil {
@@ -434,11 +438,23 @@ func main() {
 	mgmtAPI.redTeamEngine = redTeamEngine
 	fmt.Println("[初始化] ✅ Red Team Autopilot 引擎已就绪 (35 攻击向量, OWASP LLM Top10)")
 
+	// v14.3: 安全排行榜 + SLA 基线
+	leaderboardEng := NewLeaderboardEngine(logger.DB(), tenantMgr, mgmtAPI.healthScoreEng)
+	mgmtAPI.leaderboardEng = leaderboardEng
+	fmt.Println("[初始化] ✅ 安全排行榜 + SLA 基线引擎已就绪 (排行榜/热力图/SLA 达标)")
+
 	// v12.0: 报告引擎
 	reportEngine := NewReportEngine(logger.DB(), "/var/lib/lobster-guard/reports/")
 	reportEngine.SetEngines(mgmtAPI.healthScoreEng, mgmtAPI.owaspMatrixEng, llmAuditor, mgmtAPI.userProfileEng, anomalyDetector, logger)
 	mgmtAPI.reportEngine = reportEngine
 	mgmtAPI.sessionReplayEng = sessionReplayEng
+	mgmtAPI.honeypotEngine = honeypotEngine // v15.0
+
+	// v15.1: A/B 测试引擎
+	abTestEngine := NewABTestEngine(logger.DB())
+	mgmtAPI.abTestEngine = abTestEngine
+	fmt.Println("[初始化] ✅ A/B 测试引擎已就绪 (Prompt A/B 测试 + 流量分配 + 统计显著性)")
+
 	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
 
 	ctx, cancel := context.WithCancel(context.Background())

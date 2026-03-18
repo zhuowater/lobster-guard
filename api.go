@@ -105,8 +105,14 @@ type ManagementAPI struct {
 	tenantMgr *TenantManager
 	// v14.2 红队引擎
 	redTeamEngine *RedTeamEngine
+	// v14.3 排行榜引擎
+	leaderboardEng *LeaderboardEngine
 	// v14.1 认证管理器
 	authManager *AuthManager
+	// v15.0 蜜罐引擎
+	honeypotEngine *HoneypotEngine
+	// v15.1 A/B 测试引擎
+	abTestEngine *ABTestEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -499,6 +505,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAnomalyStatus(w, r)
 	case strings.HasPrefix(path, "/api/v1/anomaly/metric/") && method == "GET":
 		api.handleAnomalyMetric(w, r)
+	// v14.3 排行榜 + SLA API
+	case path == "/api/v1/leaderboard" && method == "GET":
+		api.handleLeaderboard(w, r)
+	case path == "/api/v1/leaderboard/heatmap" && method == "GET":
+		api.handleLeaderboardHeatmap(w, r)
+	case path == "/api/v1/leaderboard/sla" && method == "GET":
+		api.handleLeaderboardSLA(w, r)
+	case path == "/api/v1/leaderboard/sla/config" && method == "PUT":
+		api.handleLeaderboardSLAConfig(w, r)
 	// v14.2 Red Team Autopilot API
 	case path == "/api/v1/redteam/run" && method == "POST":
 		api.handleRedTeamRun(w, r)
@@ -565,6 +580,38 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(404)
 			}
 		}
+	// v15.0 蜜罐 API
+	case path == "/api/v1/honeypot/templates" && method == "GET":
+		api.handleHoneypotTemplateList(w, r)
+	case path == "/api/v1/honeypot/templates" && method == "POST":
+		api.handleHoneypotTemplateCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/honeypot/templates/") && method == "PUT":
+		api.handleHoneypotTemplateUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/honeypot/templates/") && method == "DELETE":
+		api.handleHoneypotTemplateDelete(w, r)
+	case path == "/api/v1/honeypot/triggers" && method == "GET":
+		api.handleHoneypotTriggerList(w, r)
+	case strings.HasPrefix(path, "/api/v1/honeypot/triggers/") && method == "GET":
+		api.handleHoneypotTriggerGet(w, r)
+	case path == "/api/v1/honeypot/stats" && method == "GET":
+		api.handleHoneypotStats(w, r)
+	case path == "/api/v1/honeypot/test" && method == "POST":
+		api.handleHoneypotTest(w, r)
+	// v15.1 A/B 测试 API
+	case path == "/api/v1/ab-tests" && method == "GET":
+		api.handleABTestList(w, r)
+	case path == "/api/v1/ab-tests" && method == "POST":
+		api.handleABTestCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/ab-tests/") && strings.HasSuffix(path, "/start") && method == "POST":
+		api.handleABTestStart(w, r)
+	case strings.HasPrefix(path, "/api/v1/ab-tests/") && strings.HasSuffix(path, "/stop") && method == "POST":
+		api.handleABTestStop(w, r)
+	case strings.HasPrefix(path, "/api/v1/ab-tests/") && method == "PUT":
+		api.handleABTestUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/ab-tests/") && method == "DELETE":
+		api.handleABTestDelete(w, r)
+	case strings.HasPrefix(path, "/api/v1/ab-tests/") && method == "GET":
+		api.handleABTestGet(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -2508,7 +2555,20 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 				content := contentSamples[rng.Intn(len(contentSamples))]
 				if rng.Float64() < seed.blockPct {
 					action = "block"
-					reason = "规则拦截: 恶意内容检测"
+					// v14.3: 使用 OWASP 分类的 block reason（让热力图有数据）
+					groupRoll := rng.Float64()
+					var group string
+					if groupRoll < 0.40 {
+						group = "injection"
+					} else if groupRoll < 0.70 {
+						group = "jailbreak"
+					} else if groupRoll < 0.90 {
+						group = "pii"
+					} else {
+						group = "custom"
+					}
+					reasons := blockReasons[group]
+					reason = reasons[rng.Intn(len(reasons))]
 					content = attackContent[rng.Intn(len(attackContent))]
 				} else if rng.Float64() < 0.1 {
 					action = "warn"
@@ -2577,6 +2637,29 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 创建了 %d 个演示租户 + 成员映射 + 安全配置", tenantsCreated)
 	}
 
+	// v14.3: 为排行榜注入差异化红队测试报告
+	if api.redTeamEngine != nil && api.tenantMgr != nil {
+		type rtSeed struct {
+			tenantID string
+			passRate float64
+		}
+		rtSeeds := []rtSeed{
+			{"default", 75.8},
+			{"security-team", 100.0},
+			{"product-team", 65.0},
+		}
+		for _, s := range rtSeeds {
+			passed := int(s.passRate / 100 * 35)
+			failed := 35 - passed
+			reportJSON := fmt.Sprintf(`{"id":"demo-rt-%s","tenant_id":"%s","total_tests":35,"passed":%d,"failed":%d,"pass_rate":%.1f,"results":[],"category_stats":{},"vulnerabilities":[],"recommendations":[]}`,
+				s.tenantID, s.tenantID, passed, failed, s.passRate)
+			al.db.Exec(`INSERT OR REPLACE INTO redteam_reports (id, tenant_id, timestamp, duration_ms, total_tests, passed, failed, pass_rate, report_json, status) VALUES (?, ?, ?, 1200, 35, ?, ?, ?, ?, 'completed')`,
+				"demo-rt-"+s.tenantID, s.tenantID, now.Add(-time.Duration(rng.Intn(48))*time.Hour).UTC().Format(time.RFC3339),
+				passed, failed, s.passRate, reportJSON)
+		}
+		log.Printf("[Demo] 注入了 %d 个红队测试报告（排行榜用）", len(rtSeeds))
+	}
+
 	// v14.1: 注入演示用户
 	usersCreated := 0
 	if api.authManager != nil {
@@ -2584,20 +2667,37 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 创建/更新了 %d 个演示用户", usersCreated)
 	}
 
+	// v15.0: 注入蜜罐演示数据
+	honeypotTemplates, honeypotTriggers := 0, 0
+	if api.honeypotEngine != nil {
+		honeypotTemplates, honeypotTriggers = api.honeypotEngine.SeedDemoData()
+		log.Printf("[Demo] 蜜罐: %d 模板, %d 触发记录", honeypotTemplates, honeypotTriggers)
+	}
+
+	// v15.1: 注入 A/B 测试演示数据
+	abTestsCreated := 0
+	if api.abTestEngine != nil {
+		abTestsCreated = api.abTestEngine.SeedABTestDemoData()
+		log.Printf("[Demo] A/B 测试: %d 个", abTestsCreated)
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":                true,
-		"count":             inserted,
-		"llm_calls":         llmCallsInserted,
-		"llm_tool_calls":    llmToolCallsInserted,
-		"canary_leaks":      "included",
-		"budget_violations": "included",
-		"anomaly_alerts":    "included",
-		"report_generated":  reportGenerated,
-		"replay_sessions":   len(replayTraceIDs),
-		"prompt_versions":   promptVersionsInserted,
-		"tenants_created":   tenantsCreated,
-		"users_created":     usersCreated,
+		"ok":                  true,
+		"count":               inserted,
+		"llm_calls":           llmCallsInserted,
+		"llm_tool_calls":      llmToolCallsInserted,
+		"canary_leaks":        "included",
+		"budget_violations":   "included",
+		"anomaly_alerts":      "included",
+		"report_generated":    reportGenerated,
+		"replay_sessions":     len(replayTraceIDs),
+		"prompt_versions":     promptVersionsInserted,
+		"tenants_created":     tenantsCreated,
+		"users_created":       usersCreated,
+		"honeypot_templates":  honeypotTemplates,
+		"honeypot_triggers":   honeypotTriggers,
+		"ab_tests_created":    abTestsCreated,
 	})
 }
 
@@ -2632,12 +2732,27 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 		promptDeleted = api.promptTracker.ClearPromptData(al.db)
 	}
 
-	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据, %d 条 Prompt 版本", deleted, llmDeleted, promptDeleted)
+	// v15.0: 清除蜜罐数据
+	var hpTplDeleted, hpTrigDeleted int64
+	if api.honeypotEngine != nil {
+		hpTplDeleted, hpTrigDeleted = api.honeypotEngine.ClearDemoData()
+	}
+
+	// v15.1: 清除 A/B 测试数据
+	var abDeleted int64
+	if api.abTestEngine != nil {
+		abDeleted = api.abTestEngine.ClearABTestData()
+	}
+
+	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据, %d 条 Prompt 版本, %d+%d 蜜罐数据, %d A/B 测试", deleted, llmDeleted, promptDeleted, hpTplDeleted, hpTrigDeleted, abDeleted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":              true,
-		"deleted":         deleted,
-		"llm_deleted":     llmDeleted,
-		"prompt_deleted":  promptDeleted,
+		"ok":                     true,
+		"deleted":                deleted,
+		"llm_deleted":            llmDeleted,
+		"prompt_deleted":         promptDeleted,
+		"honeypot_tpl_deleted":   hpTplDeleted,
+		"honeypot_trig_deleted":  hpTrigDeleted,
+		"ab_tests_deleted":       abDeleted,
 	})
 }
 
@@ -4986,3 +5101,371 @@ func (api *ManagementAPI) handleRedTeamVectors(w http.ResponseWriter, r *http.Re
 	jsonResponse(w, 200, map[string]interface{}{"vectors": vectors, "total": len(vectors)})
 }
 
+// ============================================================
+// v14.3 排行榜 + SLA API handlers
+// ============================================================
+
+// handleLeaderboard GET /api/v1/leaderboard — 安全排行榜
+func (api *ManagementAPI) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
+	if api.leaderboardEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "leaderboard engine not available"})
+		return
+	}
+	scores := api.leaderboardEng.GetLeaderboard()
+	if scores == nil {
+		scores = []TenantScore{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"scores": scores,
+		"total":  len(scores),
+		"sla":    api.leaderboardEng.GetSLAConfig(),
+	})
+}
+
+// handleLeaderboardHeatmap GET /api/v1/leaderboard/heatmap — 攻击热力图
+func (api *ManagementAPI) handleLeaderboardHeatmap(w http.ResponseWriter, r *http.Request) {
+	if api.leaderboardEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "leaderboard engine not available"})
+		return
+	}
+	cells := api.leaderboardEng.GetHeatmap()
+	if cells == nil {
+		cells = []AttackHeatmapCell{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"cells":      cells,
+		"categories": owaspCategoryOrder,
+	})
+}
+
+// handleLeaderboardSLA GET /api/v1/leaderboard/sla — SLA 达标情况
+func (api *ManagementAPI) handleLeaderboardSLA(w http.ResponseWriter, r *http.Request) {
+	if api.leaderboardEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "leaderboard engine not available"})
+		return
+	}
+	overview := api.leaderboardEng.GetSLAOverview()
+	jsonResponse(w, 200, overview)
+}
+
+// handleLeaderboardSLAConfig PUT /api/v1/leaderboard/sla/config — 更新 SLA 阈值配置
+func (api *ManagementAPI) handleLeaderboardSLAConfig(w http.ResponseWriter, r *http.Request) {
+	if api.leaderboardEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "leaderboard engine not available"})
+		return
+	}
+	var cfg SLAConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+	api.leaderboardEng.SetSLAConfig(cfg)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "ok",
+		"config": api.leaderboardEng.GetSLAConfig(),
+	})
+}
+
+// ============================================================
+// v15.0 蜜罐 API
+// ============================================================
+
+func (api *ManagementAPI) handleHoneypotTemplateList(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	tenantID := r.URL.Query().Get("tenant")
+	if tenantID == "" {
+		tenantID = "all"
+	}
+	templates, err := api.honeypotEngine.ListTemplates(tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, templates)
+}
+
+func (api *ManagementAPI) handleHoneypotTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	var tpl HoneypotTemplate
+	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := api.honeypotEngine.CreateTemplate(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 201, tpl)
+}
+
+func (api *ManagementAPI) handleHoneypotTemplateUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/honeypot/templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "missing template id"})
+		return
+	}
+	var tpl HoneypotTemplate
+	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+	tpl.ID = id
+	if err := api.honeypotEngine.UpdateTemplate(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, tpl)
+}
+
+func (api *ManagementAPI) handleHoneypotTemplateDelete(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/honeypot/templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "missing template id"})
+		return
+	}
+	if err := api.honeypotEngine.DeleteTemplate(id); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "deleted"})
+}
+
+func (api *ManagementAPI) handleHoneypotTriggerList(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	tenantID := r.URL.Query().Get("tenant")
+	if tenantID == "" {
+		tenantID = "all"
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	triggers, err := api.honeypotEngine.ListTriggers(tenantID, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, triggers)
+}
+
+func (api *ManagementAPI) handleHoneypotTriggerGet(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/honeypot/triggers/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "missing trigger id"})
+		return
+	}
+	trigger, err := api.honeypotEngine.GetTrigger(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": "trigger not found"})
+		return
+	}
+	jsonResponse(w, 200, trigger)
+}
+
+func (api *ManagementAPI) handleHoneypotStats(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	tenantID := r.URL.Query().Get("tenant")
+	if tenantID == "" {
+		tenantID = "all"
+	}
+	stats := api.honeypotEngine.GetStats(tenantID)
+	jsonResponse(w, 200, stats)
+}
+
+func (api *ManagementAPI) handleHoneypotTest(w http.ResponseWriter, r *http.Request) {
+	if api.honeypotEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	var req struct {
+		Text     string `json:"text"`
+		TenantID string `json:"tenant_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if req.Text == "" {
+		jsonResponse(w, 400, map[string]string{"error": "text is required"})
+		return
+	}
+	if req.TenantID == "" {
+		req.TenantID = "all"
+	}
+	result := api.honeypotEngine.TestHoneypot(req.Text, req.TenantID)
+	jsonResponse(w, 200, result)
+}
+
+
+// ============================================================
+// v15.1 A/B 测试 API handlers
+// ============================================================
+
+// handleABTestList GET /api/v1/ab-tests — 测试列表
+func (api *ManagementAPI) handleABTestList(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 200, map[string]interface{}{"tests": []interface{}{}, "total": 0})
+		return
+	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	status := r.URL.Query().Get("status")
+	tests, err := api.abTestEngine.List(tenantID, status)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if tests == nil {
+		tests = []*ABTest{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"tests": tests, "total": len(tests)})
+}
+
+// handleABTestCreate POST /api/v1/ab-tests — 创建测试
+func (api *ManagementAPI) handleABTestCreate(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "A/B test engine not available"})
+		return
+	}
+	var req ABTest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := api.abTestEngine.Create(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, req)
+}
+
+// handleABTestGet GET /api/v1/ab-tests/:id — 测试详情
+func (api *ManagementAPI) handleABTestGet(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "A/B test engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/ab-tests/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	test, err := api.abTestEngine.Get(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, test)
+}
+
+// handleABTestUpdate PUT /api/v1/ab-tests/:id — 更新测试
+func (api *ManagementAPI) handleABTestUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "A/B test engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/ab-tests/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		TrafficA    int    `json:"traffic_a"`
+		VersionA    string `json:"version_a"`
+		PromptHashA string `json:"prompt_hash_a"`
+		VersionB    string `json:"version_b"`
+		PromptHashB string `json:"prompt_hash_b"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := api.abTestEngine.Update(id, req.Name, req.TrafficA, req.VersionA, req.PromptHashA, req.VersionB, req.PromptHashB); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	test, _ := api.abTestEngine.Get(id)
+	jsonResponse(w, 200, test)
+}
+
+// handleABTestStart POST /api/v1/ab-tests/:id/start — 开始测试
+func (api *ManagementAPI) handleABTestStart(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "A/B test engine not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/ab-tests/")
+	id := strings.TrimSuffix(path, "/start")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	if err := api.abTestEngine.Start(id); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	test, _ := api.abTestEngine.Get(id)
+	jsonResponse(w, 200, map[string]interface{}{"status": "started", "test": test})
+}
+
+// handleABTestStop POST /api/v1/ab-tests/:id/stop — 停止测试
+func (api *ManagementAPI) handleABTestStop(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "A/B test engine not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/ab-tests/")
+	id := strings.TrimSuffix(path, "/stop")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	test, err := api.abTestEngine.Stop(id)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "completed", "test": test})
+}
+
+// handleABTestDelete DELETE /api/v1/ab-tests/:id — 删除测试
+func (api *ManagementAPI) handleABTestDelete(w http.ResponseWriter, r *http.Request) {
+	if api.abTestEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "A/B test engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/ab-tests/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	if err := api.abTestEngine.Delete(id); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}

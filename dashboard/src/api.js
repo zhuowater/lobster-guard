@@ -35,7 +35,7 @@ function authHeaders() {
  * 排除不需要 tenant 的路径
  */
 function injectTenantParam(path) {
-  const skipPaths = ['/healthz', '/api/v1/tenants', '/api/v1/system/', '/api/v1/config', '/api/v1/demo/', '/api/v1/notifications', '/api/v1/llm/status', '/api/v1/llm/rules', '/api/v1/auth/', '/api/v1/redteam']
+  const skipPaths = ['/healthz', '/api/v1/tenants', '/api/v1/system/', '/api/v1/config', '/api/v1/demo/', '/api/v1/notifications', '/api/v1/llm/status', '/api/v1/llm/rules', '/api/v1/auth/', '/api/v1/redteam', '/api/v1/leaderboard']
   for (const sp of skipPaths) {
     if (path.startsWith(sp)) return path
   }
