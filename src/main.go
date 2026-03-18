@@ -492,6 +492,9 @@ func main() {
 	mgmtAPI.sessionCorrelator = sessionCorrelator // v17.3
 	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
+	// v19.0: 对抗性自进化引擎（声明，在事件总线初始化后创建）
+	var evolutionEngine *EvolutionEngine
+
 	// v18.1: 事件总线
 	var eventBus *EventBus
 	if cfg.EventBus.Enabled {
@@ -540,6 +543,20 @@ func main() {
 			}
 		}
 	}
+
+	// v19.0: 对抗性自进化
+	if cfg.EvolutionEnabled {
+		evolutionEngine = NewEvolutionEngine(logger.DB(), redTeamEngine, engine, outboundEngine, llmRuleEngine, eventBus)
+		intervalMin := cfg.EvolutionIntervalMin
+		if intervalMin <= 0 {
+			intervalMin = 360
+		}
+		evolutionEngine.StartAutoEvolution(intervalMin)
+		fmt.Printf("[初始化] ✅ 对抗性自进化已启用 (每 %d 分钟)\n", intervalMin)
+	} else {
+		fmt.Println("[初始化] ⚠️ 对抗性自进化: 未启用")
+	}
+	mgmtAPI.evolutionEngine = evolutionEngine
 
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
 	bgScheduler := NewBackgroundScheduler(cfg, attackChainEng, behaviorProfileEng)
@@ -658,6 +675,10 @@ func main() {
 	sig := <-quit
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
+	// v19.0: 停止自进化引擎
+	if evolutionEngine != nil {
+		evolutionEngine.StopAutoEvolution()
+	}
 	// v18.1: 停止事件总线
 	if eventBus != nil {
 		eventBus.Stop()

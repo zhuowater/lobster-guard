@@ -211,6 +211,9 @@ type Config struct {
 	// v18.2 配置安全
 	ConfigEncryptionKey string `yaml:"config_encryption_key"` // 敏感字段加密密钥
 	APITokenRotation    bool   `yaml:"api_token_rotation"`    // Token 自动轮换开关
+	// v19.0 对抗性自进化
+	EvolutionEnabled     bool `yaml:"evolution_enabled"`
+	EvolutionIntervalMin int  `yaml:"evolution_interval_min"` // 默认 360（6小时）
 }
 
 // EventBusConfig 事件总线配置（v18.1）

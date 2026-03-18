@@ -128,6 +128,8 @@ type ManagementAPI struct {
 	envelopeMgr *EnvelopeManager
 	// v18.1 事件总线
 	eventBus *EventBus
+	// v19.0 对抗性自进化引擎
+	evolutionEngine *EvolutionEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -741,6 +743,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v17.0: 态势大屏聚合 API
 	case path == "/api/v1/bigscreen/data" && method == "GET":
 		api.handleBigScreenData(w, r)
+
+	// v19.0: 对抗性自进化 API
+	case path == "/api/v1/evolution/run" && method == "POST":
+		api.handleEvolutionRun(w, r)
+	case path == "/api/v1/evolution/stats" && method == "GET":
+		api.handleEvolutionStats(w, r)
+	case path == "/api/v1/evolution/log" && method == "GET":
+		api.handleEvolutionLog(w, r)
+	case path == "/api/v1/evolution/strategies" && method == "GET":
+		api.handleEvolutionStrategies(w, r)
+	case path == "/api/v1/evolution/config" && method == "GET":
+		api.handleEvolutionConfigGet(w, r)
+	case path == "/api/v1/evolution/config" && method == "PUT":
+		api.handleEvolutionConfigPut(w, r)
 
 	default:
 		w.WriteHeader(404)
