@@ -36,7 +36,7 @@
     <!-- v10.1: 预算超限告警 -->
     <div v-if="loaded && budgetViolationCount > 0" class="alert-panel budget-alert" style="margin-bottom:20px">
       <div class="alert-header">
-        <span class="alert-icon">📊</span>
+        <span class="alert-icon"><Icon name="bar-chart" :size="16" /></span>
         <span class="alert-title" style="color:#EA580C">检测到 {{ budgetViolationCount }} 次预算超限</span>
       </div>
       <div style="font-size:var(--text-sm);color:var(--text-secondary);padding:4px 0">
@@ -174,6 +174,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api.js'
+import Icon from '../components/Icon.vue'
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
 import PieChart from '../components/PieChart.vue'

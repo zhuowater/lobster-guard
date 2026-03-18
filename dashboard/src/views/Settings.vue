@@ -63,7 +63,7 @@
           </div>
         </div>
         <Skeleton v-if="backupsLoading" type="table" />
-        <div v-else-if="!backups.length" class="empty"><div class="empty-icon">💾</div>暂无备份<div class="empty-hint">点击"创建备份"开始</div></div>
+        <div v-else-if="!backups.length" class="empty"><div class="empty-icon"><Icon name="save" :size="48" color="var(--text-quaternary)" /></div>暂无备份<div class="empty-hint">点击"创建备份"开始</div></div>
         <DataTable v-else :columns="backupColumns" :data="backups" :show-toolbar="false">
           <template #cell-name="{ value }"><span style="font-family:monospace;font-size:.8rem">{{ value }}</span></template>
           <template #cell-size="{ value }">{{ formatSize(value) }}</template>
@@ -161,7 +161,7 @@
           <label class="llm-checkbox" v-if="canaryEnabled"><input type="checkbox" v-model="canaryAutoRotate" /> 每24小时自动轮换</label>
           <div class="llm-row" v-if="canaryEnabled"><span class="llm-label">最近泄露</span><span class="llm-val" :style="{ color: (canaryStatus.leak_count || 0) > 0 ? 'var(--color-danger)' : 'var(--text-secondary)' }">{{ canaryStatus.leak_count || 0 }} 次</span></div>
 
-          <div id="section-budget" class="llm-section-title">📊 Response Budget</div>
+          <div id="section-budget" class="llm-section-title"><Icon name="bar-chart" :size="16" /> Response Budget</div>
           <label class="llm-checkbox"><input type="checkbox" v-model="budgetEnabled" /> 启用预算控制</label>
           <div v-if="budgetEnabled">
             <div class="llm-row"><span class="llm-label">最大工具调用</span><input type="number" v-model.number="budgetMaxTools" class="llm-input-sm" min="1" max="100" /> <span class="llm-hint">次/请求</span></div>
@@ -218,6 +218,7 @@ import { useRoute } from 'vue-router'
 import { api, apiPost, apiPut, apiDelete, saveToken, clearToken, getToken } from '../api.js'
 import { showToast, updateHealth } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
+import Icon from '../components/Icon.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import Skeleton from '../components/Skeleton.vue'
 

@@ -3,7 +3,7 @@
     <div v-if="visible" class="modal-overlay" @click.self="close">
       <div class="editor-panel">
         <div class="editor-header">
-          <span class="modal-icon">{{ isEdit ? '✏️' : '➕' }}</span>
+          <span class="modal-icon"><Icon :name="isEdit ? 'edit' : 'plus'" :size="18" /></span>
           <span class="modal-title">{{ isEdit ? '编辑规则' : '新建规则' }}</span>
           <button class="editor-close" @click="close">✕</button>
         </div>
@@ -65,6 +65,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import RegexTester from './RegexTester.vue'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

@@ -85,7 +85,7 @@
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           <button class="btn btn-ghost btn-sm" @click.stop="toggleShadow(row)" :title="row.shadow_mode?'切换为激活':'切换为影子模式'" style="margin-left:2px">
-            <span v-if="row.shadow_mode">🔄</span>
+            <span v-if="row.shadow_mode"><Icon name="refresh" :size="14" /></span>
             <span v-else>👻</span>
           </button>
           <button class="btn btn-danger btn-sm" @click.stop="confirmDelete(row)" style="margin-left:2px" title="删除">
@@ -186,6 +186,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiPost } from '../api.js'
+import Icon from '../components/Icon.vue'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 

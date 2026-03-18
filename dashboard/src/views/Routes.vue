@@ -31,8 +31,8 @@
               <td><span class="tag" style="background:var(--color-primary-dim);color:var(--color-primary);font-weight:600">{{ p.upstream_id || '(默认分配)' }}</span></td>
               <td><span v-if="gmf(p,'default')" class="tag" style="background:var(--color-warning-dim);color:var(--color-warning)">默认</span><span v-else class="tag tag-info">条件</span></td>
               <td style="text-align:right">
-                <button class="btn btn-ghost btn-sm" @click="openPolicyEdit(idx, p)" title="编辑">✏️</button>
-                <button class="btn btn-ghost btn-sm" @click="confirmDeletePolicy(idx, p)" style="margin-left:4px" title="删除">🗑️</button>
+                <button class="btn btn-ghost btn-sm" @click="openPolicyEdit(idx, p)" title="编辑"><Icon name="edit" :size="14" /></button>
+                <button class="btn btn-ghost btn-sm" @click="confirmDeletePolicy(idx, p)" style="margin-left:4px" title="删除"><Icon name="trash" :size="14" /></button>
               </td>
             </tr>
           </tbody>
@@ -61,8 +61,8 @@
         <span class="card-title">亲和路由管理</span>
         <div class="card-actions">
           <button class="btn btn-sm" @click="showBindModal = true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 绑定用户</button>
-          <button class="btn btn-ghost btn-sm" @click="showBatchModal = true">📥 批量绑定</button>
-          <button class="btn btn-ghost btn-sm" @click="showMigrateModal = true">🔄 迁移用户</button>
+          <button class="btn btn-ghost btn-sm" @click="showBatchModal = true"><Icon name="import" :size="14" /> 批量绑定</button>
+          <button class="btn btn-ghost btn-sm" @click="showMigrateModal = true"><Icon name="refresh" :size="14" /> 迁移用户</button>
           <button class="btn btn-ghost btn-sm" @click="refresh"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
         </div>
       </div>
@@ -93,7 +93,7 @@
           </div>
         </template>
         <template #actions="{ row }">
-          <button class="btn btn-ghost btn-sm" @click.stop="openMigrateFor(row)" title="迁移">🔄</button>
+          <button class="btn btn-ghost btn-sm" @click.stop="openMigrateFor(row)" title="迁移"><Icon name="refresh" :size="14" /></button>
           <button class="btn btn-danger btn-sm" @click.stop="confirmUnbind(row)" style="margin-left:4px">解绑</button>
         </template>
       </DataTable>
@@ -112,6 +112,7 @@ import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import Icon from '../components/Icon.vue'
 import BindModal from '../components/BindModal.vue'
 import UpstreamSelect from '../components/UpstreamSelect.vue'
 

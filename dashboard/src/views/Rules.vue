@@ -148,14 +148,14 @@
       <div v-if="showImport" class="modal-overlay" @click.self="showImport = false">
         <div class="import-panel">
           <div class="import-header">
-            <span>📤</span>
+            <Icon name="upload" :size="16" />
             <span style="font-weight:600;flex:1">导入规则 (YAML)</span>
             <button class="editor-close" @click="showImport = false">✕</button>
           </div>
           <div class="import-body">
             <div style="margin-bottom:12px">
               <input type="file" accept=".yaml,.yml" @change="handleFileUpload" ref="fileInput" style="display:none" />
-              <button class="btn btn-sm" @click="$refs.fileInput.click()">📁 选择 YAML 文件</button>
+              <button class="btn btn-sm" @click="$refs.fileInput.click()"><Icon name="file-text" :size="14" /> 选择 YAML 文件</button>
               <span v-if="importFileName" style="margin-left:8px;font-size:.82rem;color:var(--text-secondary)">{{ importFileName }}</span>
             </div>
             <textarea v-model="importYaml" rows="10" placeholder="或直接粘贴 YAML 内容..." class="import-textarea"></textarea>
@@ -166,8 +166,8 @@
             </div>
           </div>
           <div class="import-footer">
-            <button class="btn btn-sm" @click="previewImport" :disabled="!importYaml.trim()">🔍 预览</button>
-            <button class="btn btn-sm btn-green" @click="doImport" :disabled="!importYaml.trim()">✅ 确认导入</button>
+            <button class="btn btn-sm" @click="previewImport" :disabled="!importYaml.trim()"><Icon name="search" :size="14" /> 预览</button>
+            <button class="btn btn-sm btn-green" @click="doImport" :disabled="!importYaml.trim()"><Icon name="check-circle" :size="14" /> 确认导入</button>
           </div>
         </div>
       </div>
@@ -187,6 +187,7 @@ import { api, apiPost, apiPut, apiDelete, downloadFile } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import Icon from '../components/Icon.vue'
 import RuleEditor from '../components/RuleEditor.vue'
 import RegexTester from '../components/RegexTester.vue'
 

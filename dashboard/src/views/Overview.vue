@@ -8,7 +8,7 @@
           安全驾驶舱
         </div>
         <div class="cockpit-controls">
-          <button class="gen-report-btn" @click="goReport" title="生成安全报告">📊 生成报告</button>
+          <button class="gen-report-btn" @click="goReport" title="生成安全报告"><Icon name="bar-chart" :size="14" /> 生成报告</button>
           <select v-model="timeRange" @change="onTimeRangeChange" class="time-range-select" title="数据时间范围">
             <option value="24h">⏱ 24小时</option>
             <option value="7d">⏱ 7天</option>
@@ -54,7 +54,7 @@
               ⚠️ 检测到 {{ anomalyStatus.alerts_24h }} 个异常
             </router-link>
             <span class="anomaly-learning" v-else-if="anomalyStatus.baselines_ready < anomalyStatus.metrics_count">
-              📊 基线学习中 ({{ anomalyStatus.baselines_ready }}/{{ anomalyStatus.metrics_count }} 就绪)
+              <Icon name="bar-chart" :size="14" /> 基线学习中 ({{ anomalyStatus.baselines_ready }}/{{ anomalyStatus.metrics_count }} 就绪)
             </span>
             <router-link to="/anomaly" class="anomaly-ok" v-else>
               ✅ 异常检测正常 ({{ anomalyStatus.metrics_count }} 指标)
@@ -121,6 +121,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
+import Icon from '../components/Icon.vue'
 import PieChart from '../components/PieChart.vue'
 import HeatMap from '../components/HeatMap.vue'
 import EmptyState from '../components/EmptyState.vue'

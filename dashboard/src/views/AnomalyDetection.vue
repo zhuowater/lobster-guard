@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-header">
-      <h2>📊 异常基线检测</h2>
+      <h2><Icon name="bar-chart" :size="18" /> 异常基线检测</h2>
       <p class="page-desc">连续运行 7 天后自动建立正常行为基线，偏离 >2σ 自动告警</p>
     </div>
 
@@ -19,7 +19,7 @@
     <div class="baseline-grid" v-if="loaded">
       <div class="baseline-card" :class="{ 'bc-anomaly-active': m.anomaly }" v-for="m in metricsData" :key="m.metric_name" @click="onBaselineCardClick(m)" style="cursor:pointer">
         <div class="bc-header">
-          <span class="bc-icon">📊</span>
+          <span class="bc-icon"><Icon name="bar-chart" :size="16" /></span>
           <span class="bc-name">{{ metricDisplayName(m.metric_name) }}</span>
         </div>
         <div class="bc-body" v-if="m.baseline && m.baseline.ready">
@@ -97,6 +97,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api.js'
+import Icon from '../components/Icon.vue'
 import StatCard from '../components/StatCard.vue'
 import EmptyState from '../components/EmptyState.vue'
 import Skeleton from '../components/Skeleton.vue'

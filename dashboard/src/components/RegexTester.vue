@@ -1,7 +1,7 @@
 <template>
   <div class="regex-tester">
     <div class="regex-tester-header">
-      <span class="card-icon">🔍</span>
+      <span class="card-icon"><Icon name="search" :size="16" /></span>
       <span class="card-title" style="font-size:.9rem">正则表达式测试器</span>
     </div>
     <div class="regex-row">
@@ -31,6 +31,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   initialPattern: { type: String, default: '' },

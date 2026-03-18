@@ -1,10 +1,10 @@
 <template>
   <div>
     <div class="tab-header" style="margin-bottom:20px">
-      <button class="tab-btn" :class="{ active: tab === 'config' }" @click="tab = 'config'">📄 配置</button>
-      <button class="tab-btn" :class="{ active: tab === 'backup' }" @click="tab = 'backup'">💾 备份</button>
-      <button class="tab-btn" :class="{ active: tab === 'diag' }" @click="tab = 'diag'">🔍 诊断</button>
-      <button class="tab-btn" :class="{ active: tab === 'alert' }" @click="tab = 'alert'">🔔 告警</button>
+      <button class="tab-btn" :class="{ active: tab === 'config' }" @click="tab = 'config'"><Icon name="file-text" :size="14" /> 配置</button>
+      <button class="tab-btn" :class="{ active: tab === 'backup' }" @click="tab = 'backup'"><Icon name="save" :size="14" /> 备份</button>
+      <button class="tab-btn" :class="{ active: tab === 'diag' }" @click="tab = 'diag'"><Icon name="search" :size="14" /> 诊断</button>
+      <button class="tab-btn" :class="{ active: tab === 'alert' }" @click="tab = 'alert'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> 告警</button>
     </div>
 
     <!-- ===== 配置 Tab ===== -->
@@ -44,7 +44,7 @@
           </div>
         </div>
         <Skeleton v-if="backupsLoading" type="table" />
-        <div v-else-if="!backups.length" class="empty"><div class="empty-icon">💾</div>暂无备份<div class="empty-hint">点击"创建备份"开始</div></div>
+        <div v-else-if="!backups.length" class="empty"><div class="empty-icon"><Icon name="save" :size="48" color="var(--text-quaternary)" /></div>暂无备份<div class="empty-hint">点击"创建备份"开始</div></div>
         <DataTable v-else :columns="backupColumns" :data="backups" :show-toolbar="false">
           <template #cell-name="{ value }"><span style="font-family:var(--font-mono);font-size:var(--text-xs)">{{ value }}</span></template>
           <template #cell-size="{ value }">{{ formatSize(value) }}</template>
@@ -154,6 +154,7 @@ import { api, apiPost, downloadFile } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import Icon from '../components/Icon.vue'
 import Skeleton from '../components/Skeleton.vue'
 
 const tab = ref('config')
