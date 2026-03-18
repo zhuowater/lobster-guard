@@ -37,6 +37,8 @@ type LLMProxy struct {
 	eventBus *EventBus
 	// v19.1 语义检测引擎
 	semanticDetector *SemanticDetector
+	// v20.0 工具策略引擎
+	toolPolicy *ToolPolicyEngine
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -346,6 +348,39 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// v20.0: 工具策略引擎 — 非流式响应中的 tool_calls 检测
+		if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
+			info := ParseAnthropicResponse(respBody)
+			if info != nil && info.HasToolUse {
+				for i, tcName := range info.ToolNames {
+					tcArgs := ""
+					if i < len(info.ToolInputs) {
+						tcArgs = info.ToolInputs[i]
+					}
+					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, traceID, tenantID)
+					if tpEvent.Decision == "block" {
+						log.Printf("[ToolPolicy] 工具调用被阻断: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
+						if lp.eventBus != nil {
+							lp.eventBus.Emit(&SecurityEvent{
+								Type: "tool_block", Severity: "high", Domain: "llm",
+								TraceID: traceID,
+								Summary: fmt.Sprintf("工具调用阻断: %s (%s)", tcName, tpEvent.RuleHit),
+								Details: map[string]interface{}{"tool_name": tcName, "rule_hit": tpEvent.RuleHit, "risk_level": tpEvent.RiskLevel},
+							})
+						}
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(403)
+						fmt.Fprintf(w, `{"error":"Tool call blocked by policy: %s","tool":"%s","rule":"%s"}`,
+							tpEvent.RuleHit, tcName, tpEvent.RuleHit)
+						go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+						return
+					} else if tpEvent.Decision == "warn" {
+						log.Printf("[ToolPolicy] 工具调用告警: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
+					}
+				}
+			}
+		}
+
 		// v18.0: 执行信封 — 响应侧（非 block 的也要记录）
 		if lp.envelopeMgr != nil {
 			decision := llmRespDecision
@@ -413,6 +448,27 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		// 规则引擎不存在但信封管理器存在
 		go func() {
 			lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), "pass", nil, "")
+		}()
+	}
+
+	// v20.0: 工具策略引擎 — SSE 流式响应中的 tool_calls 评估（异步，仅 log/warn）
+	if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
+		go func() {
+			defer func() { recover() }()
+			info := ParseSSEEvents(eventData)
+			if info != nil && info.HasToolUse {
+				for i, tcName := range info.ToolNames {
+					tcArgs := ""
+					if i < len(info.ToolInputs) {
+						tcArgs = info.ToolInputs[i]
+					}
+					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, auditCtx.TraceID, auditCtx.TenantID)
+					if tpEvent.Decision == "block" || tpEvent.Decision == "warn" {
+						log.Printf("[ToolPolicy] SSE 工具调用 %s: tool=%s rule=%s trace=%s (流式模式仅记录)",
+							tpEvent.Decision, tcName, tpEvent.RuleHit, auditCtx.TraceID)
+					}
+				}
+			}
 		}()
 	}
 

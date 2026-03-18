@@ -596,6 +596,19 @@ func main() {
 	} else {
 		fmt.Println("[初始化] ⚠️ 语义检测引擎: 未启用")
 	}
+	// v20.0: 工具策略引擎
+	var toolPolicyEngine *ToolPolicyEngine
+	if cfg.ToolPolicy.Enabled {
+		toolPolicyEngine = NewToolPolicyEngine(logger.DB(), cfg.ToolPolicy)
+		fmt.Printf("[初始化] ✅ 工具策略引擎已启用 (规则=%d, 默认=%s)\n", len(toolPolicyEngine.ListRules()), cfg.ToolPolicy.DefaultAction)
+	} else {
+		fmt.Println("[初始化] ⚠️ 工具策略引擎: 未启用")
+	}
+	mgmtAPI.toolPolicy = toolPolicyEngine
+	if llmProxy != nil {
+		llmProxy.toolPolicy = toolPolicyEngine
+	}
+
 	mgmtAPI.honeypotDeep = honeypotDeep
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector

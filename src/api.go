@@ -137,6 +137,8 @@ type ManagementAPI struct {
 	semanticDetector *SemanticDetector
 	// v19.2 蜜罐深度交互引擎
 	honeypotDeep *HoneypotDeepEngine
+	// v20.0 工具策略引擎
+	toolPolicy *ToolPolicyEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -817,6 +819,26 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleSemanticAnalyze(w, r)
 	case path == "/api/v1/semantic/patterns" && method == "GET":
 		api.handleSemanticPatterns(w, r)
+
+	// v20.0: 工具策略引擎 API
+	case path == "/api/v1/tools/stats" && method == "GET":
+		api.handleToolPolicyStats(w, r)
+	case path == "/api/v1/tools/events" && method == "GET":
+		api.handleToolPolicyEvents(w, r)
+	case path == "/api/v1/tools/rules" && method == "GET":
+		api.handleToolPolicyRulesList(w, r)
+	case path == "/api/v1/tools/rules" && method == "POST":
+		api.handleToolPolicyRulesCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tools/rules/") && method == "PUT":
+		api.handleToolPolicyRulesUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tools/rules/") && method == "DELETE":
+		api.handleToolPolicyRulesDelete(w, r)
+	case path == "/api/v1/tools/config" && method == "GET":
+		api.handleToolPolicyConfigGet(w, r)
+	case path == "/api/v1/tools/config" && method == "PUT":
+		api.handleToolPolicyConfigUpdate(w, r)
+	case path == "/api/v1/tools/evaluate" && method == "POST":
+		api.handleToolPolicyEvaluate(w, r)
 
 	default:
 		w.WriteHeader(404)

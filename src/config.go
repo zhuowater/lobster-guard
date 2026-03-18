@@ -221,6 +221,8 @@ type Config struct {
 	SemanticDetector SemanticConfig         `yaml:"semantic_detector"`
 	// v19.2 蜜罐深度交互
 	HoneypotDeep HoneypotDeepConfig `yaml:"honeypot_deep"`
+	// v20.0 工具策略引擎
+	ToolPolicy ToolPolicyConfig `yaml:"tool_policy"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）
