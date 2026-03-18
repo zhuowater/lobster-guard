@@ -98,3 +98,14 @@ Agent    ──► :8445  ──► LLM API (Anthropic/OpenAI)
 │          （安全检测、路由、审计 — 通道无关）            │
 └─────────────────────────────────────────────────────┘
 ```
+
+## 依赖
+
+| 依赖 | 用途 |
+|------|------|
+| `github.com/mattn/go-sqlite3` | SQLite 驱动 |
+| `gopkg.in/yaml.v3` | YAML 配置解析 |
+| `github.com/gorilla/websocket` | WebSocket（Bridge Mode + 实时通信）|
+| `golang.org/x/crypto` | bcrypt 密码哈希（用户认证）|
+
+仅四个外部依赖，其余全部使用 Go 标准库。
