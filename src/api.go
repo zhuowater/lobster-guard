@@ -702,6 +702,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/api/v1/envelopes/config" && method == "PUT":
 		api.handleEnvelopeConfigUpdate(w, r)
 
+	// v18.0+ Merkle Tree API
+	case strings.HasPrefix(path, "/api/v1/envelopes/proof/") && method == "GET":
+		api.handleEnvelopeProof(w, r)
+	case path == "/api/v1/envelopes/batches" && method == "GET":
+		api.handleEnvelopeBatchList(w, r)
+	case strings.HasPrefix(path, "/api/v1/envelopes/batch/") && method == "GET":
+		api.handleEnvelopeBatchDetail(w, r)
+
 	// v18.1: 事件总线 API
 	case path == "/api/v1/events/list" && method == "GET":
 		api.handleEventsList(w, r)

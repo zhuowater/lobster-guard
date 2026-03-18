@@ -504,7 +504,12 @@ func main() {
 	// v18.0: 执行信封 — 密码学审计链
 	var envelopeMgr *EnvelopeManager
 	if cfg.EnvelopeEnabled && cfg.EnvelopeSecretKey != "" {
-		envelopeMgr = NewEnvelopeManager(logger.DB(), cfg.EnvelopeSecretKey)
+		batchSize := cfg.EnvelopeBatchSize
+		if batchSize <= 0 {
+			batchSize = 64
+		}
+		envelopeMgr = NewEnvelopeManagerWithBatchSize(logger.DB(), cfg.EnvelopeSecretKey, batchSize)
+		envelopeMgr.startAutoFlush()
 		fmt.Println("[初始化] ✅ 执行信封已启用（密码学审计链）")
 	} else {
 		fmt.Println("[初始化] ⚠️ 执行信封: 未启用")

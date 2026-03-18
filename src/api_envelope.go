@@ -85,6 +85,63 @@ func (api *ManagementAPI) handleEnvelopeStats(w http.ResponseWriter, r *http.Req
 	jsonResponse(w, 200, stats)
 }
 
+// handleEnvelopeProof GET /api/v1/envelopes/proof/:id — 返回 Merkle Proof
+func (api *ManagementAPI) handleEnvelopeProof(w http.ResponseWriter, r *http.Request) {
+	if api.envelopeMgr == nil {
+		jsonResponse(w, 404, map[string]string{"error": "envelope not enabled"})
+		return
+	}
+	envelopeID := strings.TrimPrefix(r.URL.Path, "/api/v1/envelopes/proof/")
+	if envelopeID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "envelope id required"})
+		return
+	}
+
+	proof, err := api.envelopeMgr.GenerateProof(envelopeID)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, proof)
+}
+
+// handleEnvelopeBatchList GET /api/v1/envelopes/batches — 批次列表
+func (api *ManagementAPI) handleEnvelopeBatchList(w http.ResponseWriter, r *http.Request) {
+	if api.envelopeMgr == nil {
+		jsonResponse(w, 404, map[string]string{"error": "envelope not enabled"})
+		return
+	}
+	batches, err := api.envelopeMgr.ListBatches(100)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"batches": batches,
+		"total":   len(batches),
+	})
+}
+
+// handleEnvelopeBatchDetail GET /api/v1/envelopes/batch/:id — 批次详情 + 验证
+func (api *ManagementAPI) handleEnvelopeBatchDetail(w http.ResponseWriter, r *http.Request) {
+	if api.envelopeMgr == nil {
+		jsonResponse(w, 404, map[string]string{"error": "envelope not enabled"})
+		return
+	}
+	batchID := strings.TrimPrefix(r.URL.Path, "/api/v1/envelopes/batch/")
+	if batchID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "batch id required"})
+		return
+	}
+
+	result, err := api.envelopeMgr.VerifyBatch(batchID)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, result)
+}
+
 // handleEnvelopeConfigUpdate PUT /api/v1/envelopes/config — 配置开关+密钥（热更新）
 func (api *ManagementAPI) handleEnvelopeConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {

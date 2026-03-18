@@ -534,3 +534,490 @@ func TestEnvelopeStatsEmpty(t *testing.T) {
 		t.Errorf("total = %v, want 0", stats["total"])
 	}
 }
+
+// ============================================================
+// v18.0+ Merkle Tree 测试
+// ============================================================
+
+// newTestEnvelopeManagerWithBatch 创建测试用信封管理器（指定批次大小）
+func newTestEnvelopeManagerWithBatch(t *testing.T, batchSize int) *EnvelopeManager {
+	t.Helper()
+	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&_busy_timeout=5000&_journal_mode=WAL")
+	if err != nil {
+		t.Fatalf("open memory db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+	return NewEnvelopeManagerWithBatchSize(db, "test-secret-key-at-least-32-chars!!", batchSize)
+}
+
+// TestMerkleBuildTree 基本树构建
+func TestMerkleBuildTree(t *testing.T) {
+	// 4 叶子 → 3 层（叶子层 + 中间层 + 根层）
+	leaves := []string{"aaa", "bbb", "ccc", "ddd"}
+	layers := BuildMerkleTree(leaves)
+
+	if len(layers) != 3 {
+		t.Fatalf("Expected 3 layers, got %d", len(layers))
+	}
+	if len(layers[0]) != 4 {
+		t.Errorf("Leaf layer should have 4 elements, got %d", len(layers[0]))
+	}
+	if len(layers[1]) != 2 {
+		t.Errorf("Middle layer should have 2 elements, got %d", len(layers[1]))
+	}
+	if len(layers[2]) != 1 {
+		t.Errorf("Root layer should have 1 element, got %d", len(layers[2]))
+	}
+
+	// 根不为空
+	root := ComputeMerkleRoot(leaves)
+	if root == "" {
+		t.Error("Root should not be empty")
+	}
+
+	// 相同输入 = 相同根
+	root2 := ComputeMerkleRoot(leaves)
+	if root != root2 {
+		t.Error("Same leaves should produce same root")
+	}
+
+	// 不同输入 = 不同根
+	leaves2 := []string{"aaa", "bbb", "ccc", "eee"}
+	root3 := ComputeMerkleRoot(leaves2)
+	if root == root3 {
+		t.Error("Different leaves should produce different root")
+	}
+
+	// 空叶子
+	rootEmpty := ComputeMerkleRoot([]string{})
+	if rootEmpty != "" {
+		t.Error("Empty leaves should produce empty root")
+	}
+}
+
+// TestMerkleProof 证明生成和验证
+func TestMerkleProof(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 4)
+
+	// 创建 4 个信封触发自动批次构建
+	var envIDs []string
+	for i := 0; i < 4; i++ {
+		env := em.Seal("trace-merkle-proof", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+		envIDs = append(envIDs, env.ID)
+	}
+
+	// 验证每个信封都能生成有效的 proof
+	for _, eid := range envIDs {
+		proof, err := em.GenerateProof(eid)
+		if err != nil {
+			t.Fatalf("GenerateProof(%s) error: %v", eid, err)
+		}
+		if !proof.Verified {
+			t.Errorf("Proof for %s should be verified", eid)
+		}
+		if proof.BatchID == "" {
+			t.Errorf("BatchID should not be empty for %s", eid)
+		}
+		if proof.Root == "" {
+			t.Errorf("Root should not be empty for %s", eid)
+		}
+		if len(proof.Path) == 0 {
+			t.Errorf("Path should not be empty for %s", eid)
+		}
+
+		// 独立验证（不需要数据库）
+		if !VerifyMerkleProof(proof) {
+			t.Errorf("VerifyMerkleProof should return true for %s", eid)
+		}
+	}
+}
+
+// TestMerkleProofTampered 篡改后证明失败
+func TestMerkleProofTampered(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 4)
+
+	// 创建 4 个信封
+	var envIDs []string
+	for i := 0; i < 4; i++ {
+		env := em.Seal("trace-merkle-tamper", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+		envIDs = append(envIDs, env.ID)
+	}
+
+	// 获取第一个信封的 proof
+	proof, err := em.GenerateProof(envIDs[0])
+	if err != nil {
+		t.Fatalf("GenerateProof error: %v", err)
+	}
+	if !proof.Verified {
+		t.Fatal("Original proof should be verified")
+	}
+
+	// 篡改 ContentHash
+	tamperedProof := *proof
+	tamperedProof.ContentHash = "tampered_hash_value"
+	if VerifyMerkleProof(&tamperedProof) {
+		t.Error("Tampered proof (content hash) should fail verification")
+	}
+
+	// 篡改 Root
+	tamperedProof2 := *proof
+	tamperedProof2.Root = "tampered_root_value"
+	if VerifyMerkleProof(&tamperedProof2) {
+		t.Error("Tampered proof (root) should fail verification")
+	}
+
+	// 篡改 Path
+	tamperedProof3 := *proof
+	tamperedProof3.Path = []ProofStep{{Hash: "fake_hash", Position: "right"}}
+	if VerifyMerkleProof(&tamperedProof3) {
+		t.Error("Tampered proof (path) should fail verification")
+	}
+}
+
+// TestMerkleBatchAutoFlush 自动构建触发
+func TestMerkleBatchAutoFlush(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 4)
+
+	// 创建 3 个信封（不足批次大小）
+	for i := 0; i < 3; i++ {
+		em.Seal("trace-auto", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+	}
+
+	// 应该还没有批次
+	batches, _ := em.ListBatches(10)
+	if len(batches) != 0 {
+		t.Errorf("Expected 0 batches before reaching batch size, got %d", len(batches))
+	}
+
+	// 第 4 个信封触发自动构建
+	em.Seal("trace-auto", "inbound", "msg-3", "pass", nil, "")
+
+	batches, _ = em.ListBatches(10)
+	if len(batches) != 1 {
+		t.Errorf("Expected 1 batch after reaching batch size, got %d", len(batches))
+	}
+	if batches[0].LeafCount != 4 {
+		t.Errorf("Batch leaf count = %d, want 4", batches[0].LeafCount)
+	}
+}
+
+// TestMerkleBatchManualFlush 手动 Flush
+func TestMerkleBatchManualFlush(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 10)
+
+	// 创建 3 个信封（不足批次大小）
+	for i := 0; i < 3; i++ {
+		em.Seal("trace-flush", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+	}
+
+	// 手动 flush
+	err := em.FlushBatch()
+	if err != nil {
+		t.Fatalf("FlushBatch error: %v", err)
+	}
+
+	batches, _ := em.ListBatches(10)
+	if len(batches) != 1 {
+		t.Fatalf("Expected 1 batch after manual flush, got %d", len(batches))
+	}
+	if batches[0].LeafCount != 3 {
+		t.Errorf("Batch leaf count = %d, want 3", batches[0].LeafCount)
+	}
+
+	// 再次 flush（没有 pending）不应创建新批次
+	em.FlushBatch()
+	batches, _ = em.ListBatches(10)
+	if len(batches) != 1 {
+		t.Errorf("Expected still 1 batch after empty flush, got %d", len(batches))
+	}
+}
+
+// TestMerkleRootChain 批次间根链验证
+func TestMerkleRootChain(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 2)
+
+	// 创建 6 个信封 → 3 个批次
+	for i := 0; i < 6; i++ {
+		em.Seal("trace-root-chain", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+	}
+
+	batches, _ := em.ListBatches(10)
+	if len(batches) != 3 {
+		t.Fatalf("Expected 3 batches, got %d", len(batches))
+	}
+
+	// 验证根链
+	result, err := em.VerifyRootChain()
+	if err != nil {
+		t.Fatalf("VerifyRootChain error: %v", err)
+	}
+	if !result.Valid {
+		t.Errorf("Root chain should be valid: %v", result.Details)
+	}
+	if result.TotalBatches != 3 {
+		t.Errorf("TotalBatches = %d, want 3", result.TotalBatches)
+	}
+}
+
+// TestMerkleBatchVerify 整批验证
+func TestMerkleBatchVerify(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 4)
+
+	// 创建 4 个信封
+	for i := 0; i < 4; i++ {
+		em.Seal("trace-batch-verify", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+	}
+
+	batches, _ := em.ListBatches(10)
+	if len(batches) == 0 {
+		t.Fatal("Expected at least 1 batch")
+	}
+
+	result, err := em.VerifyBatch(batches[0].ID)
+	if err != nil {
+		t.Fatalf("VerifyBatch error: %v", err)
+	}
+	if !result.Valid {
+		t.Errorf("Batch should be valid: %v", result.FailureReasons)
+	}
+	if result.LeafCount != 4 {
+		t.Errorf("LeafCount = %d, want 4", result.LeafCount)
+	}
+
+	// 篡改批次中某个信封后验证应失败
+	em.db.Exec(`UPDATE execution_envelopes SET decision = 'block' WHERE id = ?`, batches[0].EnvelopeIDs[0])
+	result2, _ := em.VerifyBatch(batches[0].ID)
+	if result2.Valid {
+		t.Error("Batch should be invalid after tampering an envelope")
+	}
+}
+
+// TestMerkleOddLeaves 奇数叶子处理
+func TestMerkleOddLeaves(t *testing.T) {
+	// 3 叶子（奇数）
+	leaves := []string{"aaa", "bbb", "ccc"}
+	root := ComputeMerkleRoot(leaves)
+	if root == "" {
+		t.Error("Root should not be empty for odd leaves")
+	}
+
+	// 5 叶子
+	leaves5 := []string{"a", "b", "c", "d", "e"}
+	root5 := ComputeMerkleRoot(leaves5)
+	if root5 == "" {
+		t.Error("Root should not be empty for 5 leaves")
+	}
+
+	// 验证可以生成 proof
+	for i := 0; i < len(leaves); i++ {
+		path := GenerateMerkleProofFromLeaves(leaves, i)
+		if len(path) == 0 {
+			t.Errorf("Proof path should not be empty for leaf %d", i)
+		}
+		// 验证 proof
+		proof := &MerkleProof{
+			ContentHash: leaves[i],
+			Root:        root,
+			Path:        path,
+		}
+		if !VerifyMerkleProof(proof) {
+			t.Errorf("Proof verification failed for leaf %d", i)
+		}
+	}
+
+	// 同样验证 5 叶子
+	for i := 0; i < len(leaves5); i++ {
+		path := GenerateMerkleProofFromLeaves(leaves5, i)
+		if len(path) == 0 {
+			t.Errorf("Proof path should not be empty for leaf5 %d", i)
+		}
+		proof := &MerkleProof{
+			ContentHash: leaves5[i],
+			Root:        root5,
+			Path:        path,
+		}
+		if !VerifyMerkleProof(proof) {
+			t.Errorf("Proof verification failed for leaf5 %d", i)
+		}
+	}
+}
+
+// TestMerkleSingleLeaf 单叶退化
+func TestMerkleSingleLeaf(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 10)
+
+	// 创建 1 个信封 + flush
+	env := em.Seal("trace-single", "inbound", "single-msg", "pass", nil, "")
+	em.FlushBatch()
+
+	batches, _ := em.ListBatches(10)
+	if len(batches) != 1 {
+		t.Fatalf("Expected 1 batch, got %d", len(batches))
+	}
+	if batches[0].LeafCount != 1 {
+		t.Errorf("LeafCount = %d, want 1", batches[0].LeafCount)
+	}
+
+	// 生成 proof
+	proof, err := em.GenerateProof(env.ID)
+	if err != nil {
+		t.Fatalf("GenerateProof error: %v", err)
+	}
+	if !proof.Verified {
+		t.Error("Single leaf proof should be verified")
+	}
+	if !VerifyMerkleProof(proof) {
+		t.Error("VerifyMerkleProof should return true for single leaf")
+	}
+
+	// 单叶 root 验证
+	root := ComputeMerkleRoot([]string{env.ContentHash})
+	if root == "" {
+		t.Error("Single leaf root should not be empty")
+	}
+	if root != batches[0].Root {
+		t.Errorf("Single leaf root mismatch: computed=%s, batch=%s", root, batches[0].Root)
+	}
+}
+
+// TestMerkleStatsIncludeBatches 统计包含批次信息
+func TestMerkleStatsIncludeBatches(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 2)
+
+	// 创建 4 个信封 → 2 个批次
+	for i := 0; i < 4; i++ {
+		em.Seal("trace-stats", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+	}
+
+	stats := em.Stats()
+
+	// 总信封数
+	if stats["total"].(int64) != 4 {
+		t.Errorf("total = %v, want 4", stats["total"])
+	}
+
+	// Merkle 批次数
+	batchCount, ok := stats["merkle_batches"].(int64)
+	if !ok {
+		t.Fatal("merkle_batches stat should exist")
+	}
+	if batchCount != 2 {
+		t.Errorf("merkle_batches = %d, want 2", batchCount)
+	}
+
+	// pending leaves
+	pendingCount, ok := stats["pending_leaves"].(int64)
+	if !ok {
+		t.Fatal("pending_leaves stat should exist")
+	}
+	if pendingCount != 0 {
+		t.Errorf("pending_leaves = %d, want 0 (all flushed)", pendingCount)
+	}
+
+	// batch size
+	batchSizeStat, ok := stats["batch_size"].(int64)
+	if !ok {
+		t.Fatal("batch_size stat should exist")
+	}
+	if batchSizeStat != 2 {
+		t.Errorf("batch_size = %d, want 2", batchSizeStat)
+	}
+}
+
+// TestMerkleVerifyProofStandalone 独立验证 Proof（不需要数据库）
+func TestMerkleVerifyProofStandalone(t *testing.T) {
+	// 手工构建一个 proof 并验证
+	leaves := []string{"hash_a", "hash_b", "hash_c", "hash_d"}
+	root := ComputeMerkleRoot(leaves)
+
+	for i, leaf := range leaves {
+		path := GenerateMerkleProofFromLeaves(leaves, i)
+		proof := &MerkleProof{
+			EnvelopeID:  fmt.Sprintf("env-%d", i),
+			ContentHash: leaf,
+			BatchID:     "batch-001",
+			Root:        root,
+			Path:        path,
+		}
+		if !VerifyMerkleProof(proof) {
+			t.Errorf("Standalone proof verification failed for leaf %d", i)
+		}
+	}
+
+	// nil proof
+	if VerifyMerkleProof(nil) {
+		t.Error("nil proof should return false")
+	}
+
+	// empty path proof
+	emptyProof := &MerkleProof{
+		ContentHash: "hash_a",
+		Root:        root,
+		Path:        []ProofStep{},
+	}
+	if VerifyMerkleProof(emptyProof) {
+		t.Error("empty path proof should return false")
+	}
+}
+
+// TestMerkleMultipleBatchesAndProofs 跨多个批次的 proof 验证
+func TestMerkleMultipleBatchesAndProofs(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 2)
+
+	// 创建 6 个信封 → 3 个批次
+	var envIDs []string
+	for i := 0; i < 6; i++ {
+		env := em.Seal("trace-multi-batch", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+		envIDs = append(envIDs, env.ID)
+	}
+
+	// 每个信封都应该在某个批次中
+	for _, eid := range envIDs {
+		proof, err := em.GenerateProof(eid)
+		if err != nil {
+			t.Fatalf("GenerateProof(%s) error: %v", eid, err)
+		}
+		if !proof.Verified {
+			t.Errorf("Proof for %s should be verified", eid)
+		}
+	}
+
+	// 验证整条根链
+	chainResult, err := em.VerifyRootChain()
+	if err != nil {
+		t.Fatalf("VerifyRootChain error: %v", err)
+	}
+	if !chainResult.Valid {
+		t.Errorf("Root chain should be valid: %v", chainResult.Details)
+	}
+}
+
+// TestMerkleBatchRootChainBroken 篡改批次根链后验证失败
+func TestMerkleBatchRootChainBroken(t *testing.T) {
+	em := newTestEnvelopeManagerWithBatch(t, 2)
+
+	// 创建 4 个信封 → 2 个批次
+	for i := 0; i < 4; i++ {
+		em.Seal("trace-broken-chain", "inbound", fmt.Sprintf("msg-%d", i), "pass", nil, "")
+	}
+
+	batches, _ := em.ListBatches(10)
+	if len(batches) != 2 {
+		t.Fatalf("Expected 2 batches, got %d", len(batches))
+	}
+
+	// 篡改第一个批次的 root（batches 按时间倒序，所以索引 1 是较早的）
+	em.db.Exec(`UPDATE merkle_batches SET root = 'tampered_root' WHERE id = ?`, batches[1].ID)
+
+	result, err := em.VerifyRootChain()
+	if err != nil {
+		t.Fatalf("VerifyRootChain error: %v", err)
+	}
+	if result.Valid {
+		t.Error("Root chain should be invalid after tampering")
+	}
+	if len(result.Details) == 0 {
+		t.Error("Expected details about the broken chain")
+	}
+}

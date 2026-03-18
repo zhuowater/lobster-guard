@@ -205,6 +205,7 @@ type Config struct {
 	// v18.0 执行信封 — 密码学审计链
 	EnvelopeEnabled   bool   `yaml:"envelope_enabled"`    // 开关，默认 false
 	EnvelopeSecretKey string `yaml:"envelope_secret_key"` // HMAC 签名密钥（必须配置才能启用）
+	EnvelopeBatchSize int    `yaml:"envelope_batch_size"` // Merkle Tree 批次大小（默认 64）
 	// v18.1 事件总线
 	EventBus EventBusConfig `yaml:"event_bus"`
 }

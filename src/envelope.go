@@ -53,18 +53,37 @@ type ChainVerifyResult struct {
 type EnvelopeManager struct {
 	db        *sql.DB
 	secretKey string
-	mu        sync.Mutex // 保护 prevHash 的全局链写入
+	mu        sync.Mutex // 保护 prevHash 和 pendingLeaves 的写入
 	prevHash  string     // 内存中缓存的最后一个信封的 ContentHash
+
+	// v18.0+ Merkle Tree 批次
+	pendingLeaves []pendingLeaf  // 待构建批次的叶子缓冲区
+	batchSize     int            // 批次大小（默认 64）
+	prevBatchRoot string         // 前一个批次的 Root（根链）
+	flushTicker   *time.Ticker   // 定时 flush 定时器
+	stopCh        chan struct{}   // 停止信号
 }
 
 // NewEnvelopeManager 创建信封管理器
 func NewEnvelopeManager(db *sql.DB, secretKey string) *EnvelopeManager {
+	return NewEnvelopeManagerWithBatchSize(db, secretKey, 64)
+}
+
+// NewEnvelopeManagerWithBatchSize 创建信封管理器（指定批次大小）
+func NewEnvelopeManagerWithBatchSize(db *sql.DB, secretKey string, batchSize int) *EnvelopeManager {
+	if batchSize <= 0 {
+		batchSize = 64
+	}
 	em := &EnvelopeManager{
 		db:        db,
 		secretKey: secretKey,
+		batchSize: batchSize,
+		stopCh:    make(chan struct{}),
 	}
 	em.initTable()
+	em.initMerkleTables()
 	em.loadLastHash()
+	em.loadLastBatchRoot()
 	return em
 }
 
@@ -194,6 +213,18 @@ func (em *EnvelopeManager) Seal(traceID, domain, requestContent, decision string
 
 	// 更新全局链
 	em.prevHash = env.ContentHash
+
+	// v18.0+ 加入 Merkle 批次缓冲区
+	em.pendingLeaves = append(em.pendingLeaves, pendingLeaf{
+		envelopeID:  env.ID,
+		contentHash: env.ContentHash,
+	})
+
+	// 当缓冲区满时自动构建批次
+	if len(em.pendingLeaves) >= em.batchSize {
+		em.buildBatch()
+	}
+
 	em.mu.Unlock()
 
 	return env
@@ -269,6 +300,7 @@ func (em *EnvelopeManager) Verify(envelopeID string) (*VerifyResult, error) {
 }
 
 // VerifyChain 验证某个 trace_id 的信封链完整性
+// v18.0+ 同时验证信封所在批次的 Merkle Root 完整性
 func (em *EnvelopeManager) VerifyChain(traceID string) (*ChainVerifyResult, error) {
 	envelopes, err := em.ListByTrace(traceID)
 	if err != nil {
@@ -285,6 +317,9 @@ func (em *EnvelopeManager) VerifyChain(traceID string) (*ChainVerifyResult, erro
 	if len(envelopes) == 0 {
 		return result, nil
 	}
+
+	// 收集需要验证的批次 ID（去重）
+	verifiedBatches := map[string]bool{}
 
 	for i, env := range envelopes {
 		// 验证每个信封的签名
@@ -303,9 +338,7 @@ func (em *EnvelopeManager) VerifyChain(traceID string) (*ChainVerifyResult, erro
 		}
 		result.ValidCount++
 
-		// 检查链式结构：第 i 个信封的 PrevHash 应该是链中前一个的 ContentHash
-		// 注意：PrevHash 是全局链的上一个信封，不一定是同 trace 的前一个
-		// 所以链式验证只检查同 trace 内前后信封的时序一致性
+		// 检查链式结构：时序一致性
 		if i > 0 {
 			prevEnv := envelopes[i-1]
 			if env.Timestamp.Before(prevEnv.Timestamp) {
@@ -316,6 +349,25 @@ func (em *EnvelopeManager) VerifyChain(traceID string) (*ChainVerifyResult, erro
 				result.Details = append(result.Details,
 					fmt.Sprintf("信封 #%d (%s) 时序异常: %s < %s", i, env.ID,
 						env.Timestamp.Format(time.RFC3339Nano), prevEnv.Timestamp.Format(time.RFC3339Nano)))
+			}
+		}
+
+		// v18.0+ 检查信封所在批次的 Merkle Root
+		var batchID string
+		em.db.QueryRow(`SELECT batch_id FROM execution_envelopes WHERE id = ?`, env.ID).Scan(&batchID)
+		if batchID != "" && !verifiedBatches[batchID] {
+			verifiedBatches[batchID] = true
+			batchResult, err := em.VerifyBatch(batchID)
+			if err != nil || !batchResult.Valid {
+				result.ChainValid = false
+				if result.BrokenAt == -1 {
+					result.BrokenAt = i
+				}
+				reason := fmt.Sprintf("信封 #%d (%s) 所在批次 %s Merkle 验证失败", i, env.ID, batchID)
+				if err != nil {
+					reason += ": " + err.Error()
+				}
+				result.Details = append(result.Details, reason)
 			}
 		}
 	}
@@ -397,6 +449,16 @@ func (em *EnvelopeManager) Stats() map[string]interface{} {
 	var traceCount int64
 	em.db.QueryRow(`SELECT COUNT(DISTINCT trace_id) FROM execution_envelopes`).Scan(&traceCount)
 	stats["unique_traces"] = traceCount
+
+	// v18.0+ Merkle 批次统计
+	var batchCount int64
+	em.db.QueryRow(`SELECT COUNT(*) FROM merkle_batches`).Scan(&batchCount)
+	stats["merkle_batches"] = batchCount
+
+	em.mu.Lock()
+	stats["pending_leaves"] = int64(len(em.pendingLeaves))
+	stats["batch_size"] = int64(em.batchSize)
+	em.mu.Unlock()
 
 	return stats
 }
