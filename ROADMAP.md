@@ -123,7 +123,7 @@
 ### v14.x — 安全治理 · Red Team Autopilot 🔥
 > 不是又一个 RBAC，是安全治理+自动化红队
 
-- [ ] v14.0 **租户体系**（安全域隔离：每个团队有自己的 Agent/Prompt/规则/数据）
+- [x] v14.0 **租户体系**（tenant.go · 6 表加 tenant_id · 11 个 API 支持 ?tenant= · Topbar 切换器 · api.js 自动注入 · 向后兼容 default）
 - [ ] v14.1 **登录认证**（本地用户名密码 + LDAP/SSO/OAuth2 · 操作审计日志）
 - [ ] v14.2 **Red Team Autopilot**（反直觉创新 🔥）
   - 内置攻击模拟器，OWASP LLM Top10 攻击向量自动生成
