@@ -111,7 +111,8 @@ type InboundProxy struct {
 	wsProxy    *WSProxyManager // v4.1 WebSocket 代理管理器
 	realtime   *RealtimeMetrics // v5.0 实时监控
 	slog       *Logger          // v5.0 结构化日志
-	traceCorrelator *TraceCorrelator // v18 出站 trace 关联
+	traceCorrelator    *TraceCorrelator    // v18 出站 trace 关联
+	sessionCorrelator  *SessionCorrelator  // v17.3 IM↔LLM 会话关联
 	// v5.1 智能检测
 	sessionDetector *SessionDetector
 	llmDetector     *LLMDetector
@@ -526,6 +527,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v18: 记录 sender→trace 映射，供出站关联
 	if ip.traceCorrelator != nil && senderID != "" {
 		ip.traceCorrelator.Set(senderID, traceID)
+	}
+
+	// v17.3: 注册 IM→LLM 会话关联（内容指纹 → IM trace_id）
+	if ip.sessionCorrelator != nil && msgText != "" {
+		ip.sessionCorrelator.RegisterIMSession(msgText, traceID, senderID, appID)
 	}
 
 	// 限流检查（安检之前）

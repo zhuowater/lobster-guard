@@ -29,6 +29,8 @@ type LLMProxy struct {
 	// v10.1 Canary Token
 	canaryMu    sync.RWMutex
 	canaryToken string
+	// v17.3 IM↔LLM 会话关联
+	sessionCorrelator *SessionCorrelator
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -148,6 +150,15 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 提取 model（用于审计上下文）
 	model := ParseAnthropicRequest(bodyBytes)
 
+	// v17.3: 尝试关联 IM session（通过内容指纹匹配）
+	var sessionLink *SessionLink
+	if lp.sessionCorrelator != nil && len(bodyBytes) > 0 {
+		sessionLink = lp.sessionCorrelator.MatchLLMRequest(bodyBytes, traceID)
+		if sessionLink != nil {
+			logSessionLink(traceID, sessionLink)
+		}
+	}
+
 	// v10.1: Canary Token 注入
 	var activeCanaryToken string
 	if lp.cfg.Security.CanaryToken.Enabled {
@@ -219,6 +230,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ReqBody:      bodyBytes,
 		CanaryToken:  activeCanaryToken,
 		TenantID:     tenantID,
+	}
+
+	// v17.3: 填充 IM 会话关联信息
+	if sessionLink != nil {
+		auditCtx.IMTraceID = sessionLink.IMTraceID
+		auditCtx.SenderID = sessionLink.SenderID
 	}
 
 	// 复制响应 headers

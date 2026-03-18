@@ -39,6 +39,9 @@ type LLMAuditContext struct {
 	ReqBody     []byte
 	CanaryToken string // v10.1: 本次请求注入的 canary token
 	TenantID    string // v14.0: 租户 ID（从 X-Tenant-Id 头或自动解析）
+	// v17.3: IM↔LLM 会话关联
+	IMTraceID   string // 关联的 IM 侧 trace_id（如果匹配到）
+	SenderID    string // 关联的 IM 发送者
 }
 
 // NewLLMAuditor 创建 LLM 审计器
@@ -94,6 +97,11 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN prompt_hash TEXT DEFAULT ''`)
 	// v14.0: 租户列
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
+
+	// v17.3: IM↔LLM 会话关联字段
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN im_trace_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN sender_id TEXT DEFAULT ''`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_im_trace ON llm_calls(im_trace_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
@@ -531,6 +539,11 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 		return
 	}
 
+	// v17.3: 写入 IM↔LLM 会话关联
+	if ctx.IMTraceID != "" {
+		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, callID)
+	}
+
 	// 记录工具调用
 	for i, toolName := range info.ToolNames {
 		inputPreview := ""
@@ -597,6 +610,11 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 	if err != nil {
 		log.Printf("[LLMAudit] 写入 llm_call(SSE) 失败: %v", err)
 		return
+	}
+
+	// v17.3: 写入 IM↔LLM 会话关联
+	if ctx.IMTraceID != "" {
+		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, callID)
 	}
 
 	for i, toolName := range info.ToolNames {

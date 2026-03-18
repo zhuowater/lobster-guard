@@ -352,11 +352,16 @@ func main() {
 
 	// v18: Trace 关联缓存 — 入站↔出站 trace_id 自动关联
 	traceCorrelator := NewTraceCorrelator(10000)
+	sessionCorrelator := NewSessionCorrelator(50000, 5*60*1000) // v17.3: IM↔LLM 会话关联
+	if llmProxy != nil {
+		llmProxy.sessionCorrelator = sessionCorrelator
+	}
 
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng, honeypotEngine)
 	inbound.realtime = realtime
 	inbound.slog = slog
 	inbound.traceCorrelator = traceCorrelator
+	inbound.sessionCorrelator = sessionCorrelator
 	// v5.1: 注入智能检测组件
 	inbound.sessionDetector = sessionDetector
 	inbound.llmDetector = llmDetector
