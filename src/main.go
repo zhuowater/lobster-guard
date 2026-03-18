@@ -352,7 +352,17 @@ func main() {
 
 	// v18: Trace 关联缓存 — 入站↔出站 trace_id 自动关联
 	traceCorrelator := NewTraceCorrelator(10000)
-	sessionCorrelator := NewSessionCorrelator(50000, 60*60*1000) // v17.3: IM↔LLM 会话关联（1小时空闲切 session）
+	// v17.3: IM↔LLM 会话关联
+	sessionIdleMs := int64(60 * 60 * 1000) // 默认 1 小时
+	if cfg.SessionIdleTimeoutMin > 0 {
+		sessionIdleMs = int64(cfg.SessionIdleTimeoutMin) * 60 * 1000
+	}
+	sessionFPMs := int64(5 * 60 * 1000) // 默认 5 分钟
+	if cfg.SessionFPWindowSec > 0 {
+		sessionFPMs = int64(cfg.SessionFPWindowSec) * 1000
+	}
+	sessionCorrelator := NewSessionCorrelator(50000, sessionIdleMs)
+	sessionCorrelator.fpWindowMs = sessionFPMs
 	if llmProxy != nil {
 		llmProxy.sessionCorrelator = sessionCorrelator
 	}
@@ -476,6 +486,7 @@ func main() {
 
 	// v17.1: 布局存储
 	mgmtAPI.layoutStore = NewLayoutStore(logger.DB())
+	mgmtAPI.sessionCorrelator = sessionCorrelator // v17.3
 	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）

@@ -122,6 +122,8 @@ type ManagementAPI struct {
 	attackChainEng *AttackChainEngine
 	// v17.1 布局存储
 	layoutStore *LayoutStore
+	// v17.3 会话关联
+	sessionCorrelator *SessionCorrelator
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -476,6 +478,13 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleSessionRisks(w, r)
 	case path == "/api/v1/sessions/risks/reset" && method == "POST":
 		api.handleSessionRisksReset(w, r)
+	// v17.3 会话关联
+	case path == "/api/v1/session-correlator/stats" && method == "GET":
+		api.handleSessionCorrelatorStats(w, r)
+	case path == "/api/v1/session-correlator/config" && method == "GET":
+		api.handleSessionCorrelatorConfig(w, r)
+	case path == "/api/v1/session-correlator/config" && method == "PUT":
+		api.handleSessionCorrelatorConfigUpdate(w, r)
 	// v8.0 运维工具箱 API
 	case path == "/api/v1/config/view" && method == "GET":
 		api.handleConfigView(w, r)
@@ -6861,4 +6870,122 @@ func (s *BackgroundScheduler) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+}
+
+// ============================================================
+// v17.3: 会话关联配置与状态 API
+// ============================================================
+
+// handleSessionCorrelatorStats GET /api/v1/session-correlator/stats — 返回会话关联器运行状态
+func (api *ManagementAPI) handleSessionCorrelatorStats(w http.ResponseWriter, r *http.Request) {
+	if api.sessionCorrelator == nil {
+		jsonResponse(w, 200, map[string]interface{}{"enabled": false})
+		return
+	}
+	stats := api.sessionCorrelator.Stats()
+	stats["enabled"] = true
+	jsonResponse(w, 200, stats)
+}
+
+// handleSessionCorrelatorConfig GET /api/v1/session-correlator/config — 返回当前配置
+func (api *ManagementAPI) handleSessionCorrelatorConfig(w http.ResponseWriter, r *http.Request) {
+	idleMin := 60
+	if api.cfg.SessionIdleTimeoutMin > 0 {
+		idleMin = api.cfg.SessionIdleTimeoutMin
+	}
+	fpSec := 300
+	if api.cfg.SessionFPWindowSec > 0 {
+		fpSec = api.cfg.SessionFPWindowSec
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"session_idle_timeout_min": idleMin,
+		"session_fp_window_sec":    fpSec,
+	})
+}
+
+// handleSessionCorrelatorConfigUpdate PUT /api/v1/session-correlator/config — 热更新配置
+func (api *ManagementAPI) handleSessionCorrelatorConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SessionIdleTimeoutMin *int `json:"session_idle_timeout_min"`
+		SessionFPWindowSec    *int `json:"session_fp_window_sec"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	updated := false
+
+	if req.SessionIdleTimeoutMin != nil {
+		v := *req.SessionIdleTimeoutMin
+		if v < 1 || v > 1440 {
+			jsonResponse(w, 400, map[string]string{"error": "session_idle_timeout_min must be 1-1440"})
+			return
+		}
+		api.cfg.SessionIdleTimeoutMin = v
+		if api.sessionCorrelator != nil {
+			api.sessionCorrelator.mu.Lock()
+			api.sessionCorrelator.idleTimeoutMs = int64(v) * 60 * 1000
+			api.sessionCorrelator.mu.Unlock()
+		}
+		updated = true
+	}
+
+	if req.SessionFPWindowSec != nil {
+		v := *req.SessionFPWindowSec
+		if v < 10 || v > 3600 {
+			jsonResponse(w, 400, map[string]string{"error": "session_fp_window_sec must be 10-3600"})
+			return
+		}
+		api.cfg.SessionFPWindowSec = v
+		if api.sessionCorrelator != nil {
+			api.sessionCorrelator.mu.Lock()
+			api.sessionCorrelator.fpWindowMs = int64(v) * 1000
+			api.sessionCorrelator.mu.Unlock()
+		}
+		updated = true
+	}
+
+	if !updated {
+		jsonResponse(w, 400, map[string]string{"error": "no fields to update"})
+		return
+	}
+
+	// 写回 config.yaml
+	if err := api.saveSessionCorrelatorConfig(); err != nil {
+		log.Printf("[会话关联] 配置写回失败: %v", err)
+	}
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"ok":                       true,
+		"session_idle_timeout_min": api.cfg.SessionIdleTimeoutMin,
+		"session_fp_window_sec":    api.cfg.SessionFPWindowSec,
+	})
+}
+
+// saveSessionCorrelatorConfig 将 session correlator 配置写回 config.yaml
+func (api *ManagementAPI) saveSessionCorrelatorConfig() error {
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	if api.cfg.SessionIdleTimeoutMin > 0 {
+		raw["session_idle_timeout_min"] = api.cfg.SessionIdleTimeoutMin
+	}
+	if api.cfg.SessionFPWindowSec > 0 {
+		raw["session_fp_window_sec"] = api.cfg.SessionFPWindowSec
+	}
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %w", err)
+	}
+	log.Printf("[会话关联] 配置已保存: idle=%dmin, fp=%ds", api.cfg.SessionIdleTimeoutMin, api.cfg.SessionFPWindowSec)
+	return nil
 }

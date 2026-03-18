@@ -199,6 +199,9 @@ type Config struct {
 	// v18.0 后台调度
 	ChainAnalysisIntervalMin   int `yaml:"chain_analysis_interval_min"`   // 攻击链自动分析间隔（分钟），默认 5
 	BehaviorScanIntervalMin    int `yaml:"behavior_scan_interval_min"`    // 行为画像自动扫描间隔（分钟），默认 10
+	// v17.3 IM↔LLM 会话关联
+	SessionIdleTimeoutMin      int `yaml:"session_idle_timeout_min"`      // 会话空闲超时（分钟），默认 60。同一用户超过此时间没发新消息则切新会话
+	SessionFPWindowSec         int `yaml:"session_fp_window_sec"`         // 内容指纹匹配窗口（秒），默认 300。LLM 请求在此窗口内匹配 IM 消息指纹
 }
 
 // AuthConfig 认证配置（v14.1）
