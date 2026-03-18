@@ -1,8 +1,13 @@
 # lobster-guard Makefile
-# 龙虾卫士 - AI Agent 安全网关 v3.6
+# 龙虾卫士 - AI Agent 安全网关 v17.1（含 v18 系统性修复）
+# Go 源文件: 42 个 + 34 个测试 = 76 个 .go 文件
+# Go 代码: 48,484 行（业务 30,318 + 测试 18,166）
+# Vue 前端: 48 个 Vue 文件，14,819 行
+# 测试用例: 754 个通过 | API 端点: ~227 个
+# 外部依赖: sqlite3 + yaml.v3 + gorilla/websocket + x/crypto
 
 APP_NAME := lobster-guard
-VERSION := 3.6.0
+VERSION := 17.1.0
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_FLAGS := -ldflags="-s -w"
 
@@ -13,6 +18,17 @@ all: build
 .PHONY: build
 build:
 	CGO_ENABLED=1 go build $(GO_FLAGS) -o $(APP_NAME) .
+
+# 构建 Vue 前端（dashboard/dist/ 被 go:embed 嵌入）
+.PHONY: dashboard
+dashboard:
+	cd dashboard && npm run build
+	@echo "✅ Dashboard 构建完成（dashboard/dist/）"
+
+# 完整构建：先构建前端，再编译 Go
+.PHONY: build-all
+build-all: dashboard build
+	@echo "✅ 完整构建完成：前端 + Go 二进制"
 
 # 静态编译（完全静态链接，适合 Docker/容器部署）
 .PHONY: static
@@ -41,12 +57,44 @@ test:
 test-quick:
 	CGO_ENABLED=1 go test -count=1 -timeout 60s ./...
 
+# 代码检查
+.PHONY: lint
+lint:
+	@echo "=== Go vet ==="
+	CGO_ENABLED=1 go vet ./...
+	@echo "=== 检查完成 ==="
+
+# 端到端模拟测试（通过 API 触发）
+.PHONY: simulate
+simulate:
+	@echo "=== 端到端模拟测试 ==="
+	@curl -s -X POST -H "Authorization: Bearer $${LOBSTER_GUARD_TOKEN}" \
+		http://localhost:9090/api/v1/simulate/e2e | python3 -m json.tool 2>/dev/null || \
+		echo "❌ 模拟测试失败（确保服务已启动）"
+
+# 代码行数统计
+.PHONY: count
+count:
+	@echo "=== Go 源文件（非测试） ==="
+	@find . -name '*.go' ! -name '*_test.go' | wc -l | xargs -I{} echo "  文件数: {}"
+	@find . -name '*.go' ! -name '*_test.go' | xargs wc -l | tail -1
+	@echo ""
+	@echo "=== Go 测试文件 ==="
+	@find . -name '*_test.go' | wc -l | xargs -I{} echo "  文件数: {}"
+	@find . -name '*_test.go' | xargs wc -l | tail -1
+	@echo ""
+	@echo "=== Vue 前端 ==="
+	@find dashboard/src -name '*.vue' 2>/dev/null | wc -l | xargs -I{} echo "  文件数: {}"
+	@find dashboard/src -name '*.vue' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1
+	@echo ""
+	@echo "=== 总计 ==="
+	@find . -name '*.go' -o -name '*.vue' | xargs wc -l 2>/dev/null | tail -1
+
 # 安装到系统
 .PHONY: install
 install: build
 	install -Dm755 $(APP_NAME) /usr/local/bin/$(APP_NAME)
 	install -Dm644 config.yaml.example /etc/lobster-guard/config.yaml
-	install -Dm644 dashboard.html /etc/lobster-guard/dashboard.html
 	install -Dm644 lobster-guard.service /etc/systemd/system/lobster-guard.service
 	mkdir -p /var/lib/lobster-guard
 	mkdir -p /var/log/lobster-guard
@@ -132,15 +180,23 @@ inbound-rules:
 
 .PHONY: help
 help:
-	@echo "lobster-guard v3.6 Makefile 命令:"
+	@echo "lobster-guard v17.1 Makefile 命令:"
 	@echo ""
 	@echo "  构建:"
-	@echo "    make build         - 编译"
+	@echo "    make build         - 编译 Go 二进制"
+	@echo "    make dashboard     - 构建 Vue 前端"
+	@echo "    make build-all     - 完整构建（前端 + Go）"
 	@echo "    make static        - 静态编译（Docker/容器用）"
-	@echo "    make test          - 运行全部测试"
-	@echo "    make test-quick    - 快速测试（无详细输出）"
-	@echo "    make run           - 编译并运行"
 	@echo "    make clean         - 清理"
+	@echo ""
+	@echo "  测试:"
+	@echo "    make test          - 运行全部测试（754 用例）"
+	@echo "    make test-quick    - 快速测试（无详细输出）"
+	@echo "    make simulate      - 端到端模拟测试"
+	@echo "    make lint          - 代码检查"
+	@echo ""
+	@echo "  运行:"
+	@echo "    make run           - 编译并运行"
 	@echo ""
 	@echo "  部署:"
 	@echo "    make install       - 安装到系统（systemd）"
@@ -157,3 +213,6 @@ help:
 	@echo "    make rate-limit    - 限流统计"
 	@echo "    make rule-hits     - 规则命中率"
 	@echo "    make inbound-rules - 入站规则列表"
+	@echo ""
+	@echo "  统计:"
+	@echo "    make count         - 代码行数统计"
