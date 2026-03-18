@@ -205,6 +205,15 @@ type Config struct {
 	// v18.0 执行信封 — 密码学审计链
 	EnvelopeEnabled   bool   `yaml:"envelope_enabled"`    // 开关，默认 false
 	EnvelopeSecretKey string `yaml:"envelope_secret_key"` // HMAC 签名密钥（必须配置才能启用）
+	// v18.1 事件总线
+	EventBus EventBusConfig `yaml:"event_bus"`
+}
+
+// EventBusConfig 事件总线配置（v18.1）
+type EventBusConfig struct {
+	Enabled bool            `yaml:"enabled"`
+	Targets []WebhookTarget `yaml:"targets"`
+	Chains  []ActionChain   `yaml:"chains"`
 }
 
 // AuthConfig 认证配置（v14.1）

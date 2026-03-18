@@ -492,6 +492,15 @@ func main() {
 	mgmtAPI.sessionCorrelator = sessionCorrelator // v17.3
 	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
+	// v18.1: 事件总线
+	var eventBus *EventBus
+	if cfg.EventBus.Enabled {
+		eventBus = NewEventBus(logger.DB(), cfg)
+		fmt.Println("[初始化] ✅ 事件总线已启用")
+	} else {
+		fmt.Println("[初始化] ⚠️ 事件总线: 未启用")
+	}
+
 	// v18.0: 执行信封 — 密码学审计链
 	var envelopeMgr *EnvelopeManager
 	if cfg.EnvelopeEnabled && cfg.EnvelopeSecretKey != "" {
@@ -508,6 +517,23 @@ func main() {
 			llmProxy.envelopeMgr = envelopeMgr
 		}
 		mgmtAPI.envelopeMgr = envelopeMgr
+	}
+
+	// v18.1: 注入事件总线到各组件
+	if eventBus != nil {
+		inbound.eventBus = eventBus
+		outbound.eventBus = eventBus
+		if llmProxy != nil {
+			llmProxy.eventBus = eventBus
+		}
+		mgmtAPI.eventBus = eventBus
+		// 注入严格模式回调
+		if mgmtAPI.strictMode != nil {
+			eventBus.strictModeFunc = func(enable bool) error {
+				mgmtAPI.strictMode.SetEnabled(enable)
+				return nil
+			}
+		}
 	}
 
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
@@ -627,6 +653,10 @@ func main() {
 	sig := <-quit
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
+	// v18.1: 停止事件总线
+	if eventBus != nil {
+		eventBus.Stop()
+	}
 	// v18.0: 停止后台调度器
 	bgScheduler.Stop()
 	// v4.2: 使用 ShutdownManager 优雅关闭

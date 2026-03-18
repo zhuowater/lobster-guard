@@ -126,6 +126,8 @@ type ManagementAPI struct {
 	sessionCorrelator *SessionCorrelator
 	// v18.0 执行信封
 	envelopeMgr *EnvelopeManager
+	// v18.1 事件总线
+	eventBus *EventBus
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -699,6 +701,26 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleEnvelopeStats(w, r)
 	case path == "/api/v1/envelopes/config" && method == "PUT":
 		api.handleEnvelopeConfigUpdate(w, r)
+
+	// v18.1: 事件总线 API
+	case path == "/api/v1/events/list" && method == "GET":
+		api.handleEventsList(w, r)
+	case path == "/api/v1/events/stats" && method == "GET":
+		api.handleEventsStats(w, r)
+	case path == "/api/v1/events/targets" && method == "GET":
+		api.handleEventsTargetList(w, r)
+	case path == "/api/v1/events/targets" && method == "POST":
+		api.handleEventsTargetCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/events/targets/") && method == "PUT":
+		api.handleEventsTargetUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/events/targets/") && method == "DELETE":
+		api.handleEventsTargetDelete(w, r)
+	case path == "/api/v1/events/test" && method == "POST":
+		api.handleEventsTest(w, r)
+	case path == "/api/v1/events/deliveries" && method == "GET":
+		api.handleEventsDeliveries(w, r)
+	case path == "/api/v1/events/chains" && method == "GET":
+		api.handleEventsChains(w, r)
 
 	// v18: 概览摘要聚合 API
 	case path == "/api/v1/overview/summary" && method == "GET":

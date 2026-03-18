@@ -33,6 +33,8 @@ type LLMProxy struct {
 	sessionCorrelator *SessionCorrelator
 	// v18.0 执行信封
 	envelopeMgr *EnvelopeManager
+	// v18.1 事件总线
+	eventBus *EventBus
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -186,6 +188,15 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if lp.envelopeMgr != nil {
 					lp.envelopeMgr.Seal(traceID, "llm_request", string(bodyBytes), "block", llmReqRules, "")
 				}
+				// v18.1: 事件总线
+				if lp.eventBus != nil {
+					lp.eventBus.Emit(&SecurityEvent{
+						Type: "llm_block", Severity: "high", Domain: "llm",
+						TraceID: traceID,
+						Summary: fmt.Sprintf("LLM 请求阻断: %s (%s)", topMatch.RuleName, topMatch.Category),
+						Details: map[string]interface{}{"rule_id": topMatch.RuleID, "category": topMatch.Category, "rules": llmReqRules},
+					})
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(403)
 				fmt.Fprintf(w, `{"error":"Request blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
@@ -194,6 +205,15 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case "warn":
 				log.Printf("[LLM规则] 请求告警: rule=%s category=%s pattern=%q",
 					topMatch.RuleID, topMatch.Category, topMatch.Pattern)
+				// v18.1: 事件总线
+				if lp.eventBus != nil {
+					lp.eventBus.Emit(&SecurityEvent{
+						Type: "llm_block", Severity: "medium", Domain: "llm",
+						TraceID: traceID,
+						Summary: fmt.Sprintf("LLM 请求告警: %s (%s)", topMatch.RuleName, topMatch.Category),
+						Details: map[string]interface{}{"rule_id": topMatch.RuleID, "category": topMatch.Category, "action": "warn"},
+					})
+				}
 			case "log":
 				log.Printf("[LLM规则] 请求日志: rule=%s category=%s",
 					topMatch.RuleID, topMatch.Category)

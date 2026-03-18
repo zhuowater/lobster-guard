@@ -122,6 +122,8 @@ type InboundProxy struct {
 	honeypot *HoneypotEngine
 	// v18.0 执行信封
 	envelopeMgr *EnvelopeManager
+	// v18.1 事件总线
+	eventBus *EventBus
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -314,10 +316,28 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 				rule := strings.Join(detectResult.MatchedRules, ",")
 				ip.alertNotifier.Notify("inbound", senderID, rule, msgText, appID)
 			}
+			// v18.1: 事件总线
+			if ip.eventBus != nil {
+				ip.eventBus.Emit(&SecurityEvent{
+					Type: "inbound_block", Severity: "high", Domain: "inbound",
+					TraceID: bridgeTraceID, SenderID: senderID,
+					Summary: fmt.Sprintf("入站拦截: %s", strings.Join(detectResult.Reasons, "; ")),
+					Details: map[string]interface{}{"rules": detectResult.MatchedRules, "app_id": appID},
+				})
+			}
 			return
 		}
 		if detectResult.Action == "warn" {
 			log.Printf("[桥接入站] 告警放行 sender=%s reasons=%v", senderID, detectResult.Reasons)
+			// v18.1: 事件总线
+			if ip.eventBus != nil {
+				ip.eventBus.Emit(&SecurityEvent{
+					Type: "inbound_block", Severity: "medium", Domain: "inbound",
+					TraceID: bridgeTraceID, SenderID: senderID,
+					Summary: fmt.Sprintf("入站告警: %s", strings.Join(detectResult.Reasons, "; ")),
+					Details: map[string]interface{}{"rules": detectResult.MatchedRules, "action": "warn", "app_id": appID},
+				})
+			}
 			// v15.0: 蜜罐触发检查
 			if ip.honeypot != nil {
 				tpl, watermark := ip.honeypot.ShouldTrigger(msgText, senderID, "")
@@ -713,6 +733,15 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rule := strings.Join(detectResult.MatchedRules, ",")
 			ip.alertNotifier.Notify("inbound", senderID, rule, msgText, appID)
 		}
+		// v18.1: 事件总线
+		if ip.eventBus != nil {
+			ip.eventBus.Emit(&SecurityEvent{
+				Type: "inbound_block", Severity: "high", Domain: "inbound",
+				TraceID: traceID, SenderID: senderID,
+				Summary: fmt.Sprintf("入站拦截: %s", strings.Join(detectResult.Reasons, "; ")),
+				Details: map[string]interface{}{"rules": detectResult.MatchedRules, "app_id": appID},
+			})
+		}
 		code, respBody := ip.channel.BlockResponseWithMessage(detectResult.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Trace-ID", traceID)
@@ -725,6 +754,15 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ip.slog.Warn("inbound", "告警放行", "sender_id", senderID, "action", "warn", "reason", reason, "trace_id", traceID)
 		} else {
 			log.Printf("[入站] 告警放行 sender=%s reasons=%v trace_id=%s", senderID, detectResult.Reasons, traceID)
+		}
+		// v18.1: 事件总线
+		if ip.eventBus != nil {
+			ip.eventBus.Emit(&SecurityEvent{
+				Type: "inbound_block", Severity: "medium", Domain: "inbound",
+				TraceID: traceID, SenderID: senderID,
+				Summary: fmt.Sprintf("入站告警: %s", strings.Join(detectResult.Reasons, "; ")),
+				Details: map[string]interface{}{"rules": detectResult.MatchedRules, "action": "warn", "app_id": appID},
+			})
 		}
 		// v15.0: 蜜罐触发检查
 		if ip.honeypot != nil {
@@ -861,6 +899,8 @@ type OutboundProxy struct {
 	traceCorrelator *TraceCorrelator
 	// v18.0 执行信封
 	envelopeMgr *EnvelopeManager
+	// v18.1 事件总线
+	eventBus *EventBus
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {
@@ -952,6 +992,15 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
 			op.logger.LogWithTrace("outbound", recipient, "honeypot_detonation", detonationReason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 			log.Printf("[出站] 💣 蜜罐引爆检测 path=%s watermarks=%v", r.URL.Path, detonatedWatermarks)
+			// v18.1: 事件总线
+			if op.eventBus != nil {
+				op.eventBus.Emit(&SecurityEvent{
+					Type: "honeypot_triggered", Severity: "critical", Domain: "outbound",
+					TraceID: outTraceID, SenderID: recipient,
+					Summary: fmt.Sprintf("蜜罐引爆: 水印 %v 出现在出站内容中", detonatedWatermarks),
+					Details: map[string]interface{}{"watermarks": detonatedWatermarks},
+				})
+			}
 			if op.realtime != nil {
 				op.realtime.RecordOutbound("honeypot_detonation", time.Since(start).Microseconds())
 				op.realtime.RecordEvent("outbound", recipient, "honeypot_detonation", detonationReason, outTraceID)
@@ -1002,6 +1051,15 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if op.alertNotifier != nil {
 			op.alertNotifier.Notify("outbound", recipient, result.RuleName, text, outAppID)
 		}
+		// v18.1: 事件总线
+		if op.eventBus != nil {
+			op.eventBus.Emit(&SecurityEvent{
+				Type: "outbound_block", Severity: "high", Domain: "outbound",
+				TraceID: outTraceID, SenderID: recipient,
+				Summary: fmt.Sprintf("出站拦截: %s", result.Reason),
+				Details: map[string]interface{}{"rule": result.RuleName, "app_id": outAppID},
+			})
+		}
 		code, respBody := op.channel.OutboundBlockResponseWithMessage(result.Reason, result.RuleName, result.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
@@ -1016,6 +1074,15 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if op.realtime != nil {
 			op.realtime.RecordOutbound("warn", time.Since(start).Microseconds())
 			op.realtime.RecordEvent("outbound", recipient, "warn", result.Reason, outTraceID)
+		}
+		// v18.1: 事件总线
+		if op.eventBus != nil {
+			op.eventBus.Emit(&SecurityEvent{
+				Type: "outbound_block", Severity: "medium", Domain: "outbound",
+				TraceID: outTraceID, SenderID: recipient,
+				Summary: fmt.Sprintf("出站告警: %s", result.Reason),
+				Details: map[string]interface{}{"rule": result.RuleName, "action": "warn", "app_id": outAppID},
+			})
 		}
 	case "log":
 		op.logger.LogWithTrace("outbound", recipient, "log", result.Reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
