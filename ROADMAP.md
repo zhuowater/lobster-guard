@@ -248,7 +248,7 @@
 > 把三条数据通道吃干榨净 | 理论基础：Shannon 信息论（安全有物理成本下限）
 > 依赖：✅ 纯已有流量（InboundProxy + LLMProxy + OutboundProxy + trace_id 关联）
 
-- [ ] v20.0 **LLM tool_calls 深度解析 + 策略管控**
+- [x] v20.0 **LLM tool_calls 深度解析 + 策略管控**
   - LLMProxy 已经能看到 LLM 响应中的 `tool_calls`（LLM 决定要调什么工具）
   - 新增 tool_calls 策略引擎：工具白名单 / 参数关键词检测 / 调用频率限制 / 危险工具告警
   - 示例：LLM 请求调用 `execute_code` / `shell_exec` → 根据策略 block/warn/log
