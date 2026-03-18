@@ -353,9 +353,13 @@ func main() {
 	honeypotEngine := NewHoneypotEngine(logger.DB())
 	fmt.Println("[初始化] ✅ 蜜罐引擎已就绪 (Agent 蜜罐: 假数据+水印追踪+引爆检测)")
 
+	// v18: Trace 关联缓存 — 入站↔出站 trace_id 自动关联
+	traceCorrelator := NewTraceCorrelator(10000)
+
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, metrics, ruleHits, userCache, policyEng, honeypotEngine)
 	inbound.realtime = realtime
 	inbound.slog = slog
+	inbound.traceCorrelator = traceCorrelator
 	// v5.1: 注入智能检测组件
 	inbound.sessionDetector = sessionDetector
 	inbound.llmDetector = llmDetector
@@ -380,6 +384,8 @@ func main() {
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits, honeypotEngine)
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 	outbound.realtime = realtime
+	outbound.traceCorrelator = traceCorrelator
+	fmt.Println("[初始化] ✅ Trace 关联缓存 (入站↔出站 trace_id 自动关联, 5min 窗口)")
 
 	// v4.1 WebSocket 代理管理器
 	wsProxy := NewWSProxyManager(cfg, engine, outboundEngine, logger, metrics, pool, routes, ruleHits)

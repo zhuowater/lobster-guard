@@ -16,8 +16,74 @@ import (
 	"net/url"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 )
+
+// ============================================================
+// v18: Trace 关联缓存 — 入站 senderID→traceID 映射，出站按 recipient 反查
+// ============================================================
+
+// TraceCorrelator 维护 sender→最近 trace_id 的映射（LRU 淘汰）
+type TraceCorrelator struct {
+	mu      sync.RWMutex
+	entries map[string]traceEntry
+	maxSize int
+}
+
+type traceEntry struct {
+	traceID string
+	ts      time.Time
+}
+
+func NewTraceCorrelator(maxSize int) *TraceCorrelator {
+	if maxSize <= 0 {
+		maxSize = 10000
+	}
+	return &TraceCorrelator{entries: make(map[string]traceEntry), maxSize: maxSize}
+}
+
+// Set 入站时记录 sender→trace 映射
+func (tc *TraceCorrelator) Set(senderID, traceID string) {
+	if senderID == "" || traceID == "" {
+		return
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.entries[senderID] = traceEntry{traceID: traceID, ts: time.Now()}
+	// 简单淘汰：超过 maxSize 时删最老的
+	if len(tc.entries) > tc.maxSize {
+		var oldest string
+		var oldestTs time.Time
+		for k, v := range tc.entries {
+			if oldest == "" || v.ts.Before(oldestTs) {
+				oldest = k
+				oldestTs = v.ts
+			}
+		}
+		if oldest != "" {
+			delete(tc.entries, oldest)
+		}
+	}
+}
+
+// Get 出站时按 recipient 查找入站 trace_id（5分钟内有效）
+func (tc *TraceCorrelator) Get(recipientID string) string {
+	if recipientID == "" {
+		return ""
+	}
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+	e, ok := tc.entries[recipientID]
+	if !ok {
+		return ""
+	}
+	// 5 分钟窗口
+	if time.Since(e.ts) > 5*time.Minute {
+		return ""
+	}
+	return e.traceID
+}
 
 // ============================================================
 // 入站代理 v2.0
@@ -45,6 +111,7 @@ type InboundProxy struct {
 	wsProxy    *WSProxyManager // v4.1 WebSocket 代理管理器
 	realtime   *RealtimeMetrics // v5.0 实时监控
 	slog       *Logger          // v5.0 结构化日志
+	traceCorrelator *TraceCorrelator // v18 出站 trace 关联
 	// v5.1 智能检测
 	sessionDetector *SessionDetector
 	llmDetector     *LLMDetector
@@ -86,6 +153,10 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		appID := msg.AppID
 		rh := fmt.Sprintf("%x", sha256.Sum256(msg.Raw))
 		bridgeTraceID := GenerateTraceID()
+		// v18: 记录 sender→trace 映射，供出站关联
+		if ip.traceCorrelator != nil {
+			ip.traceCorrelator.Set(senderID, bridgeTraceID)
+		}
 
 		// 路由决策
 		var upstreamID string
@@ -452,6 +523,11 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v18: 记录 sender→trace 映射，供出站关联
+	if ip.traceCorrelator != nil && senderID != "" {
+		ip.traceCorrelator.Set(senderID, traceID)
+	}
+
 	// 限流检查（安检之前）
 	if ip.limiter != nil {
 		allowed, reason := ip.limiter.Allow(senderID)
@@ -713,6 +789,8 @@ type OutboundProxy struct {
 	realtime       *RealtimeMetrics  // v5.0 实时监控
 	// v15.0 蜜罐引擎
 	honeypot *HoneypotEngine
+	// v18 出站 trace 关联
+	traceCorrelator *TraceCorrelator
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {
@@ -753,6 +831,12 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v18: 出站 trace_id — 优先从关联缓存查（实现入站↔出站关联），其次从请求头，最后自动生成
+	var outTraceID string
+	// 先提取 recipient，再查关联缓存
+	// recipient 在后面才提取，这里先用 header
+	outTraceID = r.Header.Get("X-Trace-ID")
+
 	// 出站 body 大小限制：最大 10MB，防止 OOM
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)); r.Body.Close()
 	if err != nil { op.proxy.ServeHTTP(w, r); return }
@@ -780,6 +864,14 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// v18: 出站 trace 关联 — 用 recipient 查入站时记录的 trace_id
+	if outTraceID == "" && op.traceCorrelator != nil && recipient != "" {
+		outTraceID = op.traceCorrelator.Get(recipient)
+	}
+	if outTraceID == "" {
+		outTraceID = GenerateTraceID()
+	}
+
 	// v15.0: 蜜罐引爆检测 — 检查出站内容中是否包含蜜罐水印
 	if op.honeypot != nil && text != "" {
 		detonatedWatermarks := op.honeypot.CheckDetonation(text)
@@ -788,11 +880,11 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			upstreamID := r.Header.Get("X-Upstream-Id")
 			detonationReason := "honeypot_detonation:" + strings.Join(detonatedWatermarks, ",")
 			pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
-			op.logger.Log("outbound", recipient, "honeypot_detonation", detonationReason, pv, rh, latMs, upstreamID, outAppID)
+			op.logger.LogWithTrace("outbound", recipient, "honeypot_detonation", detonationReason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 			log.Printf("[出站] 💣 蜜罐引爆检测 path=%s watermarks=%v", r.URL.Path, detonatedWatermarks)
 			if op.realtime != nil {
 				op.realtime.RecordOutbound("honeypot_detonation", time.Since(start).Microseconds())
-				op.realtime.RecordEvent("outbound", recipient, "honeypot_detonation", detonationReason, "")
+				op.realtime.RecordEvent("outbound", recipient, "honeypot_detonation", detonationReason, outTraceID)
 			}
 			// 阻断包含蜜罐水印的出站消息
 			w.Header().Set("Content-Type", "application/json")
@@ -819,13 +911,13 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch result.Action {
 	case "block":
 		log.Printf("[出站] 拦截 path=%s rule=%s", r.URL.Path, result.RuleName)
-		op.logger.Log("outbound", recipient, "block", result.Reason, pv, rh, latMs, upstreamID, outAppID)
+		op.logger.LogWithTrace("outbound", recipient, "block", result.Reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "block", op.channel.Name(), latMs)
 		}
 		if op.realtime != nil {
 			op.realtime.RecordOutbound("block", time.Since(start).Microseconds())
-			op.realtime.RecordEvent("outbound", recipient, "block", result.Reason, "")
+			op.realtime.RecordEvent("outbound", recipient, "block", result.Reason, outTraceID)
 		}
 		// v3.10 告警通知
 		if op.alertNotifier != nil {
@@ -838,16 +930,16 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case "warn":
 		log.Printf("[出站] 告警放行 path=%s rule=%s", r.URL.Path, result.RuleName)
-		op.logger.Log("outbound", recipient, "warn", result.Reason, pv, rh, latMs, upstreamID, outAppID)
+		op.logger.LogWithTrace("outbound", recipient, "warn", result.Reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "warn", op.channel.Name(), latMs)
 		}
 		if op.realtime != nil {
 			op.realtime.RecordOutbound("warn", time.Since(start).Microseconds())
-			op.realtime.RecordEvent("outbound", recipient, "warn", result.Reason, "")
+			op.realtime.RecordEvent("outbound", recipient, "warn", result.Reason, outTraceID)
 		}
 	case "log":
-		op.logger.Log("outbound", recipient, "log", result.Reason, pv, rh, latMs, upstreamID, outAppID)
+		op.logger.LogWithTrace("outbound", recipient, "log", result.Reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", "log", op.channel.Name(), latMs)
 		}
@@ -862,7 +954,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			action = "pii_detected"; reason = "outbound_pii:" + strings.Join(piis, "+")
 			log.Printf("[出站] PII path=%s piis=%v", r.URL.Path, piis)
 		}
-		op.logger.Log("outbound", recipient, action, reason, pv, rh, latMs, upstreamID, outAppID)
+		op.logger.LogWithTrace("outbound", recipient, action, reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 		if op.metrics != nil {
 			op.metrics.RecordRequest("outbound", action, op.channel.Name(), latMs)
 		}
