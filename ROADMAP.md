@@ -256,7 +256,7 @@
   - tool_calls 审计增强：记录每次工具调用的名称、参数摘要、风险等级
   - Dashboard 工具调用统计页：热门工具 TOP10 / 高危调用趋势 / 按租户聚合
   - 数据来源：LLMProxy.handleSSEResponse + LLMAuditor.llm_tool_calls 表（已有）
-- [ ] v20.1 **信息流污染追踪（Taint Propagation）** 🔥
+- [x] v20.1 **信息流污染追踪（Taint Propagation）** 🔥
   - 入站打标：InboundProxy 检测入站消息含 PII（手机号/身份证/银行卡/姓名）→ 给 trace_id 打 `PII-TAINTED` 标签
   - LLM 阶段传播：该 trace_id 的 LLM 请求必然携带被污染的用户消息 → 标签跟着 trace_id 走
   - tool_calls 意图推断：LLM 的 tool_calls 参数含敏感查询（`SELECT * FROM customers`）→ 追加 `DATA-QUERY-TAINTED`
