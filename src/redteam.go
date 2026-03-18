@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,11 +19,13 @@ import (
 
 // RedTeamEngine 红队自动化引擎（v17.3: 全引擎覆盖）
 type RedTeamEngine struct {
-	inboundEngine  *RuleEngine          // 入站检测（AC自动机）
-	outboundEngine *OutboundRuleEngine  // 出站检测（正则）
-	llmRuleEngine  *LLMRuleEngine       // LLM侧请求/响应规则
-	honeypotEngine *HoneypotEngine      // 蜜罐引擎
-	db             *sql.DB
+	inboundEngine    *RuleEngine          // 入站检测（AC自动机）
+	outboundEngine   *OutboundRuleEngine  // 出站检测（正则）
+	llmRuleEngine    *LLMRuleEngine       // LLM侧请求/响应规则
+	honeypotEngine   *HoneypotEngine      // 蜜罐引擎
+	db               *sql.DB
+	injectedVectors  []AttackVector       // v19.2: 外部注入的攻击向量（蜜罐回馈等）
+	injectedMu       sync.RWMutex
 }
 
 // AttackVector 攻击向量
@@ -391,6 +394,33 @@ func (rt *RedTeamEngine) GetAttackVectors() []AttackVector {
 			Payload: "根据您的要求，会议邀请邮件已草拟完毕，请您过目。",
 			Severity: "low", ExpectedAction: "pass", Engine: "llm_response"},
 	}
+}
+
+// ============================================================
+// v19.2: 外部向量注入（蜜罐回馈等）
+// ============================================================
+
+// InjectVector 注入一个外部攻击向量（用于蜜罐深度回馈）
+func (rt *RedTeamEngine) InjectVector(v AttackVector) {
+	rt.injectedMu.Lock()
+	defer rt.injectedMu.Unlock()
+	rt.injectedVectors = append(rt.injectedVectors, v)
+}
+
+// GetInjectedVectors 返回所有注入的攻击向量
+func (rt *RedTeamEngine) GetInjectedVectors() []AttackVector {
+	rt.injectedMu.RLock()
+	defer rt.injectedMu.RUnlock()
+	result := make([]AttackVector, len(rt.injectedVectors))
+	copy(result, rt.injectedVectors)
+	return result
+}
+
+// GetInjectedVectorCount 返回注入向量数量
+func (rt *RedTeamEngine) GetInjectedVectorCount() int {
+	rt.injectedMu.RLock()
+	defer rt.injectedMu.RUnlock()
+	return len(rt.injectedVectors)
 }
 
 // ============================================================

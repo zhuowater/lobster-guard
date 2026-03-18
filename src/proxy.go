@@ -128,6 +128,8 @@ type InboundProxy struct {
 	adaptiveEngine *AdaptiveDecisionEngine
 	// v19.1 语义检测引擎
 	semanticDetector *SemanticDetector
+	// v19.2 蜜罐深度交互引擎
+	honeypotDeep *HoneypotDeepEngine
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -359,6 +361,10 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 						TraceID:       bridgeTraceID,
 					})
 					ip.logger.LogWithTrace("inbound", senderID, "honeypot", "honeypot_triggered:"+tpl.Name, msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+					// v19.2: 蜜罐深度交互记录
+					if ip.honeypotDeep != nil {
+						ip.honeypotDeep.RecordInteraction(senderID, tpl.TriggerType, "im", msgText)
+					}
 					log.Printf("[桥接入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s", senderID, tpl.Name, watermark)
 					return // 不转发给上游，蜜罐已介入
 				}
@@ -795,6 +801,10 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					TraceID:       traceID,
 				})
 				ip.logger.LogWithTrace("inbound", senderID, "honeypot", "honeypot_triggered:"+tpl.Name, msgText, rh, latMs, upstreamID, appID, traceID)
+				// v19.2: 蜜罐深度交互记录
+				if ip.honeypotDeep != nil {
+					ip.honeypotDeep.RecordInteraction(senderID, tpl.TriggerType, "im", msgText)
+				}
 				log.Printf("[入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s trace_id=%s", senderID, tpl.Name, watermark, traceID)
 				// 返回蜜罐假响应而不是转发给上游
 				w.Header().Set("Content-Type", "application/json")

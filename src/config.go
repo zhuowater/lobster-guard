@@ -219,6 +219,8 @@ type Config struct {
 	Singularity      SingularityConfig      `yaml:"singularity"`
 	// v19.1 语义检测引擎
 	SemanticDetector SemanticConfig         `yaml:"semantic_detector"`
+	// v19.2 蜜罐深度交互
+	HoneypotDeep HoneypotDeepConfig `yaml:"honeypot_deep"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）

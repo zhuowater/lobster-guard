@@ -135,6 +135,8 @@ type ManagementAPI struct {
 	singularityEngine *SingularityEngine
 	// v19.1 语义检测引擎
 	semanticDetector *SemanticDetector
+	// v19.2 蜜罐深度交互引擎
+	honeypotDeep *HoneypotDeepEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -644,6 +646,21 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleHoneypotStats(w, r)
 	case path == "/api/v1/honeypot/test" && method == "POST":
 		api.handleHoneypotTest(w, r)
+	// v19.2 蜜罐深度交互 API
+	case path == "/api/v1/honeypot/interactions" && method == "GET":
+		api.handleHoneypotDeepInteractions(w, r)
+	case path == "/api/v1/honeypot/loyalty" && method == "GET":
+		api.handleHoneypotDeepLoyaltyList(w, r)
+	case strings.HasPrefix(path, "/api/v1/honeypot/loyalty/") && method == "GET":
+		api.handleHoneypotDeepLoyaltyGet(w, r)
+	case path == "/api/v1/honeypot/feedback" && method == "POST":
+		api.handleHoneypotDeepFeedback(w, r)
+	case strings.HasPrefix(path, "/api/v1/honeypot/feedback/") && method == "POST":
+		api.handleHoneypotDeepFeedbackByID(w, r)
+	case path == "/api/v1/honeypot/deep/stats" && method == "GET":
+		api.handleHoneypotDeepStats(w, r)
+	case path == "/api/v1/honeypot/deep/record" && method == "POST":
+		api.handleHoneypotDeepRecord(w, r)
 	// v15.1 A/B 测试 API
 	case path == "/api/v1/ab-tests" && method == "GET":
 		api.handleABTestList(w, r)

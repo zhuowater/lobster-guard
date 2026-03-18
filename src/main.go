@@ -579,6 +579,15 @@ func main() {
 	}
 	mgmtAPI.singularityEngine = singularityEngine
 
+	// v19.2: 蜜罐深度交互引擎
+	var honeypotDeep *HoneypotDeepEngine
+	if cfg.HoneypotDeep.Enabled {
+		honeypotDeep = NewHoneypotDeepEngine(logger.DB(), honeypotEngine, evolutionEngine, eventBus, cfg.HoneypotDeep)
+		fmt.Println("[初始化] ✅ 蜜罐深度交互引擎已启用（忠诚度曲线 + 自进化回馈）")
+	} else {
+		fmt.Println("[初始化] ⚠️ 蜜罐深度交互引擎: 未启用")
+	}
+
 	// v19.1: 语义检测引擎
 	var semanticDetector *SemanticDetector
 	if cfg.SemanticDetector.Enabled {
@@ -587,6 +596,8 @@ func main() {
 	} else {
 		fmt.Println("[初始化] ⚠️ 语义检测引擎: 未启用")
 	}
+	mgmtAPI.honeypotDeep = honeypotDeep
+	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector
 	inbound.semanticDetector = semanticDetector
 	if llmProxy != nil {
