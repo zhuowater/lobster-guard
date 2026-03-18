@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "14.3.0"
+	AppVersion = "16.0.0"
 )
 
 var startTime = time.Now()
@@ -454,6 +454,16 @@ func main() {
 	abTestEngine := NewABTestEngine(logger.DB())
 	mgmtAPI.abTestEngine = abTestEngine
 	fmt.Println("[初始化] ✅ A/B 测试引擎已就绪 (Prompt A/B 测试 + 流量分配 + 统计显著性)")
+
+	// v16.0: Agent 行为画像引擎
+	behaviorProfileEng := NewBehaviorProfileEngine(logger.DB())
+	mgmtAPI.behaviorProfileEng = behaviorProfileEng
+	fmt.Println("[初始化] ✅ Agent 行为画像引擎已就绪 (语义行为模式 + 突变检测 + 风险评估)")
+
+	// v16.1: 攻击链引擎
+	attackChainEng := NewAttackChainEngine(logger.DB())
+	mgmtAPI.attackChainEng = attackChainEng
+	fmt.Println("[初始化] ✅ 攻击链引擎已就绪 (跨 Agent 关联分析 + 模式匹配 + 风险评分)")
 
 	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
 

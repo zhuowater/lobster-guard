@@ -113,6 +113,10 @@ type ManagementAPI struct {
 	honeypotEngine *HoneypotEngine
 	// v15.1 A/B 测试引擎
 	abTestEngine *ABTestEngine
+	// v16.0 Agent 行为画像引擎
+	behaviorProfileEng *BehaviorProfileEngine
+	// v16.1 攻击链引擎
+	attackChainEng *AttackChainEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -612,6 +616,32 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleABTestDelete(w, r)
 	case strings.HasPrefix(path, "/api/v1/ab-tests/") && method == "GET":
 		api.handleABTestGet(w, r)
+	// v16.0 Agent 行为画像 API
+	case path == "/api/v1/behavior/profiles" && method == "GET":
+		api.handleBehaviorProfileList(w, r)
+	case path == "/api/v1/behavior/anomalies" && method == "GET":
+		api.handleBehaviorAnomalyList(w, r)
+	case path == "/api/v1/behavior/patterns" && method == "GET":
+		api.handleBehaviorPatterns(w, r)
+	case strings.HasPrefix(path, "/api/v1/behavior/profiles/") && strings.HasSuffix(path, "/scan") && method == "POST":
+		api.handleBehaviorProfileScan(w, r)
+	case strings.HasPrefix(path, "/api/v1/behavior/profiles/") && method == "GET":
+		api.handleBehaviorProfileGet(w, r)
+
+	// v16.1 攻击链分析 API
+	case path == "/api/v1/attack-chains" && method == "GET":
+		api.handleAttackChainList(w, r)
+	case path == "/api/v1/attack-chains/analyze" && method == "POST":
+		api.handleAttackChainAnalyze(w, r)
+	case path == "/api/v1/attack-chains/patterns" && method == "GET":
+		api.handleAttackChainPatterns(w, r)
+	case path == "/api/v1/attack-chains/stats" && method == "GET":
+		api.handleAttackChainStats(w, r)
+	case strings.HasPrefix(path, "/api/v1/attack-chains/") && strings.HasSuffix(path, "/status") && method == "PUT":
+		api.handleAttackChainUpdateStatus(w, r)
+	case strings.HasPrefix(path, "/api/v1/attack-chains/") && method == "GET":
+		api.handleAttackChainGet(w, r)
+
 	default:
 		w.WriteHeader(404)
 	}
@@ -2681,6 +2711,20 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] A/B 测试: %d 个", abTestsCreated)
 	}
 
+	// v16.0: 注入行为画像演示数据
+	bpProfiles, bpAnomalies, bpPatterns := 0, 0, 0
+	if api.behaviorProfileEng != nil {
+		bpProfiles, bpAnomalies, bpPatterns = api.behaviorProfileEng.SeedBehaviorDemoData(al.db)
+		log.Printf("[Demo] 行为画像: %d 个 Agent, %d 个突变, %d 个模式", bpProfiles, bpAnomalies, bpPatterns)
+	}
+
+	// v16.1: 注入攻击链演示数据
+	attackChainsCreated := 0
+	if api.attackChainEng != nil {
+		attackChainsCreated = api.attackChainEng.SeedDemoData()
+		log.Printf("[Demo] 攻击链: %d 条", attackChainsCreated)
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":                  true,
@@ -2698,6 +2742,10 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		"honeypot_templates":  honeypotTemplates,
 		"honeypot_triggers":   honeypotTriggers,
 		"ab_tests_created":    abTestsCreated,
+		"behavior_profiles":   bpProfiles,
+		"behavior_anomalies":  bpAnomalies,
+		"behavior_patterns":   bpPatterns,
+		"attack_chains":       attackChainsCreated,
 	})
 }
 
@@ -2744,7 +2792,19 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 		abDeleted = api.abTestEngine.ClearABTestData()
 	}
 
-	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据, %d 条 Prompt 版本, %d+%d 蜜罐数据, %d A/B 测试", deleted, llmDeleted, promptDeleted, hpTplDeleted, hpTrigDeleted, abDeleted)
+	// v16.0: 清除行为画像数据
+	var bpDeleted int64
+	if api.behaviorProfileEng != nil {
+		bpDeleted = api.behaviorProfileEng.ClearBehaviorDemoData()
+	}
+
+	// v16.1: 清除攻击链数据
+	var chainDeleted int64
+	if api.attackChainEng != nil {
+		chainDeleted = api.attackChainEng.ClearDemoData()
+	}
+
+	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据, %d 条 Prompt 版本, %d+%d 蜜罐数据, %d A/B 测试, %d 行为画像, %d 攻击链", deleted, llmDeleted, promptDeleted, hpTplDeleted, hpTrigDeleted, abDeleted, bpDeleted, chainDeleted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":                     true,
 		"deleted":                deleted,
@@ -2753,6 +2813,8 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 		"honeypot_tpl_deleted":   hpTplDeleted,
 		"honeypot_trig_deleted":  hpTrigDeleted,
 		"ab_tests_deleted":       abDeleted,
+		"behavior_deleted":       bpDeleted,
+		"chain_deleted":          chainDeleted,
 	})
 }
 
@@ -5468,4 +5530,274 @@ func (api *ManagementAPI) handleABTestDelete(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// ============================================================
+// v16.1 攻击链分析 API
+// ============================================================
+
+// handleAttackChainList GET /api/v1/attack-chains
+func (api *ManagementAPI) handleAttackChainList(w http.ResponseWriter, r *http.Request) {
+	if api.attackChainEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "attack chain engine not available"})
+		return
+	}
+	q := r.URL.Query()
+	tenantID := q.Get("tenant")
+	if tenantID == "" {
+		tenantID = "all"
+	}
+	severity := q.Get("severity")
+	status := q.Get("status")
+	limit := 50
+	if l, err := strconv.Atoi(q.Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	chains, err := api.attackChainEng.ListChains(tenantID, severity, status, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, chains)
+}
+
+// handleAttackChainGet GET /api/v1/attack-chains/:id
+func (api *ManagementAPI) handleAttackChainGet(w http.ResponseWriter, r *http.Request) {
+	if api.attackChainEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "attack chain engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/attack-chains/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	chain, err := api.attackChainEng.GetChain(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": "attack chain not found"})
+		return
+	}
+	jsonResponse(w, 200, chain)
+}
+
+// handleAttackChainAnalyze POST /api/v1/attack-chains/analyze
+func (api *ManagementAPI) handleAttackChainAnalyze(w http.ResponseWriter, r *http.Request) {
+	if api.attackChainEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "attack chain engine not available"})
+		return
+	}
+	var req struct {
+		TenantID string `json:"tenant_id"`
+		Hours    int    `json:"hours"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.TenantID = "default"
+		req.Hours = 24
+	}
+	if req.Hours <= 0 {
+		req.Hours = 24
+	}
+	if req.TenantID == "" {
+		req.TenantID = "default"
+	}
+	chains, err := api.attackChainEng.AnalyzeChains(req.TenantID, req.Hours)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":    "completed",
+		"chains":    chains,
+		"count":     len(chains),
+		"tenant_id": req.TenantID,
+		"hours":     req.Hours,
+	})
+}
+
+// handleAttackChainUpdateStatus PUT /api/v1/attack-chains/:id/status
+func (api *ManagementAPI) handleAttackChainUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if api.attackChainEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "attack chain engine not available"})
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/attack-chains/")
+	trimmed = strings.TrimSuffix(trimmed, "/status")
+	id := trimmed
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := api.attackChainEng.UpdateChainStatus(id, req.Status); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "id": id, "new_status": req.Status})
+}
+
+// handleAttackChainPatterns GET /api/v1/attack-chains/patterns
+func (api *ManagementAPI) handleAttackChainPatterns(w http.ResponseWriter, r *http.Request) {
+	patterns := GetChainPatterns()
+	jsonResponse(w, 200, patterns)
+}
+
+// handleAttackChainStats GET /api/v1/attack-chains/stats
+func (api *ManagementAPI) handleAttackChainStats(w http.ResponseWriter, r *http.Request) {
+	if api.attackChainEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "attack chain engine not available"})
+		return
+	}
+	tenantID := r.URL.Query().Get("tenant")
+	if tenantID == "" {
+		tenantID = "all"
+	}
+	stats := api.attackChainEng.GetStats(tenantID)
+	jsonResponse(w, 200, stats)
+}
+
+// ============================================================
+// v16.0 Agent 行为画像 API handlers
+// ============================================================
+
+// handleBehaviorProfileList GET /api/v1/behavior/profiles — Agent 画像列表
+func (api *ManagementAPI) handleBehaviorProfileList(w http.ResponseWriter, r *http.Request) {
+	if api.behaviorProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "behavior profile engine not available"})
+		return
+	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	profiles, err := api.behaviorProfileEng.ListProfiles(tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if profiles == nil {
+		profiles = []AgentProfile{}
+	}
+
+	totalAnomalies := 0
+	highRiskCount := 0
+	totalPatterns := 0
+	for _, p := range profiles {
+		totalAnomalies += len(p.Anomalies)
+		if p.RiskLevel == "high" || p.RiskLevel == "critical" {
+			highRiskCount++
+		}
+		totalPatterns += len(p.CommonPatterns)
+	}
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"profiles":        profiles,
+		"total":           len(profiles),
+		"total_anomalies": totalAnomalies,
+		"high_risk_count": highRiskCount,
+		"total_patterns":  totalPatterns,
+		"tenant":          tenantID,
+	})
+}
+
+// handleBehaviorProfileGet GET /api/v1/behavior/profiles/:id — 单个 Agent 画像
+func (api *ManagementAPI) handleBehaviorProfileGet(w http.ResponseWriter, r *http.Request) {
+	if api.behaviorProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "behavior profile engine not available"})
+		return
+	}
+	agentID := strings.TrimPrefix(r.URL.Path, "/api/v1/behavior/profiles/")
+	if agentID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "agent_id required"})
+		return
+	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	profile, err := api.behaviorProfileEng.BuildProfile(agentID, tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if profile.TotalRequests == 0 {
+		jsonResponse(w, 404, map[string]string{"error": "agent not found"})
+		return
+	}
+	jsonResponse(w, 200, profile)
+}
+
+// handleBehaviorAnomalyList GET /api/v1/behavior/anomalies — 行为突变列表
+func (api *ManagementAPI) handleBehaviorAnomalyList(w http.ResponseWriter, r *http.Request) {
+	if api.behaviorProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "behavior profile engine not available"})
+		return
+	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	severity := r.URL.Query().Get("severity")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	anomalies, err := api.behaviorProfileEng.ListAnomalies(tenantID, severity, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if anomalies == nil {
+		anomalies = []BehaviorAnomaly{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"anomalies": anomalies,
+		"total":     len(anomalies),
+		"tenant":    tenantID,
+	})
+}
+
+// handleBehaviorProfileScan POST /api/v1/behavior/profiles/:id/scan — 手动触发扫描
+func (api *ManagementAPI) handleBehaviorProfileScan(w http.ResponseWriter, r *http.Request) {
+	if api.behaviorProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "behavior profile engine not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/behavior/profiles/")
+	agentID := strings.TrimSuffix(path, "/scan")
+	if agentID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "agent_id required"})
+		return
+	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	profile, err := api.behaviorProfileEng.ScanAndPersist(agentID, tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":    "scanned",
+		"profile":   profile,
+		"anomalies": len(profile.Anomalies),
+	})
+}
+
+// handleBehaviorPatterns GET /api/v1/behavior/patterns — 全局行为序列模式
+func (api *ManagementAPI) handleBehaviorPatterns(w http.ResponseWriter, r *http.Request) {
+	if api.behaviorProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "behavior profile engine not available"})
+		return
+	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	patterns, err := api.behaviorProfileEng.ListAllPatterns(tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if patterns == nil {
+		patterns = []BehaviorPattern{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"patterns": patterns,
+		"total":    len(patterns),
+		"tenant":   tenantID,
+	})
 }
