@@ -27,6 +27,8 @@ func setupRedTeamEngine(t *testing.T) (*RedTeamEngine, *sql.DB, func()) {
 	}
 	engine := NewRuleEngine()
 	rt := NewRedTeamEngine(db, engine)
+	rt.outboundEngine = NewOutboundRuleEngine(nil)                     // v17.3: 使用默认出站规则
+	rt.llmRuleEngine = NewLLMRuleEngine(mergeLLMRuleDefaults(nil))    // v17.3: 使用默认 LLM 规则
 	cleanup := func() { db.Close(); os.Remove(tmpDB) }
 	return rt, db, cleanup
 }
@@ -52,8 +54,11 @@ func setupMgmtAPIWithRedTeam(t *testing.T) (*ManagementAPI, func()) {
 	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
 	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	// 注入 RedTeamEngine
+	// 注入 RedTeamEngine（v17.3: 全引擎）
+	llmRuleEng := NewLLMRuleEngine(mergeLLMRuleDefaults(nil))
 	rt := NewRedTeamEngine(db, engine)
+	rt.outboundEngine = outEngine
+	rt.llmRuleEngine = llmRuleEng
 	api.redTeamEngine = rt
 
 	cleanup := func() { logger.Close(); db.Close(); os.Remove(tmpDB) }
@@ -138,7 +143,7 @@ func TestAttackVectorFields(t *testing.T) {
 			t.Fatalf("向量 %s 无效 Severity: %s", v.ID, v.Severity)
 		}
 		// ExpectedAction 必须是有效值
-		validAction := map[string]bool{"pass": true, "warn": true, "block": true}
+		validAction := map[string]bool{"pass": true, "warn": true, "block": true, "rewrite": true}
 		if !validAction[v.ExpectedAction] {
 			t.Fatalf("向量 %s 无效 ExpectedAction: %s", v.ID, v.ExpectedAction)
 		}

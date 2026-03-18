@@ -453,6 +453,9 @@ func main() {
 
 	// v14.2: Red Team Autopilot
 	redTeamEngine := NewRedTeamEngine(logger.DB(), engine)
+	redTeamEngine.outboundEngine = outboundEngine   // v17.3: 出站规则红队
+	redTeamEngine.llmRuleEngine = llmRuleEngine      // v17.3: LLM 规则红队
+	redTeamEngine.honeypotEngine = honeypotEngine     // v17.3: 蜜罐红队
 	mgmtAPI.redTeamEngine = redTeamEngine
 	fmt.Println("[初始化] ✅ Red Team Autopilot 引擎已就绪 (35 攻击向量, OWASP LLM Top10)")
 
