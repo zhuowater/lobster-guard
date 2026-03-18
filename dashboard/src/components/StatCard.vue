@@ -3,6 +3,7 @@
     <div class="stat-card-top">
       <span class="stat-card-icon" v-html="iconSvg"></span>
       <span class="stat-card-label">{{ label }}</span>
+      <span v-if="badge" class="stat-card-badge">{{ badge }}</span>
     </div>
     <div class="stat-card-value">{{ displayText }}</div>
     <div v-if="change" class="stat-card-change" :class="changeUp ? 'change-up' : 'change-down'">
@@ -24,6 +25,7 @@ const props = defineProps({
   color: { type: String, default: 'blue' },
   change: { type: String, default: '' },
   changeUp: { type: Boolean, default: true },
+  badge: { type: String, default: '' },
 })
 
 const hovered = ref(false)
@@ -102,6 +104,8 @@ watch(() => props.value, (newVal) => {
 .stat-card--red::before { background: var(--color-danger); }
 .stat-card--yellow::before { background: var(--color-warning); }
 .stat-card--green::before { background: var(--color-success); }
+.stat-card--indigo::before { background: #6366F1; }
+.stat-card--indigo .stat-card-icon { color: #6366F1; }
 
 .stat-card:hover {
   transform: translateY(-2px);
@@ -124,6 +128,11 @@ watch(() => props.value, (newVal) => {
 
 .stat-card-label {
   font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500;
+}
+.stat-card-badge {
+  display: inline-block; padding: 1px 5px; border-radius: 9999px;
+  font-size: 9px; font-weight: 600; color: var(--text-tertiary);
+  background: rgba(107,114,128,0.15); margin-left: auto; line-height: 1.4;
 }
 .stat-card-value {
   font-size: var(--text-2xl); font-weight: 700;

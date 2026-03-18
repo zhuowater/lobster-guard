@@ -265,9 +265,18 @@ func NewOWASPMatrixEngine(db *sql.DB, llmRuleEngine *LLMRuleEngine) *OWASPMatrix
 	return &OWASPMatrixEngine{db: db, llmRuleEngine: llmRuleEngine}
 }
 
-// Calculate 计算 OWASP Top 10 矩阵
+// Calculate 计算 OWASP Top 10 矩阵（默认 24h）
 func (e *OWASPMatrixEngine) Calculate() []OWASPMatrixItem {
-	since24h := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	return e.CalculateWithFilter("")
+}
+
+// CalculateWithFilter 计算 OWASP Top 10 矩阵（v11.4: 支持时间过滤）
+// sinceRFC3339 为空则使用默认 24h 窗口
+func (e *OWASPMatrixEngine) CalculateWithFilter(sinceRFC3339 string) []OWASPMatrixItem {
+	since24h := sinceRFC3339
+	if since24h == "" {
+		since24h = time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	}
 	items := make([]OWASPMatrixItem, 10)
 
 	// 定义 OWASP LLM Top 10

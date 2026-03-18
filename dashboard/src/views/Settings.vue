@@ -136,28 +136,17 @@
           LLM 代理未启用 · <a href="https://github.com/lobster-guard/docs/llm-proxy" target="_blank" style="color:var(--color-primary)">查看文档</a>
         </div>
         <div v-else>
-          <div class="llm-row"><span class="llm-label">启用状态</span><span class="llm-val"><span class="dot dot-sm" :class="llmConfig.enabled ? 'dot-healthy' : 'dot-unhealthy'"></span>{{ llmConfig.enabled ? '已启用' : '未启用' }}</span></div>
-          <div class="llm-row"><span class="llm-label">监听端口</span><span class="llm-val" style="font-family:var(--font-mono)">{{ llmConfig.listen || '--' }}</span></div>
-
-          <div class="llm-section-title">上游目标</div>
-          <div v-if="llmConfig.targets && llmConfig.targets.length" class="llm-targets">
-            <div v-for="t in llmConfig.targets" :key="t.name" class="llm-target-row">
-              <code>{{ t.name }}</code>
-              <span style="color:var(--text-tertiary)">{{ t.upstream }}</span>
-              <span class="llm-tag">{{ t.api_key_header }}</span>
-            </div>
+          <div class="llm-row">
+            <span class="llm-label">启用状态</span>
+            <span class="llm-val">
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="llmConfig.enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="margin-left:8px;font-size:var(--text-xs);color:var(--text-tertiary)">{{ llmConfig.enabled ? '已启用' : '未启用' }} · 修改需重启</span>
+            </span>
           </div>
-          <div v-else style="color:var(--text-tertiary);font-size:var(--text-sm)">无上游目标</div>
-
-          <div class="llm-section-title">审计配置</div>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_input" /> 记录工具调用输入</label>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_result" /> 记录工具调用结果</label>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_system_prompt" /> 记录 System Prompt</label>
-          <div class="llm-row" style="margin-top:8px"><span class="llm-label">摘要长度</span><input type="number" v-model.number="llmConfig.audit.max_preview_len" class="llm-input-sm" min="100" max="5000" /> <span class="llm-hint">字符</span></div>
-
-          <div id="section-cost" class="llm-section-title">成本预警</div>
-          <div class="llm-row"><span class="llm-label">日限额</span><span class="llm-hint" style="margin-right:4px">$</span><input type="number" v-model.number="llmConfig.cost_alert.daily_limit_usd" class="llm-input-sm" min="0" step="5" /> <span class="llm-hint">USD</span></div>
-          <div class="llm-row"><span class="llm-label">Webhook</span><input type="text" v-model="llmConfig.cost_alert.webhook_url" class="llm-input" placeholder="https://..." /></div>
+          <div class="llm-row"><span class="llm-label">监听端口</span><input type="text" v-model="llmConfig.listen" class="llm-input-sm" style="width:140px;font-family:var(--font-mono)" placeholder=":8445" /> <span class="llm-hint">修改需重启</span></div>
 
           <div id="section-security" class="llm-section-title">安全策略</div>
           <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.scan_pii_in_response" /> 扫描响应中的 PII</label>
@@ -181,6 +170,34 @@
             <div class="llm-row"><span class="llm-label">超限动作</span><select v-model="budgetAction" class="llm-input-sm" style="width:100px"><option value="warn">warn</option><option value="block">block</option></select></div>
             <div class="llm-row"><span class="llm-label">工具限制</span><input type="text" v-model="budgetToolLimitsStr" class="llm-input" placeholder="exec=3, shell=2" /></div>
             <div class="llm-row"><span class="llm-label">24h超限</span><span class="llm-val" :style="{ color: (budgetStatus.violations_24h || 0) > 0 ? 'var(--color-warning)' : 'var(--text-secondary)' }">{{ budgetStatus.violations_24h || 0 }} 次</span></div>
+          </div>
+
+          <div class="llm-section-title">审计配置</div>
+          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_input" /> 记录工具调用输入</label>
+          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_result" /> 记录工具调用结果</label>
+          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_system_prompt" /> 记录 System Prompt</label>
+          <div class="llm-row" style="margin-top:8px"><span class="llm-label">摘要长度</span><input type="number" v-model.number="llmConfig.audit.max_preview_len" class="llm-input-sm" min="100" max="5000" /> <span class="llm-hint">字符</span></div>
+
+          <div id="section-cost" class="llm-section-title">成本预警</div>
+          <div class="llm-row"><span class="llm-label">日限额</span><span class="llm-hint" style="margin-right:4px">$</span><input type="number" v-model.number="llmConfig.cost_alert.daily_limit_usd" class="llm-input-sm" min="0" step="5" /> <span class="llm-hint">USD</span></div>
+          <div class="llm-row"><span class="llm-label">Webhook</span><input type="text" v-model="llmConfig.cost_alert.webhook_url" class="llm-input" placeholder="https://..." /></div>
+
+          <div class="llm-section-title llm-advanced-toggle" @click="showAdvanced = !showAdvanced" style="cursor:pointer;user-select:none">
+            <span>{{ showAdvanced ? '▾' : '▸' }} 高级配置</span>
+            <span style="font-size:var(--text-xs);color:var(--text-tertiary);font-weight:400;margin-left:8px">上游目标、超时等</span>
+          </div>
+          <div v-show="showAdvanced">
+            <div class="llm-row"><span class="llm-label">超时</span><input type="number" v-model.number="llmConfig.timeout_sec" class="llm-input-sm" min="5" max="300" /> <span class="llm-hint">秒</span></div>
+            <div class="llm-row"><span class="llm-label">请求体限制</span><input type="number" v-model.number="llmConfig.max_body_bytes" class="llm-input-sm" style="width:120px" min="0" step="1048576" /> <span class="llm-hint">字节 (0=不限)</span></div>
+            <div style="margin-top:8px;margin-bottom:4px;font-size:var(--text-xs);color:var(--text-tertiary)">上游目标（透明代理转发地址）</div>
+            <div v-if="llmConfig.targets && llmConfig.targets.length" class="llm-targets">
+              <div v-for="t in llmConfig.targets" :key="t.name" class="llm-target-row">
+                <code>{{ t.name }}</code>
+                <span style="color:var(--text-tertiary)">{{ t.upstream }}</span>
+                <span class="llm-tag">{{ t.api_key_header }}</span>
+              </div>
+            </div>
+            <div v-else style="color:var(--text-tertiary);font-size:var(--text-sm)">无上游目标</div>
           </div>
 
           <div style="margin-top:var(--space-4);display:flex;align-items:center;gap:var(--space-3)">
@@ -233,6 +250,7 @@ const activeTab = ref('auth')
 const llmConfigLoading = ref(true)
 const llmConfig = ref(null)
 const llmSaving = ref(false)
+const showAdvanced = ref(false)
 const highRiskToolsStr = computed({
   get: () => llmConfig.value?.security?.high_risk_tool_list?.join(', ') || '',
   set: (v) => { if (llmConfig.value?.security) { llmConfig.value.security.high_risk_tool_list = v.split(',').map(s => s.trim()).filter(Boolean) } }
@@ -437,4 +455,11 @@ onMounted(() => {
 .llm-input:focus { border-color: var(--color-primary); }
 .llm-hint { font-size: var(--text-xs); color: var(--text-tertiary); }
 .llm-restart-hint { font-size: var(--text-xs); color: var(--color-warning); }
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 20px; transition: .3s; }
+.toggle-slider:before { content: ''; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background: var(--text-tertiary); border-radius: 50%; transition: .3s; }
+.toggle-switch input:checked + .toggle-slider { background: var(--color-primary); border-color: var(--color-primary); }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(16px); background: #fff; }
+.llm-advanced-toggle { display: flex; align-items: center; }
 </style>

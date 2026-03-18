@@ -87,6 +87,23 @@ func (api *ManagementAPI) checkRegistrationAuth(r *http.Request) bool {
 	return auth == "Bearer "+api.registrationToken
 }
 
+// parseSinceParam 解析 since 参数: "1h", "24h", "7d", "30d" → RFC3339 时间字符串（v11.4）
+func parseSinceParam(since string) string {
+	now := time.Now().UTC()
+	switch since {
+	case "1h":
+		return now.Add(-1 * time.Hour).Format(time.RFC3339)
+	case "24h":
+		return now.Add(-24 * time.Hour).Format(time.RFC3339)
+	case "7d":
+		return now.AddDate(0, 0, -7).Format(time.RFC3339)
+	case "30d":
+		return now.AddDate(0, 0, -30).Format(time.RFC3339)
+	default:
+		return "" // 全量
+	}
+}
+
 func jsonResponse(w http.ResponseWriter, code int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -820,7 +837,15 @@ func (api *ManagementAPI) handleAuditTimeline(w http.ResponseWriter, r *http.Req
 }
 
 func (api *ManagementAPI) handleStats(w http.ResponseWriter, r *http.Request) {
-	stats := api.logger.Stats()
+	since := r.URL.Query().Get("since")
+	sinceTime := parseSinceParam(since)
+	stats := api.logger.StatsWithFilter(sinceTime)
+	// v11.4: 返回时间范围信息
+	if since != "" {
+		stats["time_range"] = since
+	} else {
+		stats["time_range"] = "all"
+	}
 	upstreams := api.pool.ListUpstreams()
 	healthyCount := 0
 	for _, up := range upstreams {
@@ -2392,12 +2417,19 @@ func (api *ManagementAPI) handleLLMStatus(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleLLMOverview GET /api/v1/llm/overview — LLM 概览统计
+// handleLLMOverview GET /api/v1/llm/overview — LLM 概览统计（v11.4: 支持 ?since 参数）
 func (api *ManagementAPI) handleLLMOverview(w http.ResponseWriter, r *http.Request) {
-	overview, err := api.llmAuditor.Overview()
+	since := r.URL.Query().Get("since")
+	sinceTime := parseSinceParam(since)
+	overview, err := api.llmAuditor.OverviewWithFilter(sinceTime)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	if since != "" {
+		overview["time_range"] = since
+	} else {
+		overview["time_range"] = "all"
 	}
 	jsonResponse(w, 200, overview)
 }
@@ -3224,10 +3256,10 @@ func (api *ManagementAPI) handleUserTimeline(w http.ResponseWriter, r *http.Requ
 	jsonResponse(w, 200, map[string]interface{}{"events": events, "total": len(events)})
 }
 
-// handleUserRiskStats GET /api/v1/users/risk-stats — 风险统计概览
+// handleUserRiskStats GET /api/v1/users/risk-stats — 风险统计概览（固定 30 天窗口）
 func (api *ManagementAPI) handleUserRiskStats(w http.ResponseWriter, r *http.Request) {
 	if api.userProfileEng == nil {
-		jsonResponse(w, 200, &UserRiskStats{})
+		jsonResponse(w, 200, map[string]interface{}{"time_range": "30d"})
 		return
 	}
 	stats, err := api.userProfileEng.GetRiskStats()
@@ -3242,7 +3274,7 @@ func (api *ManagementAPI) handleUserRiskStats(w http.ResponseWriter, r *http.Req
 // v11.1 驾驶舱模式 API handlers
 // ============================================================
 
-// handleHealthScore GET /api/v1/health/score — 综合安全健康分
+// handleHealthScore GET /api/v1/health/score — 综合安全健康分（固定 7 天窗口，v11.4 增加 time_range 标注）
 func (api *ManagementAPI) handleHealthScore(w http.ResponseWriter, r *http.Request) {
 	if api.healthScoreEng == nil {
 		jsonResponse(w, 500, map[string]string{"error": "health score engine not available"})
@@ -3253,17 +3285,33 @@ func (api *ManagementAPI) handleHealthScore(w http.ResponseWriter, r *http.Reque
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	jsonResponse(w, 200, result)
+	// v11.4: 包装为带 time_range 的响应
+	resp := map[string]interface{}{
+		"time_range":  "7d",
+		"score":       result.Score,
+		"level":       result.Level,
+		"level_label": result.LevelLabel,
+		"deductions":  result.Deductions,
+		"trend":       result.Trend,
+		"updated_at":  result.UpdatedAt,
+	}
+	jsonResponse(w, 200, resp)
 }
 
-// handleOWASPMatrix GET /api/v1/llm/owasp-matrix — OWASP LLM Top 10 矩阵
+// handleOWASPMatrix GET /api/v1/llm/owasp-matrix — OWASP LLM Top 10 矩阵（v11.4: 支持 ?since 参数）
 func (api *ManagementAPI) handleOWASPMatrix(w http.ResponseWriter, r *http.Request) {
 	if api.owaspMatrixEng == nil {
 		jsonResponse(w, 500, map[string]string{"error": "OWASP matrix engine not available"})
 		return
 	}
-	items := api.owaspMatrixEng.Calculate()
-	jsonResponse(w, 200, map[string]interface{}{"items": items, "total": len(items)})
+	since := r.URL.Query().Get("since")
+	sinceTime := parseSinceParam(since)
+	items := api.owaspMatrixEng.CalculateWithFilter(sinceTime)
+	timeRange := since
+	if timeRange == "" {
+		timeRange = "24h" // OWASP 矩阵默认 24h
+	}
+	jsonResponse(w, 200, map[string]interface{}{"items": items, "total": len(items), "time_range": timeRange})
 }
 
 // handleStrictModeGet GET /api/v1/system/strict-mode — 获取严格模式状态
@@ -3343,7 +3391,7 @@ func (api *ManagementAPI) handleNotifications(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	jsonResponse(w, 200, map[string]interface{}{"notifications": items, "total": len(items)})
+	jsonResponse(w, 200, map[string]interface{}{"notifications": items, "total": len(items), "time_range": "24h"})
 }
 
 // ============================================================

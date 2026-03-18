@@ -5,11 +5,18 @@
       <div class="card-header">
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
         <span class="card-title">OWASP LLM Top 10 矩阵</span>
-        <div class="refresh-control" style="margin-left:auto">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          <select v-model="refreshInterval" @change="onRefreshChange" class="refresh-select">
-            <option value="30000">30s</option><option value="60000">1m</option><option value="300000">5m</option><option value="0">手动</option>
+        <div class="owasp-controls" style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <select v-model="timeRange" @change="onTimeRangeChange" class="time-range-select" title="数据时间范围">
+            <option value="24h">⏱ 24小时</option>
+            <option value="7d">⏱ 7天</option>
+            <option value="30d">⏱ 30天</option>
           </select>
+          <div class="refresh-control">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <select v-model="refreshInterval" @change="onRefreshChange" class="refresh-select">
+              <option value="30000">30s</option><option value="60000">1m</option><option value="300000">5m</option><option value="0">手动</option>
+            </select>
+          </div>
         </div>
       </div>
       <div class="owasp-grid">
@@ -17,7 +24,7 @@
           <div class="owasp-id">{{ item.id }}</div>
           <div class="owasp-name">{{ item.name_zh }}</div>
           <div class="owasp-count">{{ item.count }}</div>
-          <div class="owasp-label">24h 事件</div>
+          <div class="owasp-label">{{ timeRange }} 事件</div>
         </div>
       </div>
     </div>
@@ -25,19 +32,19 @@
     <!-- Stat Cards -->
     <div class="ov-cards" v-if="loaded">
       <StatCard
-        :iconSvg="svgCalls" :value="overview.total_calls" label="总调用数" color="indigo"
+        :iconSvg="svgCalls" :value="overview.total_calls" label="总调用数" :badge="timeRange" color="indigo"
         class="stat-clickable" @click="router.push('/agent')"
       />
       <StatCard
-        :iconSvg="svgToken" :value="formatTokens(overview.total_tokens)" label="Token 用量" color="blue"
+        :iconSvg="svgToken" :value="formatTokens(overview.total_tokens)" label="Token 用量" :badge="timeRange" color="blue"
         class="stat-clickable" @click="router.push({ path: '/settings', query: { section: 'cost' } })"
       />
       <StatCard
-        :iconSvg="svgSpeed" :value="overview.avg_latency_ms + 'ms'" label="平均延迟" color="green"
+        :iconSvg="svgSpeed" :value="overview.avg_latency_ms + 'ms'" label="平均延迟" :badge="timeRange" color="green"
         class="stat-clickable" @click="router.push('/agent')"
       />
       <StatCard
-        :iconSvg="svgError" :value="(overview.error_rate * 100).toFixed(1) + '%'" label="错误率" color="red"
+        :iconSvg="svgError" :value="(overview.error_rate * 100).toFixed(1) + '%'" label="错误率" :badge="timeRange" color="red"
         class="stat-clickable" @click="router.push('/agent')"
       />
     </div>
@@ -202,9 +209,13 @@ const router = useRouter()
 // v11.1: OWASP 矩阵
 const owaspMatrix = ref([])
 const refreshInterval = ref(localStorage.getItem('llm_refresh') || '30000')
+// v11.4: 全局时间范围选择器
+const timeRange = ref(localStorage.getItem('llm_time_range') || '24h')
+
+function onTimeRangeChange() { localStorage.setItem('llm_time_range', timeRange.value); trendRange.value = timeRange.value === '24h' ? '24h' : '7d'; loadData(); loadOwaspMatrix() }
 
 async function loadOwaspMatrix() {
-  try { const d = await api('/api/v1/llm/owasp-matrix'); owaspMatrix.value = d.items || [] } catch { owaspMatrix.value = [] }
+  try { const d = await api(`/api/v1/llm/owasp-matrix?since=${timeRange.value}`); owaspMatrix.value = d.items || [] } catch { owaspMatrix.value = [] }
 }
 function onOwaspClick(item) {
   const routeMap = {
@@ -318,7 +329,7 @@ async function loadTimeline() {
 
 async function loadData() {
   try {
-    const d = await api('/api/v1/llm/overview')
+    const d = await api(`/api/v1/llm/overview?since=${timeRange.value}`)
     overview.value = d
   } catch {
     overview.value = { total_calls: 0, total_tokens: 0, avg_latency_ms: 0, error_rate: 0, models: [], cost_by_model: [], cost_trend: [], daily_limit_usd: 0, today_cost_usd: 0, cost_alert_triggered: false }
@@ -388,5 +399,7 @@ code { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; fon
 .owasp-high { border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
 .refresh-control { display: flex; align-items: center; gap: var(--space-1); color: var(--text-tertiary); }
 .refresh-select { background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--text-xs); padding: 2px 6px; cursor: pointer; }
+.time-range-select{background:var(--bg-elevated);border:1px solid var(--color-primary);border-radius:var(--radius-sm);color:var(--color-primary);font-size:var(--text-xs);font-weight:600;padding:3px 8px;cursor:pointer;transition:all .2s}
+.time-range-select:hover{background:var(--color-primary);color:#fff}
 @media(max-width:768px) { .owasp-grid { grid-template-columns: repeat(2, 1fr); } }
 </style>

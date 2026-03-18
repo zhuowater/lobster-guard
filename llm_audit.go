@@ -574,8 +574,14 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 // 查询 API
 // ============================================================
 
-// Overview 返回 LLM 概览统计
+// Overview 返回 LLM 概览统计（全量）
 func (la *LLMAuditor) Overview() (map[string]interface{}, error) {
+	return la.OverviewWithFilter("")
+}
+
+// OverviewWithFilter 返回 LLM 概览统计（v11.4: 支持时间过滤）
+// sinceRFC3339 为空则全量，否则 WHERE timestamp >= sinceRFC3339
+func (la *LLMAuditor) OverviewWithFilter(sinceRFC3339 string) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"total_calls":        0,
 		"total_tokens":       0,
@@ -595,12 +601,24 @@ func (la *LLMAuditor) Overview() (map[string]interface{}, error) {
 		"cost_alert_triggered": false,
 	}
 
+	// v11.4: 构建 WHERE 子句
+	callsWhere := ""
+	toolsWhere := ""
+	var callsArgs []interface{}
+	var toolsArgs []interface{}
+	if sinceRFC3339 != "" {
+		callsWhere = " WHERE timestamp >= ?"
+		callsArgs = append(callsArgs, sinceRFC3339)
+		toolsWhere = " WHERE timestamp >= ?"
+		toolsArgs = append(toolsArgs, sinceRFC3339)
+	}
+
 	var totalCalls int
-	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls").Scan(&totalCalls)
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls"+callsWhere, callsArgs...).Scan(&totalCalls)
 	result["total_calls"] = totalCalls
 
 	var totalTokens, inputTokens, outputTokens sql.NullInt64
-	la.db.QueryRow("SELECT COALESCE(SUM(total_tokens),0), COALESCE(SUM(request_tokens),0), COALESCE(SUM(response_tokens),0) FROM llm_calls").Scan(&totalTokens, &inputTokens, &outputTokens)
+	la.db.QueryRow("SELECT COALESCE(SUM(total_tokens),0), COALESCE(SUM(request_tokens),0), COALESCE(SUM(response_tokens),0) FROM llm_calls"+callsWhere, callsArgs...).Scan(&totalTokens, &inputTokens, &outputTokens)
 	result["total_tokens"] = totalTokens.Int64
 	result["input_tokens"] = inputTokens.Int64
 	result["output_tokens"] = outputTokens.Int64
@@ -610,19 +628,27 @@ func (la *LLMAuditor) Overview() (map[string]interface{}, error) {
 	result["estimated_cost_usd"] = float64(int(cost*100)) / 100
 
 	var avgLatency sql.NullFloat64
-	la.db.QueryRow("SELECT AVG(latency_ms) FROM llm_calls").Scan(&avgLatency)
+	la.db.QueryRow("SELECT AVG(latency_ms) FROM llm_calls"+callsWhere, callsArgs...).Scan(&avgLatency)
 	if avgLatency.Valid {
 		result["avg_latency_ms"] = float64(int(avgLatency.Float64*10)) / 10
 	}
 
 	var errorCount int
-	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE status_code >= 400 OR error_message != ''").Scan(&errorCount)
+	errWhere := callsWhere
+	errArgs := make([]interface{}, len(callsArgs))
+	copy(errArgs, callsArgs)
+	if sinceRFC3339 != "" {
+		errWhere = " WHERE timestamp >= ? AND (status_code >= 400 OR error_message != '')"
+	} else {
+		errWhere = " WHERE status_code >= 400 OR error_message != ''"
+	}
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls"+errWhere, errArgs...).Scan(&errorCount)
 	if totalCalls > 0 {
 		result["error_rate"] = float64(int(float64(errorCount)/float64(totalCalls)*10000)) / 10000
 	}
 
 	var toolCallsTotal int
-	la.db.QueryRow("SELECT COUNT(*) FROM llm_tool_calls").Scan(&toolCallsTotal)
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_tool_calls"+toolsWhere, toolsArgs...).Scan(&toolCallsTotal)
 	result["tool_calls_total"] = toolCallsTotal
 
 	since24h := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
@@ -631,7 +657,13 @@ func (la *LLMAuditor) Overview() (map[string]interface{}, error) {
 	result["high_risk_24h"] = highRisk24h
 
 	// 模型分布
-	rows, err := la.db.Query("SELECT model, COUNT(*) as cnt FROM llm_calls WHERE model != '' GROUP BY model ORDER BY cnt DESC LIMIT 10")
+	modelWhere := callsWhere
+	if sinceRFC3339 != "" {
+		modelWhere = " WHERE timestamp >= ? AND model != ''"
+	} else {
+		modelWhere = " WHERE model != ''"
+	}
+	rows, err := la.db.Query("SELECT model, COUNT(*) as cnt FROM llm_calls"+modelWhere+" GROUP BY model ORDER BY cnt DESC LIMIT 10", callsArgs...)
 	if err == nil {
 		defer rows.Close()
 		var models []map[string]interface{}

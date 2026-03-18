@@ -146,6 +146,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, apiPost, downloadFile, getToken } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
@@ -154,6 +155,7 @@ import TrendChart from '../components/TrendChart.vue'
 import JsonHighlight from '../components/JsonHighlight.vue'
 import Skeleton from '../components/Skeleton.vue'
 
+const route = useRoute()
 const loading = ref(false)
 const logs = ref([])
 const timelineData = ref([])
@@ -294,6 +296,17 @@ function doConfirm() { confirmVisible.value = false; if (confirmAction) confirmA
 
 let refreshTimer = null
 onMounted(() => {
+  // v11.4: 读取 route.query.since 并自动设置日期过滤器
+  const sincePar = route.query.since
+  if (sincePar) {
+    const sinceMap = { '1h': 1, '24h': 24, '7d': 168, '30d': 720 }
+    const hours = sinceMap[sincePar]
+    if (hours) {
+      const d = new Date(Date.now() - hours * 3600000)
+      filters.start_time = d.toISOString().slice(0, 16)
+      timelineRange.value = hours > 24 ? '7d' : '24h'
+    }
+  }
   loadLogs()
   loadTimeline()
   refreshTimer = setInterval(() => { loadLogs(); loadTimeline() }, 30000)

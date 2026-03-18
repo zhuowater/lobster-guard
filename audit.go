@@ -188,11 +188,29 @@ func (al *AuditLogger) Timeline(hours int) []map[string]interface{} {
 }
 
 func (al *AuditLogger) Stats() map[string]interface{} {
+	return al.StatsWithFilter("")
+}
+
+// StatsWithFilter 带时间过滤的统计（v11.4）
+// sinceRFC3339 为空则全量，否则 WHERE timestamp >= sinceRFC3339
+func (al *AuditLogger) StatsWithFilter(sinceRFC3339 string) map[string]interface{} {
 	stats := map[string]interface{}{}
 	var total int
-	al.db.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&total)
+	if sinceRFC3339 != "" {
+		al.db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE timestamp >= ?`, sinceRFC3339).Scan(&total)
+	} else {
+		al.db.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&total)
+	}
 	stats["total"] = total
-	rows, err := al.db.Query(`SELECT direction, action, COUNT(*) FROM audit_log GROUP BY direction, action`)
+	var query string
+	var args []interface{}
+	if sinceRFC3339 != "" {
+		query = `SELECT direction, action, COUNT(*) FROM audit_log WHERE timestamp >= ? GROUP BY direction, action`
+		args = append(args, sinceRFC3339)
+	} else {
+		query = `SELECT direction, action, COUNT(*) FROM audit_log GROUP BY direction, action`
+	}
+	rows, err := al.db.Query(query, args...)
 	if err != nil { return stats }
 	defer rows.Close()
 	breakdown := map[string]interface{}{}

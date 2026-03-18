@@ -7,11 +7,18 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           安全驾驶舱
         </div>
-        <div class="refresh-control">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          <select v-model="refreshInterval" @change="onRefreshChange" class="refresh-select">
-            <option value="30000">30s</option><option value="60000">1m</option><option value="300000">5m</option><option value="0">手动</option>
+        <div class="cockpit-controls">
+          <select v-model="timeRange" @change="onTimeRangeChange" class="time-range-select" title="数据时间范围">
+            <option value="24h">⏱ 24小时</option>
+            <option value="7d">⏱ 7天</option>
+            <option value="30d">⏱ 30天</option>
           </select>
+          <div class="refresh-control">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <select v-model="refreshInterval" @change="onRefreshChange" class="refresh-select">
+              <option value="30000">30s</option><option value="60000">1m</option><option value="300000">5m</option><option value="0">手动</option>
+            </select>
+          </div>
         </div>
       </div>
       <div class="cockpit-body">
@@ -31,6 +38,7 @@
           <div class="score-desc">
             <span class="score-level-badge" :class="'badge-'+healthScore.level">{{healthScore.level_label}}</span>
             <span class="score-text">安全健康分 {{healthScore.score}}/100</span>
+            <span class="time-badge" title="健康分固定使用7天评估窗口">7d</span>
           </div>
           <div v-if="showScoreDetail && healthScore.deductions && healthScore.deductions.length" class="deduction-list">
             <div v-for="d in healthScore.deductions" :key="d.name" class="deduction-item">
@@ -72,11 +80,11 @@
     </div>
     <!-- Stat Cards -->
     <div class="ov-cards" v-if="loaded">
-      <StatCard :iconSvg="svgGlobe" :value="stats.total" label="总请求" color="blue" class="stat-clickable" @click="router.push('/audit')"/>
-      <StatCard :iconSvg="svgShieldX" :value="stats.blocked" label="拦截数" color="red" class="stat-clickable" @click="router.push('/audit')"/>
-      <StatCard :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" color="yellow" class="stat-clickable" @click="router.push('/audit')"/>
-      <StatCard :iconSvg="svgPercent" :value="stats.rate" label="拦截率" color="green" class="stat-clickable" @click="router.push('/rules')"/>
-      <StatCard :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" color="red" class="stat-clickable" @click="router.push('/user-profiles')"/>
+      <StatCard :iconSvg="svgGlobe" :value="stats.total" :label="'总请求'" :badge="timeRange" color="blue" class="stat-clickable" @click="router.push({ path: '/audit', query: { since: timeRange } })"/>
+      <StatCard :iconSvg="svgShieldX" :value="stats.blocked" :label="'拦截数'" :badge="timeRange" color="red" class="stat-clickable" @click="router.push({ path: '/audit', query: { since: timeRange } })"/>
+      <StatCard :iconSvg="svgAlertTriangle" :value="stats.warned" :label="'告警数'" :badge="timeRange" color="yellow" class="stat-clickable" @click="router.push({ path: '/audit', query: { since: timeRange } })"/>
+      <StatCard :iconSvg="svgPercent" :value="stats.rate" :label="'拦截率'" :badge="timeRange" color="green" class="stat-clickable" @click="router.push({ path: '/rules', query: { since: timeRange } })"/>
+      <StatCard :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" badge="30d" color="red" class="stat-clickable" @click="router.push('/user-profiles')"/>
     </div>
     <div class="ov-cards" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
     <!-- Trend + Health -->
@@ -131,6 +139,8 @@ const svgGrid='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" strok
 const svgShieldCheck='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
 const loaded=ref(false),stats=ref({total:'--',blocked:'--',warned:'--',rate:'--'}),trendData=ref([]),trendRange=ref('24h'),recentAttacks=ref([]),topRules=ref([]),pieData=ref([]),heatmapData=ref([]),highRiskUserCount=ref(0)
 const healthScore=ref(null),showScoreDetail=ref(false),systemHealth=ref(null),refreshInterval=ref(localStorage.getItem('overview_refresh')||'30000'),anomalyStatus=ref(null)
+// v11.4: 全局时间范围选择器
+const timeRange=ref(localStorage.getItem('overview_time_range')||'24h')
 const scoreColorMap={excellent:'#10B981',good:'#3B82F6',warning:'#F59E0B',danger:'#EF4444',critical:'#DC2626'}
 const scoreColor=computed(()=>healthScore.value?(scoreColorMap[healthScore.value.level]||'#6B7280'):'#6B7280')
 const scoreDash=computed(()=>{if(!healthScore.value)return'0 327';const c=2*Math.PI*52,p=healthScore.value.score/100;return`${c*p} ${c*(1-p)}`})
@@ -162,13 +172,14 @@ const healthBars=computed(()=>{const h=appState.health;if(!h||!h.checks)return[]
 const trendChartData=computed(()=>trendData.value.map(t=>({total:(t.pass||0)+(t.block||0)+(t.warn||0),block:t.block||0,warn:t.warn||0})))
 const trendLines=[{key:'total',color:'#3B82F6',label:'总请求'},{key:'block',color:'#EF4444',label:'拦截'},{key:'warn',color:'#F59E0B',label:'告警'}]
 const trendXLabels=computed(()=>trendData.value.map(t=>{const h=t.hour||'';if(trendRange.value==='7d')return h.substring(5,10)+' '+h.substring(11,13)+':00';const hp=h.substring(11,13);return hp?hp+':00':''}))
+function onTimeRangeChange(){localStorage.setItem('overview_time_range',timeRange.value);trendRange.value=timeRange.value==='24h'?'24h':'7d';loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus()}
 function onTrendRangeChange(range){trendRange.value=range;loadTrend()}
 async function loadTrend(){try{const d=await api('/api/v1/audit/timeline?hours='+(trendRange.value==='7d'?168:24));trendData.value=d.timeline||[]}catch{trendData.value=[]}}
 async function loadHealthScore(){try{healthScore.value=await api('/api/v1/health/score')}catch{}}
 async function loadSystemHealth(){try{const d=await api('/healthz');if(d.system)systemHealth.value=d.system}catch{}}
 async function loadAnomalyStatus(){try{anomalyStatus.value=await api('/api/v1/anomaly/status')}catch{anomalyStatus.value=null}}
 async function loadData(){
-  try{const d=await api('/api/v1/stats');const total=d.total||0;const breakdown=d.breakdown||{};let blocked=0,warned=0;for(const k of Object.keys(breakdown)){if(k.indexOf('block')>=0)blocked+=breakdown[k];if(k.indexOf('warn')>=0)warned+=breakdown[k]};const rate=total>0?(blocked/total*100).toFixed(1):'0.0';stats.value={total,blocked,warned,rate:rate+'%'}}catch{}
+  try{const d=await api(`/api/v1/stats?since=${timeRange.value}`);const total=d.total||0;const breakdown=d.breakdown||{};let blocked=0,warned=0;for(const k of Object.keys(breakdown)){if(k.indexOf('block')>=0)blocked+=breakdown[k];if(k.indexOf('warn')>=0)warned+=breakdown[k]};const rate=total>0?(blocked/total*100).toFixed(1):'0.0';stats.value={total,blocked,warned,rate:rate+'%'}}catch{}
   await loadTrend()
   try{const d=await api('/api/v1/audit/logs?action=block&limit=5');recentAttacks.value=d.logs||[]}catch{recentAttacks.value=[]}
   try{const d=await api('/api/v1/rules/hits');let list=Array.isArray(d)?d:(d.hits||[]);list.sort((a,b)=>(b.hits||0)-(a.hits||0));const top=list.slice(0,5);const maxH=top.length?(top[0].hits||1):1;topRules.value=top.map(r=>({...r,pct:(r.hits/maxH)*100}));const groupMap={};for(const r of list){const g=r.group||'other';if(!groupMap[g])groupMap[g]=0;groupMap[g]+=r.hits||0};const groups=Object.entries(groupMap).sort((a,b)=>b[1]-a[1]);pieData.value=groups.map(([label,value],i)=>({label,value,color:pieColors[i%pieColors.length]}))}catch{topRules.value=[];pieData.value=[]}
@@ -179,7 +190,7 @@ async function loadData(){
 function onRefreshChange(){localStorage.setItem('overview_refresh',refreshInterval.value);setupTimer()}
 let refreshTimer=null
 function setupTimer(){clearInterval(refreshTimer);const ms=parseInt(refreshInterval.value);if(ms>0)refreshTimer=setInterval(()=>{loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus()},ms)}
-onMounted(()=>{loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus();setupTimer()})
+onMounted(()=>{trendRange.value=timeRange.value==='24h'?'24h':'7d';loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus();setupTimer()})
 onUnmounted(()=>clearInterval(refreshTimer))
 </script>
 <style scoped>
@@ -235,5 +246,10 @@ onUnmounted(()=>clearInterval(refreshTimer))
 .anomaly-learning{color:var(--text-tertiary);font-size:var(--text-xs)}
 .anomaly-ok{color:var(--text-tertiary);font-size:var(--text-xs);text-decoration:none}
 .anomaly-ok:hover{color:var(--text-secondary)}
+/* v11.4: 全局时间选择器 + 时间标注 */
+.cockpit-controls{display:flex;align-items:center;gap:var(--space-2)}
+.time-range-select{background:var(--bg-elevated);border:1px solid var(--color-primary);border-radius:var(--radius-sm);color:var(--color-primary);font-size:var(--text-xs);font-weight:600;padding:3px 8px;cursor:pointer;transition:all .2s}
+.time-range-select:hover{background:var(--color-primary);color:#fff}
+.time-badge{display:inline-block;padding:1px 6px;border-radius:9999px;font-size:10px;font-weight:600;color:var(--text-tertiary);background:rgba(107,114,128,0.15);margin-left:4px;vertical-align:middle;line-height:1.4}
 @media(max-width:768px){.cockpit-body{flex-direction:column}.cockpit-left,.cockpit-right{width:100%}}
 </style>
