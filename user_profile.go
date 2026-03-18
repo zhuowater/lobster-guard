@@ -112,6 +112,55 @@ func (e *UserProfileEngine) GetTopRiskUsers(limit int) ([]UserRiskProfile, error
 	return profiles, nil
 }
 
+// GetTopRiskUsersTenant v14.0: 租户感知的风险用户 TOP N
+func (e *UserProfileEngine) GetTopRiskUsersTenant(limit int, tenantID string) ([]UserRiskProfile, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	tClause, tArgs := TenantFilter(tenantID)
+	query := `SELECT DISTINCT sender_id FROM audit_log WHERE sender_id != ''` + tClause + ` ORDER BY sender_id`
+	rows, err := e.db.Query(query, tArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var userIDs []string
+	for rows.Next() {
+		var uid string
+		if rows.Scan(&uid) == nil && uid != "" {
+			userIDs = append(userIDs, uid)
+		}
+	}
+
+	var profiles []UserRiskProfile
+	for _, uid := range userIDs {
+		p, err := e.GetUserProfile(uid)
+		if err != nil {
+			continue
+		}
+		profiles = append(profiles, *p)
+	}
+
+	// Sort by risk score descending
+	for i := 0; i < len(profiles); i++ {
+		for j := i + 1; j < len(profiles); j++ {
+			if profiles[j].RiskScore > profiles[i].RiskScore {
+				profiles[i], profiles[j] = profiles[j], profiles[i]
+			}
+		}
+	}
+
+	if len(profiles) > limit {
+		profiles = profiles[:limit]
+	}
+	return profiles, nil
+}
+
 // GetUserProfile 获取单个用户的风险画像
 func (e *UserProfileEngine) GetUserProfile(userID string) (*UserRiskProfile, error) {
 	p := &UserRiskProfile{

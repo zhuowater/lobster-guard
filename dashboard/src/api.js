@@ -1,4 +1,5 @@
-/** @module api - API 调用封装 */
+/** @module api - API 调用封装（v14.0: 自动注入 tenant 参数） */
+import { getCurrentTenant } from './stores/app.js'
 
 const TOKEN_KEY = 'lobster_guard_token'
 
@@ -26,6 +27,23 @@ function authHeaders() {
 }
 
 /**
+ * v14.0: 为 URL 自动添加 tenant 参数
+ * 排除不需要 tenant 的路径（healthz、tenants管理、系统配置等）
+ */
+function injectTenantParam(path) {
+  // 这些路径不注入 tenant（全局路由 or 租户管理本身）
+  const skipPaths = ['/healthz', '/api/v1/tenants', '/api/v1/system/', '/api/v1/config', '/api/v1/demo/', '/api/v1/notifications', '/api/v1/llm/status', '/api/v1/llm/rules']
+  for (const sp of skipPaths) {
+    if (path.startsWith(sp)) return path
+  }
+
+  const tenant = getCurrentTenant()
+  if (!tenant || tenant === 'default') return path // default 不注入，后端会默认
+  const sep = path.includes('?') ? '&' : '?'
+  return path + sep + 'tenant=' + encodeURIComponent(tenant)
+}
+
+/**
  * 通用 API 请求
  * @param {string} path - API 路径
  * @param {RequestInit} [opts] - fetch 选项
@@ -33,7 +51,8 @@ function authHeaders() {
  */
 export async function api(path, opts = {}) {
   opts.headers = authHeaders()
-  const res = await fetch(location.origin + path, opts)
+  const url = location.origin + injectTenantParam(path)
+  const res = await fetch(url, opts)
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.json()
 }

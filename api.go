@@ -67,6 +67,8 @@ type ManagementAPI struct {
 	sessionReplayEng *SessionReplayEngine
 	// v13.1 Prompt 版本追踪器
 	promptTracker *PromptTracker
+	// v14.0 租户管理器
+	tenantMgr *TenantManager
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -287,6 +289,17 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDemoSeed(w, r)
 	case path == "/api/v1/demo/clear" && method == "DELETE":
 		api.handleDemoClear(w, r)
+	// v14.0 租户管理 API
+	case path == "/api/v1/tenants" && method == "GET":
+		api.handleTenantList(w, r)
+	case path == "/api/v1/tenants" && method == "POST":
+		api.handleTenantCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "GET":
+		api.handleTenantGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "PUT":
+		api.handleTenantUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "DELETE":
+		api.handleTenantDelete(w, r)
 	// v13.1 Prompt 版本追踪 API
 	case path == "/api/v1/prompts" && method == "GET":
 		api.handlePromptsList(w, r)
@@ -776,16 +789,17 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
 	traceID := r.URL.Query().Get("trace_id")
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil { limit = n }
 	}
-	logs, err := api.logger.QueryLogsExTrace(direction, action, senderID, appID, q, traceID, limit)
+	logs, err := api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs)})
+	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs), "tenant": tenantID})
 }
 
 // handleAuditExport GET /api/v1/audit/export — 导出审计日志为 CSV 或 JSON（v3.10）
@@ -802,6 +816,7 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 	q := r.URL.Query().Get("q")
 	from := r.URL.Query().Get("from")   // v12.1: 时间范围起始 (RFC3339 或 since 格式)
 	to := r.URL.Query().Get("to")       // v12.1: 时间范围结束
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
 	// 支持 since 简写: from=24h → 转为 RFC3339
 	if from != "" && !strings.Contains(from, "T") {
 		from = parseSinceParam(from)
@@ -812,7 +827,7 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 	}
 	if limit > 10000 { limit = 10000 }
 
-	logs, err := api.logger.QueryLogsExFull(direction, action, senderID, appID, q, "", from, to, limit)
+	logs, err := api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, "", from, to, tenantID, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -886,13 +901,15 @@ func (api *ManagementAPI) handleAuditTimeline(w http.ResponseWriter, r *http.Req
 func (api *ManagementAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 	since := r.URL.Query().Get("since")
 	sinceTime := parseSinceParam(since)
-	stats := api.logger.StatsWithFilter(sinceTime)
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	stats := api.logger.StatsWithFilterTenant(sinceTime, tenantID)
 	// v11.4: 返回时间范围信息
 	if since != "" {
 		stats["time_range"] = since
 	} else {
 		stats["time_range"] = "all"
 	}
+	stats["tenant"] = tenantID
 	upstreams := api.pool.ListUpstreams()
 	healthyCount := 0
 	for _, up := range upstreams {
@@ -2316,6 +2333,68 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 注入了 %d 个 Prompt 版本演示数据", promptVersionsInserted)
 	}
 
+	// v14.0: 注入租户演示数据
+	tenantsCreated := 0
+	if api.tenantMgr != nil {
+		demoTenants := []Tenant{
+			{ID: "security-team", Name: "安全团队", Description: "企业安全部门 — 高安全标准，低拦截率", MaxAgents: 10, MaxRules: 50, Enabled: true, StrictMode: true},
+			{ID: "product-team", Name: "产品团队", Description: "产品研发部门 — 更多告警，活跃用户多", MaxAgents: 20, MaxRules: 30, Enabled: true, StrictMode: false},
+		}
+		for i := range demoTenants {
+			if err := api.tenantMgr.Create(&demoTenants[i]); err == nil {
+				tenantsCreated++
+			}
+		}
+
+		// 给不同租户注入差异化数据
+		type tenantSeed struct {
+			tenantID string
+			senders  []string
+			count    int
+			blockPct float64 // 拦截比例
+		}
+		seeds := []tenantSeed{
+			{"security-team", []string{"sec-user-01", "sec-user-02", "sec-user-03"}, 80, 0.08},
+			{"product-team", []string{"pm-user-01", "pm-user-02", "pm-user-03", "pm-user-04", "pm-user-05"}, 120, 0.25},
+		}
+
+		for _, seed := range seeds {
+			for i := 0; i < seed.count; i++ {
+				offsetSec := rng.Int63n(7 * 24 * 3600)
+				ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
+				sender := seed.senders[rng.Intn(len(seed.senders))]
+				appID := appIDs[rng.Intn(len(appIDs))]
+				traceID := fmt.Sprintf("%s-%08x%08x", seed.tenantID[:3], rng.Uint32(), rng.Uint32())
+				latency := 5.0 + rng.Float64()*200.0
+				action := "pass"
+				reason := ""
+				content := contentSamples[rng.Intn(len(contentSamples))]
+				if rng.Float64() < seed.blockPct {
+					action = "block"
+					reason = "规则拦截: 恶意内容检测"
+					content = attackContent[rng.Intn(len(attackContent))]
+				} else if rng.Float64() < 0.1 {
+					action = "warn"
+					reason = warnReasons[rng.Intn(len(warnReasons))]
+				}
+				al.db.Exec(`INSERT INTO audit_log (timestamp, direction, sender_id, action, reason, content_preview, full_request_hash, latency_ms, upstream_id, app_id, trace_id, tenant_id) VALUES (?,?,?,?,?,?,'',?,?,?,?,?)`,
+					ts, "inbound", sender, action, reason, content, latency, "upstream-1", appID, traceID, seed.tenantID)
+			}
+			// LLM calls for this tenant
+			for i := 0; i < seed.count/3; i++ {
+				offsetSec := rng.Int63n(7 * 24 * 3600)
+				ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
+				traceID := fmt.Sprintf("%s-llm-%08x", seed.tenantID[:3], rng.Uint32())
+				model := "claude-sonnet-4-20250514"
+				reqTokens := 500 + rng.Intn(3000)
+				respTokens := 200 + rng.Intn(2000)
+				al.db.Exec(`INSERT INTO llm_calls (timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, tenant_id) VALUES (?,?,?,?,?,?,?,200,0,0,'',?)`,
+					ts, traceID, model, reqTokens, respTokens, reqTokens+respTokens, 300.0+rng.Float64()*2000.0, seed.tenantID)
+			}
+		}
+		log.Printf("[Demo] 创建了 %d 个演示租户 + 差异化数据", tenantsCreated)
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":                true,
@@ -2328,6 +2407,7 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		"report_generated":  reportGenerated,
 		"replay_sessions":   len(replayTraceIDs),
 		"prompt_versions":   promptVersionsInserted,
+		"tenants_created":   tenantsCreated,
 	})
 }
 
@@ -2620,11 +2700,12 @@ func (api *ManagementAPI) handleLLMStatus(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleLLMOverview GET /api/v1/llm/overview — LLM 概览统计（v11.4: 支持 ?since 参数）
+// handleLLMOverview GET /api/v1/llm/overview — LLM 概览统计（v11.4: 支持 ?since 参数, v14.0: 支持 ?tenant）
 func (api *ManagementAPI) handleLLMOverview(w http.ResponseWriter, r *http.Request) {
 	since := r.URL.Query().Get("since")
 	sinceTime := parseSinceParam(since)
-	overview, err := api.llmAuditor.OverviewWithFilter(sinceTime)
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	overview, err := api.llmAuditor.OverviewWithFilterTenant(sinceTime, tenantID)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -2634,6 +2715,7 @@ func (api *ManagementAPI) handleLLMOverview(w http.ResponseWriter, r *http.Reque
 	} else {
 		overview["time_range"] = "all"
 	}
+	overview["tenant"] = tenantID
 	jsonResponse(w, 200, overview)
 }
 
@@ -3385,19 +3467,20 @@ func (api *ManagementAPI) writeV51Metrics(w io.Writer) {
 // v11.0 用户画像 API
 // ============================================================
 
-// handleUserRiskTop GET /api/v1/users/risk-top — 风险用户 TOP N
+// handleUserRiskTop GET /api/v1/users/risk-top — 风险用户 TOP N（v14.0: ?tenant）
 func (api *ManagementAPI) handleUserRiskTop(w http.ResponseWriter, r *http.Request) {
 	if api.userProfileEng == nil {
 		jsonResponse(w, 200, map[string]interface{}{"users": []interface{}{}, "total": 0})
 		return
 	}
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
 			limit = n
 		}
 	}
-	users, err := api.userProfileEng.GetTopRiskUsers(limit)
+	users, err := api.userProfileEng.GetTopRiskUsersTenant(limit, tenantID)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -3405,7 +3488,7 @@ func (api *ManagementAPI) handleUserRiskTop(w http.ResponseWriter, r *http.Reque
 	if users == nil {
 		users = []UserRiskProfile{}
 	}
-	jsonResponse(w, 200, map[string]interface{}{"users": users, "total": len(users)})
+	jsonResponse(w, 200, map[string]interface{}{"users": users, "total": len(users), "tenant": tenantID})
 }
 
 // handleUserRiskProfile GET /api/v1/users/risk/:id — 单个用户风险画像
@@ -3483,7 +3566,8 @@ func (api *ManagementAPI) handleHealthScore(w http.ResponseWriter, r *http.Reque
 		jsonResponse(w, 500, map[string]string{"error": "health score engine not available"})
 		return
 	}
-	result, err := api.healthScoreEng.Calculate()
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	result, err := api.healthScoreEng.CalculateForTenant(tenantID)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -3497,11 +3581,12 @@ func (api *ManagementAPI) handleHealthScore(w http.ResponseWriter, r *http.Reque
 		"deductions":  result.Deductions,
 		"trend":       result.Trend,
 		"updated_at":  result.UpdatedAt,
+		"tenant":      tenantID,
 	}
 	jsonResponse(w, 200, resp)
 }
 
-// handleOWASPMatrix GET /api/v1/llm/owasp-matrix — OWASP LLM Top 10 矩阵（v11.4: 支持 ?since 参数）
+// handleOWASPMatrix GET /api/v1/llm/owasp-matrix — OWASP LLM Top 10 矩阵（v11.4: 支持 ?since 参数, v14.0: ?tenant）
 func (api *ManagementAPI) handleOWASPMatrix(w http.ResponseWriter, r *http.Request) {
 	if api.owaspMatrixEng == nil {
 		jsonResponse(w, 500, map[string]string{"error": "OWASP matrix engine not available"})
@@ -3509,12 +3594,13 @@ func (api *ManagementAPI) handleOWASPMatrix(w http.ResponseWriter, r *http.Reque
 	}
 	since := r.URL.Query().Get("since")
 	sinceTime := parseSinceParam(since)
-	items := api.owaspMatrixEng.CalculateWithFilter(sinceTime)
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	items := api.owaspMatrixEng.CalculateWithFilterTenant(sinceTime, tenantID)
 	timeRange := since
 	if timeRange == "" {
-		timeRange = "24h" // OWASP 矩阵默认 24h
+		timeRange = "24h"
 	}
-	jsonResponse(w, 200, map[string]interface{}{"items": items, "total": len(items), "time_range": timeRange})
+	jsonResponse(w, 200, map[string]interface{}{"items": items, "total": len(items), "time_range": timeRange, "tenant": tenantID})
 }
 
 // handleStrictModeGet GET /api/v1/system/strict-mode — 获取严格模式状态
@@ -3806,7 +3892,7 @@ func (api *ManagementAPI) handleLLMExport(w http.ResponseWriter, r *http.Request
 // v13.0 会话回放 API handlers
 // ============================================================
 
-// handleSessionReplayList GET /api/v1/sessions/replay — 会话列表
+// handleSessionReplayList GET /api/v1/sessions/replay — 会话列表（v14.0: 支持 ?tenant）
 func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http.Request) {
 	if api.sessionReplayEng == nil {
 		jsonResponse(w, 500, map[string]string{"error": "session replay engine not available"})
@@ -3817,6 +3903,7 @@ func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http
 	senderID := r.URL.Query().Get("sender_id")
 	risk := r.URL.Query().Get("risk")
 	q := r.URL.Query().Get("q")
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
 	// 支持 since 简写
 	if from != "" && !strings.Contains(from, "T") {
 		from = parseSinceParam(from)
@@ -3833,7 +3920,7 @@ func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http
 			offset = n
 		}
 	}
-	sessions, total, err := api.sessionReplayEng.ListSessions(from, to, senderID, risk, q, limit, offset)
+	sessions, total, err := api.sessionReplayEng.ListSessionsTenant(from, to, senderID, risk, q, tenantID, limit, offset)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -3846,6 +3933,7 @@ func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http
 		"total":    total,
 		"limit":    limit,
 		"offset":   offset,
+		"tenant":   tenantID,
 	})
 }
 
@@ -3929,7 +4017,7 @@ func (api *ManagementAPI) handleSessionReplayDeleteTag(w http.ResponseWriter, r 
 	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": tagID})
 }
 
-// handleAnomalyBaselines GET /api/v1/anomaly/baselines — 所有指标的基线状态
+// handleAnomalyBaselines GET /api/v1/anomaly/baselines — 所有指标的基线状态（v14.0: 租户感知不变，全局）
 func (api *ManagementAPI) handleAnomalyBaselines(w http.ResponseWriter, r *http.Request) {
 	if api.anomalyDetector == nil {
 		jsonResponse(w, 200, map[string]interface{}{"baselines": map[string]interface{}{}, "total": 0})
@@ -3993,19 +4081,21 @@ func (api *ManagementAPI) handleAnomalyMetric(w http.ResponseWriter, r *http.Req
 // v13.1 Prompt 版本追踪 API handlers
 // ============================================================
 
-// handlePromptsList GET /api/v1/prompts — Prompt 版本列表（按时间倒序）
+// handlePromptsList GET /api/v1/prompts — Prompt 版本列表（按时间倒序, v14.0: ?tenant）
 func (api *ManagementAPI) handlePromptsList(w http.ResponseWriter, r *http.Request) {
 	if api.promptTracker == nil {
 		jsonResponse(w, 200, map[string]interface{}{"versions": []interface{}{}, "total": 0})
 		return
 	}
-	versions := api.promptTracker.ListVersions()
+	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
+	versions := api.promptTracker.ListVersionsTenant(tenantID)
 	if versions == nil {
 		versions = []PromptVersion{}
 	}
 	jsonResponse(w, 200, map[string]interface{}{
 		"versions": versions,
 		"total":    len(versions),
+		"tenant":   tenantID,
 	})
 }
 
@@ -4060,5 +4150,93 @@ func (api *ManagementAPI) handlePromptsDiff(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	jsonResponse(w, 200, diff)
+}
+
+// ============================================================
+// v14.0 租户管理 API handlers
+// ============================================================
+
+// handleTenantList GET /api/v1/tenants — 租户列表（含概要统计）
+func (api *ManagementAPI) handleTenantList(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	summaries := api.tenantMgr.ListSummaries()
+	if summaries == nil {
+		summaries = []*TenantSummary{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"tenants": summaries, "total": len(summaries)})
+}
+
+// handleTenantCreate POST /api/v1/tenants — 创建租户
+func (api *ManagementAPI) handleTenantCreate(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	var t Tenant
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := api.tenantMgr.Create(&t); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "created", "tenant": t})
+}
+
+// handleTenantGet GET /api/v1/tenants/:id — 租户详情
+func (api *ManagementAPI) handleTenantGet(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tenant id required"})
+		return
+	}
+	summary := api.tenantMgr.GetSummary(id)
+	if summary == nil {
+		jsonResponse(w, 404, map[string]string{"error": "tenant not found"})
+		return
+	}
+	jsonResponse(w, 200, summary)
+}
+
+// handleTenantUpdate PUT /api/v1/tenants/:id — 更新租户
+func (api *ManagementAPI) handleTenantUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	var t Tenant
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+	t.ID = id
+	if err := api.tenantMgr.Update(&t); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "tenant": t})
+}
+
+// handleTenantDelete DELETE /api/v1/tenants/:id — 删除租户
+func (api *ManagementAPI) handleTenantDelete(w http.ResponseWriter, r *http.Request) {
+	if api.tenantMgr == nil {
+		jsonResponse(w, 500, map[string]string{"error": "tenant manager not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	if err := api.tenantMgr.Delete(id); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
 }
 

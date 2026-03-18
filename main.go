@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "13.1.0"
+	AppVersion = "14.0.0"
 )
 
 var startTime = time.Now()
@@ -214,6 +214,10 @@ func main() {
 	// v4.2: 创建 Store 抽象层
 	store := NewSQLiteStore(db, cfg.DBPath)
 
+	// v14.0: 初始化租户管理器
+	tenantMgr := NewTenantManager(db)
+	_ = tenantMgr // 传给 ManagementAPI
+
 	logger, err := NewAuditLogger(db)
 	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
 	defer logger.Close()
@@ -384,6 +388,7 @@ func main() {
 	}
 
 	mgmtAPI := NewManagementAPI(cfg, *cfgPath, pool, routes, logger, engine, outboundEngine, inbound, channel, metrics, ruleHits, userCache, policyEng, alertNotifier, wsProxy, store, shutdownMgr, realtime)
+	mgmtAPI.tenantMgr = tenantMgr // v14.0
 	// v5.1: 注入智能检测组件
 	mgmtAPI.sessionDetector = sessionDetector
 	mgmtAPI.llmDetector = llmDetector

@@ -216,6 +216,28 @@ func (pt *PromptTracker) ListVersions() []PromptVersion {
 	return versions
 }
 
+// ListVersionsTenant v14.0: 租户感知的版本列表
+func (pt *PromptTracker) ListVersionsTenant(tenantID string) []PromptVersion {
+	tClause, tArgs := TenantFilter(tenantID)
+	query := `SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,'')
+		FROM prompt_versions WHERE 1=1` + tClause + ` ORDER BY id DESC`
+	rows, err := pt.db.Query(query, tArgs...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var versions []PromptVersion
+	for rows.Next() {
+		var v PromptVersion
+		if rows.Scan(&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash) == nil {
+			pt.fillMetrics(&v)
+			versions = append(versions, v)
+		}
+	}
+	return versions
+}
+
 // GetDiff 获取指定版本与前一版本的 diff
 func (pt *PromptTracker) GetDiff(hash string) *PromptDiff {
 	newVer := pt.GetVersion(hash)

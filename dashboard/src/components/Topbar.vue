@@ -14,6 +14,12 @@
       <span class="topbar-search-hint">Ctrl+K</span>
     </div>
     <div class="topbar-right">
+      <!-- v14.0: 租户切换器 -->
+      <div class="tenant-switcher" v-if="tenants.length > 1">
+        <select class="tenant-select" :value="currentTenantId" @change="onTenantChange">
+          <option v-for="t in tenants" :key="t.id" :value="t.id">🏢 {{ t.name }}</option>
+        </select>
+      </div>
       <!-- 通知中心 (v11.1) -->
       <div class="notif-wrap" ref="notifWrap">
         <button class="notif-btn" @click="toggleNotif" :title="'通知 (' + unreadCount + ' 未读)'">
@@ -54,12 +60,33 @@
 import { inject, computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api.js'
+import { currentTenant, setTenant, updateTenantList } from '../stores/app.js'
 
 defineEmits(['toggleMobile'])
 const appState = inject('appState')
 const route = useRoute()
 const router = useRouter()
 const searchInput = ref(null)
+
+// v14.0: 租户切换
+const tenants = ref([])
+const currentTenantId = computed(() => currentTenant.value)
+
+async function loadTenants() {
+  try {
+    const d = await api('/api/v1/tenants')
+    tenants.value = d.tenants || []
+    updateTenantList(d.tenants || [])
+  } catch {
+    tenants.value = [{ id: 'default', name: '默认租户' }]
+  }
+}
+
+function onTenantChange(e) {
+  setTenant(e.target.value)
+  // Reload current page to refresh data with new tenant
+  router.go(0)
+}
 
 // v11.1: 通知中心
 const notifOpen = ref(false)
@@ -139,7 +166,7 @@ function onKeydown(e) {
   }
 }
 
-onMounted(() => { document.addEventListener('keydown', onKeydown); document.addEventListener('click', onClickOutside); loadNotifications(); notifTimer = setInterval(loadNotifications, 60000) })
+onMounted(() => { document.addEventListener('keydown', onKeydown); document.addEventListener('click', onClickOutside); loadNotifications(); notifTimer = setInterval(loadNotifications, 60000); loadTenants() })
 onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document.removeEventListener('click', onClickOutside); clearInterval(notifTimer) })
 </script>
 
@@ -239,4 +266,18 @@ onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document
 .notif-detail { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notif-time { font-size: 10px; color: var(--text-disabled); margin-top: 2px; }
 .notif-empty { padding: var(--space-6); text-align: center; font-size: var(--text-sm); color: var(--text-tertiary); }
+/* v14.0: 租户切换器 */
+.tenant-switcher { position: relative; }
+.tenant-select {
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); color: var(--text-primary); padding: 4px 24px 4px 8px;
+  font-size: var(--text-xs); font-family: var(--font-sans); cursor: pointer;
+  outline: none; appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 6px center;
+  transition: border-color var(--transition-fast);
+  max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tenant-select:hover { border-color: var(--color-primary); }
+.tenant-select:focus { border-color: var(--color-primary); }
 </style>

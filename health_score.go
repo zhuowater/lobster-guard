@@ -183,6 +183,134 @@ func (e *HealthScoreEngine) Calculate() (*HealthScoreResult, error) {
 	}, nil
 }
 
+// CalculateForTenant v14.0: 租户感知的健康分计算
+func (e *HealthScoreEngine) CalculateForTenant(tenantID string) (*HealthScoreResult, error) {
+	tClause, tArgs := TenantFilter(tenantID)
+
+	score := 100
+	var deductions []HealthDeduction
+	now := time.Now().UTC()
+	since7d := now.AddDate(0, 0, -7).Format(time.RFC3339)
+
+	// 1. IM 拦截率
+	var imTotal, imBlocked int64
+	q1 := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN action='block' THEN 1 ELSE 0 END),0) FROM audit_log WHERE timestamp >= ?` + tClause
+	args1 := append([]interface{}{since7d}, tArgs...)
+	e.db.QueryRow(q1, args1...).Scan(&imTotal, &imBlocked)
+	imBlockRate := float64(0)
+	if imTotal > 0 {
+		imBlockRate = float64(imBlocked) / float64(imTotal) * 100
+	}
+	imDeduct := 0
+	if imBlockRate > 30 {
+		imDeduct = 30
+	} else if imBlockRate > 20 {
+		imDeduct = 20
+	} else if imBlockRate > 10 {
+		imDeduct = 10
+	}
+	if imDeduct > 0 {
+		score -= imDeduct
+		deductions = append(deductions, HealthDeduction{
+			Name: "IM 拦截率", Points: imDeduct, MaxPoints: 30,
+			Detail: fmt.Sprintf("拦截率 %.1f%% (%d/%d)", imBlockRate, imBlocked, imTotal),
+		})
+	}
+
+	// 2. LLM 异常率
+	var llmTotal, llmErrors int64
+	q2 := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END),0) FROM llm_calls WHERE timestamp >= ?` + tClause
+	args2 := append([]interface{}{since7d}, tArgs...)
+	e.db.QueryRow(q2, args2...).Scan(&llmTotal, &llmErrors)
+	llmErrorRate := float64(0)
+	if llmTotal > 0 {
+		llmErrorRate = float64(llmErrors) / float64(llmTotal) * 100
+	}
+	llmDeduct := 0
+	if llmErrorRate > 20 {
+		llmDeduct = 20
+	} else if llmErrorRate > 10 {
+		llmDeduct = 15
+	} else if llmErrorRate > 5 {
+		llmDeduct = 10
+	}
+	if llmDeduct > 0 {
+		score -= llmDeduct
+		deductions = append(deductions, HealthDeduction{
+			Name: "LLM 异常率", Points: llmDeduct, MaxPoints: 20,
+			Detail: fmt.Sprintf("异常率 %.1f%% (%d/%d)", llmErrorRate, llmErrors, llmTotal),
+		})
+	}
+
+	// 3. 规则频繁命中
+	ruleHitDeduct := 0
+	if imBlocked > 100 {
+		ruleHitDeduct = 15
+	} else if imBlocked > 50 {
+		ruleHitDeduct = 10
+	} else if imBlocked > 20 {
+		ruleHitDeduct = 5
+	}
+	if ruleHitDeduct > 0 {
+		score -= ruleHitDeduct
+		deductions = append(deductions, HealthDeduction{
+			Name: "规则频繁命中", Points: ruleHitDeduct, MaxPoints: 15,
+			Detail: fmt.Sprintf("7天内 %d 次拦截命中", imBlocked),
+		})
+	}
+
+	if score < 0 {
+		score = 0
+	}
+	level, levelLabel := scoreToLevel(score)
+	trend := e.calculateTrendForTenant(now, tenantID)
+
+	return &HealthScoreResult{
+		Score:      score,
+		Level:      level,
+		LevelLabel: levelLabel,
+		Deductions: deductions,
+		Trend:      trend,
+		UpdatedAt:  now.Format(time.RFC3339),
+	}, nil
+}
+
+// calculateTrendForTenant v14.0: 租户感知趋势
+func (e *HealthScoreEngine) calculateTrendForTenant(now time.Time, tenantID string) []HealthScoreTrend {
+	tClause, tArgs := TenantFilter(tenantID)
+	var trend []HealthScoreTrend
+	for i := 6; i >= 0; i-- {
+		day := now.AddDate(0, 0, -i)
+		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+		dayEnd := time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, time.UTC).Format(time.RFC3339)
+
+		dayScore := 100
+		var total, blocked int64
+		q := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN action='block' THEN 1 ELSE 0 END),0) FROM audit_log WHERE timestamp >= ? AND timestamp <= ?` + tClause
+		args := append([]interface{}{dayStart, dayEnd}, tArgs...)
+		e.db.QueryRow(q, args...).Scan(&total, &blocked)
+
+		if total > 0 {
+			blockRate := float64(blocked) / float64(total) * 100
+			if blockRate > 30 {
+				dayScore -= 30
+			} else if blockRate > 20 {
+				dayScore -= 20
+			} else if blockRate > 10 {
+				dayScore -= 10
+			}
+		}
+		if dayScore < 0 {
+			dayScore = 0
+		}
+		trend = append(trend, HealthScoreTrend{
+			Date:  day.Format("01-02"),
+			Score: dayScore,
+		})
+	}
+	return trend
+}
+
 // calculateTrend 计算最近7天每天的分数
 func (e *HealthScoreEngine) calculateTrend(now time.Time) []HealthScoreTrend {
 	var trend []HealthScoreTrend
@@ -356,6 +484,68 @@ func (e *OWASPMatrixEngine) CalculateWithFilter(sinceRFC3339 string) []OWASPMatr
 			riskLevel = "low"
 		}
 
+		items[i] = OWASPMatrixItem{
+			ID:        def.id,
+			Name:      def.name,
+			NameZh:    def.nameZh,
+			Count:     count,
+			RiskLevel: riskLevel,
+		}
+	}
+	return items
+}
+
+// CalculateWithFilterTenant v14.0: 租户感知 OWASP 矩阵
+func (e *OWASPMatrixEngine) CalculateWithFilterTenant(sinceRFC3339, tenantID string) []OWASPMatrixItem {
+	tClause, tArgs := TenantFilter(tenantID)
+	since24h := sinceRFC3339
+	if since24h == "" {
+		since24h = time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	}
+	items := make([]OWASPMatrixItem, 10)
+
+	owaspDefs := []struct {
+		id, name, nameZh string
+		flagReasons      []string
+	}{
+		{"LLM01", "Prompt Injection", "提示注入", nil},
+		{"LLM02", "Insecure Output", "不安全输出", nil},
+		{"LLM03", "Training Data", "训练数据中毒", nil},
+		{"LLM04", "Model DoS", "模型拒绝服务", []string{"budget_exceeded"}},
+		{"LLM05", "Supply Chain", "供应链漏洞", nil},
+		{"LLM06", "Sensitive Info", "敏感信息泄露", []string{"canary_leaked"}},
+		{"LLM07", "Insecure Plugin", "不安全插件", []string{"high_risk_tool"}},
+		{"LLM08", "Excessive Agency", "过度代理权限", []string{"budget_exceeded", "high_risk_tool"}},
+		{"LLM09", "Overreliance", "过度依赖", nil},
+		{"LLM10", "Model Theft", "模型盗取", []string{"canary_leaked"}},
+	}
+
+	// flagged events from llm_tool_calls with tenant filter
+	flagCounts := make(map[string]int64)
+	fq := `SELECT flag_reason, COUNT(*) FROM llm_tool_calls WHERE flagged=1 AND timestamp >= ?` + tClause + ` GROUP BY flag_reason`
+	fArgs := append([]interface{}{since24h}, tArgs...)
+	flagRows, err := e.db.Query(fq, fArgs...)
+	if err == nil {
+		defer flagRows.Close()
+		for flagRows.Next() {
+			var reason string
+			var cnt int64
+			flagRows.Scan(&reason, &cnt)
+			flagCounts[reason] += cnt
+		}
+	}
+
+	for i, def := range owaspDefs {
+		var count int64
+		for _, fr := range def.flagReasons {
+			count += flagCounts[fr]
+		}
+		riskLevel := "none"
+		if count > 5 {
+			riskLevel = "high"
+		} else if count > 0 {
+			riskLevel = "low"
+		}
 		items[i] = OWASPMatrixItem{
 			ID:        def.id,
 			Name:      def.name,

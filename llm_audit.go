@@ -726,6 +726,99 @@ func (la *LLMAuditor) OverviewWithFilter(sinceRFC3339 string) (map[string]interf
 	return result, nil
 }
 
+// OverviewWithFilterTenant v14.0: 租户感知的 LLM 概览
+func (la *LLMAuditor) OverviewWithFilterTenant(sinceRFC3339, tenantID string) (map[string]interface{}, error) {
+	tClause, tArgs := TenantFilter(tenantID)
+
+	result := map[string]interface{}{
+		"total_calls":        0,
+		"total_tokens":       0,
+		"input_tokens":       0,
+		"output_tokens":      0,
+		"estimated_cost_usd": 0.0,
+		"avg_latency_ms":     0.0,
+		"error_rate":         0.0,
+		"tool_calls_total":   0,
+		"high_risk_24h":      0,
+		"models":             []map[string]interface{}{},
+		"cost_by_model":      []map[string]interface{}{},
+		"cost_trend":         []map[string]interface{}{},
+		"daily_limit_usd":    0.0,
+		"today_cost_usd":     0.0,
+		"cost_alert_triggered": false,
+	}
+
+	// Build WHERE clause
+	callsWhere := " WHERE 1=1" + tClause
+	callsArgs := append([]interface{}{}, tArgs...)
+	if sinceRFC3339 != "" {
+		callsWhere += " AND timestamp >= ?"
+		callsArgs = append(callsArgs, sinceRFC3339)
+	}
+
+	toolsWhere := " WHERE 1=1" + tClause
+	toolsArgs := append([]interface{}{}, tArgs...)
+	if sinceRFC3339 != "" {
+		toolsWhere += " AND timestamp >= ?"
+		toolsArgs = append(toolsArgs, sinceRFC3339)
+	}
+
+	var totalCalls int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls"+callsWhere, callsArgs...).Scan(&totalCalls)
+	result["total_calls"] = totalCalls
+
+	var totalTokens, inputTokens, outputTokens sql.NullInt64
+	la.db.QueryRow("SELECT COALESCE(SUM(total_tokens),0), COALESCE(SUM(request_tokens),0), COALESCE(SUM(response_tokens),0) FROM llm_calls"+callsWhere, callsArgs...).Scan(&totalTokens, &inputTokens, &outputTokens)
+	result["total_tokens"] = totalTokens.Int64
+	result["input_tokens"] = inputTokens.Int64
+	result["output_tokens"] = outputTokens.Int64
+
+	cost := float64(inputTokens.Int64)*3.0/1000000.0 + float64(outputTokens.Int64)*15.0/1000000.0
+	result["estimated_cost_usd"] = float64(int(cost*100)) / 100
+
+	var avgLatency sql.NullFloat64
+	la.db.QueryRow("SELECT AVG(latency_ms) FROM llm_calls"+callsWhere, callsArgs...).Scan(&avgLatency)
+	if avgLatency.Valid {
+		result["avg_latency_ms"] = float64(int(avgLatency.Float64*10)) / 10
+	}
+
+	var errorCount int
+	errWhere := " WHERE (status_code >= 400 OR error_message != '')" + tClause
+	errArgs := append([]interface{}{}, tArgs...)
+	if sinceRFC3339 != "" {
+		errWhere += " AND timestamp >= ?"
+		errArgs = append(errArgs, sinceRFC3339)
+	}
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls"+errWhere, errArgs...).Scan(&errorCount)
+	if totalCalls > 0 {
+		result["error_rate"] = float64(int(float64(errorCount)/float64(totalCalls)*10000)) / 10000
+	}
+
+	var toolCallsTotal int
+	la.db.QueryRow("SELECT COUNT(*) FROM llm_tool_calls"+toolsWhere, toolsArgs...).Scan(&toolCallsTotal)
+	result["tool_calls_total"] = toolCallsTotal
+
+	// Model distribution
+	modelWhere := callsWhere + " AND model != ''"
+	rows, err := la.db.Query("SELECT model, COUNT(*) as cnt FROM llm_calls"+modelWhere+" GROUP BY model ORDER BY cnt DESC LIMIT 10", callsArgs...)
+	if err == nil {
+		defer rows.Close()
+		var models []map[string]interface{}
+		for rows.Next() {
+			var name string
+			var count int
+			if rows.Scan(&name, &count) == nil {
+				models = append(models, map[string]interface{}{"name": name, "count": count})
+			}
+		}
+		if models != nil {
+			result["models"] = models
+		}
+	}
+
+	return result, nil
+}
+
 // calcModelCost 根据模型名和 token 数计算成本
 func calcModelCost(model string, inputTokens, outputTokens int) float64 {
 	pricing, ok := modelPricing[model]

@@ -409,6 +409,93 @@ func (e *SessionReplayEngine) ListSessions(from, to, senderID, riskLevel, q stri
 	return page, total, nil
 }
 
+// ListSessionsTenant v14.0: 租户感知的会话列表
+func (e *SessionReplayEngine) ListSessionsTenant(from, to, senderID, riskLevel, q, tenantID string, limit, offset int) ([]SessionSummary, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	tClause, tArgs := TenantFilter(tenantID)
+
+	whereClause := "WHERE trace_id IS NOT NULL AND trace_id != ''" + tClause
+	var args []interface{}
+	args = append(args, tArgs...)
+	if from != "" {
+		whereClause += " AND timestamp >= ?"
+		args = append(args, from)
+	}
+	if to != "" {
+		whereClause += " AND timestamp <= ?"
+		args = append(args, to)
+	}
+
+	// Get unique trace IDs from both sources
+	traceQuery := fmt.Sprintf(`
+		SELECT DISTINCT trace_id, MIN(timestamp) as first_ts FROM (
+			SELECT trace_id, timestamp FROM llm_calls %s
+			UNION ALL
+			SELECT trace_id, timestamp FROM audit_log %s
+		) combined GROUP BY trace_id ORDER BY first_ts DESC
+	`, whereClause, whereClause)
+
+	allArgs := append(args, args...)
+
+	rows, err := e.db.Query(traceQuery, allArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query traces: %w", err)
+	}
+	defer rows.Close()
+
+	var allTraceIDs []string
+	for rows.Next() {
+		var tid, ts string
+		if rows.Scan(&tid, &ts) == nil && tid != "" {
+			allTraceIDs = append(allTraceIDs, tid)
+		}
+	}
+
+	var summaries []SessionSummary
+	for _, tid := range allTraceIDs {
+		sum := e.quickSummary(tid)
+		if sum == nil {
+			continue
+		}
+		if senderID != "" && sum.SenderID != senderID {
+			continue
+		}
+		if riskLevel != "" && riskLevel != "all" {
+			if riskLevel == "high" && sum.RiskLevel != "high" && sum.RiskLevel != "critical" {
+				continue
+			}
+			if riskLevel == "critical" && sum.RiskLevel != "critical" {
+				continue
+			}
+		}
+		if q != "" {
+			q = strings.ToLower(q)
+			if !strings.Contains(strings.ToLower(sum.TraceID), q) &&
+				!strings.Contains(strings.ToLower(sum.SenderID), q) &&
+				!strings.Contains(strings.ToLower(sum.Model), q) {
+				continue
+			}
+		}
+		summaries = append(summaries, *sum)
+	}
+
+	total := len(summaries)
+	if offset >= len(summaries) {
+		return []SessionSummary{}, total, nil
+	}
+	end := offset + limit
+	if end > len(summaries) {
+		end = len(summaries)
+	}
+	return summaries[offset:end], total, nil
+}
+
 // quickSummary 快速构建某个 trace_id 的摘要（不查标签以加速列表查询）
 func (e *SessionReplayEngine) quickSummary(traceID string) *SessionSummary {
 	s := &SessionSummary{

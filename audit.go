@@ -232,6 +232,181 @@ func (al *AuditLogger) StatsWithFilter(sinceRFC3339 string) map[string]interface
 }
 
 // ============================================================
+// v14.0 租户感知查询
+// ============================================================
+
+// StatsWithFilterTenant 带时间+租户过滤的统计
+func (al *AuditLogger) StatsWithFilterTenant(sinceRFC3339, tenantID string) map[string]interface{} {
+	stats := map[string]interface{}{}
+	tClause, tArgs := TenantFilter(tenantID)
+
+	var total int
+	baseWhere := "WHERE 1=1" + tClause
+	baseArgs := append([]interface{}{}, tArgs...)
+	if sinceRFC3339 != "" {
+		baseWhere += " AND timestamp >= ?"
+		baseArgs = append(baseArgs, sinceRFC3339)
+	}
+	al.db.QueryRow("SELECT COUNT(*) FROM audit_log "+baseWhere, baseArgs...).Scan(&total)
+	stats["total"] = total
+
+	query := "SELECT direction, action, COUNT(*) FROM audit_log " + baseWhere + " GROUP BY direction, action"
+	rows, err := al.db.Query(query, baseArgs...)
+	if err != nil {
+		return stats
+	}
+	defer rows.Close()
+	breakdown := map[string]interface{}{}
+	for rows.Next() {
+		var dir, action string
+		var cnt int
+		if rows.Scan(&dir, &action, &cnt) == nil {
+			breakdown[dir+"_"+action] = cnt
+		}
+	}
+	stats["breakdown"] = breakdown
+	return stats
+}
+
+// QueryLogsExTenant 租户感知的审计日志查询
+func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID string, limit int) ([]map[string]interface{}, error) {
+	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
+	var args []interface{}
+
+	tClause, tArgs := TenantFilter(tenantID)
+	query += tClause
+	args = append(args, tArgs...)
+
+	if direction != "" {
+		query += ` AND direction=?`
+		args = append(args, direction)
+	}
+	if action != "" {
+		query += ` AND action=?`
+		args = append(args, action)
+	}
+	if senderID != "" {
+		query += ` AND sender_id=?`
+		args = append(args, senderID)
+	}
+	if appID != "" {
+		query += ` AND app_id=?`
+		args = append(args, appID)
+	}
+	if q != "" {
+		query += ` AND content_preview LIKE ?`
+		args = append(args, "%"+q+"%")
+	}
+	if traceID != "" {
+		query += ` AND trace_id=?`
+		args = append(args, traceID)
+	}
+	query += ` ORDER BY id DESC`
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	query += ` LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := al.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var ts, dir, sid, act, reason, preview, uid, aid, tid string
+		var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil {
+			continue
+		}
+		results = append(results, map[string]interface{}{
+			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
+			"action": act, "reason": reason, "content_preview": preview,
+			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
+		})
+	}
+	return results, nil
+}
+
+// QueryLogsExFullTenant 完整查询（含时间范围+租户）
+func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID string, limit int) ([]map[string]interface{}, error) {
+	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
+	var args []interface{}
+
+	tClause, tArgs := TenantFilter(tenantID)
+	query += tClause
+	args = append(args, tArgs...)
+
+	if direction != "" {
+		query += ` AND direction=?`
+		args = append(args, direction)
+	}
+	if action != "" {
+		query += ` AND action=?`
+		args = append(args, action)
+	}
+	if senderID != "" {
+		query += ` AND sender_id=?`
+		args = append(args, senderID)
+	}
+	if appID != "" {
+		query += ` AND app_id=?`
+		args = append(args, appID)
+	}
+	if q != "" {
+		query += ` AND content_preview LIKE ?`
+		args = append(args, "%"+q+"%")
+	}
+	if traceID != "" {
+		query += ` AND trace_id=?`
+		args = append(args, traceID)
+	}
+	if from != "" {
+		query += ` AND timestamp >= ?`
+		args = append(args, from)
+	}
+	if to != "" {
+		query += ` AND timestamp <= ?`
+		args = append(args, to)
+	}
+	query += ` ORDER BY id DESC`
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	query += ` LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := al.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var ts, dir, sid, act, reason, preview, uid, aid, tid string
+		var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil {
+			continue
+		}
+		results = append(results, map[string]interface{}{
+			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
+			"action": act, "reason": reason, "content_preview": preview,
+			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
+		})
+	}
+	return results, nil
+}
+
+// ============================================================
 // v5.0 审计日志归档
 // ============================================================
 
@@ -424,6 +599,10 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN trace_id TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trace ON audit_log(trace_id)`)
 
+	// v14.0: tenant_id 列（在 TenantManager.initSchema 中也会添加，这里确保测试也有）
+	db.Exec(`ALTER TABLE audit_log ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id)`)
+
 	// v9.0: LLM 审计表（LLMAuditor 会初始化，但确保表结构存在）
 	db.Exec(`CREATE TABLE IF NOT EXISTS llm_calls (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -455,6 +634,12 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_ts ON llm_tool_calls(timestamp)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk ON llm_tool_calls(risk_level)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tool ON llm_tool_calls(tool_name)`)
+
+	// v14.0: tenant_id 列 for LLM tables
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
 
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)
