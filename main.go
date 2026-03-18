@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "16.0.0"
+	AppVersion = "17.0.0"
 )
 
 var startTime = time.Now()
@@ -464,6 +464,10 @@ func main() {
 	attackChainEng := NewAttackChainEngine(logger.DB())
 	mgmtAPI.attackChainEng = attackChainEng
 	fmt.Println("[初始化] ✅ 攻击链引擎已就绪 (跨 Agent 关联分析 + 模式匹配 + 风险评分)")
+
+	// v17.1: 布局存储
+	mgmtAPI.layoutStore = NewLayoutStore(logger.DB())
+	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
 	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
 

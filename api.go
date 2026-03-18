@@ -117,6 +117,8 @@ type ManagementAPI struct {
 	behaviorProfileEng *BehaviorProfileEngine
 	// v16.1 攻击链引擎
 	attackChainEng *AttackChainEngine
+	// v17.1 布局存储
+	layoutStore *LayoutStore
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -641,6 +643,26 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAttackChainUpdateStatus(w, r)
 	case strings.HasPrefix(path, "/api/v1/attack-chains/") && method == "GET":
 		api.handleAttackChainGet(w, r)
+
+	// v17.1 布局持久化 API
+	case path == "/api/v1/layouts" && method == "GET":
+		api.handleLayoutList(w, r)
+	case path == "/api/v1/layouts" && method == "POST":
+		api.handleLayoutCreate(w, r)
+	case path == "/api/v1/layouts/presets" && method == "GET":
+		api.handleLayoutPresets(w, r)
+	case path == "/api/v1/layouts/active" && method == "POST":
+		api.handleLayoutSetActive(w, r)
+	case strings.HasPrefix(path, "/api/v1/layouts/") && method == "GET":
+		api.handleLayoutGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/layouts/") && method == "PUT":
+		api.handleLayoutUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/layouts/") && method == "DELETE":
+		api.handleLayoutDelete(w, r)
+
+	// v17.0: 态势大屏聚合 API
+	case path == "/api/v1/bigscreen/data" && method == "GET":
+		api.handleBigScreenData(w, r)
 
 	default:
 		w.WriteHeader(404)
@@ -5800,4 +5822,45 @@ func (api *ManagementAPI) handleBehaviorPatterns(w http.ResponseWriter, r *http.
 		"total":    len(patterns),
 		"tenant":   tenantID,
 	})
+}
+
+// handleBigScreenData GET /api/v1/bigscreen/data — v17.0 态势大屏聚合数据
+func (mapi *ManagementAPI) handleBigScreenData(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant")
+	result := map[string]interface{}{}
+
+	// OWASP 矩阵
+	if mapi.owaspMatrixEng != nil {
+		result["owasp_matrix"] = mapi.owaspMatrixEng.Calculate()
+	}
+
+	// 攻击链统计
+	if mapi.attackChainEng != nil {
+		result["chain_stats"] = mapi.attackChainEng.GetStats(tenantID)
+	}
+
+	// 蜜罐统计
+	if mapi.honeypotEngine != nil {
+		result["honeypot_stats"] = mapi.honeypotEngine.GetStats(tenantID)
+	}
+
+	// 24 小时趋势数据（每小时 1 个点）
+	db := mapi.logger.DB()
+	now := time.Now().UTC()
+	totalArr := make([]int, 24)
+	blockedArr := make([]int, 24)
+	for i := 23; i >= 0; i-- {
+		hourStart := now.Add(-time.Duration(i+1) * time.Hour).Format(time.RFC3339)
+		hourEnd := now.Add(-time.Duration(i) * time.Hour).Format(time.RFC3339)
+		var total, blocked int
+		db.QueryRow("SELECT COUNT(*) FROM audit_log WHERE timestamp >= ? AND timestamp < ?", hourStart, hourEnd).Scan(&total)
+		db.QueryRow("SELECT COUNT(*) FROM audit_log WHERE action='block' AND timestamp >= ? AND timestamp < ?", hourStart, hourEnd).Scan(&blocked)
+		totalArr[23-i] = total
+		blockedArr[23-i] = blocked
+	}
+	result["trend_total"] = totalArr
+	result["trend_blocked"] = blockedArr
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }

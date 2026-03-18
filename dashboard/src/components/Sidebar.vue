@@ -57,6 +57,13 @@
       </router-link>
     </div>
     <div class="sidebar-footer">
+      <!-- v17.0: 态势大屏入口 -->
+      <router-link to="/bigscreen" class="bigscreen-btn" v-if="!appState.sidebarCollapsed" title="态势大屏">
+        🖥 态势大屏
+      </router-link>
+      <router-link to="/bigscreen" class="bigscreen-btn bigscreen-btn-icon" v-else title="态势大屏">
+        🖥
+      </router-link>
       <!-- 严格模式开关 (v11.1) -->
       <div class="strict-toggle" v-if="!appState.sidebarCollapsed">
         <span class="strict-label">🛡️ 严格模式</span>
@@ -130,6 +137,7 @@ onMounted(() => { checkLLMStatus(); loadStrictMode() })
 // IM 安全导航项
 const imItems = [
   { path: '/overview', label: '概览', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>' },
+  { path: '/custom', label: '自定义大屏', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>' },
   { path: '/upstream', label: '上游', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/></svg>' },
   { path: '/routes', label: '路由', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>' },
   { path: '/rules', label: '规则', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
@@ -246,6 +254,24 @@ const statusText = computed(() => {
   transition: all var(--transition-fast); border: 1px solid var(--border-subtle); background: transparent;
 }
 .sidebar-toggle:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+/* 态势大屏按钮 (v17.0) */
+.bigscreen-btn {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px 12px; margin: 0 0 var(--space-2) 0;
+  background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: var(--radius-md); color: #a5b4fc;
+  font-size: var(--text-xs); font-weight: 600;
+  cursor: pointer; transition: all var(--transition-fast);
+  text-decoration: none; white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+.bigscreen-btn:hover {
+  background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25));
+  color: #c7d2fe; box-shadow: 0 0 12px rgba(99,102,241,0.2);
+}
+.bigscreen-btn-icon { padding: 8px 0; font-size: 1.2rem; }
 
 /* 严格模式 */
 .strict-banner {

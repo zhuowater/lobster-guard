@@ -1,6 +1,6 @@
 <template>
-  <!-- v14.1: 登录页不显示侧边栏和顶栏 -->
-  <div v-if="isLoginPage" class="login-layout">
+  <!-- v14.1: 登录页不显示侧边栏和顶栏; v17.0: 大屏页面全屏 -->
+  <div v-if="isLoginPage || isBigScreen" class="login-layout">
     <router-view />
   </div>
   <div v-else class="app-layout">
@@ -32,8 +32,9 @@ import Toast from './components/Toast.vue'
 const route = useRoute()
 const mobileOpen = ref(false)
 
-// v14.1: 判断是否在登录页
+// v14.1: 判断是否在登录页; v17.0: 大屏页面
 const isLoginPage = computed(() => route.name === 'login')
+const isBigScreen = computed(() => route.path === '/bigscreen')
 
 let healthTimer = null
 
