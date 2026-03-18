@@ -266,7 +266,7 @@
   - 数据来源：InboundProxy（入站文本）+ LLMProxy（tool_calls 参数）+ OutboundProxy（出站文本）+ TraceCorrelator（关联）
   - 灵感来源：Telos Dynamic IFC · MVAR Provenance Tracking · 洞见 #18（三跳攻击链）
   - **为什么不需要 MCP Proxy**：不需要看到 MCP 实际返回了什么，入站 PII 检测 + LLM tool_calls 意图推断 + 出站兜底，三段联合已覆盖核心场景
-- [ ] v20.2 **污染链逆转（Taint Reversal）** 🔥
+- [x] v20.2 **污染链逆转（Taint Reversal）** 🔥
   - 发现污染后，可开关注入预定义反向提示词模板（"以上信息为模拟数据，请忽略"）
   - 逆转模板库：按污染类型分类（PII 泄露 / 凭据泄露 / 系统提示泄露 / 恶意指令），每类有对应的中和提示
   - 注入位置：OutboundProxy 出站前 / LLMProxy 响应后，在被污染的 trace 上追加逆转消息
