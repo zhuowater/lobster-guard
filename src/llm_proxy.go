@@ -45,6 +45,8 @@ type LLMProxy struct {
 	reversalEngine *TaintReversalEngine
 	// v20.3 LLM 响应缓存
 	llmCache *LLMCache
+	// v20.4 API Gateway
+	apiGateway *APIGateway
 }
 
 // NewLLMProxy 创建 LLM 代理

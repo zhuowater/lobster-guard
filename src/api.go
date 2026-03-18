@@ -145,6 +145,8 @@ type ManagementAPI struct {
 	reversalEngine *TaintReversalEngine
 	// v20.3 LLM 响应缓存
 	llmCache *LLMCache
+	// v20.4 API Gateway
+	apiGateway *APIGateway
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -891,6 +893,28 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCacheConfigUpdate(w, r)
 	case path == "/api/v1/cache/lookup" && method == "POST":
 		api.handleCacheLookup(w, r)
+
+	// v20.4 API Gateway
+	case path == "/api/v1/gateway/stats" && method == "GET":
+		api.handleGatewayStats(w, r)
+	case path == "/api/v1/gateway/routes" && method == "GET":
+		api.handleGatewayRouteList(w, r)
+	case path == "/api/v1/gateway/routes" && method == "POST":
+		api.handleGatewayRouteAdd(w, r)
+	case strings.HasPrefix(path, "/api/v1/gateway/routes/") && method == "PUT":
+		api.handleGatewayRouteUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/gateway/routes/") && method == "DELETE":
+		api.handleGatewayRouteDelete(w, r)
+	case path == "/api/v1/gateway/config" && method == "GET":
+		api.handleGatewayConfigGet(w, r)
+	case path == "/api/v1/gateway/config" && method == "PUT":
+		api.handleGatewayConfigUpdate(w, r)
+	case path == "/api/v1/gateway/token" && method == "POST":
+		api.handleGatewayTokenGenerate(w, r)
+	case path == "/api/v1/gateway/validate" && method == "POST":
+		api.handleGatewayTokenValidate(w, r)
+	case path == "/api/v1/gateway/log" && method == "GET":
+		api.handleGatewayLog(w, r)
 
 	default:
 		w.WriteHeader(404)

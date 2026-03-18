@@ -229,6 +229,8 @@ type Config struct {
 	TaintReversal TaintReversalConfig `yaml:"taint_reversal"`
 	// v20.3 LLM 响应缓存
 	LLMCache LLMCacheConfig `yaml:"llm_cache"`
+	// v20.4 API Gateway
+	APIGateway APIGatewayConfig `yaml:"api_gateway"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）

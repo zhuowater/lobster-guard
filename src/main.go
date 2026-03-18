@@ -654,6 +654,20 @@ func main() {
 		llmProxy.llmCache = llmCache
 	}
 
+	// v20.4: API Gateway 引擎
+	var apiGateway *APIGateway
+	if cfg.APIGateway.Enabled {
+		apiGateway = NewAPIGateway(db, cfg.APIGateway)
+		fmt.Printf("[初始化] ✅ API Gateway 已启用 (JWT=%v, APIKey=%v, 路由=%d)\n",
+			cfg.APIGateway.JWTEnabled, cfg.APIGateway.APIKeyEnabled, len(apiGateway.ListRoutes()))
+	} else {
+		fmt.Println("[初始化] ⚠️ API Gateway: 未启用")
+	}
+	mgmtAPI.apiGateway = apiGateway
+	if llmProxy != nil {
+		llmProxy.apiGateway = apiGateway
+	}
+
 	mgmtAPI.honeypotDeep = honeypotDeep
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector
