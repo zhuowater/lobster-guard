@@ -80,6 +80,7 @@ function onNotifClick(n) {
   else if (n.type === 'budget_exceeded') router.push('/agent')
   else if (n.type === 'high_risk_tool') router.push('/agent')
   else if (n.type === 'anomaly') router.push('/anomaly')
+  else if (n.type === 'report_ready') router.push('/reports')
   notifOpen.value = false
 }
 async function loadNotifications() { try { const d = await api('/api/v1/notifications'); notifications.value = d.notifications || [] } catch { notifications.value = [] } }

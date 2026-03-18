@@ -557,7 +557,25 @@ func (e *NotificationEngine) GetRecentNotifications() []NotificationItem {
 		}
 	}
 
-	// 4. 高风险工具调用
+	// 4. 报告生成完成 (v12.0)
+	rptRows, err := e.db.Query(`SELECT id, title, created_at FROM reports WHERE status='ready' AND created_at >= ? ORDER BY created_at DESC LIMIT 5`, since24h)
+	if err == nil {
+		defer rptRows.Close()
+		for rptRows.Next() {
+			var rptID, rptTitle, rptCreated string
+			rptRows.Scan(&rptID, &rptTitle, &rptCreated)
+			idCounter++
+			items = append(items, NotificationItem{
+				ID:        fmt.Sprintf("n-%d", idCounter),
+				Timestamp: rptCreated, Type: "report_ready", TypeLabel: "报告就绪",
+				Severity: "low",
+				Summary:  fmt.Sprintf("报告已生成: %s", rptTitle),
+				Detail:   rptID,
+			})
+		}
+	}
+
+	// 5. 高风险工具调用
 	hrRows, err := e.db.Query(`SELECT timestamp, tool_name FROM llm_tool_calls WHERE risk_level IN ('high','critical') AND timestamp >= ? ORDER BY timestamp DESC LIMIT 10`, since24h)
 	if err == nil {
 		defer hrRows.Close()

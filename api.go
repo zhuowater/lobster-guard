@@ -61,6 +61,8 @@ type ManagementAPI struct {
 	notificationEng *NotificationEngine
 	// v11.2 异常基线检测
 	anomalyDetector *AnomalyDetector
+	// v12.0 报告引擎
+	reportEngine *ReportEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -78,7 +80,10 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 func (api *ManagementAPI) checkManagementAuth(r *http.Request) bool {
 	if api.managementToken == "" { return true }
 	auth := r.Header.Get("Authorization")
-	return auth == "Bearer "+api.managementToken
+	if auth == "Bearer "+api.managementToken { return true }
+	// 支持 query parameter token（用于 iframe/下载等无法设 header 的场景）
+	if qToken := r.URL.Query().Get("token"); qToken == api.managementToken { return true }
+	return false
 }
 
 func (api *ManagementAPI) checkRegistrationAuth(r *http.Request) bool {
@@ -310,6 +315,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleStrictModeSet(w, r)
 	case path == "/api/v1/notifications" && method == "GET":
 		api.handleNotifications(w, r)
+	// v12.0 报告引擎 API
+	case path == "/api/v1/reports/generate" && method == "POST":
+		api.handleReportGenerate(w, r)
+	case path == "/api/v1/reports" && method == "GET":
+		api.handleReportList(w, r)
+	case strings.HasPrefix(path, "/api/v1/reports/") && strings.HasSuffix(path, "/download") && method == "GET":
+		api.handleReportDownload(w, r)
+	case strings.HasPrefix(path, "/api/v1/reports/") && method == "DELETE":
+		api.handleReportDelete(w, r)
+	case strings.HasPrefix(path, "/api/v1/reports/") && method == "GET":
+		api.handleReportGet(w, r)
+	// v12.0 LLM 审计导出 API
+	case path == "/api/v1/llm/export" && method == "GET":
+		api.handleLLMExport(w, r)
 	// v11.2 异常基线检测 API
 	case path == "/api/v1/anomaly/baselines" && method == "GET":
 		api.handleAnomalyBaselines(w, r)
@@ -2126,6 +2145,17 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 注入了异常基线 + 6 条异常告警")
 	}
 
+	// v12.0: 生成示例日报
+	reportGenerated := false
+	if api.reportEngine != nil {
+		if _, err := api.reportEngine.Generate(ReportDaily); err == nil {
+			reportGenerated = true
+			log.Printf("[Demo] 生成了示例安全日报")
+		} else {
+			log.Printf("[Demo] 生成示例日报失败: %v", err)
+		}
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":              true,
@@ -2135,6 +2165,7 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		"canary_leaks":    "included",
 		"budget_violations": "included",
 		"anomaly_alerts":  "included",
+		"report_generated": reportGenerated,
 	})
 }
 
@@ -3396,6 +3427,207 @@ func (api *ManagementAPI) handleNotifications(w http.ResponseWriter, r *http.Req
 
 // ============================================================
 // v11.2 异常基线检测 API handlers
+// ============================================================
+// v12.0 报告引擎 API
+// ============================================================
+
+// handleReportGenerate POST /api/v1/reports/generate — 生成报告
+func (api *ManagementAPI) handleReportGenerate(w http.ResponseWriter, r *http.Request) {
+	if api.reportEngine == nil {
+		jsonResponse(w, 500, map[string]string{"error": "report engine not initialized"})
+		return
+	}
+	var body struct {
+		Type string `json:"type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	var rt ReportType
+	switch body.Type {
+	case "daily":
+		rt = ReportDaily
+	case "weekly":
+		rt = ReportWeekly
+	case "monthly":
+		rt = ReportMonthly
+	default:
+		jsonResponse(w, 400, map[string]string{"error": "type must be daily, weekly, or monthly"})
+		return
+	}
+	meta, err := api.reportEngine.Generate(rt)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, meta)
+}
+
+// handleReportList GET /api/v1/reports — 报告列表
+func (api *ManagementAPI) handleReportList(w http.ResponseWriter, r *http.Request) {
+	if api.reportEngine == nil {
+		jsonResponse(w, 200, map[string]interface{}{"reports": []interface{}{}})
+		return
+	}
+	typ := r.URL.Query().Get("type")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20
+	if limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	reports, err := api.reportEngine.ListReports(typ, limit)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if reports == nil {
+		reports = []ReportMeta{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"reports": reports})
+}
+
+// handleReportGet GET /api/v1/reports/:id — 获取报告元数据
+func (api *ManagementAPI) handleReportGet(w http.ResponseWriter, r *http.Request) {
+	if api.reportEngine == nil {
+		jsonResponse(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/reports/")
+	meta, err := api.reportEngine.GetReport(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": "report not found"})
+		return
+	}
+	jsonResponse(w, 200, meta)
+}
+
+// handleReportDownload GET /api/v1/reports/:id/download — 下载报告 HTML
+func (api *ManagementAPI) handleReportDownload(w http.ResponseWriter, r *http.Request) {
+	if api.reportEngine == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/reports/")
+	id = strings.TrimSuffix(id, "/download")
+	meta, err := api.reportEngine.GetReport(id)
+	if err != nil {
+		http.Error(w, "report not found", 404)
+		return
+	}
+	data, err := os.ReadFile(meta.FilePath)
+	if err != nil {
+		http.Error(w, "report file not found", 404)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s.html\"", meta.ID))
+	w.Write(data)
+}
+
+// handleReportDelete DELETE /api/v1/reports/:id — 删除报告
+func (api *ManagementAPI) handleReportDelete(w http.ResponseWriter, r *http.Request) {
+	if api.reportEngine == nil {
+		jsonResponse(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/reports/")
+	if err := api.reportEngine.DeleteReport(id); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"ok": true})
+}
+
+// handleLLMExport GET /api/v1/llm/export — 导出 LLM 审计数据（CSV/JSON）
+func (api *ManagementAPI) handleLLMExport(w http.ResponseWriter, r *http.Request) {
+	if api.llmAuditor == nil {
+		jsonResponse(w, 404, map[string]string{"error": "LLM proxy not enabled"})
+		return
+	}
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+	dataType := r.URL.Query().Get("data") // "calls" or "tools"
+	if dataType == "" {
+		dataType = "calls"
+	}
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+
+	if dataType == "tools" {
+		records, _, err := api.llmAuditor.QueryToolCalls("", "", from, to, 10000, 0)
+		if err != nil {
+			jsonResponse(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		if format == "csv" {
+			w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+			w.Header().Set("Content-Disposition", "attachment; filename=\"llm-tools-export.csv\"")
+			cw := csv.NewWriter(w)
+			cw.Write([]string{"id", "llm_call_id", "timestamp", "tool_name", "tool_input_preview", "tool_result_preview", "risk_level", "flagged", "flag_reason"})
+			for _, rec := range records {
+				cw.Write([]string{
+					fmt.Sprintf("%v", rec["id"]),
+					fmt.Sprintf("%v", rec["llm_call_id"]),
+					fmt.Sprintf("%v", rec["timestamp"]),
+					fmt.Sprintf("%v", rec["tool_name"]),
+					fmt.Sprintf("%v", rec["tool_input_preview"]),
+					fmt.Sprintf("%v", rec["tool_result_preview"]),
+					fmt.Sprintf("%v", rec["risk_level"]),
+					fmt.Sprintf("%v", rec["flagged"]),
+					fmt.Sprintf("%v", rec["flag_reason"]),
+				})
+			}
+			cw.Flush()
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Disposition", "attachment; filename=\"llm-tools-export.json\"")
+			json.NewEncoder(w).Encode(map[string]interface{}{"data": records, "total": len(records)})
+		}
+		return
+	}
+
+	// calls
+	records, _, err := api.llmAuditor.QueryCalls("", "", from, to, 10000, 0)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"llm-calls-export.csv\"")
+		cw := csv.NewWriter(w)
+		cw.Write([]string{"id", "timestamp", "trace_id", "model", "request_tokens", "response_tokens", "total_tokens", "latency_ms", "status_code", "has_tool_use", "tool_count", "error_message", "canary_leaked", "budget_exceeded"})
+		for _, rec := range records {
+			cw.Write([]string{
+				fmt.Sprintf("%v", rec["id"]),
+				fmt.Sprintf("%v", rec["timestamp"]),
+				fmt.Sprintf("%v", rec["trace_id"]),
+				fmt.Sprintf("%v", rec["model"]),
+				fmt.Sprintf("%v", rec["request_tokens"]),
+				fmt.Sprintf("%v", rec["response_tokens"]),
+				fmt.Sprintf("%v", rec["total_tokens"]),
+				fmt.Sprintf("%v", rec["latency_ms"]),
+				fmt.Sprintf("%v", rec["status_code"]),
+				fmt.Sprintf("%v", rec["has_tool_use"]),
+				fmt.Sprintf("%v", rec["tool_count"]),
+				fmt.Sprintf("%v", rec["error_message"]),
+				fmt.Sprintf("%v", rec["canary_leaked"]),
+				fmt.Sprintf("%v", rec["budget_exceeded"]),
+			})
+		}
+		cw.Flush()
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"llm-calls-export.json\"")
+		json.NewEncoder(w).Encode(map[string]interface{}{"data": records, "total": len(records)})
+	}
+}
+
 // ============================================================
 
 // handleAnomalyBaselines GET /api/v1/anomaly/baselines — 所有指标的基线状态

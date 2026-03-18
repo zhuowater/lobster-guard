@@ -14,6 +14,7 @@ const routes = [
   { path: '/agent', name: 'agent', component: () => import('./views/AgentBehavior.vue'), meta: { title: 'Agent 行为', icon: '🤖', group: 'llm' } },
   { path: '/monitor', name: 'monitor', component: () => import('./views/Monitor.vue'), meta: { title: '监控', icon: '⚡', group: 'system' } },
   { path: '/anomaly', name: 'anomaly', component: () => import('./views/AnomalyDetection.vue'), meta: { title: '异常检测', icon: '📊', group: 'system' } },
+  { path: '/reports', name: 'reports', component: () => import('./views/Reports.vue'), meta: { title: '报告', icon: '📄', group: 'system' } },
   { path: '/ops', name: 'ops', component: () => import('./views/Operations.vue'), meta: { title: '运维', icon: '🔧', group: 'system' } },
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { title: '设置', icon: '⚙️', group: 'system' } },
 ]

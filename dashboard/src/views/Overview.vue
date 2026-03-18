@@ -8,6 +8,7 @@
           安全驾驶舱
         </div>
         <div class="cockpit-controls">
+          <button class="gen-report-btn" @click="goReport" title="生成安全报告">📊 生成报告</button>
           <select v-model="timeRange" @change="onTimeRangeChange" class="time-range-select" title="数据时间范围">
             <option value="24h">⏱ 24小时</option>
             <option value="7d">⏱ 7天</option>
@@ -172,6 +173,7 @@ const healthBars=computed(()=>{const h=appState.health;if(!h||!h.checks)return[]
 const trendChartData=computed(()=>trendData.value.map(t=>({total:(t.pass||0)+(t.block||0)+(t.warn||0),block:t.block||0,warn:t.warn||0})))
 const trendLines=[{key:'total',color:'#3B82F6',label:'总请求'},{key:'block',color:'#EF4444',label:'拦截'},{key:'warn',color:'#F59E0B',label:'告警'}]
 const trendXLabels=computed(()=>trendData.value.map(t=>{const h=t.hour||'';if(trendRange.value==='7d')return h.substring(5,10)+' '+h.substring(11,13)+':00';const hp=h.substring(11,13);return hp?hp+':00':''}))
+function goReport(){router.push({path:'/reports',query:{auto:'daily'}})}
 function onTimeRangeChange(){localStorage.setItem('overview_time_range',timeRange.value);trendRange.value=timeRange.value==='24h'?'24h':'7d';loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus()}
 function onTrendRangeChange(range){trendRange.value=range;loadTrend()}
 async function loadTrend(){try{const d=await api('/api/v1/audit/timeline?hours='+(trendRange.value==='7d'?168:24));trendData.value=d.timeline||[]}catch{trendData.value=[]}}
@@ -248,6 +250,8 @@ onUnmounted(()=>clearInterval(refreshTimer))
 .anomaly-ok:hover{color:var(--text-secondary)}
 /* v11.4: 全局时间选择器 + 时间标注 */
 .cockpit-controls{display:flex;align-items:center;gap:var(--space-2)}
+.gen-report-btn{background:var(--bg-elevated);border:1px solid var(--color-primary);border-radius:var(--radius-sm);color:var(--color-primary);font-size:var(--text-xs);font-weight:600;padding:3px 8px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.gen-report-btn:hover{background:var(--color-primary);color:#fff}
 .time-range-select{background:var(--bg-elevated);border:1px solid var(--color-primary);border-radius:var(--radius-sm);color:var(--color-primary);font-size:var(--text-xs);font-weight:600;padding:3px 8px;cursor:pointer;transition:all .2s}
 .time-range-select:hover{background:var(--color-primary);color:#fff}
 .time-badge{display:inline-block;padding:1px 6px;border-radius:9999px;font-size:10px;font-weight:600;color:var(--text-tertiary);background:rgba(107,114,128,0.15);margin-left:4px;vertical-align:middle;line-height:1.4}

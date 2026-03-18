@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "11.4.0"
+	AppVersion = "12.0.0"
 )
 
 var startTime = time.Now()
@@ -402,6 +402,12 @@ func main() {
 	mgmtAPI.anomalyDetector = anomalyDetector
 	anomalyDetector.StartBackground()
 	fmt.Println("[初始化] ✅ 异常基线检测器已启动 (6 个指标, 7 天窗口, >2σ 告警)")
+
+	// v12.0: 报告引擎
+	reportEngine := NewReportEngine(logger.DB(), "/var/lib/lobster-guard/reports/")
+	reportEngine.SetEngines(mgmtAPI.healthScoreEng, mgmtAPI.owaspMatrixEng, llmAuditor, mgmtAPI.userProfileEng, anomalyDetector, logger)
+	mgmtAPI.reportEngine = reportEngine
+	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
