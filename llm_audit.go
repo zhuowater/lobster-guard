@@ -14,10 +14,11 @@ import (
 
 // LLMAuditor — LLM 侧审计记录器（独立于 IM 侧）
 type LLMAuditor struct {
-	db       *sql.DB
-	cfg      LLMAuditConfig
-	highRisk map[string]string // tool_name → risk_level
-	proxyCfg *LLMProxyConfig   // v9.1 引用代理配置（用于读取 cost_alert 等）
+	db             *sql.DB
+	cfg            LLMAuditConfig
+	highRisk       map[string]string // tool_name → risk_level
+	proxyCfg       *LLMProxyConfig   // v9.1 引用代理配置（用于读取 cost_alert 等）
+	promptTracker  *PromptTracker    // v13.1 Prompt 版本追踪器
 }
 
 // v9.1 模型定价表（每百万 Token 美元）
@@ -88,6 +89,8 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN canary_leaked INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN budget_exceeded INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN budget_violations TEXT`)
+	// v13.1: Prompt 版本追踪列
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN prompt_hash TEXT DEFAULT ''`)
 
 	return &LLMAuditor{
 		db:       db,
@@ -119,6 +122,11 @@ func (la *LLMAuditor) ClassifyToolRisk(toolName string) string {
 
 // RecordCall 写入一条 LLM 调用记录，返回插入的 ID
 func (la *LLMAuditor) RecordCall(ts string, traceID, model string, reqTokens, respTokens, totalTokens int, latencyMs float64, statusCode int, hasToolUse bool, toolCount int, errMsg string, canaryLeaked bool, budgetExceeded bool, budgetViolations string) (int64, error) {
+	return la.RecordCallWithPrompt(ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, hasToolUse, toolCount, errMsg, canaryLeaked, budgetExceeded, budgetViolations, "")
+}
+
+// RecordCallWithPrompt 写入 LLM 调用记录（含 prompt_hash），返回插入的 ID
+func (la *LLMAuditor) RecordCallWithPrompt(ts string, traceID, model string, reqTokens, respTokens, totalTokens int, latencyMs float64, statusCode int, hasToolUse bool, toolCount int, errMsg string, canaryLeaked bool, budgetExceeded bool, budgetViolations string, promptHash string) (int64, error) {
 	toolUse := 0
 	if hasToolUse {
 		toolUse = 1
@@ -132,9 +140,9 @@ func (la *LLMAuditor) RecordCall(ts string, traceID, model string, reqTokens, re
 		budgetVal = 1
 	}
 	result, err := la.db.Exec(`INSERT INTO llm_calls
-		(timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, canary_leaked, budget_exceeded, budget_violations)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, toolUse, toolCount, errMsg, canaryVal, budgetVal, budgetViolations)
+		(timestamp, trace_id, model, request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, error_message, canary_leaked, budget_exceeded, budget_violations, prompt_hash)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		ts, traceID, model, reqTokens, respTokens, totalTokens, latencyMs, statusCode, toolUse, toolCount, errMsg, canaryVal, budgetVal, budgetViolations, promptHash)
 	if err != nil {
 		return 0, err
 	}
@@ -494,7 +502,16 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 		}
 	}
 
-	callID, err := la.RecordCall(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, statusCode, info.HasToolUse, info.ToolCount, errMsg, canaryLeaked, budgetExceeded, budgetViolationsJSON)
+	// v13.1: Prompt 版本追踪
+	var promptHash string
+	if la.promptTracker != nil {
+		systemPrompt := extractSystemPrompt(ctx.ReqBody)
+		if systemPrompt != "" {
+			promptHash = la.promptTracker.Track(systemPrompt, model)
+		}
+	}
+
+	callID, err := la.RecordCallWithPrompt(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, statusCode, info.HasToolUse, info.ToolCount, errMsg, canaryLeaked, budgetExceeded, budgetViolationsJSON, promptHash)
 	if err != nil {
 		log.Printf("[LLMAudit] 写入 llm_call 失败: %v", err)
 		return
@@ -553,7 +570,16 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 		}
 	}
 
-	callID, err := la.RecordCall(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, 200, info.HasToolUse, info.ToolCount, "", canaryLeaked, budgetExceeded, budgetViolationsJSON)
+	// v13.1: Prompt 版本追踪
+	var promptHash string
+	if la.promptTracker != nil {
+		systemPrompt := extractSystemPrompt(ctx.ReqBody)
+		if systemPrompt != "" {
+			promptHash = la.promptTracker.Track(systemPrompt, model)
+		}
+	}
+
+	callID, err := la.RecordCallWithPrompt(ts, ctx.TraceID, model, info.InputTokens, info.OutputTokens, info.TotalTokens, latencyMs, 200, info.HasToolUse, info.ToolCount, "", canaryLeaked, budgetExceeded, budgetViolationsJSON, promptHash)
 	if err != nil {
 		log.Printf("[LLMAudit] 写入 llm_call(SSE) 失败: %v", err)
 		return

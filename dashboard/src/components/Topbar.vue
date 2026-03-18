@@ -82,6 +82,7 @@ function onNotifClick(n) {
   else if (n.type === 'anomaly') router.push('/anomaly')
   else if (n.type === 'report_ready') router.push('/reports')
   else if (n.type === 'session_risk') router.push('/sessions')
+  else if (n.type === 'prompt_changed') router.push('/prompts')
   notifOpen.value = false
 }
 async function loadNotifications() { try { const d = await api('/api/v1/notifications'); notifications.value = d.notifications || [] } catch { notifications.value = [] } }

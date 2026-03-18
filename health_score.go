@@ -592,6 +592,24 @@ func (e *NotificationEngine) GetRecentNotifications() []NotificationItem {
 		}
 	}
 
+	// 6. v13.1: Prompt 版本变更通知
+	pvRows, err := e.db.Query(`SELECT hash, model, first_seen FROM prompt_versions WHERE first_seen >= ? ORDER BY first_seen DESC LIMIT 5`, since24h)
+	if err == nil {
+		defer pvRows.Close()
+		for pvRows.Next() {
+			var hash, model, ts string
+			pvRows.Scan(&hash, &model, &ts)
+			idCounter++
+			items = append(items, NotificationItem{
+				ID:        fmt.Sprintf("n-%d", idCounter),
+				Timestamp: ts, Type: "prompt_changed", TypeLabel: "Prompt 变更",
+				Severity: "medium",
+				Summary:  fmt.Sprintf("检测到新 Prompt 版本: %s", hash[:8]),
+				Detail:   fmt.Sprintf("模型: %s", model),
+			})
+		}
+	}
+
 	return items
 }
 

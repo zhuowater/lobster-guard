@@ -52,6 +52,29 @@
       <Skeleton type="card" /><Skeleton type="card" /><Skeleton type="card" /><Skeleton type="card" />
     </div>
 
+    <!-- v13.1: Prompt 版本卡片 -->
+    <div class="card prompt-mini-card" v-if="promptInfo" style="margin-bottom:16px;cursor:pointer" @click="router.push('/prompts')">
+      <div class="card-header" style="padding-bottom:8px">
+        <span class="card-icon">📝</span>
+        <span class="card-title">Prompt 版本追踪</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-tertiary)">点击查看详情 →</span>
+      </div>
+      <div style="padding:0 16px 12px;display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div>
+          <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase">当前版本</div>
+          <div style="font-size:14px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary)">{{ promptInfo.hash?.slice(0,8) || '-' }}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase">版本数</div>
+          <div style="font-size:14px;font-weight:700;color:var(--color-primary)">{{ promptInfo.total }}</div>
+        </div>
+        <div v-if="promptInfo.verdict" :style="{ color: promptInfo.verdict === 'improved' ? 'var(--color-success)' : promptInfo.verdict === 'degraded' ? 'var(--color-error)' : 'var(--text-tertiary)' }">
+          <div style="font-size:10px;text-transform:uppercase">安全趋势</div>
+          <div style="font-size:14px;font-weight:700">{{ promptInfo.verdict === 'improved' ? '✅ 改善' : promptInfo.verdict === 'degraded' ? '⚠️ 退化' : '➡️ 持平' }}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 成本看板 -->
     <div class="ov-row" v-if="loaded" style="margin-bottom:20px">
       <div class="card">
@@ -241,6 +264,8 @@ const overview = ref({ total_calls: 0, total_tokens: 0, avg_latency_ms: 0, error
 const callsData = ref([])
 const trendRange = ref('24h')
 const timelineData = ref([])
+// v13.1 Prompt 版本追踪
+const promptInfo = ref(null)
 
 function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
@@ -339,6 +364,24 @@ async function loadData() {
     callsData.value = d.records || []
   } catch { callsData.value = [] }
   await loadTimeline()
+  // v13.1: 加载 Prompt 版本摘要
+  try {
+    const pList = await api('/api/v1/prompts')
+    const versions = pList.versions || []
+    if (versions.length > 0) {
+      const cur = versions[0]
+      let verdict = null
+      if (versions.length > 1) {
+        // 简单判断: 比较 canary 率
+        const oldTotal = versions[1].total_calls || versions[1].call_count || 1
+        const newTotal = cur.total_calls || cur.call_count || 1
+        const oldCanary = (versions[1].canary_leaks || 0) / oldTotal
+        const newCanary = (cur.canary_leaks || 0) / newTotal
+        verdict = newCanary < oldCanary ? 'improved' : newCanary > oldCanary ? 'degraded' : 'neutral'
+      }
+      promptInfo.value = { hash: cur.hash, total: versions.length, verdict }
+    }
+  } catch { /* ignore */ }
   loaded.value = true
 }
 

@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "13.0.0"
+	AppVersion = "13.1.0"
 )
 
 var startTime = time.Now()
@@ -406,6 +406,14 @@ func main() {
 	// v13.0: 会话回放引擎
 	sessionReplayEng := NewSessionReplayEngine(logger.DB())
 	fmt.Println("[初始化] ✅ 会话回放引擎已就绪 (trace_id 串联 IM+LLM+Tools)")
+
+	// v13.1: Prompt 版本追踪器
+	promptTracker := NewPromptTracker(logger.DB())
+	if llmAuditor != nil {
+		llmAuditor.promptTracker = promptTracker
+	}
+	mgmtAPI.promptTracker = promptTracker
+	fmt.Println("[初始化] ✅ Prompt 版本追踪器已就绪 (自动检测 System Prompt 变化)")
 
 	// v12.0: 报告引擎
 	reportEngine := NewReportEngine(logger.DB(), "/var/lib/lobster-guard/reports/")

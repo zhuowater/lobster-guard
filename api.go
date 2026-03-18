@@ -65,6 +65,8 @@ type ManagementAPI struct {
 	reportEngine *ReportEngine
 	// v13.0 会话回放引擎
 	sessionReplayEng *SessionReplayEngine
+	// v13.1 Prompt 版本追踪器
+	promptTracker *PromptTracker
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -285,6 +287,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDemoSeed(w, r)
 	case path == "/api/v1/demo/clear" && method == "DELETE":
 		api.handleDemoClear(w, r)
+	// v13.1 Prompt 版本追踪 API
+	case path == "/api/v1/prompts" && method == "GET":
+		api.handlePromptsList(w, r)
+	case path == "/api/v1/prompts/current" && method == "GET":
+		api.handlePromptsCurrent(w, r)
+	case strings.HasPrefix(path, "/api/v1/prompts/") && strings.HasSuffix(path, "/diff") && method == "GET":
+		api.handlePromptsDiff(w, r)
+	case strings.HasPrefix(path, "/api/v1/prompts/") && method == "GET":
+		api.handlePromptsGet(w, r)
 	// v13.0 会话回放 API
 	case path == "/api/v1/sessions/replay" && method == "GET":
 		api.handleSessionReplayList(w, r)
@@ -2298,17 +2309,25 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// v13.1: 注入 Prompt 版本追踪演示数据
+	promptVersionsInserted := 0
+	if api.promptTracker != nil {
+		promptVersionsInserted = api.promptTracker.SeedPromptDemoData(al.db)
+		log.Printf("[Demo] 注入了 %d 个 Prompt 版本演示数据", promptVersionsInserted)
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":              true,
-		"count":           inserted,
-		"llm_calls":       llmCallsInserted,
-		"llm_tool_calls":  llmToolCallsInserted,
-		"canary_leaks":    "included",
+		"ok":                true,
+		"count":             inserted,
+		"llm_calls":         llmCallsInserted,
+		"llm_tool_calls":    llmToolCallsInserted,
+		"canary_leaks":      "included",
 		"budget_violations": "included",
-		"anomaly_alerts":  "included",
-		"report_generated": reportGenerated,
-		"replay_sessions": len(replayTraceIDs),
+		"anomaly_alerts":    "included",
+		"report_generated":  reportGenerated,
+		"replay_sessions":   len(replayTraceIDs),
+		"prompt_versions":   promptVersionsInserted,
 	})
 }
 
@@ -2337,11 +2356,18 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 	// v13.0: 清除会话标签
 	al.db.Exec("DELETE FROM session_tags")
 
-	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据", deleted, llmDeleted)
+	// v13.1: 清除 Prompt 版本数据
+	var promptDeleted int64
+	if api.promptTracker != nil {
+		promptDeleted = api.promptTracker.ClearPromptData(al.db)
+	}
+
+	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据, %d 条 Prompt 版本", deleted, llmDeleted, promptDeleted)
 	jsonResponse(w, 200, map[string]interface{}{
-		"ok":          true,
-		"deleted":     deleted,
-		"llm_deleted": llmDeleted,
+		"ok":              true,
+		"deleted":         deleted,
+		"llm_deleted":     llmDeleted,
+		"prompt_deleted":  promptDeleted,
 	})
 }
 
@@ -3961,5 +3987,78 @@ func (api *ManagementAPI) handleAnomalyMetric(w http.ResponseWriter, r *http.Req
 	}
 	detail := api.anomalyDetector.GetMetricDetail(metricName)
 	jsonResponse(w, 200, detail)
+}
+
+// ============================================================
+// v13.1 Prompt 版本追踪 API handlers
+// ============================================================
+
+// handlePromptsList GET /api/v1/prompts — Prompt 版本列表（按时间倒序）
+func (api *ManagementAPI) handlePromptsList(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 200, map[string]interface{}{"versions": []interface{}{}, "total": 0})
+		return
+	}
+	versions := api.promptTracker.ListVersions()
+	if versions == nil {
+		versions = []PromptVersion{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"versions": versions,
+		"total":    len(versions),
+	})
+}
+
+// handlePromptsCurrent GET /api/v1/prompts/current — 当前活跃版本
+func (api *ManagementAPI) handlePromptsCurrent(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 404, map[string]string{"error": "prompt tracker not available"})
+		return
+	}
+	current := api.promptTracker.GetCurrent()
+	if current == nil {
+		jsonResponse(w, 404, map[string]string{"error": "no prompt version tracked yet"})
+		return
+	}
+	jsonResponse(w, 200, current)
+}
+
+// handlePromptsGet GET /api/v1/prompts/:hash — 单个版本详情（含安全指标）
+func (api *ManagementAPI) handlePromptsGet(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 404, map[string]string{"error": "prompt tracker not available"})
+		return
+	}
+	hash := strings.TrimPrefix(r.URL.Path, "/api/v1/prompts/")
+	if hash == "" {
+		jsonResponse(w, 400, map[string]string{"error": "hash required"})
+		return
+	}
+	version := api.promptTracker.GetVersion(hash)
+	if version == nil {
+		jsonResponse(w, 404, map[string]string{"error": "version not found"})
+		return
+	}
+	jsonResponse(w, 200, version)
+}
+
+// handlePromptsDiff GET /api/v1/prompts/:hash/diff — 与前一版本的 diff + 指标对比
+func (api *ManagementAPI) handlePromptsDiff(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 404, map[string]string{"error": "prompt tracker not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/prompts/")
+	hash := strings.TrimSuffix(path, "/diff")
+	if hash == "" {
+		jsonResponse(w, 400, map[string]string{"error": "hash required"})
+		return
+	}
+	diff := api.promptTracker.GetDiff(hash)
+	if diff == nil {
+		jsonResponse(w, 404, map[string]string{"error": "version not found"})
+		return
+	}
+	jsonResponse(w, 200, diff)
 }
 
