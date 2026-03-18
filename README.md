@@ -82,13 +82,13 @@
 
 > Vue 3 深色科技主题 · Indigo 配色 · 29 页面 · 5 组侧边栏
 
-![Dashboard Full](docs/screenshots/dashboard-full.jpg)
+![Dashboard Overview](docs/screenshots/dashboard-overview-v17.png)
 
 ### 安全拦截一览
 
 > Block 红色高亮 · Warn 黄色高亮 · 支持方向/动作/发送者多维筛选
 
-![Dashboard Block Filter](docs/screenshots/dashboard-block-filter.jpg)
+![Dashboard Bigscreen](docs/screenshots/dashboard-bigscreen-v17.png)
 
 📖 更多截图：[管理后台详情](docs/dashboard.md)
 

@@ -10,13 +10,13 @@
 
 ### Dashboard 全览
 
-![Dashboard Full](screenshots/dashboard-full.jpg)
+![Dashboard Full](screenshots/dashboard-overview-v17.png)
 
-### 安全拦截一览
+### 态势感知大屏
 
-> Block 红色高亮 · Warn 黄色高亮 · 支持方向/动作/发送者多维筛选
+> 全屏驾驶舱 · 实时攻防态势 · OWASP 矩阵 · 攻击链关联 · 安全排行榜
 
-![Dashboard Block Filter](screenshots/dashboard-block-filter.jpg)
+![Dashboard Bigscreen](screenshots/dashboard-bigscreen-v17.png)
 
 ## 页面列表
 
@@ -105,46 +105,27 @@ TrendChart / PieChart / HeatMap / RuleEditor / TimelineChart 等，统一 Indigo
 <summary>展开查看全部截图</summary>
 
 ### LLM 安全域
-![LLM Overview](screenshots/dashboard-llm.jpg)
-![LLM Cost](screenshots/dashboard-llm-cost.jpg)
-![LLM Rules](screenshots/dashboard-llm-rules.jpg)
+![LLM Overview](screenshots/dashboard-llm-overview-v17.png)
 
 ### 威胁分析
-![User Profiles](screenshots/dashboard-user-profiles.jpg)
-![User Detail](screenshots/dashboard-user-detail.jpg)
-![Agent Behavior](screenshots/dashboard-agent-behavior.jpg)
-![Cockpit](screenshots/dashboard-cockpit-v11.4.jpg)
-![OWASP Matrix](screenshots/dashboard-owasp-matrix-v11.1.jpg)
+![User Profiles](screenshots/dashboard-user-profiles-v17.png)
+![Behavior Profile](screenshots/dashboard-behavior-v17.png)
+![Attack Chains](screenshots/dashboard-attack-chains-v17.png)
+![Anomaly Detection](screenshots/dashboard-anomaly-v17.png)
+
+### 安全治理
+![Red Team](screenshots/dashboard-redteam-v17.png)
+![Honeypot](screenshots/dashboard-honeypot-v17.png)
+![Leaderboard](screenshots/dashboard-leaderboard-v17.png)
+![Reports](screenshots/dashboard-reports-v17.png)
+![Sessions](screenshots/dashboard-sessions-v17.png)
 
 ### 审计与监控
-![Audit](screenshots/dashboard-audit.jpg)
-![Monitor](screenshots/dashboard-monitor.jpg)
-![Routes](screenshots/dashboard-routes.jpg)
-![Rules](screenshots/dashboard-rules.jpg)
+![Audit](screenshots/dashboard-audit-v17.png)
+![Routes](screenshots/dashboard-routes-v17.png)
+![Rules](screenshots/dashboard-rules-v17.png)
 
-### 运维管理
-![Operations](screenshots/dashboard-ops.jpg)
-![Agent Alerts](screenshots/dashboard-agent-alert.jpg)
-
-### 报告与会话
-![Reports List](screenshots/reports-list-v12.0.jpg)
-![Report Preview](screenshots/report-preview-v12.0.jpg)
-![Session List](screenshots/session-list-v13.jpg)
-![Session Detail](screenshots/session-detail-v13.jpg)
-![Session Timeline](screenshots/session-timeline-v13.jpg)
-
-### Prompt 追踪
-![Prompt History](screenshots/prompt-history-v13.1.jpg)
-![Prompt Current](screenshots/prompt-current-v13.1.jpg)
-![Prompt Diff](screenshots/prompt-diff-v13.1.jpg)
-
-### 多租户
-![Tenants](screenshots/tenants-v14.jpg)
-![Tenant Members](screenshots/tenant-members-v14.jpg)
-![Tenant Security Config](screenshots/tenant-security-config-v14.jpg)
-![Tenant Switch](screenshots/tenant-switch-v14.jpg)
-
-### 设置
-![LLM Settings](screenshots/settings-llm-v11.4.jpg)
+### 态势大屏
+![Bigscreen](screenshots/dashboard-bigscreen-v17.png)
 
 </details>
