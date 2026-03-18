@@ -141,6 +141,8 @@ type ManagementAPI struct {
 	toolPolicy *ToolPolicyEngine
 	// v20.1 污染追踪引擎
 	taintTracker *TaintTracker
+	// v20.2 污染链逆转引擎
+	reversalEngine *TaintReversalEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -855,6 +857,22 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleTaintConfigUpdate(w, r)
 	case path == "/api/v1/taint/scan" && method == "POST":
 		api.handleTaintScan(w, r)
+
+	// v20.2: 污染链逆转 API
+	case path == "/api/v1/reversal/stats" && method == "GET":
+		api.handleReversalStats(w, r)
+	case path == "/api/v1/reversal/records" && method == "GET":
+		api.handleReversalRecords(w, r)
+	case path == "/api/v1/reversal/templates" && method == "GET":
+		api.handleReversalTemplates(w, r)
+	case path == "/api/v1/reversal/templates" && method == "POST":
+		api.handleReversalTemplatesAdd(w, r)
+	case path == "/api/v1/reversal/config" && method == "GET":
+		api.handleReversalConfigGet(w, r)
+	case path == "/api/v1/reversal/config" && method == "PUT":
+		api.handleReversalConfigUpdate(w, r)
+	case path == "/api/v1/reversal/test" && method == "POST":
+		api.handleReversalTest(w, r)
 
 	default:
 		w.WriteHeader(404)

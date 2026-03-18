@@ -625,6 +625,21 @@ func main() {
 		llmProxy.taintTracker = taintTracker
 	}
 
+	// v20.2: 污染链逆转引擎
+	var reversalEngine *TaintReversalEngine
+	if cfg.TaintReversal.Enabled {
+		reversalEngine = NewTaintReversalEngine(db, taintTracker, envelopeMgr, cfg.TaintReversal)
+		fmt.Printf("[初始化] ✅ 污染链逆转已启用 (mode=%s, 模板=%d)\n",
+			reversalEngine.GetConfig().Mode, len(reversalEngine.GetTemplates()))
+	} else {
+		fmt.Println("[初始化] ⚠️ 污染链逆转: 未启用")
+	}
+	mgmtAPI.reversalEngine = reversalEngine
+	outbound.reversalEngine = reversalEngine
+	if llmProxy != nil {
+		llmProxy.reversalEngine = reversalEngine
+	}
+
 	mgmtAPI.honeypotDeep = honeypotDeep
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector

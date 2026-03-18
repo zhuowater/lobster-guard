@@ -945,6 +945,8 @@ type OutboundProxy struct {
 	eventBus *EventBus
 	// v20.1 污染追踪引擎
 	taintTracker *TaintTracker
+	// v20.2 污染链逆转引擎
+	reversalEngine *TaintReversalEngine
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {

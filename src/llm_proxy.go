@@ -41,6 +41,8 @@ type LLMProxy struct {
 	toolPolicy *ToolPolicyEngine
 	// v20.1 污染追踪引擎
 	taintTracker *TaintTracker
+	// v20.2 污染链逆转引擎
+	reversalEngine *TaintReversalEngine
 }
 
 // NewLLMProxy 创建 LLM 代理

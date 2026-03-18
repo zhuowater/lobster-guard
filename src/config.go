@@ -225,6 +225,8 @@ type Config struct {
 	ToolPolicy ToolPolicyConfig `yaml:"tool_policy"`
 	// v20.1 信息流污染追踪
 	TaintTracker TaintConfig `yaml:"taint_tracker"`
+	// v20.2 污染链逆转
+	TaintReversal TaintReversalConfig `yaml:"taint_reversal"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）
