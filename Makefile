@@ -14,10 +14,23 @@ GO_FLAGS := -ldflags="-s -w"
 .PHONY: all
 all: build
 
+# 准备 embed 资源（go:embed 不支持 symlink，复制到 src/ 下）
+.PHONY: embed-prep
+embed-prep:
+	@rm -rf src/dashboard src/rules
+	@cp -r dashboard src/dashboard
+	@cp -r rules src/rules
+
+# 清理 embed 副本
+.PHONY: embed-clean
+embed-clean:
+	@rm -rf src/dashboard src/rules
+
 # 编译（需要 CGO 支持 SQLite）
 .PHONY: build
-build:
-	CGO_ENABLED=1 go build $(GO_FLAGS) -o $(APP_NAME) .
+build: embed-prep
+	cd src && CGO_ENABLED=1 go build $(GO_FLAGS) -o ../$(APP_NAME) .
+	@$(MAKE) embed-clean
 
 # 构建 Vue 前端（dashboard/dist/ 被 go:embed 嵌入）
 .PHONY: dashboard
@@ -32,15 +45,17 @@ build-all: dashboard build
 
 # 静态编译（完全静态链接，适合 Docker/容器部署）
 .PHONY: static
-static:
-	CGO_ENABLED=1 go build $(GO_FLAGS) -tags 'netgo osusergo static_build' \
-		-ldflags='-s -w -extldflags "-static"' -o $(APP_NAME) .
+static: embed-prep
+	cd src && CGO_ENABLED=1 go build $(GO_FLAGS) -tags 'netgo osusergo static_build' \
+		-ldflags='-s -w -extldflags "-static"' -o ../$(APP_NAME) .
+	@$(MAKE) embed-clean
 
 # 清理
 .PHONY: clean
 clean:
 	rm -f $(APP_NAME)
 	rm -f audit.db
+	rm -rf src/dashboard src/rules
 
 # 运行
 .PHONY: run
@@ -49,19 +64,23 @@ run: build
 
 # 测试（全部测试）
 .PHONY: test
-test:
-	CGO_ENABLED=1 go test -v -count=1 -timeout 60s ./...
+test: embed-prep
+	cd src && CGO_ENABLED=1 go test -v -count=1 -timeout 60s ./...
+	@$(MAKE) embed-clean
 
 # 快速测试（不输出详细日志）
 .PHONY: test-quick
-test-quick:
-	CGO_ENABLED=1 go test -count=1 -timeout 60s ./...
+test-quick: embed-prep
+	cd src && CGO_ENABLED=1 go test -count=1 -timeout 60s ./...
+	@$(MAKE) embed-clean
 
 # 代码检查
 .PHONY: lint
 lint:
 	@echo "=== Go vet ==="
-	CGO_ENABLED=1 go vet ./...
+	@$(MAKE) embed-prep
+	cd src && CGO_ENABLED=1 go vet ./...
+	@$(MAKE) embed-clean
 	@echo "=== 检查完成 ==="
 
 # 端到端模拟测试（通过 API 触发）
@@ -76,19 +95,19 @@ simulate:
 .PHONY: count
 count:
 	@echo "=== Go 源文件（非测试） ==="
-	@find . -name '*.go' ! -name '*_test.go' | wc -l | xargs -I{} echo "  文件数: {}"
-	@find . -name '*.go' ! -name '*_test.go' | xargs wc -l | tail -1
+	@find src -name '*.go' ! -name '*_test.go' | wc -l | xargs -I{} echo "  文件数: {}"
+	@find src -name '*.go' ! -name '*_test.go' | xargs wc -l | tail -1
 	@echo ""
 	@echo "=== Go 测试文件 ==="
-	@find . -name '*_test.go' | wc -l | xargs -I{} echo "  文件数: {}"
-	@find . -name '*_test.go' | xargs wc -l | tail -1
+	@find src -name '*_test.go' | wc -l | xargs -I{} echo "  文件数: {}"
+	@find src -name '*_test.go' | xargs wc -l | tail -1
 	@echo ""
 	@echo "=== Vue 前端 ==="
 	@find dashboard/src -name '*.vue' 2>/dev/null | wc -l | xargs -I{} echo "  文件数: {}"
 	@find dashboard/src -name '*.vue' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1
 	@echo ""
 	@echo "=== 总计 ==="
-	@find . -name '*.go' -o -name '*.vue' | xargs wc -l 2>/dev/null | tail -1
+	@find src -name '*.go' -o -name '*.vue' | xargs wc -l 2>/dev/null | tail -1
 
 # 安装到系统
 .PHONY: install
