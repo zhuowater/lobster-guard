@@ -71,6 +71,10 @@
         <span class="sidebar-status-text">{{ statusText }}</span>
       </div>
     </div>
+    <!-- 严格模式切换 toast -->
+    <Transition name="toast-fade">
+      <div class="strict-toast" v-if="strictToastVisible">{{ strictToast }}</div>
+    </Transition>
     <button class="sidebar-toggle" @click="toggleSidebar" :title="appState.sidebarCollapsed ? '展开' : '折叠'">
       <svg v-if="appState.sidebarCollapsed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
       <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -99,11 +103,26 @@ async function loadStrictMode() {
   try { const d = await api('/api/v1/system/strict-mode'); strictMode.value = d.enabled === true } catch { strictMode.value = false }
 }
 
+const strictToast = ref('')
+const strictToastVisible = ref(false)
+
 async function toggleStrictMode() {
   const newVal = !strictMode.value
   const msg = newVal ? '确定要启用严格模式吗？\n\n所有规则将切换为"拦截"模式，影子模式规则也将生效。' : '确定要关闭严格模式吗？\n\n所有规则将恢复到之前的状态。'
   if (!confirm(msg)) return
-  try { await apiPost('/api/v1/system/strict-mode', { enabled: newVal }); strictMode.value = newVal } catch { alert('切换失败') }
+  try {
+    const res = await apiPost('/api/v1/system/strict-mode', { enabled: newVal })
+    strictMode.value = newVal
+    const imCount = res.affected_im_rules || 0
+    const llmCount = res.affected_llm_rules || 0
+    if (newVal) {
+      strictToast.value = `已切换为严格模式，${imCount} 条 IM 规则 + ${llmCount} 条 LLM 规则已设为拦截`
+    } else {
+      strictToast.value = `已关闭严格模式，${imCount} 条 IM 规则 + ${llmCount} 条 LLM 规则已恢复`
+    }
+    strictToastVisible.value = true
+    setTimeout(() => { strictToastVisible.value = false }, 4000)
+  } catch { alert('切换失败') }
 }
 
 onMounted(() => { checkLLMStatus(); loadStrictMode() })
@@ -128,6 +147,7 @@ const llmItems = [
 // 系统导航项
 const systemItems = [
   { path: '/monitor', label: '监控', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' },
+  { path: '/anomaly', label: '异常检测', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h2l3-7 4 14 4-10 3 3h4"/></svg>' },
   { path: '/ops', label: '运维', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' },
   { path: '/settings', label: '设置', svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
 ]
@@ -243,6 +263,17 @@ const statusText = computed(() => {
 .toggle-active { background: #EF4444; }
 .toggle-active::before { transform: translateX(16px); }
 
+/* 严格模式 toast */
+.strict-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-surface); border: 1px solid var(--color-primary);
+  color: var(--text-primary); padding: 10px 20px; border-radius: var(--radius-md);
+  font-size: var(--text-xs); font-weight: 600; box-shadow: var(--shadow-lg);
+  z-index: 9999; white-space: nowrap; max-width: 90vw; text-align: center;
+}
+.toast-fade-enter-active { transition: all .3s ease; }
+.toast-fade-leave-active { transition: all .3s ease; }
+.toast-fade-enter-from, .toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(10px); }
 @media(max-width:768px) {
   .sidebar {
     position: fixed; left: -280px; top: 0; bottom: 0; z-index: 201;

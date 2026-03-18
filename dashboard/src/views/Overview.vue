@@ -35,9 +35,22 @@
           <div v-if="showScoreDetail && healthScore.deductions && healthScore.deductions.length" class="deduction-list">
             <div v-for="d in healthScore.deductions" :key="d.name" class="deduction-item">
               <span class="deduction-name">{{d.name}}</span><span class="deduction-points">-{{d.points}}</span><span class="deduction-detail">{{d.detail}}</span>
+              <router-link v-if="deductionLink(d.name)" :to="deductionLink(d.name)" class="deduction-jump" title="查看详情" @click.stop>→</router-link>
             </div>
           </div>
           <div v-else-if="showScoreDetail" class="deduction-empty">✅ 未发现安全风险</div>
+          <!-- v11.2 异常检测指示器 -->
+          <div class="anomaly-indicator" v-if="anomalyStatus">
+            <router-link to="/anomaly" class="anomaly-link" v-if="anomalyStatus.alerts_24h > 0">
+              ⚠️ 检测到 {{ anomalyStatus.alerts_24h }} 个异常
+            </router-link>
+            <span class="anomaly-learning" v-else-if="anomalyStatus.baselines_ready < anomalyStatus.metrics_count">
+              📊 基线学习中 ({{ anomalyStatus.baselines_ready }}/{{ anomalyStatus.metrics_count }} 就绪)
+            </span>
+            <router-link to="/anomaly" class="anomaly-ok" v-else>
+              ✅ 异常检测正常 ({{ anomalyStatus.metrics_count }} 指标)
+            </router-link>
+          </div>
           <div class="trend-mini" v-if="healthScore.trend && healthScore.trend.length">
             <div class="trend-mini-label">7天趋势</div>
             <svg :viewBox="'0 0 200 50'" class="trend-mini-svg">
@@ -117,7 +130,7 @@ const svgTarget='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" str
 const svgGrid='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>'
 const svgShieldCheck='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
 const loaded=ref(false),stats=ref({total:'--',blocked:'--',warned:'--',rate:'--'}),trendData=ref([]),trendRange=ref('24h'),recentAttacks=ref([]),topRules=ref([]),pieData=ref([]),heatmapData=ref([]),highRiskUserCount=ref(0)
-const healthScore=ref(null),showScoreDetail=ref(false),systemHealth=ref(null),refreshInterval=ref(localStorage.getItem('overview_refresh')||'30000')
+const healthScore=ref(null),showScoreDetail=ref(false),systemHealth=ref(null),refreshInterval=ref(localStorage.getItem('overview_refresh')||'30000'),anomalyStatus=ref(null)
 const scoreColorMap={excellent:'#10B981',good:'#3B82F6',warning:'#F59E0B',danger:'#EF4444',critical:'#DC2626'}
 const scoreColor=computed(()=>healthScore.value?(scoreColorMap[healthScore.value.level]||'#6B7280'):'#6B7280')
 const scoreDash=computed(()=>{if(!healthScore.value)return'0 327';const c=2*Math.PI*52,p=healthScore.value.score/100;return`${c*p} ${c*(1-p)}`})
@@ -125,6 +138,26 @@ const trendMiniPointsArr=computed(()=>{if(!healthScore.value?.trend?.length)retu
 const trendMiniPoints=computed(()=>trendMiniPointsArr.value.map(p=>`${p.x},${p.y}`).join(' '))
 const sysMetrics=computed(()=>{const s=systemHealth.value;if(!s)return[];const r=[];if(s.cpu_percent!=null){const p=s.cpu_percent;r.push({label:'CPU',pct:p,display:p.toFixed(1)+'%',color:p>80?'#EF4444':p>60?'#F59E0B':'#10B981'})}if(s.memory_percent!=null){const p=s.memory_percent;r.push({label:'内存',pct:p,display:(s.memory_used_mb||0).toFixed(0)+' MB',color:p>80?'#EF4444':p>60?'#F59E0B':'#10B981'})}if(s.disk_used_percent!=null){const p=s.disk_used_percent;r.push({label:'磁盘',pct:p,display:p.toFixed(1)+'%',color:p>90?'#EF4444':p>80?'#F59E0B':'#10B981'})}return r})
 function fmtTime(ts){if(!ts)return'--';const d=new Date(ts);return isNaN(d.getTime())?String(ts):d.toLocaleString('zh-CN',{hour12:false})}
+
+// v11.3: 分项跳转链接
+function deductionLink(name) {
+  const map = {
+    'IM拦截率': '/audit',
+    'IM 拦截率': '/audit',
+    'LLM异常率': '/agent',
+    'LLM 异常率': '/agent',
+    'Canary泄露': '/settings?section=canary',
+    'Canary 泄露': '/settings?section=canary',
+    '高危用户': '/user-profiles',
+    '规则命中': '/rules',
+    '规则覆盖': '/rules',
+  }
+  // Fuzzy match: check if any key is a substring of name
+  for (const [k, v] of Object.entries(map)) {
+    if (name.includes(k) || k.includes(name)) return v
+  }
+  return null
+}
 const healthBars=computed(()=>{const h=appState.health;if(!h||!h.checks)return[];const dims=[{k:'database',n:'数据库',fn:c=>c.latency_ms!=null?Math.min(100,Math.max(0,100-c.latency_ms*2)):50,vfn:c=>c.latency_ms!=null?c.latency_ms.toFixed(1)+'ms':'--'},{k:'upstream',n:'上游',fn:c=>c.total>0?(c.healthy/c.total*100):0,vfn:c=>c.healthy!=null?c.healthy+'/'+c.total:'--'},{k:'disk',n:'磁盘',fn:c=>c.used_percent!=null?(100-c.used_percent):50,vfn:c=>c.used_percent!=null?c.used_percent.toFixed(1)+'%':'--'},{k:'memory',n:'内存',fn:c=>c.alloc_mb!=null?Math.max(0,100-c.alloc_mb/10):50,vfn:c=>c.alloc_mb!=null?c.alloc_mb.toFixed(1)+' MB':'--'},{k:'goroutines',n:'Goroutine',fn:c=>c.count!=null?Math.max(0,100-c.count/10):50,vfn:c=>c.count!=null?String(c.count):''}];const result=[];for(const dm of dims){const c=h.checks[dm.k];if(!c)continue;const pct=dm.fn(c);const color=c.status==='ok'?'var(--color-success)':(c.status==='warning'?'var(--color-warning)':'var(--color-danger)');result.push({name:dm.n,pct,color,val:dm.vfn(c)})}return result})
 const trendChartData=computed(()=>trendData.value.map(t=>({total:(t.pass||0)+(t.block||0)+(t.warn||0),block:t.block||0,warn:t.warn||0})))
 const trendLines=[{key:'total',color:'#3B82F6',label:'总请求'},{key:'block',color:'#EF4444',label:'拦截'},{key:'warn',color:'#F59E0B',label:'告警'}]
@@ -133,6 +166,7 @@ function onTrendRangeChange(range){trendRange.value=range;loadTrend()}
 async function loadTrend(){try{const d=await api('/api/v1/audit/timeline?hours='+(trendRange.value==='7d'?168:24));trendData.value=d.timeline||[]}catch{trendData.value=[]}}
 async function loadHealthScore(){try{healthScore.value=await api('/api/v1/health/score')}catch{}}
 async function loadSystemHealth(){try{const d=await api('/healthz');if(d.system)systemHealth.value=d.system}catch{}}
+async function loadAnomalyStatus(){try{anomalyStatus.value=await api('/api/v1/anomaly/status')}catch{anomalyStatus.value=null}}
 async function loadData(){
   try{const d=await api('/api/v1/stats');const total=d.total||0;const breakdown=d.breakdown||{};let blocked=0,warned=0;for(const k of Object.keys(breakdown)){if(k.indexOf('block')>=0)blocked+=breakdown[k];if(k.indexOf('warn')>=0)warned+=breakdown[k]};const rate=total>0?(blocked/total*100).toFixed(1):'0.0';stats.value={total,blocked,warned,rate:rate+'%'}}catch{}
   await loadTrend()
@@ -144,8 +178,8 @@ async function loadData(){
 }
 function onRefreshChange(){localStorage.setItem('overview_refresh',refreshInterval.value);setupTimer()}
 let refreshTimer=null
-function setupTimer(){clearInterval(refreshTimer);const ms=parseInt(refreshInterval.value);if(ms>0)refreshTimer=setInterval(()=>{loadData();loadHealthScore();loadSystemHealth()},ms)}
-onMounted(()=>{loadData();loadHealthScore();loadSystemHealth();setupTimer()})
+function setupTimer(){clearInterval(refreshTimer);const ms=parseInt(refreshInterval.value);if(ms>0)refreshTimer=setInterval(()=>{loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus()},ms)}
+onMounted(()=>{loadData();loadHealthScore();loadSystemHealth();loadAnomalyStatus();setupTimer()})
 onUnmounted(()=>clearInterval(refreshTimer))
 </script>
 <style scoped>
@@ -177,6 +211,8 @@ onUnmounted(()=>clearInterval(refreshTimer))
 .deduction-name{font-weight:600;color:var(--text-primary);min-width:80px}
 .deduction-points{color:#EF4444;font-weight:700;font-family:var(--font-mono);min-width:30px}
 .deduction-detail{color:var(--text-tertiary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.deduction-jump{color:var(--color-primary);text-decoration:none;font-weight:700;font-size:var(--text-sm);flex-shrink:0;padding:0 4px;opacity:0.7;transition:opacity .2s}
+.deduction-jump:hover{opacity:1;text-decoration:none}
 .deduction-empty{font-size:var(--text-xs);color:var(--text-tertiary);padding:var(--space-2) 0}
 .trend-mini{margin-top:var(--space-2)}
 .trend-mini-label{font-size:10px;color:var(--text-tertiary);margin-bottom:2px}
@@ -192,5 +228,12 @@ onUnmounted(()=>clearInterval(refreshTimer))
 .sys-goroutines{font-size:10px;color:var(--text-tertiary);display:flex;align-items:center;gap:4px;margin-top:var(--space-2)}
 .refresh-control{display:flex;align-items:center;gap:var(--space-1);color:var(--text-tertiary)}
 .refresh-select{background:var(--bg-elevated);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-xs);padding:2px 6px;cursor:pointer}
+/* 异常检测指示器 (v11.2) */
+.anomaly-indicator{margin-top:var(--space-2);padding:4px 0}
+.anomaly-link{color:#EF4444;font-size:var(--text-xs);font-weight:700;text-decoration:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:rgba(239,68,68,0.1);border-radius:9999px;transition:all .2s}
+.anomaly-link:hover{background:rgba(239,68,68,0.2);text-decoration:none}
+.anomaly-learning{color:var(--text-tertiary);font-size:var(--text-xs)}
+.anomaly-ok{color:var(--text-tertiary);font-size:var(--text-xs);text-decoration:none}
+.anomaly-ok:hover{color:var(--text-secondary)}
 @media(max-width:768px){.cockpit-body{flex-direction:column}.cockpit-left,.cockpit-right{width:100%}}
 </style>

@@ -13,7 +13,7 @@
         </div>
       </div>
       <div class="owasp-grid">
-        <div v-for="item in owaspMatrix" :key="item.id" class="owasp-card" :class="'owasp-'+item.risk_level" @click="onOwaspClick(item)">
+        <div v-for="item in owaspMatrix" :key="item.id" class="owasp-card" :class="['owasp-'+item.risk_level, { 'owasp-disabled': isOwaspDisabled(item.id) }]" @click="onOwaspClick(item)">
           <div class="owasp-id">{{ item.id }}</div>
           <div class="owasp-name">{{ item.name_zh }}</div>
           <div class="owasp-count">{{ item.count }}</div>
@@ -207,11 +207,22 @@ async function loadOwaspMatrix() {
   try { const d = await api('/api/v1/llm/owasp-matrix'); owaspMatrix.value = d.items || [] } catch { owaspMatrix.value = [] }
 }
 function onOwaspClick(item) {
-  // 跳转到 LLM 规则页面，带上对应的 category
-  const catMap = { 'LLM01': 'prompt_injection', 'LLM02': 'pii_leak', 'LLM04': 'token_abuse', 'LLM06': 'pii_leak', 'LLM07': 'custom' }
-  const cat = catMap[item.id] || ''
-  router.push({ path: '/llm-rules', query: cat ? { category: cat } : {} })
+  const routeMap = {
+    'LLM01': { path: '/llm-rules', query: { category: 'prompt_injection' } },
+    'LLM02': { path: '/llm-rules', query: { category: 'pii_leak' } },
+    'LLM03': null,
+    'LLM04': { path: '/llm-rules', query: { category: 'token_abuse' } },
+    'LLM05': null,
+    'LLM06': { path: '/settings', query: { section: 'canary' } },
+    'LLM07': { path: '/agent' },
+    'LLM08': { path: '/settings', query: { section: 'budget' } },
+    'LLM09': null,
+    'LLM10': { path: '/settings', query: { section: 'canary' } },
+  }
+  const target = routeMap[item.id]
+  if (target) router.push(target)
 }
+function isOwaspDisabled(id) { return ['LLM03','LLM05','LLM09'].includes(id) }
 function onRefreshChange() { localStorage.setItem('llm_refresh', refreshInterval.value); setupLLMTimer() }
 
 const loaded = ref(false)
@@ -369,6 +380,8 @@ code { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; fon
 .owasp-label { font-size: 9px; color: var(--text-disabled); }
 .owasp-none .owasp-count { color: var(--text-disabled); }
 .owasp-none { opacity: 0.6; }
+.owasp-disabled { cursor: not-allowed !important; opacity: 0.5; }
+.owasp-disabled:hover { transform: none !important; box-shadow: none !important; border-color: var(--border-subtle) !important; }
 .owasp-low .owasp-count { color: #F59E0B; }
 .owasp-low { border-color: rgba(245, 158, 11, 0.3); }
 .owasp-high .owasp-count { color: #EF4444; }

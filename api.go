@@ -59,6 +59,8 @@ type ManagementAPI struct {
 	owaspMatrixEng  *OWASPMatrixEngine
 	strictMode      *StrictModeManager
 	notificationEng *NotificationEngine
+	// v11.2 异常基线检测
+	anomalyDetector *AnomalyDetector
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -291,6 +293,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleStrictModeSet(w, r)
 	case path == "/api/v1/notifications" && method == "GET":
 		api.handleNotifications(w, r)
+	// v11.2 异常基线检测 API
+	case path == "/api/v1/anomaly/baselines" && method == "GET":
+		api.handleAnomalyBaselines(w, r)
+	case path == "/api/v1/anomaly/alerts" && method == "GET":
+		api.handleAnomalyAlerts(w, r)
+	case path == "/api/v1/anomaly/status" && method == "GET":
+		api.handleAnomalyStatus(w, r)
+	case strings.HasPrefix(path, "/api/v1/anomaly/metric/") && method == "GET":
+		api.handleAnomalyMetric(w, r)
 	// v9.0 LLM 侧安全审计 API
 	case strings.HasPrefix(path, "/api/v1/llm/"):
 		// LLM config 端点不需要 llmAuditor（即使 LLM 未启用也要能读写配置）
@@ -2083,6 +2094,13 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Demo] 注入了 %d 条 LLM 规则命中统计", len(rules))
 	}
 
+	// v11.2: 注入异常检测演示数据
+	if api.anomalyDetector != nil {
+		api.anomalyDetector.InjectDemoBaselines()
+		api.anomalyDetector.InjectDemoAlerts()
+		log.Printf("[Demo] 注入了异常基线 + 6 条异常告警")
+	}
+
 	log.Printf("[Demo] 注入了 %d 条模拟审计数据", inserted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":              true,
@@ -2091,6 +2109,7 @@ func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request)
 		"llm_tool_calls":  llmToolCallsInserted,
 		"canary_leaks":    "included",
 		"budget_violations": "included",
+		"anomaly_alerts":  "included",
 	})
 }
 
@@ -3270,9 +3289,22 @@ func (api *ManagementAPI) handleStrictModeSet(w http.ResponseWriter, r *http.Req
 		return
 	}
 	api.strictMode.SetEnabled(req.Enabled)
+	// v11.3: 返回受影响的规则数
+	affectedIM := 0
+	affectedLLM := 0
+	if api.inboundEngine != nil {
+		configs := api.inboundEngine.GetRuleConfigs()
+		affectedIM = len(configs)
+	}
+	if api.llmRuleEngine != nil {
+		rules := api.llmRuleEngine.GetRules()
+		affectedLLM = len(rules)
+	}
 	jsonResponse(w, 200, map[string]interface{}{
-		"enabled": api.strictMode.IsEnabled(),
-		"status":  "ok",
+		"enabled":            api.strictMode.IsEnabled(),
+		"status":             "ok",
+		"affected_im_rules":  affectedIM,
+		"affected_llm_rules": affectedLLM,
 	})
 }
 
@@ -3286,6 +3318,95 @@ func (api *ManagementAPI) handleNotifications(w http.ResponseWriter, r *http.Req
 	if items == nil {
 		items = []NotificationItem{}
 	}
+
+	// v11.2: 注入异常检测告警到通知中心
+	if api.anomalyDetector != nil {
+		alerts := api.anomalyDetector.GetAlerts(20)
+		since24h := time.Now().UTC().Add(-24 * time.Hour)
+		for _, a := range alerts {
+			if a.Timestamp.Before(since24h) {
+				continue
+			}
+			severity := "high"
+			if a.Severity == "critical" {
+				severity = "critical"
+			}
+			items = append(items, NotificationItem{
+				ID:        a.ID,
+				Timestamp: a.Timestamp.Format(time.RFC3339),
+				Type:      "anomaly",
+				TypeLabel: "异常检测",
+				Severity:  severity,
+				Summary:   fmt.Sprintf("异常检测: %s 偏离 %.1fσ", MetricDisplayName(a.MetricName), a.Deviation),
+				Detail:    fmt.Sprintf("期望=%.1f 实际=%.1f 方向=%s", a.Expected, a.Actual, a.Direction),
+			})
+		}
+	}
+
 	jsonResponse(w, 200, map[string]interface{}{"notifications": items, "total": len(items)})
+}
+
+// ============================================================
+// v11.2 异常基线检测 API handlers
+// ============================================================
+
+// handleAnomalyBaselines GET /api/v1/anomaly/baselines — 所有指标的基线状态
+func (api *ManagementAPI) handleAnomalyBaselines(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 200, map[string]interface{}{"baselines": map[string]interface{}{}, "total": 0})
+		return
+	}
+	baselines := api.anomalyDetector.GetBaselines()
+	jsonResponse(w, 200, map[string]interface{}{"baselines": baselines, "total": len(baselines)})
+}
+
+// handleAnomalyAlerts GET /api/v1/anomaly/alerts — 最近异常告警列表
+func (api *ManagementAPI) handleAnomalyAlerts(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 200, map[string]interface{}{"alerts": []interface{}{}, "total": 0})
+		return
+	}
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	alerts := api.anomalyDetector.GetAlerts(limit)
+	if alerts == nil {
+		alerts = []AnomalyAlert{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"alerts": alerts, "total": len(alerts)})
+}
+
+// handleAnomalyStatus GET /api/v1/anomaly/status — 异常检测器状态
+func (api *ManagementAPI) handleAnomalyStatus(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"enabled":         false,
+			"metrics_count":   0,
+			"baselines_ready": 0,
+			"alerts_24h":      0,
+			"total_alerts":    0,
+		})
+		return
+	}
+	status := api.anomalyDetector.GetStatus()
+	jsonResponse(w, 200, status)
+}
+
+// handleAnomalyMetric GET /api/v1/anomaly/metric/:name — 单个指标基线详情
+func (api *ManagementAPI) handleAnomalyMetric(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 404, map[string]string{"error": "anomaly detector not available"})
+		return
+	}
+	metricName := strings.TrimPrefix(r.URL.Path, "/api/v1/anomaly/metric/")
+	if metricName == "" {
+		jsonResponse(w, 400, map[string]string{"error": "metric name required"})
+		return
+	}
+	detail := api.anomalyDetector.GetMetricDetail(metricName)
+	jsonResponse(w, 200, detail)
 }
 

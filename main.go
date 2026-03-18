@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "11.1.0"
+	AppVersion = "11.2.1"
 )
 
 var startTime = time.Now()
@@ -397,6 +397,11 @@ func main() {
 	mgmtAPI.owaspMatrixEng = NewOWASPMatrixEngine(logger.DB(), llmRuleEngine)
 	mgmtAPI.strictMode = NewStrictModeManager(engine, llmRuleEngine)
 	mgmtAPI.notificationEng = NewNotificationEngine(logger.DB())
+	// v11.2: 异常基线检测器
+	anomalyDetector := NewAnomalyDetector(logger.DB())
+	mgmtAPI.anomalyDetector = anomalyDetector
+	anomalyDetector.StartBackground()
+	fmt.Println("[初始化] ✅ 异常基线检测器已启动 (6 个指标, 7 天窗口, >2σ 告警)")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

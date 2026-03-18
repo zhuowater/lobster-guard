@@ -30,6 +30,10 @@
           <button class="btn btn-sm" @click="openCreate">新建规则</button>
         </div>
       </div>
+      <!-- 筛选状态 badge -->
+      <div v-if="filterCategory" class="filter-badge-wrap">
+        <span class="filter-badge">筛选: {{ catLabel(filterCategory) }} <button class="filter-clear" @click="clearFilter">✕</button></span>
+      </div>
       <DataTable :columns="columns" :data="rulesWithHits" :loading="loading" empty-text="暂无 LLM 规则" empty-desc="点击右上角新建规则" :expandable="true">
         <!-- 状态列 -->
         <template #cell-status="{ row }">
@@ -179,10 +183,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, apiPost } from '../api.js'
 import DataTable from '../components/DataTable.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 const rules = ref([])
 const hits = ref({})
@@ -192,6 +200,7 @@ const editMode = ref(false)
 const saving = ref(false)
 const deleteTarget = ref(null)
 const patternsText = ref('')
+const filterCategory = ref('')
 
 const defaultForm = () => ({
   id: '', name: '', description: '', category: 'custom', direction: 'request',
@@ -212,13 +221,23 @@ const columns = [
   { key: 'shadow_hits', label: '影子命中', width: '85px' },
 ]
 
+const filteredRules = computed(() => {
+  if (!filterCategory.value) return rules.value
+  return rules.value.filter(r => r.category === filterCategory.value)
+})
+
 const rulesWithHits = computed(() => {
-  return rules.value.map(r => ({
+  return filteredRules.value.map(r => ({
     ...r,
     _hits: hits.value[r.id]?.count || 0,
     _shadow_hits: hits.value[r.id]?.shadow_hits || 0,
   }))
 })
+
+function clearFilter() {
+  filterCategory.value = ''
+  router.replace({ path: '/llm-rules' })
+}
 
 const totalRules = computed(() => rules.value.length)
 const enabledRules = computed(() => rules.value.filter(r => r.enabled && !r.shadow_mode).length)
@@ -351,7 +370,17 @@ async function toggleShadow(row) {
   }
 }
 
-onMounted(loadData)
+onMounted(() => {
+  if (route.query.category) {
+    filterCategory.value = route.query.category
+  }
+  loadData()
+})
+
+// Watch for route query changes (e.g. navigating from OWASP matrix)
+watch(() => route.query.category, (val) => {
+  filterCategory.value = val || ''
+})
 </script>
 
 <style scoped>
@@ -418,6 +447,19 @@ textarea.input { resize: vertical; }
   display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm);
   color: var(--text-secondary); cursor: pointer;
 }
+/* 筛选 badge */
+.filter-badge-wrap { margin-bottom: 12px; }
+.filter-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 12px; background: rgba(99,102,241,0.15); color: var(--color-primary);
+  border-radius: 9999px; font-size: var(--text-xs); font-weight: 600;
+}
+.filter-clear {
+  background: none; border: none; color: var(--color-primary); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px; font-weight: 700;
+  opacity: 0.7; transition: opacity .2s;
+}
+.filter-clear:hover { opacity: 1; }
 @media (max-width:768px) {
   .stat-row { grid-template-columns: repeat(2,1fr); }
   .form-row { grid-template-columns: 1fr; }
