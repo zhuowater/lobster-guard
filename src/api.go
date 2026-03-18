@@ -143,6 +143,8 @@ type ManagementAPI struct {
 	taintTracker *TaintTracker
 	// v20.2 污染链逆转引擎
 	reversalEngine *TaintReversalEngine
+	// v20.3 LLM 响应缓存
+	llmCache *LLMCache
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -873,6 +875,22 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleReversalConfigUpdate(w, r)
 	case path == "/api/v1/reversal/test" && method == "POST":
 		api.handleReversalTest(w, r)
+
+	// v20.3 LLM 响应缓存
+	case path == "/api/v1/cache/stats" && method == "GET":
+		api.handleCacheStats(w, r)
+	case path == "/api/v1/cache/entries" && method == "GET":
+		api.handleCacheEntries(w, r)
+	case path == "/api/v1/cache/entries" && method == "DELETE":
+		api.handleCacheEntriesDelete(w, r)
+	case strings.HasPrefix(path, "/api/v1/cache/tenant/") && method == "DELETE":
+		api.handleCacheTenantDelete(w, r)
+	case path == "/api/v1/cache/config" && method == "GET":
+		api.handleCacheConfigGet(w, r)
+	case path == "/api/v1/cache/config" && method == "PUT":
+		api.handleCacheConfigUpdate(w, r)
+	case path == "/api/v1/cache/lookup" && method == "POST":
+		api.handleCacheLookup(w, r)
 
 	default:
 		w.WriteHeader(404)

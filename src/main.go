@@ -640,6 +640,20 @@ func main() {
 		llmProxy.reversalEngine = reversalEngine
 	}
 
+	// v20.3: LLM 响应缓存
+	var llmCache *LLMCache
+	if cfg.LLMCache.Enabled {
+		llmCache = NewLLMCache(db, cfg.LLMCache)
+		fmt.Printf("[初始化] ✅ LLM 响应缓存已启用 (max=%d, ttl=%d分钟, similarity=%.2f, 租户隔离=%v)\n",
+			llmCache.config.MaxEntries, llmCache.config.TTLMinutes, llmCache.config.SimilarityMin, llmCache.config.TenantIsolation)
+	} else {
+		fmt.Println("[初始化] ⚠️ LLM 响应缓存: 未启用")
+	}
+	mgmtAPI.llmCache = llmCache
+	if llmProxy != nil {
+		llmProxy.llmCache = llmCache
+	}
+
 	mgmtAPI.honeypotDeep = honeypotDeep
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector

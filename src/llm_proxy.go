@@ -43,6 +43,8 @@ type LLMProxy struct {
 	taintTracker *TaintTracker
 	// v20.2 污染链逆转引擎
 	reversalEngine *TaintReversalEngine
+	// v20.3 LLM 响应缓存
+	llmCache *LLMCache
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -242,6 +244,29 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lp.envelopeMgr.Seal(traceID, "llm_request", string(bodyBytes), decision, llmReqRules, "")
 	}
 
+	// v14.0: 从请求头提取租户 ID（提前到缓存查找前）
+	tenantID := r.Header.Get("X-Tenant-Id")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	// v20.3: LLM 响应缓存 — 请求侧查找
+	var cacheQuery string
+	if lp.llmCache != nil && lp.llmCache.config.Enabled {
+		cacheQuery = extractUserQuery(bodyBytes)
+		if cacheQuery != "" {
+			if cachedEntry, hit := lp.llmCache.Lookup(cacheQuery, model, tenantID); hit {
+				log.Printf("[LLMCache] 缓存命中: query_hash=%s tenant=%s hits=%d", cachedEntry.QueryHash[:8], tenantID, cachedEntry.HitCount)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Cache", "HIT")
+				w.Header().Set("X-Cache-Key", cachedEntry.Key)
+				w.WriteHeader(200)
+				w.Write([]byte(cachedEntry.Response))
+				return
+			}
+		}
+	}
+
 	// 构建上游请求
 	upstreamURL := strings.TrimRight(target.Upstream, "/") + r.URL.RequestURI()
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
@@ -268,12 +293,6 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-
-	// v14.0: 从请求头提取租户 ID
-	tenantID := r.Header.Get("X-Tenant-Id")
-	if tenantID == "" {
-		tenantID = "default"
-	}
 
 	// 审计上下文
 	auditCtx := &LLMAuditContext{
@@ -406,6 +425,19 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
+
+		// v20.3: LLM 响应缓存 — 存储（非流式，仅 200 成功响应）
+		if lp.llmCache != nil && cacheQuery != "" && resp.StatusCode == 200 {
+			// 判断是否被污染
+			tainted := false
+			if lp.taintTracker != nil {
+				te := lp.taintTracker.GetTaint(traceID)
+				if te != nil && len(te.Labels) > 0 {
+					tainted = true
+				}
+			}
+			go lp.llmCache.Store(cacheQuery, string(respBody), model, tenantID, tainted)
+		}
 
 		// 异步审计
 		go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)

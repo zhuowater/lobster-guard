@@ -227,6 +227,8 @@ type Config struct {
 	TaintTracker TaintConfig `yaml:"taint_tracker"`
 	// v20.2 污染链逆转
 	TaintReversal TaintReversalConfig `yaml:"taint_reversal"`
+	// v20.3 LLM 响应缓存
+	LLMCache LLMCacheConfig `yaml:"llm_cache"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）
