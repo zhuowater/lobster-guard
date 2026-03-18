@@ -124,8 +124,8 @@
 > 不是又一个 RBAC，是安全治理+自动化红队
 
 - [x] v14.0 **租户体系**（tenant.go · 6 表加 tenant_id · 11 个 API 支持 ?tenant= · Topbar 切换器 · api.js 自动注入 · 向后兼容 default）
-- [ ] v14.1 **登录认证**（本地用户名密码 + LDAP/SSO/OAuth2 · 操作审计日志）
-- [ ] v14.2 **Red Team Autopilot**（反直觉创新 🔥）
+- [x] v14.1 **登录认证**（auth.go · JWT自实现HS256 · users表 · op_audit_log · Login.vue · 路由守卫 · admin/operator/viewer角色 · 向后兼容Bearer token）
+- [x] v14.2 **Red Team Autopilot**（redteam.go · 33攻击向量 · 6个OWASP分类 · 内部调用检测引擎 · 漏洞发现+修复建议 · RedTeam.vue环形图+分类统计）
   - 内置攻击模拟器，OWASP LLM Top10 攻击向量自动生成
   - 定期对自己的防御发起攻击测试（每个安全域独立测试）
   - 自动生成红队报告：哪些规则被绕过了？哪些 Prompt 有漏洞？
