@@ -1,5 +1,27 @@
 <template>
   <div>
+    <!-- OWASP LLM Top 10 矩阵 (v11.1) -->
+    <div class="card owasp-section" style="margin-bottom:20px" v-if="owaspMatrix.length">
+      <div class="card-header">
+        <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
+        <span class="card-title">OWASP LLM Top 10 矩阵</span>
+        <div class="refresh-control" style="margin-left:auto">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          <select v-model="refreshInterval" @change="onRefreshChange" class="refresh-select">
+            <option value="30000">30s</option><option value="60000">1m</option><option value="300000">5m</option><option value="0">手动</option>
+          </select>
+        </div>
+      </div>
+      <div class="owasp-grid">
+        <div v-for="item in owaspMatrix" :key="item.id" class="owasp-card" :class="'owasp-'+item.risk_level" @click="onOwaspClick(item)">
+          <div class="owasp-id">{{ item.id }}</div>
+          <div class="owasp-name">{{ item.name_zh }}</div>
+          <div class="owasp-count">{{ item.count }}</div>
+          <div class="owasp-label">24h 事件</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Stat Cards -->
     <div class="ov-cards" v-if="loaded">
       <StatCard
@@ -177,6 +199,21 @@ const svgTrend = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" st
 const modelColors = ['#6366F1', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
 const router = useRouter()
 
+// v11.1: OWASP 矩阵
+const owaspMatrix = ref([])
+const refreshInterval = ref(localStorage.getItem('llm_refresh') || '30000')
+
+async function loadOwaspMatrix() {
+  try { const d = await api('/api/v1/llm/owasp-matrix'); owaspMatrix.value = d.items || [] } catch { owaspMatrix.value = [] }
+}
+function onOwaspClick(item) {
+  // 跳转到 LLM 规则页面，带上对应的 category
+  const catMap = { 'LLM01': 'prompt_injection', 'LLM02': 'pii_leak', 'LLM04': 'token_abuse', 'LLM06': 'pii_leak', 'LLM07': 'custom' }
+  const cat = catMap[item.id] || ''
+  router.push({ path: '/llm-rules', query: cat ? { category: cat } : {} })
+}
+function onRefreshChange() { localStorage.setItem('llm_refresh', refreshInterval.value); setupLLMTimer() }
+
 const loaded = ref(false)
 const overview = ref({ total_calls: 0, total_tokens: 0, avg_latency_ms: 0, error_rate: 0, models: [], cost_by_model: [], cost_trend: [], daily_limit_usd: 0, today_cost_usd: 0, cost_alert_triggered: false })
 const callsData = ref([])
@@ -284,7 +321,8 @@ async function loadData() {
 }
 
 let timer = null
-onMounted(() => { loadData(); timer = setInterval(loadData, 30000) })
+function setupLLMTimer() { clearInterval(timer); const ms = parseInt(refreshInterval.value); if (ms > 0) timer = setInterval(() => { loadData(); loadOwaspMatrix() }, ms) }
+onMounted(() => { loadData(); loadOwaspMatrix(); setupLLMTimer() })
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -321,4 +359,21 @@ code { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; fon
 .cost-pct-bar { display: flex; align-items: center; gap: 6px; }
 .cost-pct-fill { height: 6px; border-radius: 3px; background: var(--color-primary); min-width: 2px; }
 .cost-pct-bar span { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
+/* OWASP 矩阵 */
+.owasp-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: var(--space-2) 0; }
+.owasp-card { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); text-align: center; cursor: pointer; transition: all var(--transition-fast); }
+.owasp-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--color-primary); }
+.owasp-id { font-size: 10px; font-weight: 700; color: var(--text-tertiary); font-family: var(--font-mono); }
+.owasp-name { font-size: var(--text-xs); font-weight: 600; color: var(--text-primary); margin: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owasp-count { font-size: 1.25rem; font-weight: 800; font-family: var(--font-mono); }
+.owasp-label { font-size: 9px; color: var(--text-disabled); }
+.owasp-none .owasp-count { color: var(--text-disabled); }
+.owasp-none { opacity: 0.6; }
+.owasp-low .owasp-count { color: #F59E0B; }
+.owasp-low { border-color: rgba(245, 158, 11, 0.3); }
+.owasp-high .owasp-count { color: #EF4444; }
+.owasp-high { border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
+.refresh-control { display: flex; align-items: center; gap: var(--space-1); color: var(--text-tertiary); }
+.refresh-select { background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--text-xs); padding: 2px 6px; cursor: pointer; }
+@media(max-width:768px) { .owasp-grid { grid-template-columns: repeat(2, 1fr); } }
 </style>

@@ -1,7 +1,9 @@
 <template>
   <nav class="sidebar" :class="{ collapsed: appState.sidebarCollapsed, 'mobile-open': mobileOpen }">
+    <!-- 严格模式横幅 (v11.1) -->
+    <div class="strict-banner" v-if="strictMode && !appState.sidebarCollapsed">⚠️ 严格模式已启用</div>
     <div class="sidebar-brand">
-      <span class="sidebar-logo">🦞</span>
+      <span class="sidebar-logo" :class="{'strict-logo': strictMode}">🦞</span>
       <div class="sidebar-brand-text">
         <div class="sidebar-brand-title">龙虾卫士</div>
         <div class="sidebar-brand-sub">Lobster Guard</div>
@@ -55,6 +57,14 @@
       </router-link>
     </div>
     <div class="sidebar-footer">
+      <!-- 严格模式开关 (v11.1) -->
+      <div class="strict-toggle" v-if="!appState.sidebarCollapsed">
+        <span class="strict-label">🛡️ 严格模式</span>
+        <label class="toggle-switch">
+          <input type="checkbox" :checked="strictMode" @change="toggleStrictMode">
+          <span class="toggle-slider" :class="{'toggle-active': strictMode}"></span>
+        </label>
+      </div>
       <div class="sidebar-version">{{ appState.version }}</div>
       <div class="sidebar-status">
         <span class="dot dot-sm" :class="dotClass"></span>
@@ -71,7 +81,7 @@
 <script setup>
 import { inject, computed, ref, onMounted } from 'vue'
 import { toggleSidebar } from '../stores/app.js'
-import { api } from '../api.js'
+import { api, apiPost } from '../api.js'
 
 defineProps({ mobileOpen: Boolean })
 defineEmits(['closeMobile'])
@@ -79,20 +89,24 @@ defineEmits(['closeMobile'])
 const appState = inject('appState')
 
 const llmEnabled = ref(false)
+const strictMode = ref(false)
 
-// 检测 LLM 代理是否启用
 async function checkLLMStatus() {
-  try {
-    const d = await api('/api/v1/llm/status')
-    llmEnabled.value = d.enabled === true
-  } catch {
-    llmEnabled.value = false
-  }
+  try { const d = await api('/api/v1/llm/status'); llmEnabled.value = d.enabled === true } catch { llmEnabled.value = false }
 }
 
-onMounted(() => {
-  checkLLMStatus()
-})
+async function loadStrictMode() {
+  try { const d = await api('/api/v1/system/strict-mode'); strictMode.value = d.enabled === true } catch { strictMode.value = false }
+}
+
+async function toggleStrictMode() {
+  const newVal = !strictMode.value
+  const msg = newVal ? '确定要启用严格模式吗？\n\n所有规则将切换为"拦截"模式，影子模式规则也将生效。' : '确定要关闭严格模式吗？\n\n所有规则将恢复到之前的状态。'
+  if (!confirm(msg)) return
+  try { await apiPost('/api/v1/system/strict-mode', { enabled: newVal }); strictMode.value = newVal } catch { alert('切换失败') }
+}
+
+onMounted(() => { checkLLMStatus(); loadStrictMode() })
 
 // IM 安全导航项
 const imItems = [
@@ -202,6 +216,32 @@ const statusText = computed(() => {
   transition: all var(--transition-fast); border: 1px solid var(--border-subtle); background: transparent;
 }
 .sidebar-toggle:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+/* 严格模式 */
+.strict-banner {
+  background: linear-gradient(90deg, #DC2626, #EF4444);
+  color: #fff; text-align: center; font-size: 11px; font-weight: 700;
+  padding: 4px 8px; letter-spacing: 0.05em;
+}
+.strict-logo { filter: hue-rotate(0deg) saturate(3) brightness(1.2); }
+.strict-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 0 var(--space-2) 0; margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.strict-label { font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; }
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.1); border-radius: 20px; transition: all .3s;
+}
+.toggle-slider::before {
+  content: ''; position: absolute; height: 16px; width: 16px; left: 2px; bottom: 2px;
+  background: #fff; border-radius: 50%; transition: all .3s;
+}
+.toggle-active { background: #EF4444; }
+.toggle-active::before { transform: translateX(16px); }
 
 @media(max-width:768px) {
   .sidebar {

@@ -14,6 +14,30 @@
       <span class="topbar-search-hint">Ctrl+K</span>
     </div>
     <div class="topbar-right">
+      <!-- 通知中心 (v11.1) -->
+      <div class="notif-wrap" ref="notifWrap">
+        <button class="notif-btn" @click="toggleNotif" :title="'通知 (' + unreadCount + ' 未读)'">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" v-if="unreadCount > 0">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </button>
+        <div class="notif-panel" v-if="notifOpen">
+          <div class="notif-panel-header">
+            <span>通知中心</span>
+            <button class="notif-mark-read" @click="markAllRead" v-if="unreadCount > 0">全部已读</button>
+          </div>
+          <div class="notif-list" v-if="notifications.length">
+            <div v-for="n in notifications" :key="n.id" class="notif-item" :class="{'notif-unread': !isRead(n.id)}" @click="onNotifClick(n)">
+              <span class="notif-severity" :class="'sev-'+n.severity">●</span>
+              <div class="notif-content">
+                <div class="notif-summary">{{ n.summary }}</div>
+                <div class="notif-detail" v-if="n.detail">{{ n.detail }}</div>
+                <div class="notif-time">{{ fmtTime(n.timestamp) }} · {{ n.type_label }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="notif-empty" v-else>✅ 暂无通知</div>
+        </div>
+      </div>
       <div class="topbar-status">
         <span class="dot dot-sm" :class="dotClass"></span>
         <span class="topbar-status-label">{{ statusLabel }}</span>
@@ -28,12 +52,39 @@
 
 <script setup>
 import { inject, computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { api } from '../api.js'
 
 defineEmits(['toggleMobile'])
 const appState = inject('appState')
 const route = useRoute()
+const router = useRouter()
 const searchInput = ref(null)
+
+// v11.1: 通知中心
+const notifOpen = ref(false)
+const notifWrap = ref(null)
+const notifications = ref([])
+const READ_KEY = 'lobster_notif_read'
+
+function getReadIds() { try { return JSON.parse(localStorage.getItem(READ_KEY) || '[]') } catch { return [] } }
+function isRead(id) { return getReadIds().includes(id) }
+const unreadCount = computed(() => { const read = getReadIds(); return notifications.value.filter(n => !read.includes(n.id)).length })
+
+function toggleNotif() { notifOpen.value = !notifOpen.value; if (notifOpen.value) loadNotifications() }
+function markAllRead() { const ids = notifications.value.map(n => n.id); localStorage.setItem(READ_KEY, JSON.stringify(ids)); notifOpen.value = false }
+function onNotifClick(n) {
+  const read = getReadIds(); if (!read.includes(n.id)) { read.push(n.id); localStorage.setItem(READ_KEY, JSON.stringify(read)) }
+  if (n.type === 'blocked') router.push('/audit')
+  else if (n.type === 'canary_leak') router.push('/agent')
+  else if (n.type === 'budget_exceeded') router.push('/agent')
+  else if (n.type === 'high_risk_tool') router.push('/agent')
+  notifOpen.value = false
+}
+async function loadNotifications() { try { const d = await api('/api/v1/notifications'); notifications.value = d.notifications || [] } catch { notifications.value = [] } }
+function fmtTime(ts) { if (!ts) return ''; const d = new Date(ts); return isNaN(d.getTime()) ? '' : d.toLocaleString('zh-CN', { hour12: false }) }
+function onClickOutside(e) { if (notifWrap.value && !notifWrap.value.contains(e.target)) notifOpen.value = false }
+let notifTimer = null
 
 const currentTitle = computed(() => route.meta?.title || '概览')
 const dotClass = computed(() => appState.connectionStatus === 'connected' ? 'dot-healthy' : 'dot-unhealthy')
@@ -84,8 +135,8 @@ function onKeydown(e) {
   }
 }
 
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onKeydown))
+onMounted(() => { document.addEventListener('keydown', onKeydown); document.addEventListener('click', onClickOutside); loadNotifications(); notifTimer = setInterval(loadNotifications, 60000) })
+onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document.removeEventListener('click', onClickOutside); clearInterval(notifTimer) })
 </script>
 
 <style scoped>
@@ -135,4 +186,53 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   .topbar-search { max-width: 200px; }
 }
 @media(max-width:480px) { .topbar-search { display: none; } }
+/* 通知中心 */
+.notif-wrap { position: relative; }
+.notif-btn {
+  position: relative; background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; padding: 4px 6px; border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+.notif-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.notif-badge {
+  position: absolute; top: -2px; right: -4px; background: #EF4444; color: #fff;
+  font-size: 10px; font-weight: 700; min-width: 16px; height: 16px;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  padding: 0 4px; line-height: 1;
+}
+.notif-panel {
+  position: absolute; top: 100%; right: 0; margin-top: 8px;
+  width: 380px; max-height: 480px; overflow-y: auto;
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  z-index: 300;
+}
+.notif-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-subtle);
+  font-weight: 700; font-size: var(--text-sm); color: var(--text-primary);
+}
+.notif-mark-read {
+  background: none; border: none; color: var(--color-primary);
+  font-size: var(--text-xs); cursor: pointer; font-weight: 600;
+}
+.notif-mark-read:hover { text-decoration: underline; }
+.notif-list { max-height: 400px; overflow-y: auto; }
+.notif-item {
+  display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle); cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.notif-item:hover { background: var(--bg-elevated); }
+.notif-unread { background: rgba(99, 102, 241, 0.05); }
+.notif-severity { flex-shrink: 0; margin-top: 3px; font-size: 10px; }
+.sev-critical { color: #DC2626; }
+.sev-high { color: #EF4444; }
+.sev-medium { color: #F59E0B; }
+.sev-low { color: #10B981; }
+.notif-content { flex: 1; min-width: 0; }
+.notif-summary { font-size: var(--text-xs); font-weight: 600; color: var(--text-primary); }
+.notif-detail { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-time { font-size: 10px; color: var(--text-disabled); margin-top: 2px; }
+.notif-empty { padding: var(--space-6); text-align: center; font-size: var(--text-sm); color: var(--text-tertiary); }
 </style>

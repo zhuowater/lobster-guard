@@ -54,6 +54,11 @@ type ManagementAPI struct {
 	llmRuleEngine   *LLMRuleEngine     // v10.0 LLM 规则引擎
 	llmProxy        *LLMProxy          // v10.1 LLM 代理引用（用于 canary token 操作）
 	userProfileEng  *UserProfileEngine // v11.0 用户画像引擎
+	// v11.1 驾驶舱模式
+	healthScoreEng  *HealthScoreEngine
+	owaspMatrixEng  *OWASPMatrixEngine
+	strictMode      *StrictModeManager
+	notificationEng *NotificationEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -275,6 +280,17 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleRestoreBackup(w, r)
 	case strings.HasPrefix(path, "/api/v1/backups/") && strings.HasSuffix(path, "/download") && method == "GET":
 		api.handleDownloadBackup(w, r)
+	// v11.1 驾驶舱模式 API
+	case path == "/api/v1/health/score" && method == "GET":
+		api.handleHealthScore(w, r)
+	case path == "/api/v1/llm/owasp-matrix" && method == "GET":
+		api.handleOWASPMatrix(w, r)
+	case path == "/api/v1/system/strict-mode" && method == "GET":
+		api.handleStrictModeGet(w, r)
+	case path == "/api/v1/system/strict-mode" && method == "POST":
+		api.handleStrictModeSet(w, r)
+	case path == "/api/v1/notifications" && method == "GET":
+		api.handleNotifications(w, r)
 	// v9.0 LLM 侧安全审计 API
 	case strings.HasPrefix(path, "/api/v1/llm/"):
 		// LLM config 端点不需要 llmAuditor（即使 LLM 未启用也要能读写配置）
@@ -395,6 +411,12 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 		modules["llm_proxy"] = map[string]interface{}{"status": "disabled"}
 	}
 	result["modules"] = modules
+	// v11.1: 系统健康指标
+	result["system"] = GetSystemHealth(api.cfg.DBPath)
+	// v11.1: 严格模式状态
+	if api.strictMode != nil {
+		result["strict_mode"] = api.strictMode.IsEnabled()
+	}
 	// v3.5 入站规则信息
 	if api.inboundEngine != nil {
 		rv := api.inboundEngine.Version()
@@ -3195,5 +3217,75 @@ func (api *ManagementAPI) handleUserRiskStats(w http.ResponseWriter, r *http.Req
 		return
 	}
 	jsonResponse(w, 200, stats)
+}
+
+// ============================================================
+// v11.1 驾驶舱模式 API handlers
+// ============================================================
+
+// handleHealthScore GET /api/v1/health/score — 综合安全健康分
+func (api *ManagementAPI) handleHealthScore(w http.ResponseWriter, r *http.Request) {
+	if api.healthScoreEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "health score engine not available"})
+		return
+	}
+	result, err := api.healthScoreEng.Calculate()
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, result)
+}
+
+// handleOWASPMatrix GET /api/v1/llm/owasp-matrix — OWASP LLM Top 10 矩阵
+func (api *ManagementAPI) handleOWASPMatrix(w http.ResponseWriter, r *http.Request) {
+	if api.owaspMatrixEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "OWASP matrix engine not available"})
+		return
+	}
+	items := api.owaspMatrixEng.Calculate()
+	jsonResponse(w, 200, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+// handleStrictModeGet GET /api/v1/system/strict-mode — 获取严格模式状态
+func (api *ManagementAPI) handleStrictModeGet(w http.ResponseWriter, r *http.Request) {
+	enabled := false
+	if api.strictMode != nil {
+		enabled = api.strictMode.IsEnabled()
+	}
+	jsonResponse(w, 200, map[string]interface{}{"enabled": enabled})
+}
+
+// handleStrictModeSet POST /api/v1/system/strict-mode — 设置严格模式
+func (api *ManagementAPI) handleStrictModeSet(w http.ResponseWriter, r *http.Request) {
+	if api.strictMode == nil {
+		jsonResponse(w, 500, map[string]string{"error": "strict mode manager not available"})
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
+		return
+	}
+	api.strictMode.SetEnabled(req.Enabled)
+	jsonResponse(w, 200, map[string]interface{}{
+		"enabled": api.strictMode.IsEnabled(),
+		"status":  "ok",
+	})
+}
+
+// handleNotifications GET /api/v1/notifications — 通知列表
+func (api *ManagementAPI) handleNotifications(w http.ResponseWriter, r *http.Request) {
+	if api.notificationEng == nil {
+		jsonResponse(w, 200, map[string]interface{}{"notifications": []interface{}{}, "total": 0})
+		return
+	}
+	items := api.notificationEng.GetRecentNotifications()
+	if items == nil {
+		items = []NotificationItem{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"notifications": items, "total": len(items)})
 }
 
