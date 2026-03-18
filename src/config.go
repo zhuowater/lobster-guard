@@ -217,6 +217,8 @@ type Config struct {
 	// v18.3 自适应决策 + 奇点蜜罐
 	AdaptiveDecision AdaptiveDecisionConfig `yaml:"adaptive_decision"`
 	Singularity      SingularityConfig      `yaml:"singularity"`
+	// v19.1 语义检测引擎
+	SemanticDetector SemanticConfig         `yaml:"semantic_detector"`
 }
 
 // EventBusConfig 事件总线配置（v18.1）

@@ -126,6 +126,8 @@ type InboundProxy struct {
 	eventBus *EventBus
 	// v18.3 自适应决策
 	adaptiveEngine *AdaptiveDecisionEngine
+	// v19.1 语义检测引擎
+	semanticDetector *SemanticDetector
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {

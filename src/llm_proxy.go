@@ -35,6 +35,8 @@ type LLMProxy struct {
 	envelopeMgr *EnvelopeManager
 	// v18.1 事件总线
 	eventBus *EventBus
+	// v19.1 语义检测引擎
+	semanticDetector *SemanticDetector
 }
 
 // NewLLMProxy 创建 LLM 代理

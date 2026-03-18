@@ -133,6 +133,8 @@ type ManagementAPI struct {
 	// v18.3 自适应决策 + 奇点蜜罐
 	adaptiveEngine    *AdaptiveDecisionEngine
 	singularityEngine *SingularityEngine
+	// v19.1 语义检测引擎
+	semanticDetector *SemanticDetector
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -786,6 +788,18 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleEvolutionConfigGet(w, r)
 	case path == "/api/v1/evolution/config" && method == "PUT":
 		api.handleEvolutionConfigPut(w, r)
+
+	// v19.1: 语义检测引擎 API
+	case path == "/api/v1/semantic/stats" && method == "GET":
+		api.handleSemanticStats(w, r)
+	case path == "/api/v1/semantic/config" && method == "GET":
+		api.handleSemanticConfigGet(w, r)
+	case path == "/api/v1/semantic/config" && method == "PUT":
+		api.handleSemanticConfigPut(w, r)
+	case path == "/api/v1/semantic/analyze" && method == "POST":
+		api.handleSemanticAnalyze(w, r)
+	case path == "/api/v1/semantic/patterns" && method == "GET":
+		api.handleSemanticPatterns(w, r)
 
 	default:
 		w.WriteHeader(404)

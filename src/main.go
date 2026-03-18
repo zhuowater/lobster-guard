@@ -579,6 +579,24 @@ func main() {
 	}
 	mgmtAPI.singularityEngine = singularityEngine
 
+	// v19.1: 语义检测引擎
+	var semanticDetector *SemanticDetector
+	if cfg.SemanticDetector.Enabled {
+		semanticDetector = NewSemanticDetector(logger.DB(), cfg.SemanticDetector)
+		fmt.Printf("[初始化] ✅ 语义检测引擎已启用 (阈值=%.1f, 模式库=%d)\n", cfg.SemanticDetector.Threshold, len(semanticDetector.attackVectors))
+	} else {
+		fmt.Println("[初始化] ⚠️ 语义检测引擎: 未启用")
+	}
+	mgmtAPI.semanticDetector = semanticDetector
+	inbound.semanticDetector = semanticDetector
+	if llmProxy != nil {
+		llmProxy.semanticDetector = semanticDetector
+	}
+	// v19.1: 将语义检测阶段追加到检测 Pipeline 末尾
+	if semanticDetector != nil && inbound.pipeline != nil {
+		inbound.pipeline.stages = append(inbound.pipeline.stages, NewSemanticStage(semanticDetector))
+	}
+
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
 	bgScheduler := NewBackgroundScheduler(cfg, attackChainEng, behaviorProfileEng)
 	chainMin := cfg.ChainAnalysisIntervalMin
