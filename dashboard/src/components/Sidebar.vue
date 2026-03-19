@@ -190,21 +190,25 @@ const llmItems = [
   { path: '/ab-testing', label: 'A/B 测试', icon: 'split' },
 ]
 
-// 威胁分析导航项 (5项)
+// 威胁分析导航项 (6项)
 const threatItems = [
   { path: '/user-profiles', label: '用户画像', icon: 'user-scan' },
   { path: '/behavior', label: '行为画像', icon: 'behavior' },
   { path: '/attack-chains', label: '攻击链', icon: 'link' },
   { path: '/honeypot', label: 'Agent 蜜罐', icon: 'flame' },
   { path: '/anomaly', label: '异常检测', icon: 'chart-line' },
+  { path: '/singularity', label: '奇点蜜罐', icon: 'orbit' },
 ]
 
-// 安全治理导航项 (4项)
+// 安全治理导航项 (7项)
 const governItems = [
   { path: '/redteam', label: '红队测试', icon: 'crosshair' },
   { path: '/leaderboard', label: '排行榜', icon: 'trophy' },
   { path: '/tenants', label: '租户', icon: 'building' },
   { path: '/reports', label: '报告', icon: 'file-up' },
+  { path: '/envelopes', label: '执行信封', icon: 'lock' },
+  { path: '/events', label: '事件总线', icon: 'radio' },
+  { path: '/evolution', label: '自进化', icon: 'dna' },
 ]
 
 // 系统导航项 (4项)
