@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 lobster-guard v18.2.0 配置文件（示例）
+# 龙虾卫士 lobster-guard v20.4.0 配置文件（示例）
 # ============================================================
 # 4 端口架构:
 #   :18443 — IM 入站代理（消息平台 → Agent）
@@ -677,3 +677,88 @@ llm_proxy:
 # API Token 自动轮换（v18.2）
 # 启用后，management_token 和 JWT secret 将按策略自动轮换
 # api_token_rotation: false
+
+# ============================================================
+# Phase 1: v18.x-v20.x 配置
+# ============================================================
+
+# v18.0 执行信封 — 密码学审计链
+envelope_enabled: true
+envelope_secret_key: "your-hmac-secret-key-change-me"  # HMAC-SHA256 密钥，必须更改！
+
+# v18.1 事件总线
+event_bus:
+  enabled: true
+  targets: []    # Webhook targets: [{name, url, secret, events, retry_count}]
+  chains: []     # Action chains: [{name, trigger, actions}]
+
+# v18.3 自适应决策引擎
+adaptive_decision:
+  enabled: true
+  lookback_days: 30      # 历史回看天数
+  min_samples: 10        # 最小样本数
+  fp_threshold: 0.5      # 误伤率阈值
+  confidence_level: 0.95  # 置信水平
+
+# v18.3 奇点蜜罐 — 拓扑感知暴露预算
+singularity:
+  enabled: true
+  im_exposure_level: 3        # IM 通道暴露等级 0-5
+  llm_exposure_level: 3       # LLM 通道暴露等级 0-5
+  toolcall_exposure_level: 0  # ToolCall 通道暴露等级 0-5
+
+# v19.0 对抗性自进化
+evolution_enabled: true
+evolution_interval_min: 360   # 自进化周期(分钟)
+
+# v19.1 语义检测引擎
+semantic_detector:
+  enabled: true
+  threshold: 0.7          # 检测阈值 (0-1)
+  action: warn            # 超阈值动作: block/warn/log
+  tfidf_weight: 0.3       # TF-IDF 维度权重
+  syntax_weight: 0.3      # 句法维度权重
+  anomaly_weight: 0.2     # 异常维度权重
+  intent_weight: 0.2      # 意图维度权重
+
+# v19.2 蜜罐深度交互
+honeypot_deep:
+  enabled: true
+  auto_feedback_enabled: true
+  auto_feedback_min_score: 50
+  session_timeout_min: 30
+
+# v20.0 工具策略引擎
+tool_policy:
+  enabled: true
+  default_action: warn    # 默认动作: block/warn/allow
+  max_calls_per_min: 60   # 每分钟最大调用数
+
+# v20.1 信息流污染追踪
+taint_tracker:
+  enabled: true
+  action: warn            # 污染检测动作: block/warn/log
+  ttl_minutes: 30         # 污染标签存活时间
+
+# v20.2 污染链逆转
+taint_reversal:
+  enabled: true
+  mode: soft              # 逆转模式: soft/hard/stealth
+
+# v20.3 LLM 响应缓存
+llm_cache:
+  enabled: true
+  max_entries: 1000       # 最大缓存条目
+  ttl_minutes: 60         # 缓存过期时间
+  similarity_min: 0.85    # 语义相似度阈值 (0-1)
+  tenant_isolation: true  # 租户隔离
+  skip_tainted: true      # 跳过被污染的响应
+
+# v20.4 API Gateway
+api_gateway:
+  enabled: true
+  jwt_enabled: true
+  jwt_secret: "your-jwt-secret-change-me"  # JWT 密钥，必须更改！
+  apikey_enabled: true
+  api_keys:
+    - "your-api-key-change-me"  # API Key，必须更改！

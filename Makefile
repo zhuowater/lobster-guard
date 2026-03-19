@@ -1,12 +1,12 @@
 # lobster-guard Makefile
-# 龙虾卫士 - AI Agent 安全网关 v18.2（工程化基础）
-# Go 源文件: 44 个 + 35 个测试 = 79 个 .go 文件
-# Vue 前端: 48 个 Vue 文件，14,819 行
-# 测试用例: 760+ 个通过 | API 端点: ~230 个
+# 龙虾卫士 - AI Agent 安全网关 v20.4（Phase 1 完成）
+# Go 源文件: 69 个 + 48 个测试 = 117 个 .go 文件
+# Vue 前端: 63 个 Vue 文件，~18,600 行
+# 测试用例: 930 个通过 | API 端点: ~241 个
 # 外部依赖: sqlite3 + yaml.v3 + gorilla/websocket + x/crypto
 
 APP_NAME := lobster-guard
-VERSION := 18.2.0
+VERSION := 20.4.0
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_FLAGS := -ldflags="-s -w"
 
@@ -213,7 +213,7 @@ ci-local:
 
 .PHONY: help
 help:
-	@echo "lobster-guard v18.2 Makefile 命令:"
+	@echo "lobster-guard v20.4 Makefile 命令:"
 	@echo ""
 	@echo "  构建:"
 	@echo "    make build         - 编译 Go 二进制"
@@ -223,7 +223,7 @@ help:
 	@echo "    make clean         - 清理"
 	@echo ""
 	@echo "  测试:"
-	@echo "    make test          - 运行全部测试（754 用例）"
+	@echo "    make test          - 运行全部测试（930 用例）"
 	@echo "    make test-quick    - 快速测试（无详细输出）"
 	@echo "    make simulate      - 端到端模拟测试"
 	@echo "    make lint          - 代码检查"

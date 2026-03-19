@@ -7,18 +7,18 @@
 <h1 align="center">lobster-guard（龙虾卫士）</h1>
 
 <p align="center">
-  <strong>AI Agent 安全网关 · 双安全域 · 入站检测 · 出站拦截 · LLM 审计 · 态势感知</strong>
+  <strong>AI Agent 安全网关 · 双安全域 · 密码学审计链 · 对抗性自进化 · 语义检测 · 污染追踪 · LLM缓存 · API网关</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v17.1.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v20.4.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-754_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-227_routes-purple?style=flat-square" alt="API Routes">
-  <img src="https://img.shields.io/badge/dashboard-29_pages-orange?style=flat-square" alt="Dashboard">
+  <img src="https://img.shields.io/badge/tests-930_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-241_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/dashboard-38_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
 
@@ -30,7 +30,7 @@
 
 ## 🎯 这是什么
 
-**lobster-guard** 是一个全功能 AI Agent 安全网关，专为 AI Agent（如 [OpenClaw](https://github.com/openclaw/openclaw)）设计。它部署在消息平台/LLM 服务与 AI Agent 之间，提供 **IM 安全域 + LLM 安全域**双安全域防护，覆盖入站检测、出站拦截、LLM 审计、行为分析、攻击链检测、蜜罐诱捕和态势感知全链路。
+**lobster-guard** 是一个全功能 AI Agent 安全网关，专为 AI Agent（如 [OpenClaw](https://github.com/openclaw/openclaw)）设计。它部署在消息平台/LLM 服务与 AI Agent 之间，提供 **IM 安全域 + LLM 安全域**双安全域防护，覆盖入站检测、出站拦截、LLM 审计、行为分析、攻击链检测、蜜罐诱捕、态势感知、密码学审计链、对抗性自进化、语义检测、污染追踪、LLM 响应缓存和 API 网关全链路。
 
 **支持蓝信、飞书、钉钉、企业微信等 5 种消息通道，通过插件机制一行配置切换。**
 
@@ -53,11 +53,20 @@
 | 🧬 **行为画像** | 特征提取 · 模式学习 · 异常基线检测 · 攻击者画像 |
 | 🔗 **攻击链检测** | 多阶段关联分析 · Kill Chain 映射 · 自动升级策略 |
 | 📊 **态势感知大屏** | 实时攻防态势 · 可拖拽布局 · 4 预设模板 · 全屏驾驶舱 |
-| 🖥️ **管理后台** | Vue 3 Dashboard · 29 页面 · 19 组件 · 5 组侧边栏 |
+| 🔐 **密码学审计链** | HMAC-SHA256 执行信封 · Merkle Tree 批次验证 · 防篡改 |
+| 📡 **事件总线** | SecurityEvent · Webhook 推送 · ActionChain 编排 |
+| 🧬 **对抗性自进化** | 6 策略自动变异 · 绕过检测 · 规则自动生成 |
+| 🌀 **奇点蜜罐** | 拓扑预算(欧拉χ) · 暴露等级 · 帕累托推荐 |
+| 🔬 **语义检测** | TF-IDF + 句法 + 异常 + 意图四维分析 · 47 模式 |
+| 🔧 **工具策略** | tool_calls 18 规则 · 通配符匹配 · 滑窗限流 |
+| ☣️ **污染追踪** | 12 PII 模式 · 三端传播 · 血缘阻断 · 逆转引擎 |
+| 💾 **响应缓存** | TF-IDF 语义匹配 · 租户隔离 · 污染跳过 |
+| 🚪 **API 网关** | JWT + APIKey · 路由优先级 · 灰度发布 |
+| 🖥️ **管理后台** | Vue 3 Dashboard · 38 页面 · 19 组件 · 5 组侧边栏 |
 
 ### 🏗️ 设计哲学
 
-- **单二进制部署** — 42 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
+- **单二进制部署** — 69 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
 - **Fail-Open** — 检测异常不阻塞业务，宁可漏检不可误杀
 - **零外部依赖** — 只依赖 SQLite + YAML 解析 + WebSocket + x/crypto（4 个依赖），不引入 Redis/MQ/K8s
 - **向后兼容** — 不配多容器就自动退化为单上游模式，平滑升级
@@ -66,12 +75,15 @@
 
 | 指标 | 数值 |
 |------|------|
-| Go 源文件 | 42 个 |
-| Go 代码行数 | ~48,500 行（含测试 18,200 行）|
-| Vue 前端 | 29 个页面 + 19 个组件，~14,800 行 |
-| API 路由 | ~227 个 |
-| 测试函数 | 754 个 |
-| Git Commit | 106 个 |
+| Go 源文件 | 69 个 |
+| Go 测试文件 | 48 个 |
+| Go 源代码行数 | ~42,400 行 |
+| Go 测试行数 | ~27,100 行 |
+| 总 Go 行数 | ~69,500 行 |
+| Vue 前端 | 38 页面 + 19 组件，共 63 个文件，~18,600 行 |
+| API 路由 | ~241 个 |
+| 测试函数 | 930 个 |
+| Git Commit | 148 个 |
 | 外部依赖 | 4 个（sqlite3 + yaml.v3 + gorilla/websocket + x/crypto）|
 
 ---
@@ -80,7 +92,8 @@
 
 ### 管理后台全览
 
-> Vue 3 深色科技主题 · Indigo 配色 · 29 页面 · 5 组侧边栏
+> Vue 3 深色科技主题 · Indigo 配色 · 38 页面 · 5 组侧边栏
+> 含事件总线、语义检测、污染追踪、API 网关、LLM 缓存等新管理页面
 
 ![Dashboard Overview](docs/screenshots/dashboard-overview-v17.png)
 
@@ -163,11 +176,11 @@ open http://localhost:9090/                  # 管理后台
 | [🏛️ 架构说明](docs/architecture.md) | 架构图 · 4 端口 · 数据流 · 插件架构 |
 | [🔌 多通道配置](docs/channels.md) | 5 通道配置示例 · Bridge Mode WSS 长连接 |
 | [🛡️ 安全检测能力](docs/detection.md) | 规则体系 · 检测管线 · 规则模板库 |
-| [📡 API 参考](docs/api-reference.md) | ~227 路由完整列表 · 调用示例 |
+| [📡 API 参考](docs/api-reference.md) | ~241 路由完整列表 · 调用示例 |
 | [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · Make |
-| [🧪 测试说明](docs/testing.md) | 754 用例 · 端到端模拟 · 性能指标 |
+| [🧪 测试说明](docs/testing.md) | 930 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 完整配置项 · 出站规则合并机制 |
-| [🖥️ 管理后台](docs/dashboard.md) | 29 页面详情 · 组件库 · 截图集合 |
+| [🖥️ 管理后台](docs/dashboard.md) | 38 页面详情 · 组件库 · 截图集合 |
 
 ### 其他文档
 
@@ -199,17 +212,24 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 ```
 lobster-guard/
-├── src/                    # Go 源代码（42 个文件）
+├── src/                    # Go 源代码（69 源 + 48 测试 = 117 个文件）
 │   ├── main.go             #   入口 + CLI 参数 + 启动流程
 │   ├── config.go           #   配置加载 + 验证器
 │   ├── plugin.go           #   ChannelPlugin 接口 + 5 通道插件
 │   ├── detect.go           #   RuleEngine (AC自动机 + 正则)
 │   ├── proxy.go            #   入站/出站 HTTP 代理
-│   ├── api.go              #   管理 API (~227 路由)
+│   ├── api.go              #   管理 API (~241 路由)
 │   ├── llm_proxy.go        #   LLM 反向代理
-│   └── ...                 #   其余 35 个源文件
-├── dashboard/              # Vue 3 前端 (29 页面 + 19 组件)
-│   ├── src/views/          #   29 个页面
+│   ├── envelope.go         #   密码学执行信封
+│   ├── event_bus.go        #   事件总线 + ActionChain
+│   ├── evolution.go        #   对抗性自进化引擎
+│   ├── semantic.go         #   语义检测引擎
+│   ├── taint.go            #   污染追踪 + 逆转引擎
+│   ├── llm_cache.go        #   LLM 响应缓存
+│   ├── api_gateway.go      #   API 网关
+│   └── ...                 #   其余源文件
+├── dashboard/              # Vue 3 前端 (38 页面 + 19 组件)
+│   ├── src/views/          #   38 个页面
 │   └── src/components/     #   19 个组件
 ├── rules/                  # 规则模板库 (66 条, 4 场景)
 │   ├── general.yaml        #   通用 (越狱/注入/社工)
@@ -245,7 +265,9 @@ lobster-guard/
 | **v15** | Agent 蜜罐（8 模板）+ Prompt A/B 测试 |
 | **v16** | 行为画像 + 攻击链检测 |
 | **v17** | 态势感知大屏 + 可拖拽自定义布局 |
-| **v17.1.0** | 全链路修复（蜜罐集成/用户管理/端到端模拟） |
+| **v18** | 密码学审计链（执行信封）+ 事件总线 + 奇点蜜罐 + 自适应决策 |
+| **v19** | 对抗性自进化 + 语义检测引擎 + 蜜罐深度交互 |
+| **v20** | 工具策略引擎 + 污染追踪/逆转 + LLM 响应缓存 + API 网关 |
 
 详细版本历史参见 [ROADMAP.md](ROADMAP.md)。
 
@@ -258,5 +280,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v17.1.0 · 42 files · 48K lines · 754 tests · 227 APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v20.4.0 · 69 source files · 69.5K lines · 930 tests · 241 APIs</sub>
 </p>

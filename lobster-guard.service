@@ -1,5 +1,5 @@
 [Unit]
-Description=lobster-guard 龙虾卫士 v17.1 - AI Agent 安全网关
+Description=lobster-guard 龙虾卫士 v20.4 - AI Agent 安全网关
 Documentation=https://github.com/zhuowater/lobster-guard
 After=network.target
 Wants=network-online.target
