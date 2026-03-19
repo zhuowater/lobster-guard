@@ -1,5 +1,8 @@
 <template>
   <div class="login-page">
+    <canvas ref="particleCanvas" class="particle-bg"></canvas>
+    <div class="glow-orb glow-orb-1"></div>
+    <div class="glow-orb glow-orb-2"></div>
     <div class="login-card">
       <div class="login-logo">
         <span class="login-emoji">🦞</span>
@@ -35,7 +38,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { saveToken } from '../api.js'
 import { loginUser } from '../stores/app.js'
@@ -46,6 +49,93 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
+// --- Particle background ---
+const particleCanvas = ref(null)
+let animId = null
+let resizeHandler = null
+
+onMounted(() => {
+  const canvas = particleCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  let w, h
+
+  function resize() {
+    w = canvas.width = window.innerWidth
+    h = canvas.height = window.innerHeight
+  }
+  resize()
+  resizeHandler = resize
+  window.addEventListener('resize', resize)
+
+  // Generate particles
+  const particles = []
+  const PARTICLE_COUNT = 60
+  const colors = [
+    'rgba(99,102,241,0.4)',   // indigo
+    'rgba(168,85,247,0.3)',   // purple
+    'rgba(245,158,11,0.25)',  // amber
+    'rgba(59,130,246,0.3)',   // blue
+    'rgba(239,68,68,0.2)',    // red
+    'rgba(255,255,255,0.15)', // white
+  ]
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    particles.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      r: Math.random() * 2 + 0.5,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      glow: Math.random() > 0.7,
+      pulsePhase: Math.random() * Math.PI * 2,
+      pulseSpeed: 0.005 + Math.random() * 0.01,
+    })
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h)
+
+    particles.forEach(p => {
+      p.x += p.vx
+      p.y += p.vy
+
+      if (p.x < -10) p.x = w + 10
+      if (p.x > w + 10) p.x = -10
+      if (p.y < -10) p.y = h + 10
+      if (p.y > h + 10) p.y = -10
+
+      p.pulsePhase += p.pulseSpeed
+      const alpha = 0.5 + 0.5 * Math.sin(p.pulsePhase)
+
+      ctx.save()
+      ctx.globalAlpha = alpha
+
+      if (p.glow) {
+        ctx.shadowBlur = 12
+        ctx.shadowColor = p.color
+      }
+
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+      ctx.fillStyle = p.color
+      ctx.fill()
+      ctx.restore()
+    })
+
+    animId = requestAnimationFrame(draw)
+  }
+
+  draw()
+})
+
+onUnmounted(() => {
+  if (animId) cancelAnimationFrame(animId)
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+})
+
+// --- Login logic ---
 async function doLogin() {
   if (!username.value || !password.value) {
     error.value = '请输入用户名和密码'
@@ -68,7 +158,6 @@ async function doLogin() {
       return
     }
 
-    // 保存 token 和用户信息
     saveToken(data.token)
     loginUser(data.token, data.user)
     router.replace('/')
@@ -86,21 +175,110 @@ async function doLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-base, #0a0a0f);
-  background-image:
-    radial-gradient(ellipse 60% 50% at 50% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 40% 40% at 80% 80%, rgba(239, 68, 68, 0.04) 0%, transparent 60%);
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 60% at 90% 90%, rgba(245,158,11,0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 40% 50% at 10% 80%, rgba(239,68,68,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 70% 20%, rgba(168,85,247,0.05) 0%, transparent 50%),
+    #0a0a0f;
   padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Dot grid overlay */
+.login-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle 1px at center, rgba(99,102,241,0.15) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Slow-drifting large glow spot */
+.login-page::after {
+  content: '';
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%);
+  top: -100px;
+  left: 30%;
+  animation: float-glow 20s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Particle canvas */
+.particle-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Floating glow orbs */
+.glow-orb {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.glow-orb-1 {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(168,85,247,0.07) 0%, transparent 70%);
+  bottom: -80px;
+  right: 10%;
+  animation: float-glow-2 25s ease-in-out infinite alternate;
+}
+
+.glow-orb-2 {
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, rgba(245,158,11,0.05) 0%, transparent 70%);
+  top: 20%;
+  left: -60px;
+  animation: float-glow-3 18s ease-in-out infinite alternate;
+}
+
+@keyframes float-glow {
+  0% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(50px, 30px) scale(1.1); }
+  66% { transform: translate(-30px, 50px) scale(0.95); }
+  100% { transform: translate(20px, -20px) scale(1.05); }
+}
+
+@keyframes float-glow-2 {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-40px, -30px) scale(1.15); }
+  100% { transform: translate(30px, 20px) scale(0.9); }
+}
+
+@keyframes float-glow-3 {
+  0% { transform: translate(0, 0) scale(1); }
+  40% { transform: translate(30px, 40px) scale(1.1); }
+  100% { transform: translate(-20px, -30px) scale(1.05); }
 }
 
 .login-card {
   width: 100%;
   max-width: 380px;
-  background: var(--bg-surface, #12121a);
+  background: rgba(18, 18, 26, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
   border-radius: 16px;
   padding: 40px 32px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  z-index: 1;
+  position: relative;
 }
 
 .login-logo {
