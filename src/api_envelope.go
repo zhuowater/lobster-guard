@@ -4,6 +4,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -47,28 +48,44 @@ func (api *ManagementAPI) handleEnvelopeChainVerify(w http.ResponseWriter, r *ht
 	jsonResponse(w, 200, result)
 }
 
-// handleEnvelopeList GET /api/v1/envelopes/list?trace_id= — 按 trace_id 列出信封
+// handleEnvelopeList GET /api/v1/envelopes/list?trace_id=&limit= — 列出信封（trace_id 可选）
 func (api *ManagementAPI) handleEnvelopeList(w http.ResponseWriter, r *http.Request) {
 	if api.envelopeMgr == nil {
 		jsonResponse(w, 404, map[string]string{"error": "envelope not enabled"})
 		return
 	}
 	traceID := r.URL.Query().Get("trace_id")
-	if traceID == "" {
-		jsonResponse(w, 400, map[string]string{"error": "trace_id parameter required"})
-		return
-	}
 
-	envelopes, err := api.envelopeMgr.ListByTrace(traceID)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": err.Error()})
-		return
+	if traceID != "" {
+		// 按 trace_id 筛选
+		envelopes, err := api.envelopeMgr.ListByTrace(traceID)
+		if err != nil {
+			jsonResponse(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		jsonResponse(w, 200, map[string]interface{}{
+			"envelopes": envelopes,
+			"total":     len(envelopes),
+			"trace_id":  traceID,
+		})
+	} else {
+		// 无筛选，返回最近信封
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if n, err := strconv.Atoi(l); err == nil {
+				limit = n
+			}
+		}
+		envelopes, err := api.envelopeMgr.ListRecent(limit)
+		if err != nil {
+			jsonResponse(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		jsonResponse(w, 200, map[string]interface{}{
+			"envelopes": envelopes,
+			"total":     len(envelopes),
+		})
 	}
-	jsonResponse(w, 200, map[string]interface{}{
-		"envelopes": envelopes,
-		"total":     len(envelopes),
-		"trace_id":  traceID,
-	})
 }
 
 // handleEnvelopeStats GET /api/v1/envelopes/stats — 信封统计

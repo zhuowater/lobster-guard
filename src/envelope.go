@@ -376,6 +376,31 @@ func (em *EnvelopeManager) VerifyChain(traceID string) (*ChainVerifyResult, erro
 }
 
 // ListByTrace 按 trace_id 查询信封列表（按时间排序）
+// ListRecent returns the most recent envelopes (no filter)
+func (em *EnvelopeManager) ListRecent(limit int) ([]ExecutionEnvelope, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := em.db.Query(
+		`SELECT id, trace_id, timestamp, domain, request_hash, decision, rules_json, sender_id, nonce, prev_hash, content_hash, signature FROM execution_envelopes ORDER BY timestamp DESC, rowid DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var envelopes []ExecutionEnvelope
+	for rows.Next() {
+		env, err := scanEnvelopeFromRows(rows)
+		if err != nil {
+			continue
+		}
+		envelopes = append(envelopes, *env)
+	}
+	return envelopes, nil
+}
+
 func (em *EnvelopeManager) ListByTrace(traceID string) ([]ExecutionEnvelope, error) {
 	rows, err := em.db.Query(
 		`SELECT id, trace_id, timestamp, domain, request_hash, decision, rules_json, sender_id, nonce, prev_hash, content_hash, signature FROM execution_envelopes WHERE trace_id = ? ORDER BY timestamp ASC, rowid ASC`,
