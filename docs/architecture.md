@@ -6,7 +6,7 @@
 
 ```
                         ┌────────────────────────────────────────────────┐
-                        │              lobster-guard 🦞 v17.1.0          │
+                        │              lobster-guard 🦞 v20.4.0          │
                         │                                                │
                         │  ┌─────────────── IM 安全域 ────────────────┐  │
                         │  │                                          │  │
@@ -109,3 +109,45 @@ Agent    ──► :8445  ──► LLM API (Anthropic/OpenAI)
 | `golang.org/x/crypto` | bcrypt 密码哈希（用户认证）|
 
 仅四个外部依赖，其余全部使用 Go 标准库。
+
+## Phase 1 架构扩展 (v18-v20)
+
+### 新增引擎
+| 引擎 | 版本 | 说明 |
+|------|------|------|
+| EnvelopeEngine | v18.0 | HMAC-SHA256 信封 + Merkle Tree 批次 |
+| EventBus | v18.1 | SecurityEvent 发射 + Webhook + ActionChain |
+| AdaptiveDecision | v18.3 | 贝叶斯误伤率优化 + 置信区间 |
+| SingularityHoneypot | v18.3 | 拓扑预算(欧拉χ) + 暴露等级 |
+| EvolutionEngine | v19.0 | 6策略变异 + 规则自动生成 |
+| SemanticDetector | v19.1 | TF-IDF + 句法 + 异常 + 意图四维 |
+| HoneypotDeep | v19.2 | 忠诚度曲线 + 自进化回馈 |
+| ToolPolicyEngine | v20.0 | tool_calls 规则 + 滑窗限流 |
+| TaintTracker | v20.1 | 12 PII + 三端传播 + 血缘阻断 |
+| TaintReversal | v20.2 | soft/hard/stealth + 12模板 |
+| LLMCache | v20.3 | TF-IDF 语义缓存 + 租户隔离 |
+| APIGateway | v20.4 | JWT + APIKey + 灰度路由 |
+
+### 数据流增强
+
+```
+入站(IM) ──→ [检测链] ──→ [信封签名] ──→ [事件发射] ──→ 转发
+                ↓              ↓               ↓
+          [语义检测]    [Merkle批次]     [Webhook推送]
+          [自进化反馈]  [审计日志]       [ActionChain]
+
+出站(Agent) ──→ [PII检测] ──→ [污染追踪] ──→ [逆转引擎] ──→ 转发
+                    ↓              ↓               ↓
+              [出站规则]     [血缘传播]       [信封签名]
+
+LLM ──→ [规则引擎] ──→ [工具策略] ──→ [缓存查询] ──→ [上游LLM]
+            ↓              ↓              ↓
+      [Prompt审计]   [滑窗限流]     [语义匹配]
+```
+
+### 安全层级
+1. **L1 模式匹配** — AC自动机 + 正则 (μs级)
+2. **L2 语义分析** — TF-IDF四维检测 (ms级)
+3. **L3 行为分析** — 画像 + 基线 + 攻击链 (秒级)
+4. **L4 密码学保证** — HMAC信封 + Merkle Tree (防篡改)
+5. **L5 自进化** — 对抗变异 + 规则自动生成 (分钟级)

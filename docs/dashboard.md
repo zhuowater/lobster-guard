@@ -4,7 +4,7 @@
 
 访问 `http://your-server:9090/` 即可打开管理后台（需 JWT 登录）。
 
-## Vue 3 Dashboard（29 页面 · 19 组件）
+## Vue 3 Dashboard（38 页面 · 19 组件）
 
 > 深色科技主题 · Indigo 配色
 
@@ -72,11 +72,11 @@ TrendChart / PieChart / HeatMap / RuleEditor / TimelineChart 等，统一 Indigo
  | |_| (_) | |_) \__ \ ||  __/ | |_____| (_| | |_| | (_| | |  | |_
  |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
                                          |___/
-        龙虾卫士 - AI Agent 安全网关 v17.1.0
+        龙虾卫士 - AI Agent 安全网关 v20.4.0
         双安全域 | IM检测 | LLM审计 | 态势感知 | 蜜罐 | Red Team
 
 ┌─────────────────────────────────────────────────┐
-│              配置摘要 v17.1.0                    │
+│              配置摘要 v20.4.0                    │
 ├─────────────────────────────────────────────────┤
 │ 消息通道:    lanxin                             │
 │ 接入模式:    webhook                            │
@@ -129,3 +129,39 @@ TrendChart / PieChart / HeatMap / RuleEditor / TimelineChart 等，统一 Indigo
 ![Bigscreen](screenshots/dashboard-bigscreen-v17.png)
 
 </details>
+
+## Phase 1 新增页面 (v18-v20)
+
+### 🔐 执行信封 (`/envelopes`)
+- StatCards: 总信封数 / Merkle批次 / 待处理叶子 / 批次大小
+- 信封列表表格 + Merkle批次表格 (Tab切换)
+- 单条验证 + 批次验证
+
+### 📡 事件总线 (`/events`)
+- StatCards: 总事件 / 严重程度分布 / Webhook目标 / 最近24h
+- 事件列表 (severity颜色标签) + 三维筛选
+
+### 🧬 对抗性自进化 (`/evolution`)
+- 大数字: 代数 / 变异 / 绕过(红) / 生成规则(绿)
+- 一键运行进化 + 进化日志 + 变异策略卡片
+
+### 🌀 奇点蜜罐 (`/singularity`)
+- SVG圆环预算仪表盘 + 欧拉χ + 三通道进度条
+- 推荐放置 + 配置滑块 + 忠诚度排行
+
+### 🔬 语义检测 (`/semantic`)
+- 实时分析区(四维雷达: TF-IDF/句法/异常/意图)
+- 攻击模式库(47) + 配置(阈值/权重/动作)
+
+### 🔧 工具策略 (`/tools`)
+- 实时评估 + 规则CRUD(18规则) + 事件日志
+
+### ☣️ 污染追踪 (`/taint`)
+- 实时扫描 + 活跃污染列表(传播链可展开)
+- 逆转记录 + 双栏配置(追踪+逆转)
+
+### 💾 响应缓存 (`/cache`)
+- 命中率/节省Token/成本 + 缓存条目 + 测试查询 + 管理
+
+### 🚪 API 网关 (`/gateway`)
+- JWT生成/验证工具 + 路由CRUD + 网关日志 + 配置
