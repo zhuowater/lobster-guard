@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lobster-guard
+  labels:
+    app.kubernetes.io/name: lobster-guard
+    app.kubernetes.io/part-of: lobster-guard

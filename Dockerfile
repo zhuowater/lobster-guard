@@ -1,30 +1,45 @@
 # lobster-guard Dockerfile — 多阶段构建
-# v20.4 全功能版本
+# v20.5 全功能版本（含 K8s 服务发现 + 上游 CRUD + Dashboard 三模式）
+#
+# 构建: docker build -t lobster-guard:v20.5 .
+# 运行: docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
+#          -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
+#          lobster-guard:v20.5
 
-# Stage 1: Build Vue Dashboard
+# ── Stage 1: Build Vue Dashboard ──
 FROM node:22-alpine AS frontend
 WORKDIR /app/dashboard
 COPY dashboard/package*.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 COPY dashboard/ .
 RUN npm run build
 
-# Stage 2: Build Go binary
+# ── Stage 2: Build Go binary ──
 FROM golang:1.23-alpine AS backend
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 WORKDIR /app
-COPY src/ ./src/
 COPY go.mod go.sum ./
-# Copy built dashboard into embed location
+RUN go mod download
+COPY src/ ./src/
+COPY rules/ ./src/rules/
+# Embed built dashboard
 COPY --from=frontend /app/dashboard/dist ./src/dashboard/dist/
 WORKDIR /app/src
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /lobster-guard .
 
-# Stage 3: Runtime
+# ── Stage 3: Runtime ──
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates sqlite-libs
+RUN apk add --no-cache ca-certificates sqlite-libs tzdata \
+    && addgroup -S lobster && adduser -S lobster -G lobster
 COPY --from=backend /lobster-guard /usr/local/bin/lobster-guard
 COPY config.yaml.example /etc/lobster-guard/config.yaml
+
+RUN mkdir -p /var/lib/lobster-guard && chown lobster:lobster /var/lib/lobster-guard
+
+# 4 端口架构
+EXPOSE 18443 18444 8445 9090
+
 VOLUME ["/var/lib/lobster-guard"]
-EXPOSE 8443 8444 9090
+
+USER lobster
 ENTRYPOINT ["lobster-guard", "-config", "/etc/lobster-guard/config.yaml"]

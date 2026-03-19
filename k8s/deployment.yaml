@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lobster-guard
+  namespace: lobster-guard
+  labels:
+    app.kubernetes.io/name: lobster-guard
+    app.kubernetes.io/version: "20.5.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lobster-guard
+  template:
+    metadata:
+      labels:
+        app: lobster-guard
+        app.kubernetes.io/name: lobster-guard
+    spec:
+      serviceAccountName: lobster-guard
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: lobster-guard
+        image: lobster-guard:v20.5
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 18443
+          name: inbound
+          protocol: TCP
+        - containerPort: 18444
+          name: outbound
+          protocol: TCP
+        - containerPort: 8445
+          name: llm
+          protocol: TCP
+        - containerPort: 9090
+          name: management
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: management
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: management
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        volumeMounts:
+        - name: config
+          mountPath: /etc/lobster-guard
+          readOnly: true
+        - name: data
+          mountPath: /var/lib/lobster-guard
+      volumes:
+      - name: config
+        configMap:
+          name: lobster-guard-config
+      - name: data
+        emptyDir: {}                     # 生产环境改为 PVC

@@ -167,6 +167,39 @@ open http://localhost:9090/                  # 管理后台
 
 📖 详细配置：[配置参考](docs/configuration.md) · 📖 部署方式：[部署指南](docs/deployment.md)
 
+### 5. Docker 部署
+
+```bash
+# 单命令启动
+docker compose up -d
+
+# 或手动构建运行
+docker build -t lobster-guard:v20.5 .
+docker run -d --name lobster-guard \
+  -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
+  -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
+  lobster-guard:v20.5
+```
+
+### 6. Kubernetes 部署
+
+```bash
+# 一键部署（namespace + RBAC + Deployment + Service）
+kubectl apply -f k8s/namespace.yaml
+kubectl create configmap lobster-guard-config \
+  --from-file=config.yaml -n lobster-guard
+kubectl apply -f k8s/rbac.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+
+# 验证
+kubectl get pods -n lobster-guard
+kubectl port-forward svc/lobster-guard 9090:9090 -n lobster-guard
+open http://localhost:9090/
+```
+
+> 启用 K8s 服务发现后自动注册同集群的 OpenClaw Pod 为上游。详见 [K8s 服务发现](docs/k8s-discovery.md)。
+
 ---
 
 ## 📖 文档目录
@@ -232,15 +265,22 @@ lobster-guard/
 │   └── ...                 #   其余源文件
 ├── dashboard/              # Vue 3 前端 (38 页面 + 21 组件)
 │   ├── src/views/          #   38 个页面
-│   └── src/components/     #   19 个组件
+│   └── src/components/     #   21 个组件
 ├── rules/                  # 规则模板库 (66 条, 4 场景)
 │   ├── general.yaml        #   通用 (越狱/注入/社工)
 │   ├── financial.yaml      #   金融
 │   ├── medical.yaml        #   医疗
 │   └── government.yaml     #   政务
-├── docs/                   # 文档 + 截图
+├── docs/                   # 文档 (19 篇)
+├── k8s/                    # Kubernetes 部署清单
+│   ├── namespace.yaml      #   命名空间
+│   ├── rbac.yaml           #   ServiceAccount + Role
+│   ├── deployment.yaml     #   Deployment（含探针 + 资源限制）
+│   └── service.yaml        #   Service（4 端口）
 ├── skills/                 # OpenClaw Agent Skill
-├── config.yaml.example     # 配置模板
+├── Dockerfile              # 多阶段构建（frontend → backend → runtime）
+├── docker-compose.yml      # Docker Compose 一键启动
+├── config.yaml.example     # 配置模板（含 K8s 发现 + 上游管理）
 ├── Makefile                # 编译/测试/部署
 ├── ROADMAP.md              # 版本路线图
 └── go.mod / go.sum         # Go 依赖 (4 个)

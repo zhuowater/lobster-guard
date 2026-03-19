@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lobster-guard
+  namespace: lobster-guard
+  labels:
+    app.kubernetes.io/name: lobster-guard
+spec:
+  type: ClusterIP
+  selector:
+    app: lobster-guard
+  ports:
+  - name: inbound
+    port: 18443
+    targetPort: inbound
+    protocol: TCP
+  - name: outbound
+    port: 18444
+    targetPort: outbound
+    protocol: TCP
+  - name: llm
+    port: 8445
+    targetPort: llm
+    protocol: TCP
+  - name: management
+    port: 9090
+    targetPort: management
+    protocol: TCP

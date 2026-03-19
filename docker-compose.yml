@@ -1,18 +1,27 @@
 version: "3.8"
+
 services:
   lobster-guard:
     build: .
-    image: lobster-guard:latest
+    image: lobster-guard:v20.5
+    container_name: lobster-guard
     ports:
-      - "8443:8443"   # 入站代理
-      - "8444:8444"   # 出站/LLM代理
-      - "9090:9090"   # 管理+Dashboard
+      - "18443:18443"   # 入站代理（IM → Agent）
+      - "18444:18444"   # 出站代理（Agent → IM）
+      - "8445:8445"     # LLM 代理（Agent → Claude API）
+      - "9090:9090"     # 管理 API + Dashboard
     volumes:
       - ./config.yaml:/etc/lobster-guard/config.yaml:ro
       - lobster-data:/var/lib/lobster-guard
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   lobster-data:

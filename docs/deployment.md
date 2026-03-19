@@ -46,27 +46,27 @@ sudo systemctl enable lobster-guard
 
 ## 方式三：Docker
 
-```dockerfile
-FROM golang:1.21-alpine AS builder
-RUN apk add --no-cache gcc musl-dev
-WORKDIR /app
-COPY . .
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o lobster-guard .
-
-FROM alpine:3.19
-RUN apk add --no-cache ca-certificates
-COPY --from=builder /app/lobster-guard /usr/local/bin/
-COPY config.yaml.example /etc/lobster-guard/config.yaml
-EXPOSE 18443 18444 8445 9090
-CMD ["lobster-guard", "-config", "/etc/lobster-guard/config.yaml"]
-```
+项目根目录已包含多阶段 `Dockerfile`（前端构建 → Go 编译 → 最小运行时镜像）：
 
 ```bash
-docker build -t lobster-guard .
-docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
-  -v $(pwd)/config.yaml:/etc/lobster-guard/config.yaml \
-  lobster-guard
+# 构建镜像
+docker build -t lobster-guard:v20.5 .
+
+# 运行
+docker run -d --name lobster-guard \
+  -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
+  -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
+  lobster-guard:v20.5
+
+# 或 Docker Compose 一键启动
+docker compose up -d
 ```
+
+镜像特性：
+- **三阶段构建** — Node 22 构建前端 → Go 1.23 编译二进制 → Alpine 3.21 运行时
+- **非 root 运行** — 容器内以 `lobster` 用户运行
+- **健康检查** — docker-compose.yml 内置 `/healthz` 端点探活
+- **4 端口暴露** — 18443(入站) / 18444(出站) / 8445(LLM) / 9090(管理)
 
 ## 方式四：Make（推荐开发）
 

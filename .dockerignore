@@ -1,0 +1,14 @@
+.git
+.gitignore
+*.md
+!README.md
+docs/
+skills/
+k8s/
+lobster-guard
+audit.db
+*.log
+dashboard/node_modules/
+dashboard/dist/
+src/dashboard/
+src/rules/
