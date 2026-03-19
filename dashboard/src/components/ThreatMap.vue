@@ -45,7 +45,7 @@
         <circle :cx="s.x" :cy="s.y" :r="s.r+6" fill="none" :stroke="s.color" stroke-width="1.5" opacity="0.3" class="tm-pulse"/>
         <circle :cx="s.x" :cy="s.y" :r="s.r" fill="rgba(15,15,35,0.9)" :stroke="s.color" stroke-width="2"/>
         <circle :cx="s.x" :cy="s.y" :r="s.r-3" fill="none" :stroke="s.color" stroke-width="0.5" opacity="0.4"/>
-        <text :x="s.x" :y="s.y-4" text-anchor="middle" :font-size="s.iconSize||18" class="tm-icon">{{ s.icon }}</text>
+        <text :x="s.x" :y="s.y-2" text-anchor="middle" :font-size="s.iconSize||14" :fill="s.color" font-weight="800" font-family="monospace" letter-spacing="0.05em">{{ s.icon }}</text>
         <text :x="s.x" :y="s.y+16" text-anchor="middle" :font-size="s.labelSize||10" fill="#94a3b8" font-weight="600">{{ s.label }}</text>
       </g>
       <g class="tm-core-group" @click.stop="selectNode('core',null)">
@@ -58,14 +58,14 @@
           <text :x="coreX-72" :y="coreY-38+i*24" font-size="11" :fill="layer.active?'#a5b4fc':'#475569'" font-weight="600">{{ layer.label }}</text>
           <text :x="coreX+72" :y="coreY-38+i*24" font-size="10" :fill="layer.active?'#818cf8':'#334155'" text-anchor="end">{{ layer.count }}</text>
         </g>
-        <text :x="coreX" :y="coreY+82" text-anchor="middle" font-size="12" fill="#94a3b8">🌡 健康: <tspan :fill="sc(healthScore)" font-weight="700">{{ healthScore }}</tspan>/100</text>
-        <text :x="coreX" :y="coreY+100" text-anchor="middle" font-size="11" fill="#64748b">🔥 拦截: <tspan fill="#ef4444" font-weight="700">{{ summary.blocked }}</tspan>  ⚠️ 告警: <tspan fill="#f59e0b" font-weight="700">{{ summary.warned }}</tspan></text>
+        <text :x="coreX" :y="coreY+82" text-anchor="middle" font-size="12" fill="#94a3b8">健康: <tspan :fill="sc(healthScore)" font-weight="700">{{ healthScore }}</tspan>/100</text>
+        <text :x="coreX" :y="coreY+100" text-anchor="middle" font-size="11" fill="#64748b">拦截: <tspan fill="#ef4444" font-weight="700">{{ summary.blocked }}</tspan>  告警: <tspan fill="#f59e0b" font-weight="700">{{ summary.warned }}</tspan></text>
       </g>
       <g v-for="t in targetNodes" :key="'tn-'+t.id" class="tm-node" @click.stop="selectNode('target',t)">
         <circle :cx="t.x" :cy="t.y" :r="t.r+5" fill="none" :stroke="t.color" stroke-width="1.5" opacity="0.25" class="tm-pulse"/>
         <circle :cx="t.x" :cy="t.y" :r="t.r" fill="rgba(15,15,35,0.9)" :stroke="t.color" stroke-width="2"/>
         <circle :cx="t.x" :cy="t.y" :r="t.r-3" fill="none" :stroke="t.color" stroke-width="0.5" opacity="0.4"/>
-        <text :x="t.x" :y="t.y-4" text-anchor="middle" font-size="16" class="tm-icon">{{ t.icon }}</text>
+        <text :x="t.x" :y="t.y-2" text-anchor="middle" font-size="13" :fill="t.color" font-weight="800" font-family="monospace" letter-spacing="0.05em">{{ t.icon }}</text>
         <text :x="t.x" :y="t.y+16" text-anchor="middle" font-size="10" fill="#94a3b8" font-weight="600">{{ t.label }}</text>
       </g>
       <text :x="sourceX" :y="28" text-anchor="middle" font-size="12" fill="rgba(99,102,241,0.45)" font-weight="700" letter-spacing="0.15em">消 息 入 口</text>
@@ -134,11 +134,11 @@ let pid = 0, svgT0 = 0
 
 const sourceNodes = computed(() => {
   const items = [
-    { id: 'lanxin', icon: '📱', label: '蓝信', color: '#6366f1', r: 36, iconSize: 20, labelSize: 12 },
-    { id: 'feishu', icon: '💬', label: '飞书', color: '#3b82f6', r: 26 },
-    { id: 'dingtalk', icon: '💬', label: '钉钉', color: '#22c55e', r: 26 },
-    { id: 'wecom', icon: '💬', label: '企微', color: '#f59e0b', r: 26 },
-    { id: 'slack', icon: '💬', label: 'Slack', color: '#a855f7', r: 26 },
+    { id: 'lanxin', icon: 'LX', label: '蓝信', color: '#6366f1', r: 36, iconSize: 16, labelSize: 12, iconFont: true },
+    { id: 'feishu', icon: 'FS', label: '飞书', color: '#3b82f6', r: 26, iconFont: true },
+    { id: 'dingtalk', icon: 'DD', label: '钉钉', color: '#22c55e', r: 26, iconFont: true },
+    { id: 'wecom', icon: 'WX', label: '企微', color: '#f59e0b', r: 26, iconFont: true },
+    { id: 'slack', icon: 'SK', label: 'Slack', color: '#a855f7', r: 26, iconFont: true },
   ]
   const sp = (vh - 100) / (items.length + 1)
   items.forEach((it, i) => { it.x = sourceX; it.y = 60 + sp * (i + 1) })
@@ -147,9 +147,9 @@ const sourceNodes = computed(() => {
 
 const targetNodes = computed(() => {
   const items = [
-    { id: 'openclaw', icon: '🤖', label: 'OpenClaw', color: '#818cf8', r: 30 },
-    { id: 'anthropic', icon: '🧠', label: 'Anthropic', color: '#a78bfa', r: 28 },
-    { id: 'tools', icon: '🔧', label: 'Tool Services', color: '#22d3ee', r: 26 },
+    { id: 'openclaw', icon: 'OC', label: 'OpenClaw', color: '#818cf8', r: 30, iconFont: true },
+    { id: 'anthropic', icon: 'AI', label: 'Anthropic', color: '#a78bfa', r: 28, iconFont: true },
+    { id: 'tools', icon: 'TS', label: 'Tool Services', color: '#22d3ee', r: 26, iconFont: true },
   ]
   const sp = (vh - 100) / (items.length + 1)
   items.forEach((it, i) => { it.x = targetX; it.y = 60 + sp * (i + 1) })
