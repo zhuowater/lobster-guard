@@ -70,27 +70,27 @@ onMounted(() => {
 
   // Generate particles
   const particles = []
-  const PARTICLE_COUNT = 60
+  const PARTICLE_COUNT = 90
   const colors = [
-    'rgba(99,102,241,0.4)',   // indigo
-    'rgba(168,85,247,0.3)',   // purple
-    'rgba(245,158,11,0.25)',  // amber
-    'rgba(59,130,246,0.3)',   // blue
-    'rgba(239,68,68,0.2)',    // red
-    'rgba(255,255,255,0.15)', // white
+    'rgba(99,102,241,0.7)',   // indigo — bright
+    'rgba(168,85,247,0.6)',   // purple
+    'rgba(245,158,11,0.5)',   // amber
+    'rgba(59,130,246,0.6)',   // blue
+    'rgba(239,68,68,0.45)',   // red
+    'rgba(255,255,255,0.35)', // white
   ]
 
   for (let i = 0; i < PARTICLE_COUNT; i++) {
     particles.push({
       x: Math.random() * w,
       y: Math.random() * h,
-      r: Math.random() * 2 + 0.5,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 3 + 1,          // 半径 1-4（原来 0.5-2.5）
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
       color: colors[Math.floor(Math.random() * colors.length)],
-      glow: Math.random() > 0.7,
+      glow: Math.random() > 0.4,          // 60% 有 glow（原来 30%）
       pulsePhase: Math.random() * Math.PI * 2,
-      pulseSpeed: 0.005 + Math.random() * 0.01,
+      pulseSpeed: 0.008 + Math.random() * 0.015,
     })
   }
 
@@ -113,7 +113,7 @@ onMounted(() => {
       ctx.globalAlpha = alpha
 
       if (p.glow) {
-        ctx.shadowBlur = 12
+        ctx.shadowBlur = 20
         ctx.shadowColor = p.color
       }
 
@@ -176,10 +176,10 @@ async function doLogin() {
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 60% at 90% 90%, rgba(245,158,11,0.06) 0%, transparent 50%),
-    radial-gradient(ellipse 40% 50% at 10% 80%, rgba(239,68,68,0.05) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 40% at 70% 20%, rgba(168,85,247,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.25) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 60% at 90% 90%, rgba(245,158,11,0.15) 0%, transparent 50%),
+    radial-gradient(ellipse 40% 50% at 10% 80%, rgba(239,68,68,0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 70% 20%, rgba(168,85,247,0.12) 0%, transparent 50%),
     #0a0a0f;
   padding: 20px;
   position: relative;
@@ -191,7 +191,7 @@ async function doLogin() {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(circle 1px at center, rgba(99,102,241,0.15) 1px, transparent 1px);
+  background-image: radial-gradient(circle 1.5px at center, rgba(99,102,241,0.3) 1.5px, transparent 1.5px);
   background-size: 32px 32px;
   pointer-events: none;
   z-index: 0;
@@ -204,7 +204,7 @@ async function doLogin() {
   width: 500px;
   height: 500px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%);
   top: -100px;
   left: 30%;
   animation: float-glow 20s ease-in-out infinite alternate;
@@ -233,7 +233,7 @@ async function doLogin() {
 .glow-orb-1 {
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(168,85,247,0.07) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(168,85,247,0.18) 0%, transparent 70%);
   bottom: -80px;
   right: 10%;
   animation: float-glow-2 25s ease-in-out infinite alternate;
@@ -242,7 +242,7 @@ async function doLogin() {
 .glow-orb-2 {
   width: 350px;
   height: 350px;
-  background: radial-gradient(circle, rgba(245,158,11,0.05) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(245,158,11,0.14) 0%, transparent 70%);
   top: 20%;
   left: -60px;
   animation: float-glow-3 18s ease-in-out infinite alternate;
