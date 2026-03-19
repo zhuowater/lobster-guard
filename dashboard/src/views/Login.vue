@@ -191,7 +191,7 @@ async function doLogin() {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(circle 1.5px at center, rgba(99,102,241,0.3) 1.5px, transparent 1.5px);
+  background-image: radial-gradient(circle 0.8px at center, rgba(99,102,241,0.08) 0.8px, transparent 0.8px);
   background-size: 32px 32px;
   pointer-events: none;
   z-index: 0;

@@ -13,7 +13,9 @@
 | **多租户** | `tenant.enabled`, `tenant.default_tenant`, `tenant.isolation` |
 | **检测** | `inbound_detect_enabled`, `outbound_audit_enabled`, `detect_timeout_ms` |
 | **规则** | `inbound_rules`, `outbound_rules`(6 默认+合并), `llm_proxy.rules`(11 默认+合并) |
-| **路由** | `route_default_policy`, `route_policies`, `static_upstreams` |
+| **上游** | `static_upstreams`, `openclaw_upstream` |
+| **K8s 发现** | `discovery.kubernetes.*` (enabled/kubeconfig/namespace/service/sync_interval) |
+| **路由** | `route_default_policy`, `route_policies` |
 | **Red Team** | `redteam.enabled`, `redteam.vectors`, `redteam.schedule` |
 | **蜜罐** | `honeypot.enabled`, `honeypot.templates`, `honeypot.watermark` |
 | **A/B 测试** | `ab_testing.enabled`, `ab_testing.max_concurrent` |
@@ -59,6 +61,41 @@ inbound_detect_enabled: true
 outbound_audit_enabled: true
 detect_timeout_ms: 50
 db_path: "./audit.db"
+```
+
+### K8s 服务发现 (`discovery`)
+
+> 详见 [K8s 服务发现](k8s-discovery.md)
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `discovery.kubernetes.enabled` | bool | `false` | 启用 K8s 服务发现 |
+| `discovery.kubernetes.kubeconfig` | string | `""` | kubeconfig 路径（空 = InCluster） |
+| `discovery.kubernetes.namespace` | string | `"default"` | 目标 namespace |
+| `discovery.kubernetes.service` | string | `""` | Service 名称 |
+| `discovery.kubernetes.port_name` | string | `"gateway"` | Service 端口名 |
+| `discovery.kubernetes.label_selector` | string | `""` | Pod 标签过滤 |
+| `discovery.kubernetes.sync_interval` | int | `15` | 轮询间隔（秒） |
+
+### 上游管理 (`static_upstreams`)
+
+> 详见 [上游管理](upstream-management.md)
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `static_upstreams[].id` | string | 必填 | 上游唯一标识 |
+| `static_upstreams[].address` | string | 必填 | 上游地址 (IP 或域名) |
+| `static_upstreams[].port` | int | 必填 | 上游端口 |
+| `static_upstreams[].tags` | map | `{}` | 自定义标签 (key-value) |
+
+```yaml
+static_upstreams:
+  - id: "openclaw-prod-1"
+    address: "10.0.1.10"
+    port: 18789
+    tags:
+      region: "cn-north"
+      env: "production"
 ```
 
 ## 出站规则配置（v18 智能合并）

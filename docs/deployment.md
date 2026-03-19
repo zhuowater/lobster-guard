@@ -79,6 +79,31 @@ make stats      # 查看统计
 make logs       # 查看审计日志
 ```
 
+## 方式五：Kubernetes
+
+> 详见 [K8s 服务发现](k8s-discovery.md)
+
+```bash
+# 创建 namespace
+kubectl create namespace lobster-guard
+
+# 创建配置
+kubectl create configmap lobster-guard-config \
+  --from-file=config.yaml=config.yaml \
+  -n lobster-guard
+
+# 部署 RBAC + Deployment + Service
+kubectl apply -f k8s/rbac.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+
+# 验证
+kubectl get pods -n lobster-guard
+kubectl logs -f deploy/lobster-guard -n lobster-guard
+```
+
+启用 K8s 服务发现后，龙虾卫士自动发现同集群的 OpenClaw Pod 并注册为上游。详见 [K8s 服务发现文档](k8s-discovery.md)。
+
 ## Phase 1 部署注意事项 (v18-v20)
 
 ### 新增配置要求

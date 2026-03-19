@@ -177,7 +177,9 @@ open http://localhost:9090/                  # 管理后台
 | [🔌 多通道配置](docs/channels.md) | 5 通道配置示例 · Bridge Mode WSS 长连接 |
 | [🛡️ 安全检测能力](docs/detection.md) | 规则体系 · 检测管线 · 规则模板库 |
 | [📡 API 参考](docs/api-reference.md) | ~241 路由完整列表 · 调用示例 |
-| [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · Make |
+| [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · K8s · Make |
+| [☸️ K8s 服务发现](docs/k8s-discovery.md) | InCluster/Kubeconfig · 自动注册 · RBAC · 零依赖 |
+| [🔀 上游管理](docs/upstream-management.md) | CRUD API · 四种来源 · 路由策略 · Dashboard |
 | [🧪 测试说明](docs/testing.md) | 930 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 完整配置项 · 出站规则合并机制 |
 | [🖥️ 管理后台](docs/dashboard.md) | 38 页面详情 · 组件库 · 截图集合 |
