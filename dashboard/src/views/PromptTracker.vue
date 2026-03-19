@@ -218,6 +218,7 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api } from '../api.js'
 
 const loading = ref(true)

@@ -2,21 +2,21 @@
   <div class="toolpolicy-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">🔧 工具策略引擎</h1>
+        <h1 class="page-title"><Icon name="wrench" :size="20" /> 工具策略引擎</h1>
         <p class="page-subtitle">定义 Agent 可调用工具的策略规则 — 按工具名、参数模式精确控制</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <!-- 顶部大数字 -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon">📋</div>
+        <div class="stat-icon"><Icon name="clipboard" :size="20" /></div>
         <div class="stat-value">{{ stats.rule_count ?? '-' }}</div>
         <div class="stat-label">规则数</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">🔍</div>
+        <div class="stat-icon"><Icon name="search" :size="20" /></div>
         <div class="stat-value">{{ stats.total_evaluations ?? '-' }}</div>
         <div class="stat-label">总评估</div>
       </div>
@@ -34,8 +34,8 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'">🧪 实时测试</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'rules' }" @click="activeTab = 'rules'">📋 规则管理 ({{ rules.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'"><Icon name="test" :size="14" /> 实时测试</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'rules' }" @click="activeTab = 'rules'"><Icon name="file-text" :size="14" /> 规则管理 ({{ rules.length }})</button>
       <button class="tab-btn" :class="{ active: activeTab === 'events' }" @click="activeTab = 'events'">📜 事件日志 ({{ events.length }})</button>
     </div>
 
@@ -55,7 +55,7 @@
         </div>
         <button class="btn btn-primary" @click="evaluateTool" :disabled="evaluating || !testTool.trim()" style="margin-top: var(--space-2)">
           <span v-if="evaluating" class="spinner"></span>
-          {{ evaluating ? '评估中...' : '⚡ 评估' }}
+          {{ evaluating ? '评估中...' : '评估' }}
         </button>
       </div>
 
@@ -186,6 +186,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 
 const activeTab = ref('test')

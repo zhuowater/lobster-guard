@@ -3,7 +3,7 @@
     <!-- 标题栏 -->
     <div class="page-header">
       <div>
-        <h1 class="page-title">🔬 Prompt A/B 测试</h1>
+        <h1 class="page-title"><Icon name="split" :size="20" /> Prompt A/B 测试</h1>
         <p class="page-desc">同时运行两个 Prompt 版本，量化比安全性</p>
       </div>
       <button class="btn btn-primary" @click="showCreateModal = true">+ 创建测试</button>
@@ -89,7 +89,7 @@
         <!-- 结论 -->
         <div class="ab-conclusion" v-if="test.confidence > 0 || test.recommendation">
           <div v-if="test.confidence > 0" class="ab-conclusion-line">
-            📊 置信度: {{ test.confidence.toFixed(1) }}%
+            <Icon name="bar-chart" :size="12" /> 置信度: {{ test.confidence.toFixed(1) }}%
             <span v-if="test.winner === 'B'"> — 版本 B 在安全性上显著优于版本 A</span>
             <span v-else-if="test.winner === 'A'"> — 版本 A 在安全性上更优</span>
             <span v-else-if="test.winner === 'tie'"> — 两个版本差异不显著</span>
@@ -107,14 +107,14 @@
     </div>
 
     <div v-if="activeTests.length === 0 && !loading" class="empty-state">
-      <div class="empty-icon">🔬</div>
+      <div class="empty-icon"><Icon name="split" :size="40" /></div>
       <div class="empty-text">暂无 A/B 测试</div>
       <div class="empty-hint">创建一个测试，比较不同 Prompt 版本的安全表现</div>
     </div>
 
     <!-- 历史测试列表 -->
     <div v-if="historyTests.length > 0" class="history-section">
-      <h2 class="section-title">📋 历史测试</h2>
+      <h2 class="section-title"><Icon name="file-text" :size="16" /> 历史测试</h2>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -201,6 +201,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 
 const tests = ref([])

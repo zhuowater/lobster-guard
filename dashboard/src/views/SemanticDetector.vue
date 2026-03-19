@@ -2,10 +2,10 @@
   <div class="semantic-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">🔬 语义检测引擎</h1>
+        <h1 class="page-title"><Icon name="microscope" :size="20" /> 语义检测引擎</h1>
         <p class="page-subtitle">基于 TF-IDF / 句法 / 异常 / 意图 四维分析，精准识别 Prompt 注入与越狱攻击</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <!-- 顶部大数字 -->
@@ -16,12 +16,12 @@
         <div class="stat-label">模式库数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">🔍</div>
+        <div class="stat-icon"><Icon name="search" :size="20" /></div>
         <div class="stat-value">{{ stats.total_analyses ?? '-' }}</div>
         <div class="stat-label">总分析数</div>
       </div>
       <div class="stat-card stat-danger">
-        <div class="stat-icon">🚨</div>
+        <div class="stat-icon"><Icon name="alert-triangle" :size="20" /></div>
         <div class="stat-value">{{ stats.detections ?? '-' }}</div>
         <div class="stat-label">检测数</div>
       </div>
@@ -34,9 +34,9 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'">🧪 实时测试</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'"><Icon name="test" :size="14" /> 实时测试</button>
       <button class="tab-btn" :class="{ active: activeTab === 'patterns' }" @click="activeTab = 'patterns'">📚 攻击模式库 ({{ patterns.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'">⚙️ 配置</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'"><Icon name="settings" :size="14" /> 配置</button>
     </div>
 
     <!-- 实时测试区 -->
@@ -46,7 +46,7 @@
         <textarea v-model="testText" class="test-input" rows="4" placeholder="输入要分析的文本..."></textarea>
         <button class="btn btn-primary" @click="analyzeText" :disabled="analyzing || !testText.trim()" style="margin-top: var(--space-2)">
           <span v-if="analyzing" class="spinner"></span>
-          {{ analyzing ? '分析中...' : '🔬 分析' }}
+          {{ analyzing ? '分析中...' : '分析' }}
         </button>
       </div>
 
@@ -136,7 +136,7 @@
           </select>
         </div>
         <button class="btn btn-primary" @click="saveConfig" :disabled="saving" style="margin-top: var(--space-3)">
-          {{ saving ? '保存中...' : '💾 保存配置' }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
         <div v-if="saveMsg" class="save-msg" :class="saveMsgType">{{ saveMsg }}</div>
       </div>
@@ -148,6 +148,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut } from '../api.js'
 
 const activeTab = ref('test')

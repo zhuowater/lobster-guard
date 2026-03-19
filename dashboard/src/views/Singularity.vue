@@ -2,15 +2,15 @@
   <div class="singularity-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">🌀 奇点蜜罐</h1>
+        <h1 class="page-title"><Icon name="orbit" :size="20" /> 奇点蜜罐</h1>
         <p class="page-subtitle">拓扑感知蜜罐预算 — 以欧拉示性数约束暴露面，精准放置蜜罐</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <!-- 超预算警告 -->
     <div v-if="budget.over_budget" class="over-budget-banner">
-      🚨 <strong>预算超支！</strong>当前蜜罐暴露面超出拓扑预算限制，请减少通道暴露等级。
+      <Icon name="alert-triangle" :size="14" /> <strong>预算超支！</strong>当前蜜罐暴露面超出拓扑预算限制，请减少通道暴露等级。
     </div>
 
     <!-- 奇点预算仪表盘 -->
@@ -46,7 +46,7 @@
         <h3 class="section-title">通道暴露等级</h3>
         <div class="channel-bar" v-for="ch in channels" :key="ch.name">
           <div class="ch-header">
-            <span class="ch-name">{{ ch.icon }} {{ ch.label }}</span>
+            <span class="ch-name"><Icon :name="ch.icon" :size="14" /> {{ ch.label }}</span>
             <span class="ch-level">Lv.{{ ch.level }} / 5</span>
           </div>
           <div class="ch-track">
@@ -59,7 +59,7 @@
     <!-- Tab 切换 -->
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'recommend' }" @click="activeTab = 'recommend'">🎯 推荐放置</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'">⚙️ 配置控制</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'"><Icon name="settings" :size="14" /> 配置控制</button>
       <button class="tab-btn" :class="{ active: activeTab === 'loyalty' }" @click="activeTab = 'loyalty'">🕵️ 忠诚度排行</button>
     </div>
 
@@ -68,7 +68,7 @@
       <div class="recommend-grid">
         <div v-for="(r, idx) in recommendations" :key="idx" class="recommend-card" :class="{ pareto: r.pareto_optimal }">
           <div class="rec-header">
-            <span class="rec-channel">{{ channelIcon(r.channel) }} {{ r.channel }}</span>
+            <span class="rec-channel"><Icon :name="channelIcon(r.channel)" :size="14" /> {{ r.channel }}</span>
             <span v-if="r.pareto_optimal" class="pareto-badge">⭐ 帕累托最优</span>
           </div>
           <div class="rec-body">
@@ -87,7 +87,7 @@
         <h3 class="section-title">通道暴露等级配置</h3>
         <div class="slider-group" v-for="ch in configChannels" :key="ch.key">
           <div class="slider-header">
-            <span class="slider-label">{{ ch.icon }} {{ ch.label }}</span>
+            <span class="slider-label"><Icon :name="ch.icon" :size="14" /> {{ ch.label }}</span>
             <span class="slider-value">{{ ch.value }}</span>
           </div>
           <input type="range" class="slider" min="0" max="5" step="1" v-model.number="ch.value">
@@ -96,7 +96,7 @@
           </div>
         </div>
         <button class="btn btn-primary" @click="saveConfig" :disabled="saving" style="margin-top: var(--space-3)">
-          {{ saving ? '保存中...' : '💾 保存配置' }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
         <div v-if="saveMsg" class="save-msg" :class="saveMsgType">{{ saveMsg }}</div>
       </div>
@@ -143,6 +143,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { api, apiPut } from '../api.js'
+import Icon from '../components/Icon.vue'
 
 const activeTab = ref('recommend')
 const budget = ref({})
@@ -154,17 +155,17 @@ const saveMsg = ref('')
 const saveMsgType = ref('')
 
 const configChannels = reactive([
-  { key: 'im', icon: '💬', label: 'IM', value: 0 },
-  { key: 'llm', icon: '🧠', label: 'LLM', value: 0 },
-  { key: 'toolcall', icon: '🔧', label: 'ToolCall', value: 0 },
+  { key: 'im', icon: 'message-circle', label: 'IM', value: 0 },
+  { key: 'llm', icon: 'brain', label: 'LLM', value: 0 },
+  { key: 'toolcall', icon: 'wrench', label: 'ToolCall', value: 0 },
 ])
 
 const channels = computed(() => {
   const b = budget.value
   return [
-    { name: 'im', icon: '💬', label: 'IM', level: b.im_level ?? b.channels?.im ?? 0 },
-    { name: 'llm', icon: '🧠', label: 'LLM', level: b.llm_level ?? b.channels?.llm ?? 0 },
-    { name: 'toolcall', icon: '🔧', label: 'ToolCall', level: b.toolcall_level ?? b.channels?.toolcall ?? 0 },
+    { name: 'im', icon: 'message-circle', label: 'IM', level: b.im_level ?? b.channels?.im ?? 0 },
+    { name: 'llm', icon: 'brain', label: 'LLM', level: b.llm_level ?? b.channels?.llm ?? 0 },
+    { name: 'toolcall', icon: 'wrench', label: 'ToolCall', level: b.toolcall_level ?? b.channels?.toolcall ?? 0 },
   ]
 })
 
@@ -194,8 +195,8 @@ function channelColor(level) {
 }
 
 function channelIcon(name) {
-  const icons = { im: '💬', IM: '💬', llm: '🧠', LLM: '🧠', toolcall: '🔧', ToolCall: '🔧' }
-  return icons[name] || '📡'
+  const icons = { im: 'message-circle', IM: 'message-circle', llm: 'brain', LLM: 'brain', toolcall: 'wrench', ToolCall: 'wrench' }
+  return icons[name] || 'radio'
 }
 
 function loyaltyColor(score) {

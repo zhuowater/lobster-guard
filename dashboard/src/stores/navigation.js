@@ -3,22 +3,30 @@ import { reactive } from 'vue'
 const TABS = {
   overview: {
     label: '安全总览',
-    icon: '🛡️',
+    icon: 'shield',
     routes: ['overview', 'custom-dashboard', 'anomaly', 'monitor']
   },
   threat: {
     label: '威胁中心',
-    icon: '🔍',
-    routes: ['audit', 'sessions', 'session-detail', 'attack-chains', 'user-profiles', 'user-detail', 'behavior', 'honeypot', 'singularity', 'prompts', 'taint', 'redteam', 'semantic']
+    icon: 'search',
+    groups: [
+      { label: 'IM 安全', routes: ['audit', 'sessions', 'session-detail', 'attack-chains', 'user-profiles', 'user-detail', 'behavior'] },
+      { label: 'LLM 安全', routes: ['semantic', 'prompts', 'taint'] },
+      { label: '对抗测试', routes: ['honeypot', 'singularity', 'redteam'] }
+    ]
   },
   policy: {
     label: '策略引擎',
-    icon: '⚙️',
-    routes: ['rules', 'llm-rules', 'tools', 'evolution', 'cache', 'gateway', 'routes', 'envelopes', 'events', 'ab-testing', 'upstream']
+    icon: 'settings',
+    groups: [
+      { label: 'IM 策略', routes: ['rules', 'routes', 'upstream'] },
+      { label: 'LLM 策略', routes: ['llm-rules', 'tools', 'cache', 'gateway'] },
+      { label: '系统策略', routes: ['evolution', 'envelopes', 'events', 'ab-testing'] }
+    ]
   },
   ops: {
     label: '运营管理',
-    icon: '📊',
+    icon: 'bar-chart',
     routes: ['reports', 'leaderboard', 'tenants', 'users', 'llm', 'ops', 'settings']
   }
 }
@@ -39,13 +47,29 @@ export const navStore = reactive({
 
   getTabForRoute(routeName) {
     for (const [tab, config] of Object.entries(TABS)) {
-      if (config.routes.includes(routeName)) return tab
+      if (config.routes && config.routes.includes(routeName)) return tab
+      if (config.groups) {
+        for (const group of config.groups) {
+          if (group.routes.includes(routeName)) return tab
+        }
+      }
     }
     return 'overview'
   },
 
   getCurrentRoutes() {
-    return TABS[this.activeTab]?.routes || []
+    const tab = TABS[this.activeTab]
+    if (!tab) return []
+    if (tab.routes) return tab.routes
+    if (tab.groups) return tab.groups.flatMap(g => g.routes)
+    return []
+  },
+
+  getCurrentGroups() {
+    const tab = TABS[this.activeTab]
+    if (!tab) return null
+    if (tab.groups) return tab.groups
+    return null
   },
 
   get tabs() { return TABS }

@@ -2,10 +2,10 @@
   <div class="envelopes-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">🔐 执行信封 + Merkle Tree</h1>
+        <h1 class="page-title"><Icon name="lock" :size="20" /> 执行信封 + Merkle Tree</h1>
         <p class="page-subtitle">不可篡改的决策信封 — 每条拦截决策都有密封凭证</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <!-- StatCards -->
@@ -63,7 +63,7 @@
               <td class="td-mono">{{ formatTime(e.created_at || e.timestamp) }}</td>
               <td>
                 <button class="btn-sm" @click="verifyEnvelope(e.id)" :disabled="verifying[e.id]">
-                  {{ verifying[e.id] ? '验证中...' : '🔍 验证' }}
+                  {{ verifying[e.id] ? '验证中...' : '验证' }}
                 </button>
                 <span v-if="verifyResults[e.id] !== undefined" class="verify-result" :class="verifyResults[e.id] ? 'valid' : 'invalid'">
                   {{ verifyResults[e.id] ? '✅ 有效' : '❌ 无效' }}
@@ -117,6 +117,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api } from '../api.js'
 
 const activeTab = ref('envelopes')

@@ -88,7 +88,7 @@
             </div>
             <div class="vuln-desc">{{ v.description }}</div>
             <div class="vuln-suggestion" v-if="v.suggestion">💡 {{ v.suggestion }}</div>
-            <a class="vuln-fix-link" @click.stop="$router.push(v.category && v.category.startsWith('LLM') ? '/llm-rules' : '/rules')">🔧 前往规则页修复 →</a>
+            <a class="vuln-fix-link" @click.stop="$router.push(v.category && v.category.startsWith('LLM') ? '/llm-rules' : '/rules')"><Icon name="wrench" :size="12" /> 前往规则页修复 →</a>
           </div>
         </div>
       </div>
@@ -146,7 +146,7 @@
 
     <!-- 历史报告 -->
     <div class="history-section" v-if="reports.length > 1">
-      <h2 class="section-title-lg">📋 历史报告</h2>
+      <h2 class="section-title-lg"><Icon name="file-text" :size="16" /> 历史报告</h2>
       <table class="data-table">
         <thead>
           <tr>
@@ -180,6 +180,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { useRouter } from 'vue-router'
 import { api, apiPost, apiDelete } from '../api.js'
 

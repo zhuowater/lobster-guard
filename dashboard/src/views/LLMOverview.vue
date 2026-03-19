@@ -259,6 +259,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import StatCard from '../components/StatCard.vue'

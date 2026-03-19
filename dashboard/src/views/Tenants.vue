@@ -1,7 +1,7 @@
 <template>
   <div class="tenants-page">
     <div class="page-header">
-      <h1 class="page-title">🏢 租户管理</h1>
+      <h1 class="page-title"><Icon name="building" :size="20" /> 租户管理</h1>
       <p class="page-desc">安全域隔离 — 每个租户独立管理成员、安全策略和审计数据</p>
       <button class="btn-primary" @click="showCreateModal = true">+ 创建租户</button>
     </div>
@@ -10,7 +10,7 @@
       <div class="tenant-card" v-for="t in tenants" :key="t.id" :class="{'card-disabled': !t.enabled}">
         <div class="card-header">
           <div class="card-title">
-            <span class="card-icon">{{ t.strict_mode ? '🛡️' : '🏢' }}</span>
+            <span class="card-icon"><Icon :name="t.strict_mode ? 'shield' : 'building'" :size="18" /></span>
             <span>{{ t.name }}</span>
           </div>
           <span class="card-badge" :class="t.enabled ? 'badge-active' : 'badge-inactive'">
@@ -41,8 +41,8 @@
 
         <!-- Tab 切换 -->
         <div class="card-tabs">
-          <button class="tab-btn" :class="{active: activeTab[t.id] === 'members'}" @click="setTab(t.id, 'members')">📋 成员</button>
-          <button class="tab-btn" :class="{active: activeTab[t.id] === 'security'}" @click="setTab(t.id, 'security'); loadTenantConfig(t.id)">🔒 安全策略</button>
+          <button class="tab-btn" :class="{active: activeTab[t.id] === 'members'}" @click="setTab(t.id, 'members')"><Icon name="file-text" :size="14" /> 成员</button>
+          <button class="tab-btn" :class="{active: activeTab[t.id] === 'security'}" @click="setTab(t.id, 'security'); loadTenantConfig(t.id)"><Icon name="lock" :size="14" /> 安全策略</button>
         </div>
 
         <!-- 成员映射 Tab -->
@@ -121,7 +121,7 @@
             </div>
             <div class="config-actions">
               <button class="btn-sm btn-primary" @click="saveTenantConfig(t.id)" :disabled="savingConfig[t.id]">
-                {{ savingConfig[t.id] ? '保存中...' : '💾 保存配置' }}
+                {{ savingConfig[t.id] ? '保存中...' : '保存配置' }}
               </button>
               <span class="save-hint">配置已保存，运行时联动 v14.1 实施</span>
             </div>
@@ -163,7 +163,7 @@
           <div class="form-group form-check">
             <label class="check-label">
               <input type="checkbox" v-model="form.strict_mode" />
-              🛡️ 严格模式
+              <Icon name="shield" :size="14" /> 严格模式
             </label>
           </div>
           <div class="modal-actions">
@@ -213,6 +213,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import { setTenant } from '../stores/app.js'
 import { useRouter } from 'vue-router'

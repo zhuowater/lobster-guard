@@ -166,6 +166,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 
 const activeTab = ref('entries')

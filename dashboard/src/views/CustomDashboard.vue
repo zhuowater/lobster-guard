@@ -3,7 +3,7 @@
     <!-- Toolbar -->
     <div class="cd-toolbar">
       <div class="cd-toolbar-left">
-        <span class="cd-title">🎨 自定义布局</span>
+        <span class="cd-title"><Icon name="grid" :size="16" /> 自定义布局</span>
         <select v-model="selectedPreset" @change="applyPreset" class="cd-preset-select">
           <option value="">选择预设...</option>
           <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
@@ -18,10 +18,10 @@
           + 添加面板
         </button>
         <button class="cd-btn cd-btn-save" @click="saveLayout" :disabled="saving" title="保存当前布局">
-          {{ saving ? '保存中...' : '💾 保存' }}
+          {{ saving ? '保存中...' : '保存' }}
         </button>
         <button class="cd-btn cd-btn-reset" @click="resetLayout" title="重置为默认布局">
-          🔄 重置
+          <Icon name="refresh" :size="14" /> 重置
         </button>
         <button
           class="cd-btn"
@@ -258,6 +258,7 @@
 
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import DraggableGrid from '../components/DraggableGrid.vue'
 

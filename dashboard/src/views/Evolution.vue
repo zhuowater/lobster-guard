@@ -2,14 +2,14 @@
   <div class="evolution-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">🧬 对抗性自进化</h1>
+        <h1 class="page-title"><Icon name="dna" :size="20" /> 对抗性自进化</h1>
         <p class="page-subtitle">自动变异攻击向量、寻找规则绕过、生成修补规则 — 让防御永远领先一步</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+        <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
         <button class="btn btn-primary" @click="runEvolution" :disabled="running">
           <span v-if="running" class="spinner"></span>
-          {{ running ? '进化中...' : '🧬 运行一轮进化' }}
+          {{ running ? '进化中...' : '运行一轮进化' }}
         </button>
       </div>
     </div>
@@ -17,7 +17,7 @@
     <!-- 进化结果摘要 (运行后显示) -->
     <div v-if="runResult" class="run-result">
       <div class="run-result-header">
-        <span>🧬 进化完成 — 第 {{ runResult.generation }} 代</span>
+        <span><Icon name="dna" :size="14" /> 进化完成 — 第 {{ runResult.generation }} 代</span>
         <button class="btn-close" @click="runResult = null">✕</button>
       </div>
       <div class="run-result-stats">
@@ -30,22 +30,22 @@
     <!-- 顶部大数字 -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon">🔄</div>
+        <div class="stat-icon"><Icon name="refresh" :size="20" /></div>
         <div class="stat-value">{{ stats.current_generation ?? '-' }}</div>
         <div class="stat-label">当前代数</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">🧪</div>
+        <div class="stat-icon"><Icon name="test" :size="20" /></div>
         <div class="stat-value">{{ stats.total_mutations ?? '-' }}</div>
         <div class="stat-label">总变异数</div>
       </div>
       <div class="stat-card stat-danger">
-        <div class="stat-icon">💥</div>
+        <div class="stat-icon"><Icon name="zap" :size="20" /></div>
         <div class="stat-value">{{ stats.total_bypasses ?? '-' }}</div>
         <div class="stat-label">总绕过数</div>
       </div>
       <div class="stat-card stat-success">
-        <div class="stat-icon">🛡️</div>
+        <div class="stat-icon"><Icon name="shield" :size="20" /></div>
         <div class="stat-value">{{ stats.auto_rules ?? '-' }}</div>
         <div class="stat-label">自动生成规则</div>
       </div>
@@ -53,8 +53,8 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'log' }" @click="activeTab = 'log'">📋 进化日志 ({{ logs.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'strategies' }" @click="activeTab = 'strategies'">⚡ 变异策略 ({{ strategies.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'log' }" @click="activeTab = 'log'"><Icon name="file-text" :size="14" /> 进化日志 ({{ logs.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'strategies' }" @click="activeTab = 'strategies'"><Icon name="zap" :size="14" /> 变异策略 ({{ strategies.length }})</button>
     </div>
 
     <!-- 进化日志 -->
@@ -135,6 +135,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '../api.js'
+import Icon from '../components/Icon.vue'
 
 const activeTab = ref('log')
 const stats = ref({})

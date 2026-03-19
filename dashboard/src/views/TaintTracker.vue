@@ -2,16 +2,16 @@
   <div class="taint-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">☣️ 污染追踪</h1>
+        <h1 class="page-title"><Icon name="biohazard" :size="20" /> 污染追踪</h1>
         <p class="page-subtitle">数据流污染标签传播追踪 + 自动逆转引擎 — 阻止 PII 与凭据泄漏</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <!-- 顶部大数字 -->
     <div class="stats-grid">
       <div class="stat-card stat-danger">
-        <div class="stat-icon">☣️</div>
+        <div class="stat-icon"><Icon name="biohazard" :size="20" /></div>
         <div class="stat-value">{{ stats.active_taints ?? '-' }}</div>
         <div class="stat-label">活跃污染数</div>
       </div>
@@ -21,12 +21,12 @@
         <div class="stat-label">标签分布</div>
       </div>
       <div class="stat-card stat-success">
-        <div class="stat-icon">🔄</div>
+        <div class="stat-icon"><Icon name="refresh" :size="20" /></div>
         <div class="stat-value">{{ stats.reversals ?? '-' }}</div>
         <div class="stat-label">逆转数</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">🔐</div>
+        <div class="stat-icon"><Icon name="lock" :size="20" /></div>
         <div class="stat-value">{{ stats.pii_patterns ?? '-' }}</div>
         <div class="stat-label">PII 模式数</div>
       </div>
@@ -34,10 +34,10 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">🧪 实时扫描</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'active' }" @click="activeTab = 'active'">☣️ 活跃污染 ({{ activeTaints.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'reversal' }" @click="activeTab = 'reversal'">🔄 逆转记录 ({{ reversals.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'">⚙️ 配置</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'"><Icon name="test" :size="14" /> 实时扫描</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'active' }" @click="activeTab = 'active'"><Icon name="biohazard" :size="14" /> 活跃污染 ({{ activeTaints.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'reversal' }" @click="activeTab = 'reversal'"><Icon name="refresh" :size="14" /> 逆转记录 ({{ reversals.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'"><Icon name="settings" :size="14" /> 配置</button>
     </div>
 
     <!-- 实时扫描区 -->
@@ -47,7 +47,7 @@
         <textarea v-model="scanText" class="test-input" rows="4" placeholder="输入要扫描的文本..."></textarea>
         <button class="btn btn-primary" @click="scanTaint" :disabled="scanning || !scanText.trim()" style="margin-top: var(--space-2)">
           <span v-if="scanning" class="spinner"></span>
-          {{ scanning ? '扫描中...' : '🔍 扫描' }}
+          {{ scanning ? '扫描中...' : '扫描' }}
         </button>
       </div>
 
@@ -163,7 +163,7 @@
             <input v-model.number="taintConfig.ttl_minutes" class="field-input" type="number" placeholder="60">
           </div>
           <button class="btn btn-primary btn-sm" @click="saveTaintConfig" :disabled="saving" style="margin-top: var(--space-2)">
-            {{ saving ? '保存中...' : '💾 保存' }}
+            {{ saving ? '保存中...' : '保存' }}
           </button>
         </div>
 
@@ -185,7 +185,7 @@
             </div>
           </div>
           <button class="btn btn-primary btn-sm" @click="saveReversalConfig" :disabled="saving2" style="margin-top: var(--space-2)">
-            {{ saving2 ? '保存中...' : '💾 保存' }}
+            {{ saving2 ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
@@ -198,6 +198,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPost, apiPut } from '../api.js'
 
 const activeTab = ref('scan')

@@ -2,16 +2,16 @@
   <div class="events-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">📡 事件总线</h1>
+        <h1 class="page-title"><Icon name="radio" :size="20" /> 事件总线</h1>
         <p class="page-subtitle">全局安全事件流 — 所有模块的事件统一收集与分发</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <!-- StatCards -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon">📊</div>
+        <div class="stat-icon"><Icon name="bar-chart" :size="20" /></div>
         <div class="stat-value">{{ stats.total_events ?? '-' }}</div>
         <div class="stat-label">总事件数</div>
       </div>
@@ -103,6 +103,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api } from '../api.js'
 
 const stats = ref({})

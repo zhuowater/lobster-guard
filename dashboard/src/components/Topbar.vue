@@ -16,7 +16,7 @@
         :class="{ 'topnav-tab-active': navStore.activeTab === key }"
         @click="onTabClick(key)"
       >
-        <span class="topnav-tab-icon">{{ cfg.icon }}</span>
+        <Icon :name="cfg.icon" :size="14" class="topnav-tab-icon" />
         <span class="topnav-tab-label">{{ cfg.label }}</span>
       </button>
     </div>
@@ -29,7 +29,7 @@
       <!-- v14.0: 租户切换器 -->
       <div class="tenant-switcher" v-if="tenants.length > 1">
         <select class="tenant-select" :value="currentTenantId" @change="onTenantChange">
-          <option v-for="t in tenants" :key="t.id" :value="t.id">🏢 {{ t.name }}</option>
+          <option v-for="t in tenants" :key="t.id" :value="t.id">{{ t.name }}</option>
         </select>
       </div>
       <!-- 通知中心 (v11.1) -->
@@ -58,11 +58,11 @@
       </div>
       <!-- v15.0: 模式切换开关 -->
       <div class="mode-toggle" @click="toggleMode" :title="navStore.mode === 'classic' ? '切换到叙事模式' : '切换到经典模式'">
-        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'narrative' }">🔮</span>
+        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'narrative' }"><Icon name="eye" :size="12" /></span>
         <div class="mode-toggle-track" :class="{ 'mode-track-classic': navStore.mode === 'classic' }">
           <div class="mode-toggle-thumb" :class="{ 'mode-thumb-right': navStore.mode === 'classic' }"></div>
         </div>
-        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'classic' }">📋</span>
+        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'classic' }"><Icon name="grid" :size="12" /></span>
       </div>
       <div class="topbar-status">
         <span class="dot dot-sm" :class="dotClass"></span>
@@ -101,6 +101,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, clearToken } from '../api.js'
 import { currentTenant, setTenant, updateTenantList, currentUser, logoutUser } from '../stores/app.js'
 import { navStore } from '../stores/navigation.js'
+import Icon from './Icon.vue'
 
 defineEmits(['toggleMobile'])
 const appState = inject('appState')

@@ -8,7 +8,7 @@
     <!-- 统计卡片 -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon">📋</div>
+        <div class="stat-icon"><Icon name="clipboard" :size="20" /></div>
         <div class="stat-value">{{ stats.active_templates }}</div>
         <div class="stat-label">活跃模板</div>
       </div>
@@ -31,9 +31,9 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'templates' }" @click="activeTab = 'templates'">📋 蜜罐模板 ({{ templates.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'templates' }" @click="activeTab = 'templates'"><Icon name="file-text" :size="14" /> 蜜罐模板 ({{ templates.length }})</button>
       <button class="tab-btn" :class="{ active: activeTab === 'triggers' }" @click="activeTab = 'triggers'">⏰ 触发记录 ({{ triggers.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'">🧪 测试蜜罐</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'"><Icon name="test" :size="14" /> 测试蜜罐</button>
     </div>
 
     <!-- 模板列表 -->
@@ -45,7 +45,7 @@
       <div class="template-grid">
         <div v-for="tpl in templates" :key="tpl.id" class="template-card" :class="{ disabled: !tpl.enabled }">
           <div class="tpl-header">
-            <span class="tpl-icon">{{ typeIcon(tpl.trigger_type) }}</span>
+            <span class="tpl-icon"><Icon :name="typeIcon(tpl.trigger_type)" :size="16" /></span>
             <span class="tpl-name">{{ tpl.name }}</span>
             <span class="tpl-status" :class="tpl.enabled ? 'status-on' : 'status-off'">{{ tpl.enabled ? '✅ 启用' : '⚠️ 关闭' }}</span>
           </div>
@@ -67,14 +67,14 @@
     <div v-if="activeTab === 'triggers'" class="section">
       <div class="section-header">
         <h2>触发时间线</h2>
-        <button class="btn btn-sm" @click="loadTriggers">🔄 刷新</button>
+        <button class="btn btn-sm" @click="loadTriggers"><Icon name="refresh" :size="14" /> 刷新</button>
       </div>
       <div class="trigger-list">
         <div v-for="t in triggers" :key="t.id" class="trigger-card" :class="{ detonated: t.detonated }">
           <div class="trigger-header">
             <span class="trigger-time">{{ formatTime(t.timestamp) }}</span>
             <a class="trigger-sender link-accent" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(t.sender_id))">{{ t.sender_id }}</a>
-            <span class="trigger-tpl">{{ typeIcon(t.trigger_type) }} {{ t.template_name }}</span>
+            <span class="trigger-tpl"><Icon :name="typeIcon(t.trigger_type)" :size="14" /> {{ t.template_name }}</span>
             <span v-if="t.detonated" class="trigger-boom">💣 已引爆</span>
             <span v-else class="trigger-active">🔖 活跃</span>
           </div>
@@ -93,7 +93,7 @@
     <!-- 测试蜜罐 -->
     <div v-if="activeTab === 'test'" class="section">
       <div class="section-header">
-        <h2>🧪 测试蜜罐</h2>
+        <h2><Icon name="test" :size="18" /> 测试蜜罐</h2>
       </div>
       <div class="test-panel">
         <div class="test-input">
@@ -166,6 +166,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { useRouter } from 'vue-router'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 
@@ -221,8 +222,8 @@ async function runTest() {
 }
 
 function typeIcon(type) {
-  const icons = { credential_request: '🔑', info_extraction: '🌐', system_probe: '📄', custom: '⚡' }
-  return icons[type] || '🍯'
+  const icons = { credential_request: 'key', info_extraction: 'link', system_probe: 'file-text', custom: 'zap' }
+  return icons[type] || 'flame'
 }
 function truncate(s, max) { return s && s.length > max ? s.slice(0, max) + '...' : s || '' }
 function formatTime(ts) {

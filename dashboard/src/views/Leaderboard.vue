@@ -17,7 +17,7 @@
         </div>
         <button class="btn btn-sm" @click="loadAll" :disabled="loading">
           <span v-if="loading">刷新中...</span>
-          <span v-else>🔄 刷新</span>
+          <span v-else><Icon name="refresh" :size="14" /> 刷新</span>
         </button>
       </div>
     </div>
@@ -38,7 +38,7 @@
       </div>
       <div class="sla-card sla-total">
         <div class="sla-count">{{ slaOverview.summary.total }}</div>
-        <div class="sla-label">📊 总计</div>
+        <div class="sla-label"><Icon name="bar-chart" :size="14" /> 总计</div>
       </div>
     </div>
 
@@ -133,7 +133,7 @@
 
     <!-- SLA 配置面板 -->
     <div class="section">
-      <h2 class="section-title">⚙️ SLA 配置</h2>
+      <h2 class="section-title"><Icon name="settings" :size="16" /> SLA 配置</h2>
       <div class="sla-config-panel">
         <div class="config-row">
           <label>最低健康分</label>
@@ -152,7 +152,7 @@
           <input type="number" v-model.number="editConfig.min_block_rate" min="0" max="1" step="0.01" class="config-input" />
         </div>
         <button class="btn btn-primary" @click="saveSLAConfig" :disabled="saving">
-          {{ saving ? '保存中...' : '💾 保存配置' }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
       </div>
 
@@ -186,6 +186,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { api, apiPut } from '../api.js'
 
 const loading = ref(false)

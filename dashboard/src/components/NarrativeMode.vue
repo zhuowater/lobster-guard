@@ -3,7 +3,7 @@
     <header class="narrative-status">
       <div class="status-left">
         <span class="brand">🦞 龙虾卫士</span>
-        <button class="mode-switch-btn" @click="switchBack">📋 经典模式</button>
+        <button class="mode-switch-btn" @click="switchBack"><Icon name="grid" :size="12" /> 经典模式</button>
       </div>
       <div class="status-center">
         <Transition name="status-fade" mode="out-in">
@@ -26,7 +26,7 @@
     <main class="narrative-timeline">
       <div class="timeline-controls">
         <button class="review-btn" :class="{ active: reviewMode }" @click="reviewMode = !reviewMode">
-          {{ reviewMode ? '🔙 回到默认' : '🔍 审查放行' }}
+          {{ reviewMode ? '← 回到默认' : '审查放行' }}
         </button>
         <span class="event-count">{{ events.length }} 条事件</span>
         <span class="auto-refresh-hint">每 10s 自动刷新</span>
@@ -131,6 +131,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, h, defineCompon
 import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import { navStore } from '../stores/navigation.js'
+import Icon from './Icon.vue'
 
 const router = useRouter()
 
@@ -216,8 +217,8 @@ function fmtTime(ts) {
 }
 
 function dirIcon(dir) {
-  const m = { inbound: '←入站', outbound: '→出站', tool: '🔧工具', llm: '🧠LLM' }
-  return m[dir] || '📡'
+  const m = { inbound: '←入站', outbound: '→出站', tool: '⚙工具', llm: '⬡LLM' }
+  return m[dir] || '◎'
 }
 
 function normalizeAction(ev) {

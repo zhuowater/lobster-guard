@@ -150,6 +150,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { useRoute } from 'vue-router'
 import { api, apiPost, downloadFile, getToken } from '../api.js'
 import { showToast } from '../stores/app.js'

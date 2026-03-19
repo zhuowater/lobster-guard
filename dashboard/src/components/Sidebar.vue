@@ -1,7 +1,7 @@
 <template>
   <nav class="sidebar" :class="{ collapsed: appState.sidebarCollapsed, 'mobile-open': mobileOpen }">
     <!-- 严格模式横幅 (v11.1) -->
-    <div class="strict-banner" v-if="strictMode && !appState.sidebarCollapsed">⚠️ 严格模式已启用</div>
+    <div class="strict-banner" v-if="strictMode && !appState.sidebarCollapsed"><Icon name="alert-triangle" :size="12" /> 严格模式已启用</div>
     <div class="sidebar-brand">
       <span class="sidebar-logo" :class="{'strict-logo': strictMode}">🦞</span>
       <div class="sidebar-brand-text">
@@ -15,36 +15,58 @@
         <div :key="navStore.activeTab" class="sidebar-nav-inner">
           <!-- Tab 标题 -->
           <div class="nav-tab-header" v-if="!appState.sidebarCollapsed">
-            <span class="nav-tab-header-icon">{{ currentTabConfig.icon }}</span>
+            <Icon :name="currentTabConfig.icon" :size="13" class="nav-tab-header-icon" />
             <span class="nav-tab-header-label">{{ currentTabConfig.label }}</span>
           </div>
-          <router-link
-            v-for="item in filteredItems" :key="item.path"
-            :to="item.path"
-            class="nav-item"
-            :class="{ active: isActive(item) }"
-            @click="$emit('closeMobile')"
-            :title="appState.sidebarCollapsed ? item.label : ''"
-          >
-            <Icon :name="item.icon" :size="20" class="nav-icon" />
-            <span class="nav-label">{{ item.label }}</span>
-          </router-link>
+
+          <!-- 有子分组 -->
+          <template v-if="currentGroups">
+            <div v-for="(group, gi) in currentGroups" :key="gi" class="nav-group">
+              <div class="nav-group-label" v-if="!appState.sidebarCollapsed">{{ group.label }}</div>
+              <router-link
+                v-for="item in getGroupItems(group)" :key="item.path"
+                :to="item.path"
+                class="nav-item"
+                :class="{ active: isActive(item) }"
+                @click="$emit('closeMobile')"
+                :title="appState.sidebarCollapsed ? item.label : ''"
+              >
+                <Icon :name="item.icon" :size="20" class="nav-icon" />
+                <span class="nav-label">{{ item.label }}</span>
+              </router-link>
+            </div>
+          </template>
+
+          <!-- 无子分组（平铺） -->
+          <template v-else>
+            <router-link
+              v-for="item in filteredItems" :key="item.path"
+              :to="item.path"
+              class="nav-item"
+              :class="{ active: isActive(item) }"
+              @click="$emit('closeMobile')"
+              :title="appState.sidebarCollapsed ? item.label : ''"
+            >
+              <Icon :name="item.icon" :size="20" class="nav-icon" />
+              <span class="nav-label">{{ item.label }}</span>
+            </router-link>
+          </template>
         </div>
       </transition>
     </div>
     <div class="sidebar-footer">
       <!-- 态势大屏 + 自定义大屏 -->
       <div class="bigscreen-btns" v-if="!appState.sidebarCollapsed">
-        <router-link to="/bigscreen" class="bigscreen-btn" title="态势大屏">🖥 大屏</router-link>
-        <router-link to="/custom" class="bigscreen-btn" title="自定义大屏">🎨 自定义</router-link>
+        <router-link to="/bigscreen" class="bigscreen-btn" title="态势大屏"><Icon name="layout" :size="14" /> 大屏</router-link>
+        <router-link to="/custom" class="bigscreen-btn" title="自定义大屏"><Icon name="grid" :size="14" /> 自定义</router-link>
       </div>
       <div class="bigscreen-btns" v-else>
-        <router-link to="/bigscreen" class="bigscreen-btn bigscreen-btn-icon" title="态势大屏">🖥</router-link>
-        <router-link to="/custom" class="bigscreen-btn bigscreen-btn-icon" title="自定义大屏">🎨</router-link>
+        <router-link to="/bigscreen" class="bigscreen-btn bigscreen-btn-icon" title="态势大屏"><Icon name="layout" :size="18" /></router-link>
+        <router-link to="/custom" class="bigscreen-btn bigscreen-btn-icon" title="自定义大屏"><Icon name="grid" :size="18" /></router-link>
       </div>
       <!-- 严格模式开关 (v11.1) -->
       <div class="strict-toggle" v-if="!appState.sidebarCollapsed">
-        <span class="strict-label">🛡️ 严格模式</span>
+        <span class="strict-label"><Icon name="shield" :size="12" /> 严格模式</span>
         <label class="toggle-switch">
           <input type="checkbox" :checked="strictMode" @change="toggleStrictMode">
           <span class="toggle-slider" :class="{'toggle-active': strictMode}"></span>
@@ -156,8 +178,17 @@ const allNavItems = {
 
 // 当前 Tab 配置
 const currentTabConfig = computed(() => {
-  return navStore.tabs[navStore.activeTab] || { label: '安全总览', icon: '🛡️', routes: [] }
+  return navStore.tabs[navStore.activeTab] || { label: '安全总览', icon: 'shield', routes: [] }
 })
+
+// 子分组支持
+const currentGroups = computed(() => navStore.getCurrentGroups())
+
+function getGroupItems(group) {
+  return group.routes
+    .map(name => allNavItems[name])
+    .filter(item => item && !item.hidden)
+}
 
 // 根据当前 Tab 过滤侧边栏项目
 const filteredItems = computed(() => {
@@ -248,6 +279,22 @@ const statusText = computed(() => {
 .sidebar.collapsed .nav-label { opacity: 0; width: 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding: var(--space-2) 0; margin: var(--space-1) var(--space-1); }
 .sidebar.collapsed .nav-tab-header { display: none; }
+
+/* 子分组 */
+.nav-group {
+  margin-bottom: var(--space-2);
+}
+.nav-group-label {
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-disabled);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sidebar.collapsed .nav-group-label { display: none; }
 .sidebar-footer {
   padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle);
   display: flex; flex-direction: column; gap: var(--space-1); overflow: hidden;

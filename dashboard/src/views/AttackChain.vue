@@ -6,7 +6,7 @@
         <span class="page-desc">跨 Agent 关联分析 — 发现协同攻击链</span>
       </div>
       <button class="btn btn-primary" @click="triggerAnalyze" :disabled="analyzing">
-        {{ analyzing ? '分析中...' : '🔍 分析' }}
+        {{ analyzing ? '分析中...' : '分析' }}
       </button>
     </div>
 
@@ -113,7 +113,7 @@
     <!-- 攻击模式统计 -->
     <div class="card pattern-card" v-if="stats && Object.keys(stats.pattern_counts || {}).length > 0">
       <div class="card-header">
-        <span class="card-title">📊 攻击模式分布</span>
+        <span class="card-title"><Icon name="bar-chart" :size="14" /> 攻击模式分布</span>
       </div>
       <div class="pattern-bars">
         <div v-for="(count, name) in stats.pattern_counts" :key="name" class="pattern-row">
@@ -135,6 +135,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import Icon from '../components/Icon.vue'
 import { useRouter } from 'vue-router'
 import { api, apiPost, apiPut } from '../api.js'
 
