@@ -10,85 +10,27 @@
       </div>
     </div>
     <div class="sidebar-nav">
-      <!-- IM 安全 -->
-      <div class="nav-group-label" v-if="!appState.sidebarCollapsed">IM 安全</div>
-      <router-link
-        v-for="item in imItems" :key="item.path"
-        :to="item.path"
-        class="nav-item"
-        :class="{ active: $route.path === item.path || ($route.path.startsWith(item.path + '/') && item.path.length > 1) }"
-        @click="$emit('closeMobile')"
-        :title="appState.sidebarCollapsed ? item.label : ''"
-      >
-        <Icon :name="item.icon" :size="20" class="nav-icon" />
-        <span class="nav-label">{{ item.label }}</span>
-      </router-link>
-
-      <!-- LLM 安全 (仅启用时显示) -->
-      <template v-if="llmEnabled">
-        <div class="nav-divider"></div>
-        <div class="nav-group-label" v-if="!appState.sidebarCollapsed">LLM 安全</div>
-        <router-link
-          v-for="item in llmItems" :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          :class="{ active: $route.path === item.path || $route.path.startsWith(item.path + '/') }"
-          @click="$emit('closeMobile')"
-          :title="appState.sidebarCollapsed ? item.label : ''"
-        >
-          <Icon :name="item.icon" :size="20" class="nav-icon" />
-          <span class="nav-label">{{ item.label }}</span>
-        </router-link>
-      </template>
-
-      <!-- 威胁分析 -->
-      <template v-if="true">
-        <div class="nav-divider"></div>
-        <div class="nav-group-label" v-if="!appState.sidebarCollapsed">威胁分析</div>
-        <router-link
-          v-for="item in threatItems" :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          :class="{ active: $route.path === item.path || $route.path.startsWith(item.path + '/') }"
-          @click="$emit('closeMobile')"
-          :title="appState.sidebarCollapsed ? item.label : ''"
-        >
-          <Icon :name="item.icon" :size="20" class="nav-icon" />
-          <span class="nav-label">{{ item.label }}</span>
-        </router-link>
-      </template>
-
-      <!-- 安全治理 -->
-      <template v-if="true">
-        <div class="nav-divider"></div>
-        <div class="nav-group-label" v-if="!appState.sidebarCollapsed">安全治理</div>
-        <router-link
-          v-for="item in governItems" :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          :class="{ active: $route.path === item.path || $route.path.startsWith(item.path + '/') }"
-          @click="$emit('closeMobile')"
-          :title="appState.sidebarCollapsed ? item.label : ''"
-        >
-          <Icon :name="item.icon" :size="20" class="nav-icon" />
-          <span class="nav-label">{{ item.label }}</span>
-        </router-link>
-      </template>
-
-      <!-- 系统 -->
-      <div class="nav-divider"></div>
-      <div class="nav-group-label" v-if="!appState.sidebarCollapsed">系统</div>
-      <router-link
-        v-for="item in sysItems" :key="item.path"
-        :to="item.path"
-        class="nav-item"
-        :class="{ active: $route.path === item.path }"
-        @click="$emit('closeMobile')"
-        :title="appState.sidebarCollapsed ? item.label : ''"
-      >
-        <Icon :name="item.icon" :size="20" class="nav-icon" />
-        <span class="nav-label">{{ item.label }}</span>
-      </router-link>
+      <!-- v15.0: 根据当前 Tab 动态显示 -->
+      <transition name="sidebar-fade" mode="out-in">
+        <div :key="navStore.activeTab" class="sidebar-nav-inner">
+          <!-- Tab 标题 -->
+          <div class="nav-tab-header" v-if="!appState.sidebarCollapsed">
+            <span class="nav-tab-header-icon">{{ currentTabConfig.icon }}</span>
+            <span class="nav-tab-header-label">{{ currentTabConfig.label }}</span>
+          </div>
+          <router-link
+            v-for="item in filteredItems" :key="item.path"
+            :to="item.path"
+            class="nav-item"
+            :class="{ active: isActive(item) }"
+            @click="$emit('closeMobile')"
+            :title="appState.sidebarCollapsed ? item.label : ''"
+          >
+            <Icon :name="item.icon" :size="20" class="nav-icon" />
+            <span class="nav-label">{{ item.label }}</span>
+          </router-link>
+        </div>
+      </transition>
     </div>
     <div class="sidebar-footer">
       <!-- 态势大屏 + 自定义大屏 -->
@@ -127,7 +69,9 @@
 
 <script setup>
 import { inject, computed, ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { toggleSidebar } from '../stores/app.js'
+import { navStore } from '../stores/navigation.js'
 import { api, apiPost } from '../api.js'
 import Icon from './Icon.vue'
 
@@ -135,13 +79,9 @@ defineProps({ mobileOpen: Boolean })
 defineEmits(['closeMobile'])
 
 const appState = inject('appState')
+const route = useRoute()
 
-const llmEnabled = ref(false)
 const strictMode = ref(false)
-
-async function checkLLMStatus() {
-  try { const d = await api('/api/v1/llm/status'); llmEnabled.value = d.enabled === true } catch { llmEnabled.value = false }
-}
 
 async function loadStrictMode() {
   try { const d = await api('/api/v1/system/strict-mode'); strictMode.value = d.enabled === true } catch { strictMode.value = false }
@@ -169,60 +109,68 @@ async function toggleStrictMode() {
   } catch { alert('切换失败') }
 }
 
-onMounted(() => { checkLLMStatus(); loadStrictMode() })
+onMounted(() => { loadStrictMode() })
 
-// IM 安全导航项 (5项)
-const imItems = [
-  { path: '/overview', label: '概览', icon: 'grid' },
-  { path: '/upstream', label: '上游', icon: 'server' },
-  { path: '/routes', label: '路由', icon: 'git-branch' },
-  { path: '/rules', label: '规则', icon: 'shield' },
-  { path: '/audit', label: '审计', icon: 'file-text' },
-]
+// v15.0: 所有导航项的完整注册表（route name → sidebar display info）
+const allNavItems = {
+  // 安全总览
+  'overview':          { path: '/overview',       label: '概览（驾驶舱）', icon: 'grid' },
+  'custom-dashboard':  { path: '/custom',         label: '自定义大屏',     icon: 'palette' },
+  'anomaly':           { path: '/anomaly',        label: '异常检测',       icon: 'chart-line' },
+  'monitor':           { path: '/monitor',        label: '监控指标',       icon: 'activity' },
+  // 威胁中心
+  'audit':             { path: '/audit',          label: '审计日志',       icon: 'file-text' },
+  'sessions':          { path: '/sessions',       label: '会话回放',       icon: 'clapperboard' },
+  'session-detail':    { path: '/sessions',       label: '会话详情',       icon: 'clapperboard', hidden: true },
+  'attack-chains':     { path: '/attack-chains',  label: '攻击链分析',     icon: 'link' },
+  'user-profiles':     { path: '/user-profiles',  label: '用户画像',       icon: 'user-scan' },
+  'user-detail':       { path: '/user-profiles',  label: '用户详情',       icon: 'user-scan', hidden: true },
+  'behavior':          { path: '/behavior',       label: '行为画像',       icon: 'behavior' },
+  'honeypot':          { path: '/honeypot',       label: 'Agent 蜜罐',    icon: 'flame' },
+  'singularity':       { path: '/singularity',    label: '奇点蜜罐',      icon: 'orbit' },
+  'prompts':           { path: '/prompts',        label: 'Prompt 追踪',   icon: 'file-check' },
+  'taint':             { path: '/taint',          label: '污染追踪',       icon: 'biohazard' },
+  'redteam':           { path: '/redteam',        label: 'Red Team',       icon: 'crosshair' },
+  'semantic':          { path: '/semantic',        label: '语义检测',       icon: 'microscope' },
+  // 策略引擎
+  'rules':             { path: '/rules',          label: '入站规则',       icon: 'shield' },
+  'llm-rules':         { path: '/llm-rules',      label: 'LLM 规则',      icon: 'shield-check' },
+  'tools':             { path: '/tools',          label: '工具策略',       icon: 'wrench' },
+  'evolution':         { path: '/evolution',      label: '自进化',         icon: 'dna' },
+  'cache':             { path: '/cache',          label: '响应缓存',       icon: 'save' },
+  'gateway':           { path: '/gateway',        label: 'API 网关',       icon: 'door' },
+  'routes':            { path: '/routes',         label: '路由策略',       icon: 'git-branch' },
+  'envelopes':         { path: '/envelopes',      label: '执行信封',       icon: 'lock' },
+  'events':            { path: '/events',         label: '事件总线',       icon: 'radio' },
+  'ab-testing':        { path: '/ab-testing',     label: 'A/B 测试',      icon: 'split' },
+  'upstream':          { path: '/upstream',       label: '上游管理',       icon: 'server' },
+  // 运营管理
+  'reports':           { path: '/reports',        label: '报告中心',       icon: 'file-up' },
+  'leaderboard':       { path: '/leaderboard',    label: '排行榜',         icon: 'trophy' },
+  'tenants':           { path: '/tenants',        label: '租户管理',       icon: 'building' },
+  'users':             { path: '/users',          label: '用户管理',       icon: 'users' },
+  'llm':               { path: '/llm',            label: 'LLM 概览',      icon: 'brain' },
+  'ops':               { path: '/ops',            label: '运维工具',       icon: 'wrench' },
+  'settings':          { path: '/settings',       label: '设置',           icon: 'settings' },
+}
 
-// LLM 安全导航项 (8项)
-const llmItems = [
-  { path: '/llm', label: 'LLM 概览', icon: 'brain' },
-  { path: '/llm-rules', label: 'LLM 规则', icon: 'shield-check' },
-  { path: '/agent', label: 'Agent 行为', icon: 'bot' },
-  { path: '/sessions', label: '会话回放', icon: 'clapperboard' },
-  { path: '/prompts', label: 'Prompt 追踪', icon: 'file-check' },
-  { path: '/ab-testing', label: 'A/B 测试', icon: 'split' },
-  { path: '/tools', label: '工具策略', icon: 'wrench' },
-  { path: '/cache', label: '响应缓存', icon: 'save' },
-]
+// 当前 Tab 配置
+const currentTabConfig = computed(() => {
+  return navStore.tabs[navStore.activeTab] || { label: '安全总览', icon: '🛡️', routes: [] }
+})
 
-// 威胁分析导航项 (8项)
-const threatItems = [
-  { path: '/user-profiles', label: '用户画像', icon: 'user-scan' },
-  { path: '/behavior', label: '行为画像', icon: 'behavior' },
-  { path: '/attack-chains', label: '攻击链', icon: 'link' },
-  { path: '/honeypot', label: 'Agent 蜜罐', icon: 'flame' },
-  { path: '/anomaly', label: '异常检测', icon: 'chart-line' },
-  { path: '/singularity', label: '奇点蜜罐', icon: 'orbit' },
-  { path: '/semantic', label: '语义检测', icon: 'microscope' },
-  { path: '/taint', label: '污染追踪', icon: 'biohazard' },
-]
+// 根据当前 Tab 过滤侧边栏项目
+const filteredItems = computed(() => {
+  const routes = navStore.getCurrentRoutes()
+  return routes
+    .map(name => allNavItems[name])
+    .filter(item => item && !item.hidden)
+})
 
-// 安全治理导航项 (7项)
-const governItems = [
-  { path: '/redteam', label: '红队测试', icon: 'crosshair' },
-  { path: '/leaderboard', label: '排行榜', icon: 'trophy' },
-  { path: '/tenants', label: '租户', icon: 'building' },
-  { path: '/reports', label: '报告', icon: 'file-up' },
-  { path: '/envelopes', label: '执行信封', icon: 'lock' },
-  { path: '/events', label: '事件总线', icon: 'radio' },
-  { path: '/evolution', label: '自进化', icon: 'dna' },
-]
-
-// 系统导航项 (5项)
-const sysItems = [
-  { path: '/monitor', label: '监控', icon: 'activity' },
-  { path: '/users', label: '用户管理', icon: 'users' },
-  { path: '/ops', label: '运维', icon: 'wrench' },
-  { path: '/gateway', label: 'API 网关', icon: 'door' },
-  { path: '/settings', label: '设置', icon: 'settings' },
-]
+// 判断导航项是否激活
+function isActive(item) {
+  return route.path === item.path || (route.path.startsWith(item.path + '/') && item.path.length > 1)
+}
 
 const dotClass = computed(() => appState.connectionStatus === 'connected' ? 'dot-healthy' : 'dot-unhealthy')
 const statusText = computed(() => {
@@ -260,22 +208,29 @@ const statusText = computed(() => {
 .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
 .sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+.sidebar-nav-inner { }
 
-.nav-group-label {
-  padding: var(--space-2) var(--space-4) var(--space-1);
-  font-size: 10px;
-  font-weight: 600;
+/* v15.0: Tab 标题 */
+.nav-tab-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
+  color: var(--color-primary);
+  opacity: 0.7;
 }
-.nav-divider {
-  height: 1px;
-  background: var(--border-subtle);
-  margin: var(--space-2) var(--space-3);
-}
+.nav-tab-header-icon { font-size: 13px; }
+.nav-tab-header-label { white-space: nowrap; overflow: hidden; }
+
+/* v15.0: 侧边栏切换淡入动画 */
+.sidebar-fade-enter-active { transition: opacity 0.2s ease; }
+.sidebar-fade-leave-active { transition: opacity 0.15s ease; }
+.sidebar-fade-enter-from { opacity: 0; }
+.sidebar-fade-leave-to { opacity: 0; }
 
 .nav-item {
   display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); margin: var(--space-1) var(--space-2);
@@ -292,8 +247,7 @@ const statusText = computed(() => {
 .nav-label { transition: opacity var(--transition-normal); overflow: hidden; }
 .sidebar.collapsed .nav-label { opacity: 0; width: 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding: var(--space-2) 0; margin: var(--space-1) var(--space-1); }
-.sidebar.collapsed .nav-group-label,
-.sidebar.collapsed .nav-divider { display: none; }
+.sidebar.collapsed .nav-tab-header { display: none; }
 .sidebar-footer {
   padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle);
   display: flex; flex-direction: column; gap: var(--space-1); overflow: hidden;

@@ -8,6 +8,18 @@
       <span class="topbar-breadcrumb-sep">/</span>
       <span class="topbar-breadcrumb-current">{{ currentTitle }}</span>
     </div>
+    <!-- v15.0: 顶部 Tab 导航 -->
+    <div class="topnav-tabs" v-if="navStore.mode === 'classic'">
+      <button
+        v-for="(cfg, key) in navStore.tabs" :key="key"
+        class="topnav-tab"
+        :class="{ 'topnav-tab-active': navStore.activeTab === key }"
+        @click="onTabClick(key)"
+      >
+        <span class="topnav-tab-icon">{{ cfg.icon }}</span>
+        <span class="topnav-tab-label">{{ cfg.label }}</span>
+      </button>
+    </div>
     <div class="topbar-search">
       <svg class="topbar-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input type="text" ref="searchInput" placeholder="搜索..." autocomplete="off" />
@@ -43,6 +55,14 @@
           </div>
           <div class="notif-empty" v-else>✅ 暂无通知</div>
         </div>
+      </div>
+      <!-- v15.0: 模式切换开关 -->
+      <div class="mode-toggle" @click="toggleMode" :title="navStore.mode === 'classic' ? '切换到叙事模式' : '切换到经典模式'">
+        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'narrative' }">🔮</span>
+        <div class="mode-toggle-track" :class="{ 'mode-track-classic': navStore.mode === 'classic' }">
+          <div class="mode-toggle-thumb" :class="{ 'mode-thumb-right': navStore.mode === 'classic' }"></div>
+        </div>
+        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'classic' }">📋</span>
       </div>
       <div class="topbar-status">
         <span class="dot dot-sm" :class="dotClass"></span>
@@ -80,12 +100,28 @@ import { inject, computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, clearToken } from '../api.js'
 import { currentTenant, setTenant, updateTenantList, currentUser, logoutUser } from '../stores/app.js'
+import { navStore } from '../stores/navigation.js'
 
 defineEmits(['toggleMobile'])
 const appState = inject('appState')
 const route = useRoute()
 const router = useRouter()
 const searchInput = ref(null)
+
+// v15.0: Tab 导航 & 模式切换
+function onTabClick(tab) {
+  navStore.setTab(tab)
+  // 导航到该 Tab 的第一个路由
+  const firstRoute = navStore.tabs[tab]?.routes[0]
+  if (firstRoute) {
+    router.push({ name: firstRoute })
+  }
+}
+
+function toggleMode() {
+  const newMode = navStore.mode === 'classic' ? 'narrative' : 'classic'
+  navStore.setMode(newMode)
+}
 
 // v14.0: 租户切换
 const tenants = ref([])
@@ -370,4 +406,113 @@ onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document
   font-family: var(--font-sans); transition: all var(--transition-fast);
 }
 .user-dropdown-item:hover { background: var(--bg-elevated); color: #f87171; }
+
+/* v15.0: TopNav Tabs */
+.topnav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.topnav-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  position: relative;
+  border-bottom: 2px solid transparent;
+}
+
+.topnav-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.topnav-tab-active {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--color-primary);
+  border-bottom: 2px solid var(--color-primary);
+}
+
+.topnav-tab-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.topnav-tab-label {
+  font-weight: 500;
+}
+
+/* v15.0: 模式切换开关 */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.mode-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mode-toggle-label {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.4;
+  transition: opacity 0.2s ease;
+}
+
+.mode-toggle-label.mode-active {
+  opacity: 1;
+}
+
+.mode-toggle-track {
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(139, 92, 246, 0.3);
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.mode-track-classic {
+  background: rgba(99, 102, 241, 0.3);
+}
+
+.mode-toggle-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #a78bfa;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: all 0.2s ease;
+}
+
+.mode-thumb-right {
+  left: 12px;
+  background: #818cf8;
+}
+
+@media(max-width:768px) {
+  .topnav-tabs { display: none; }
+  .mode-toggle { display: none; }
+}
 </style>

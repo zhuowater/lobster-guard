@@ -3,6 +3,10 @@
   <div v-if="isLoginPage || isBigScreen" class="login-layout">
     <router-view />
   </div>
+  <!-- v15.0: 叙事模式全屏占位 -->
+  <div v-else-if="isNarrativeMode" class="narrative-layout">
+    <NarrativeMode />
+  </div>
   <div v-else class="app-layout">
     <div class="sidebar-overlay" :class="{ show: mobileOpen }" @click="mobileOpen = false"></div>
     <Sidebar :mobile-open="mobileOpen" @close-mobile="mobileOpen = false" />
@@ -28,13 +32,16 @@ import { updateHealth, setDisconnected } from './stores/app.js'
 import Sidebar from './components/Sidebar.vue'
 import Topbar from './components/Topbar.vue'
 import Toast from './components/Toast.vue'
+import NarrativeMode from './components/NarrativeMode.vue'
+import { navStore } from './stores/navigation.js'
 
 const route = useRoute()
 const mobileOpen = ref(false)
 
-// v14.1: 判断是否在登录页; v17.0: 大屏页面
+// v14.1: 判断是否在登录页; v17.0: 大屏页面; v15.0: 叙事模式
 const isLoginPage = computed(() => route.name === 'login')
 const isBigScreen = computed(() => route.path === '/bigscreen')
+const isNarrativeMode = computed(() => !isLoginPage.value && !isBigScreen.value && navStore.mode === 'narrative')
 
 let healthTimer = null
 
@@ -59,6 +66,7 @@ onUnmounted(() => {
 
 <style>
 .login-layout { min-height: 100vh; }
+.narrative-layout { min-height: 100vh; }
 
 .sidebar-overlay {
   display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;

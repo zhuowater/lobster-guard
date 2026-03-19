@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { isAuthenticated } from './stores/app.js'
+import { navStore } from './stores/navigation.js'
 
 const routes = [
   { path: '/', redirect: '/overview' },
@@ -48,8 +49,16 @@ const router = createRouter({
   routes,
 })
 
-// v14.1: 路由守卫 — 未认证时跳转登录页
+// v14.1: 路由守卫 — 未认证时跳转登录页; v15.0: Tab 自动同步
 router.beforeEach(async (to) => {
+  // Tab 自动同步：根据目标路由自动切换 Tab
+  if (to.name && !to.meta.public && !to.meta.bigscreen) {
+    const tab = navStore.getTabForRoute(to.name)
+    if (tab !== navStore.activeTab) {
+      navStore.setTab(tab)
+    }
+  }
+
   // 公开页面不需要认证
   if (to.meta.public) return true
 
