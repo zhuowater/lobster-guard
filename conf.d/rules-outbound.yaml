@@ -1,0 +1,56 @@
+# ============================================================
+# 出站审计规则（v18 智能合并机制）
+# 6 条默认规则始终加载，同名规则覆盖，新名称追加
+# ============================================================
+
+outbound_rules:
+  # PII 泄露
+  - name: "pii_id_card"
+    pattern: '(?:^|\D)\d{17}[\dXx](?:\D|$)'
+    action: "block"
+    priority: 100
+    message: "消息中包含身份证号，已被安全策略拦截。"
+
+  - name: "pii_bank_card"
+    pattern: '(?:^|\D)[3-6]\d{15,18}(?:\D|$)'
+    action: "block"
+    priority: 100
+
+  # 凭据泄露
+  - name: "credential_apikey"
+    patterns:
+      - 'sk-[a-zA-Z0-9]{20,}'
+      - 'ghp_[a-zA-Z0-9]{36}'
+      - 'AKIA[0-9A-Z]{16}'
+    action: "block"
+
+  - name: "credential_private_key"
+    patterns:
+      - '-----BEGIN .* PRIVATE KEY-----'
+    action: "block"
+
+  # 系统提示词泄露
+  - name: "system_prompt_leak"
+    patterns:
+      - 'SOUL\.md'
+      - 'AGENTS\.md'
+      - 'MEMORY\.md'
+    action: "warn"
+
+  # 恶意命令
+  - name: "malicious_command"
+    pattern: '(rm\s+-rf\s+/|curl\s+.*\|\s*bash|wget\s+.*\|\s*sh)'
+    action: "block"
+
+# ============================================================
+# 出站 PII 正则可配置化（v3.11）
+# ============================================================
+# outbound_pii_patterns:
+#   - name: "身份证号"
+#     pattern: "\\d{17}[\\dXx]"
+#   - name: "手机号"
+#     pattern: "1[3-9]\\d{9}"
+#   - name: "银行卡号"
+#     pattern: "\\d{16,19}"
+#   - name: "邮箱地址"
+#     pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"

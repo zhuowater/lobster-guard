@@ -1,0 +1,35 @@
+# ============================================================
+# 入站检测规则（v3.5+）
+# 不配置则使用内置默认规则（40+ Prompt Injection 检测模式）
+# type: "keyword"（默认，AC 自动机）或 "regex"（正则）
+# action: block / warn / log
+# ============================================================
+
+# inbound_rules_file: "/etc/lobster-guard/inbound-rules.yaml"
+
+inbound_rules:
+  - name: "custom_block"
+    patterns: ["恶意关键词1", "恶意关键词2"]
+    action: "block"
+    priority: 100
+    message: "自定义拦截提示"
+    type: "keyword"
+    group: "injection"
+
+  - name: "regex_base64_injection"
+    patterns: ["(?i)base64[\\s_-]*(decode|encode)\\s*\\("]
+    action: "block"
+    type: "regex"
+    group: "injection"
+    priority: 50
+
+# ============================================================
+# 规则绑定（v3.11 按 app_id 绑定规则组）
+# ============================================================
+# rule_bindings:
+#   - app_id: "bot-internal"
+#     groups: ["jailbreak", "injection"]
+#   - app_id: "bot-external"
+#     groups: ["jailbreak", "injection", "social_engineering", "pii"]
+#   - app_id: "*"
+#     groups: ["jailbreak", "injection"]

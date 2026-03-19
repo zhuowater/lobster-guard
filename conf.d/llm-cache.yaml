@@ -1,0 +1,11 @@
+# ============================================================
+# LLM 响应缓存（v20.3）
+# ============================================================
+
+llm_cache:
+  enabled: true
+  max_entries: 1000
+  ttl_minutes: 60
+  similarity_min: 0.85
+  tenant_isolation: true
+  skip_tainted: true

@@ -1,0 +1,776 @@
+# ============================================================
+# 龙虾卫士 lobster-guard v20.4.0 配置文件（示例）
+# ============================================================
+# 4 端口架构:
+#   :18443 — IM 入站代理（消息平台 → Agent）
+#   :18444 — IM 出站代理（Agent → 消息平台 API）
+#   :8445  — LLM 反向代理（Agent → LLM API）
+#   :9090  — Dashboard + API + Metrics
+# ============================================================
+
+# ============================================================
+# 消息通道选择（v3.0 新增）
+# 支持: lanxin | feishu | dingtalk | wecom | generic
+# 不配置则默认 lanxin（向后兼容）
+# ============================================================
+# channel: "lanxin"
+
+# ============================================================
+# 接入模式（v3.1 新增）
+# webhook: 传统 Webhook 回调（需要公网 IP，所有平台支持）
+# bridge:  长连接桥接（无需公网 IP，飞书/钉钉支持）
+# ============================================================
+# mode: "webhook"
+
+# ============================================================
+# 蓝信通道配置 (channel: lanxin)
+# ============================================================
+callbackKey: "YOUR_CALLBACK_KEY_BASE64"
+callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
+
+# ============================================================
+# 飞书通道配置 (channel: feishu)
+# 从飞书开放平台 → 应用 → 事件订阅 获取
+# ============================================================
+# feishu_encrypt_key: "YOUR_FEISHU_ENCRYPT_KEY"
+# feishu_verification_token: "YOUR_FEISHU_VERIFICATION_TOKEN"
+# --- Bridge 模式额外配置 (mode: bridge) ---
+# feishu_app_id: "cli_YOUR_APP_ID"
+# feishu_app_secret: "YOUR_APP_SECRET"
+
+# ============================================================
+# 钉钉通道配置 (channel: dingtalk)
+# 从钉钉开放平台 → 应用 → 事件订阅 获取
+# ============================================================
+# dingtalk_token: "YOUR_DINGTALK_TOKEN"
+# dingtalk_aes_key: "YOUR_DINGTALK_AES_KEY"       # 43字符 base64
+# dingtalk_corp_id: "YOUR_DINGTALK_CORP_ID"
+# --- Bridge 模式额外配置 (mode: bridge) ---
+# dingtalk_client_id: "YOUR_CLIENT_ID"
+# dingtalk_client_secret: "YOUR_CLIENT_SECRET"
+
+# ============================================================
+# 企业微信通道配置 (channel: wecom)
+# 从企业微信管理后台 → 应用 → 接收消息 获取
+# ============================================================
+# wecom_token: "YOUR_WECOM_TOKEN"
+# wecom_encoding_aes_key: "YOUR_WECOM_ENCODING_AES_KEY"  # 43字符 base64
+# wecom_corp_id: "YOUR_WECOM_CORP_ID"
+# --- 用户信息获取（v3.9，可选） ---
+# wecom_corp_secret: "YOUR_WECOM_CORP_SECRET"
+
+# ============================================================
+# 通用HTTP通道配置 (channel: generic)
+# 适用于自定义 webhook 对接，无加密
+# ============================================================
+# generic_sender_header: "X-Sender-Id"    # 从哪个 header 取发送者ID
+# generic_text_field: "content"            # 从 body JSON 的哪个字段取文本
+
+# ============================================================
+# IM 代理配置
+# ============================================================
+
+# 入站代理：接收消息平台 Webhook，检测后转发到 AI Agent
+inbound_listen: ":18443"
+
+# 出站代理：接收 AI Agent 的 API 调用，检测后转发到消息平台
+outbound_listen: ":18444"
+
+# 消息平台 API 上游地址（出站代理转发目标）
+# 蓝信:    https://apigw.lx.qianxin.com
+# 飞书:    https://open.feishu.cn
+# 钉钉:    https://oapi.dingtalk.com
+# 企微:    https://qyapi.weixin.qq.com
+lanxin_upstream: "https://apigw.lx.qianxin.com"
+
+# AI Agent 上游地址（v1.0 兼容：单上游模式）
+openclaw_upstream: "http://localhost:18790"
+
+# ============================================================
+# JWT 认证配置（v14 新增）
+# Dashboard 登录认证，启用后所有管理 API 需要 JWT Token
+# ============================================================
+auth:
+  enabled: true                             # 是否启用 JWT 认证（默认 true）
+  jwt_secret: "YOUR_JWT_SECRET_AT_LEAST_32_CHARS"  # JWT 签名密钥（至少32字符）
+  token_expiry: "24h"                       # Token 有效期（默认 24 小时）
+  refresh_enabled: true                     # 是否允许 Token 刷新
+  # 初始管理员账号（首次启动自动创建）
+  admin_username: "admin"
+  admin_password: "YOUR_ADMIN_PASSWORD"     # 首次登录后建议修改
+
+# ============================================================
+# 多租户配置（v14 新增）
+# 启用后不同租户数据完全隔离
+# ============================================================
+# tenant:
+#   enabled: false                          # 是否启用多租户（默认 false）
+#   default_tenant: "default"               # 默认租户名
+#   isolation: "strict"                     # 隔离模式: strict（严格隔离）| shared（共享规则）
+#   max_tenants: 100                        # 最大租户数
+#   auto_create: false                      # 是否允许自动创建租户
+
+# ============================================================
+# 安全检测
+# ============================================================
+
+# 审计日志数据库路径
+db_path: "/var/lib/lobster-guard/audit.db"
+
+# 日志级别: debug, info, warn, error
+log_level: "info"
+
+# 检测超时（毫秒），超时则 fail-open 放行
+detect_timeout_ms: 50
+
+# 是否启用入站检测
+inbound_detect_enabled: true
+
+# 是否启用出站审计/拦截
+outbound_audit_enabled: true
+
+# ============================================================
+# 管理 API + Dashboard + Metrics
+# ============================================================
+management_listen: ":9090"
+management_token: "YOUR_MANAGEMENT_TOKEN"
+# metrics_enabled: true       # Prometheus /metrics 端点（默认启用）
+
+# ============================================================
+# 审计日志增强（v3.10）
+# ============================================================
+# audit_retention_days: 30    # 日志保留天数，超过自动清理（默认 30 天）
+
+# ============================================================
+# 告警通知（v3.10）
+# block 事件实时推送到 webhook
+# ============================================================
+# alert_webhook: "https://your-webhook-url/api/notify"
+# alert_min_interval: 60      # 最小告警间隔秒数，防止刷屏（默认 60 秒）
+# alert_format: "generic"     # 告警格式: "generic"（默认）或 "lanxin"（蓝信机器人）
+
+# ============================================================
+# 限流（v3.3+）
+# 不配置或 rps=0 表示不启用限流
+# ============================================================
+# rate_limit:
+#   global_rps: 100          # 全局每秒最多 100 个请求
+#   global_burst: 200        # 突发允许 200 个
+#   per_sender_rps: 5        # 每用户每秒最多 5 个请求
+#   per_sender_burst: 10     # 每用户突发允许 10 个
+#   exempt_senders:          # 白名单用户（不限流）
+#     - "admin-sender-id"
+
+# ============================================================
+# 服务注册（多容器负载均衡）
+# ============================================================
+registration_enabled: true
+registration_token: "YOUR_REGISTRATION_TOKEN"
+heartbeat_interval_sec: 10
+heartbeat_timeout_count: 3
+
+# ============================================================
+# 路由策略（v3.8 增强：多 Bot 亲和路由）
+# 路由键: (sender_id, app_id) → upstream_id
+# 同一用户访问不同 Bot 可路由到不同容器
+# ============================================================
+route_default_policy: "least-users"    # least-users | round-robin
+route_persist: true
+
+# ============================================================
+# 蓝信用户信息获取（v3.9，可选）
+# 配置后自动从蓝信 API 获取用户姓名、邮箱、部门
+# ============================================================
+# lanxin_app_id: "2285568-213248"
+# lanxin_app_secret: "YOUR_LANXIN_APP_SECRET"
+
+# ============================================================
+# 路由策略（v3.9 增强：基于邮箱/部门/Bot 的策略匹配）
+# 匹配顺序：精确路由 → 策略匹配 → 动态分配
+# ============================================================
+# route_policies:
+#   - match:
+#       department: "安全研究院"
+#     upstream_id: "openclaw-security"
+#   - match:
+#       email_suffix: "@security.qianxin.com"
+#     upstream_id: "openclaw-security"
+#   - match:
+#       default: true
+#     upstream_id: ""  # 空表示使用 route_default_policy 动态分配
+
+# ============================================================
+# 入站规则（v3.5+）
+# 不配置则使用内置默认规则（40+ Prompt Injection 检测模式）
+# v3.11: 支持正则模式（type: regex）和规则分组（group）
+# ============================================================
+# inbound_rules_file: "/etc/lobster-guard/inbound-rules.yaml"
+# inbound_rules:
+#   - name: "custom_block"
+#     patterns: ["恶意关键词1", "恶意关键词2"]
+#     action: "block"
+#     priority: 100
+#     message: "自定义拦截提示"
+#     type: "keyword"            # "keyword"（默认）或 "regex"
+#     group: "injection"
+#
+#   - name: "regex_base64_injection"
+#     patterns: ["(?i)base64[\\s_-]*(decode|encode)\\s*\\("]
+#     action: "block"
+#     type: "regex"
+#     group: "injection"
+#     priority: 50
+
+# ============================================================
+# 规则绑定（v3.11）
+# 按 app_id 绑定不同的规则组，实现多租户规则隔离
+# ============================================================
+# rule_bindings:
+#   - app_id: "bot-internal"
+#     groups: ["jailbreak", "injection"]
+#   - app_id: "bot-external"
+#     groups: ["jailbreak", "injection", "social_engineering", "pii"]
+#   - app_id: "*"
+#     groups: ["jailbreak", "injection"]
+
+# ============================================================
+# 出站规则（v18 智能合并机制）
+# ============================================================
+# v18 起，出站规则采用智能合并:
+#   1. 6 条默认规则始终加载:
+#      - pii_id_card (身份证号, block)
+#      - pii_phone (手机号, warn)
+#      - pii_bank_card (银行卡号, block)
+#      - credential_password (密码, block)
+#      - credential_apikey (API Key, block)
+#      - malicious_command (恶意命令, block)
+#   2. 用户配置的同名规则覆盖默认规则
+#   3. 新名称规则追加到默认规则之后
+#   4. 不配置 outbound_rules 时，6 条默认规则全部生效
+# ============================================================
+outbound_rules:
+  # 示例：覆盖默认规则（将身份证号从 block 改为 warn）
+  # - name: "pii_id_card"
+  #   pattern: '(?:^|\D)\d{17}[\dXx](?:\D|$)'
+  #   action: "warn"
+
+  # 示例：追加自定义规则
+  # - name: "internal_ip_leak"
+  #   pattern: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+  #   action: "warn"
+  #   message: "检测到内网IP地址泄露"
+
+  # PII 泄露（保持默认即可，此处仅展示完整格式）
+  - name: "pii_id_card"
+    pattern: '(?:^|\D)\d{17}[\dXx](?:\D|$)'
+    action: "block"
+    priority: 100
+    message: "消息中包含身份证号，已被安全策略拦截。"
+
+  - name: "pii_bank_card"
+    pattern: '(?:^|\D)[3-6]\d{15,18}(?:\D|$)'
+    action: "block"
+    priority: 100
+
+  # 凭据泄露
+  - name: "credential_apikey"
+    patterns:
+      - 'sk-[a-zA-Z0-9]{20,}'
+      - 'ghp_[a-zA-Z0-9]{36}'
+      - 'AKIA[0-9A-Z]{16}'
+    action: "block"
+
+  - name: "credential_private_key"
+    patterns:
+      - '-----BEGIN .* PRIVATE KEY-----'
+    action: "block"
+
+  # 系统提示词泄露
+  - name: "system_prompt_leak"
+    patterns:
+      - 'SOUL\.md'
+      - 'AGENTS\.md'
+      - 'MEMORY\.md'
+    action: "warn"
+
+  # 恶意命令
+  - name: "malicious_command"
+    pattern: '(rm\s+-rf\s+/|curl\s+.*\|\s*bash|wget\s+.*\|\s*sh)'
+    action: "block"
+
+# ============================================================
+# 白名单（跳过入站检测的 sender_id）
+# ============================================================
+whitelist:
+  - "YOUR_ADMIN_SENDER_ID"
+
+# ============================================================
+# 静态上游（多容器模式）
+# ============================================================
+static_upstreams:
+  - id: "openclaw-local"
+    address: "127.0.0.1"
+    port: 18790
+
+# ============================================================
+# WebSocket 代理（v4.1 新增）
+# ============================================================
+# ws_mode: "inspect"           # inspect（检测模式）| passthrough（透传模式）
+# ws_idle_timeout: 300         # 空闲超时（秒）
+# ws_max_duration: 3600        # 最大连接时长（秒）
+# ws_max_connections: 100      # 最大并发 WebSocket 连接数
+
+# ============================================================
+# 高可用配置（v4.2 新增）
+# ============================================================
+# shutdown_timeout: 30         # 优雅关闭超时秒数
+# backup_dir: "/var/lib/lobster-guard/backups/"
+# backup_max_count: 10
+# backup_auto_interval: 0     # 自动备份间隔（小时），0 = 不自动
+
+# ============================================================
+# 可观测性（v5.0 新增）
+# ============================================================
+# log_format: "text"           # "text" 或 "json"（JSON 行，便于 ELK/Loki）
+# audit_archive_enabled: false
+# audit_archive_dir: "/var/lib/lobster-guard/archives/"
+
+# ============================================================
+# 智能检测（v5.1 新增）
+# ============================================================
+
+# --- 规则模板库 ---
+# rule_templates: ["general", "financial"]
+
+# --- 检测链（Pipeline）---
+# detect_pipeline: ["keyword", "regex", "pii", "session"]
+
+# --- 上下文感知检测 ---
+# session_detect_enabled: false
+# session_risk_threshold: 10
+# session_window: 20
+# session_decay_rate: 1
+
+# --- 可选 LLM 检测层 ---
+# llm_detect_enabled: false
+# llm_detect_endpoint: "https://api.openai.com/v1/chat/completions"
+# llm_detect_api_key: "sk-xxx"
+# llm_detect_model: "gpt-4o-mini"
+# llm_detect_timeout: 5
+# llm_detect_mode: "async"     # async 或 sync
+
+# --- 检测结果缓存 ---
+# detect_cache_ttl: 300
+# detect_cache_size: 1000
+
+# ============================================================
+# LLM 安全域 — 反向代理 + 审计（v9.0 新增）
+# ============================================================
+# 独立于 IM 侧功能，透明反向代理 LLM API 调用
+# 自动审计工具调用、Token 用量、延迟和错误率
+# ============================================================
+llm_proxy:
+  enabled: false                # 是否启用 LLM 代理（默认 false）
+  listen: ":8445"               # LLM 代理监听地址
+  targets:                      # LLM API 上游目标列表
+    - name: "anthropic"
+      upstream: "https://api.anthropic.com"
+      path_prefix: "/v1/"
+      api_key_header: "x-api-key"
+    # - name: "openai"
+    #   upstream: "https://api.openai.com"
+    #   path_prefix: "/v1/"
+    #   api_key_header: "Authorization"
+  security:
+    pii_scan: true                        # 扫描响应中的 PII
+    prompt_injection_scan: true            # 扫描请求中的 Prompt Injection
+    high_risk_tool_block: false            # 是否拦截高危工具调用
+    high_risk_tools:
+      - exec
+      - shell
+      - write_file
+      - delete_file
+    canary_token:                          # Canary Token（Prompt 泄露检测）
+      enabled: true
+      auto_rotate: true                    # 每24小时自动轮换 Token
+      alert_action: "warn"                 # 泄露时动作: log / warn / block
+    response_budget:                       # Response Budget（Agent 行为预算控制）
+      enabled: true
+      max_tool_calls_per_req: 20
+      max_single_tool_per_req: 5
+      max_tokens_per_req: 100000
+      over_budget_action: "warn"           # 超限动作: warn / block
+      tool_limits:
+        exec: 3
+        shell: 2
+  audit:
+    log_system_prompt: false     # 是否记录 system prompt
+    log_tool_input: true
+    log_tool_result: true
+    max_preview_len: 500
+  cost_alert:
+    daily_limit_usd: 50
+    webhook_url: ""
+  timeout_sec: 300
+  max_body_bytes: 10485760       # 请求体最大大小（10MB）
+  # ============================================================
+  # LLM 规则（v18 智能合并机制）
+  # ============================================================
+  # v18 起，LLM 规则采用智能合并:
+  #   1. 11 条默认规则始终加载:
+  #      - PI 检测 (3条): prompt_injection_basic / prompt_injection_advanced / prompt_injection_multilang
+  #      - PII 检测 (3条): pii_request_scan / pii_response_scan / pii_tool_output
+  #      - 敏感话题 (1条): sensitive_topic_filter
+  #      - Token 滥用 (1条): token_abuse_detect
+  #      - 响应方向 (3条, v18新增): response_harmful_content / response_data_leak / response_hallucination
+  #   2. 用户配置的同名规则覆盖默认规则
+  #   3. 新名称规则追加到默认规则之后
+  #   4. 不配置 rules 时，11 条默认规则全部生效
+  # ============================================================
+  # rules:
+  #   # 覆盖默认规则示例：将 PI 基础检测从 block 改为 warn
+  #   - name: "prompt_injection_basic"
+  #     action: "warn"
+  #   # 追加自定义规则
+  #   - name: "custom_financial_check"
+  #     pattern: '(转账|汇款|银行卡)\s*(号|账号)'
+  #     action: "block"
+  #     message: "LLM 响应中检测到金融敏感信息"
+
+# ============================================================
+# Red Team Autopilot（v14 新增）
+# 自动化安全测试，33 种攻击向量
+# ============================================================
+# redteam:
+#   enabled: false                          # 是否启用 Red Team（默认 false）
+#   schedule: "0 2 * * 1"                   # 自动执行 Cron 表达式（默认每周一凌晨2点）
+#   vectors: 33                             # 攻击向量数量
+#   parallel: 5                             # 并发测试数
+#   timeout_per_vector: 30                  # 每个向量超时秒数
+#   report_webhook: ""                      # 测试完成通知 webhook
+#   categories:                             # 启用的攻击类别
+#     - prompt_injection
+#     - jailbreak
+#     - data_extraction
+#     - privilege_escalation
+#     - social_engineering
+#     - code_injection
+#     - tool_abuse
+#     - hallucination_exploit
+
+# ============================================================
+# Agent 蜜罐（v15 新增）
+# 蜜罐诱捕 + 水印追踪 + 引爆检测
+# v18 修复: 蜜罐已集成到代理数据流，引爆事件自动关联 trace_id
+# ============================================================
+# honeypot:
+#   enabled: false                          # 是否启用蜜罐（默认 false）
+#   templates:                              # 蜜罐模板（8 种可选）
+#     - name: "fake_api_key"                # 假 API Key 蜜罐
+#       type: "credential"
+#       content: "sk-honeypot-xxxxxxxxxxxx"
+#     - name: "fake_system_prompt"          # 假系统提示词蜜罐
+#       type: "prompt"
+#       content: "You are a helpful assistant..."
+#     - name: "fake_database"               # 假数据库蜜罐
+#       type: "data"
+#       content: "user_table: id, name, ssn"
+#     - name: "fake_internal_api"           # 假内部 API 蜜罐
+#       type: "endpoint"
+#       content: "/internal/admin/users"
+#     - name: "fake_config"                 # 假配置文件蜜罐
+#       type: "config"
+#       content: "db_password: honeypot123"
+#     - name: "fake_token"                  # 假 Token 蜜罐
+#       type: "token"
+#       content: "eyJhbGciOiJIUzI1NiJ9.honeypot"
+#     - name: "fake_pii"                    # 假 PII 蜜罐
+#       type: "pii"
+#       content: "SSN: 000-00-0000"
+#     - name: "fake_command"                # 假命令蜜罐
+#       type: "command"
+#       content: "sudo cat /etc/shadow"
+#   watermark:
+#     enabled: true                         # 启用水印追踪
+#     type: "invisible_unicode"             # 水印类型: invisible_unicode | steganography
+#   trigger_action: "block"                 # 引爆时动作: log / warn / block
+#   alert_webhook: ""                       # 引爆告警 webhook
+#   auto_deploy: true                       # v18: 自动部署到代理数据流
+
+# ============================================================
+# Prompt A/B 测试（v15 新增）
+# 多版本 Prompt 对比测试
+# ============================================================
+# ab_testing:
+#   enabled: false                          # 是否启用 A/B 测试（默认 false）
+#   max_concurrent: 5                       # 最大并发测试数
+#   min_sample_size: 100                    # 最小样本量（达到后自动出结果）
+#   metrics:                                # 测量指标
+#     - response_quality                    # 响应质量评分
+#     - safety_score                        # 安全评分
+#     - latency                             # 延迟
+#     - token_usage                         # Token 用量
+#   auto_recommend: true                    # 自动推荐胜出版本
+
+# ============================================================
+# 行为画像（v16 新增）
+# 用户行为特征提取 + 模式学习
+# ============================================================
+# behavior_profile:
+#   enabled: false                          # 是否启用行为画像（默认 false）
+#   features:                               # 特征提取维度
+#     - request_frequency                   # 请求频率特征
+#     - time_distribution                   # 时间分布特征
+#     - content_pattern                     # 内容模式特征
+#     - tool_usage                          # 工具使用特征
+#     - session_behavior                    # 会话行为特征
+#   learning:
+#     window_days: 7                        # 学习窗口（天）
+#     min_samples: 50                       # 最小样本数
+#     update_interval: "1h"                 # 模型更新间隔
+#   anomaly_threshold: 3.0                  # 异常阈值（标准差倍数）
+#   alert_action: "warn"                    # 异常动作: log / warn / block
+
+# ============================================================
+# 攻击链检测（v16 新增）
+# 多阶段攻击关联分析 + Kill Chain 映射
+# ============================================================
+# attack_chain:
+#   enabled: false                          # 是否启用攻击链检测（默认 false）
+#   stages:                                 # Kill Chain 阶段定义
+#     - name: "reconnaissance"              # 侦查阶段
+#       indicators:
+#         - "system prompt leak"
+#         - "capability probing"
+#     - name: "weaponization"               # 武器化阶段
+#       indicators:
+#         - "prompt injection"
+#         - "jailbreak attempt"
+#     - name: "delivery"                    # 投递阶段
+#       indicators:
+#         - "malicious payload"
+#         - "encoded command"
+#     - name: "exploitation"                # 利用阶段
+#       indicators:
+#         - "tool abuse"
+#         - "privilege escalation"
+#     - name: "exfiltration"                # 数据窃取阶段
+#       indicators:
+#         - "data extraction"
+#         - "pii leak"
+#   correlation_window: "30m"               # 关联时间窗口
+#   min_stages: 2                           # 触发告警的最小阶段数
+#   auto_escalate: true                     # 多阶段命中时自动升级动作
+#   escalate_action: "block"                # 升级后的动作
+
+# ============================================================
+# 异常基线检测（v11 新增，v16 增强）
+# 基于历史数据建立正常基线，偏离基线触发告警
+# ============================================================
+# anomaly:
+#   enabled: false                          # 是否启用异常检测（默认 false）
+#   baseline_days: 14                       # 基线计算天数
+#   threshold: 2.5                          # 异常阈值（标准差倍数）
+#   metrics:                                # 监控指标
+#     - request_rate                        # 请求速率
+#     - block_rate                          # 拦截率
+#     - error_rate                          # 错误率
+#     - avg_latency                         # 平均延迟
+#     - unique_senders                      # 独立发送者数
+#   check_interval: "5m"                    # 检查间隔
+#   cooldown: "30m"                         # 告警冷却时间
+#   alert_action: "warn"                    # 异常动作: log / warn / block
+
+# ============================================================
+# 态势感知大屏（v17 新增）
+# 全屏驾驶舱模式，实时攻防态势可视化
+# ============================================================
+# bigscreen:
+#   enabled: true                           # 是否启用态势大屏（默认 true）
+#   refresh_interval: 5                     # 数据刷新间隔（秒）
+#   default_template: "security_ops"        # 默认预设模板
+#   templates:                              # 4 种预设模板
+#     - name: "security_ops"                # 安全运营模板
+#       description: "实时攻防态势 + 拦截统计 + 威胁地图"
+#     - name: "executive"                   # 管理层模板
+#       description: "安全评分 + 趋势 + 关键指标"
+#     - name: "soc"                         # SOC 模板
+#       description: "告警列表 + 事件时间线 + OWASP 矩阵"
+#     - name: "llm_monitor"                 # LLM 监控模板
+#       description: "Token 成本 + 调用统计 + 安全事件"
+#   auto_fullscreen: false                  # 是否自动进入全屏
+
+# ============================================================
+# 可拖拽自定义布局（v17 新增）
+# 用户自定义 Dashboard 布局，支持拖拽和调整大小
+# ============================================================
+# custom_layout:
+#   enabled: true                           # 是否启用自定义布局（默认 true）
+#   max_layouts: 10                         # 每用户最大保存布局数
+#   presets: 4                              # 预设模板数量
+#   available_widgets:                      # 可用组件列表
+#     - "request_counter"                   # 请求计数器
+#     - "block_counter"                     # 拦截计数器
+#     - "trend_chart"                       # 趋势图
+#     - "pie_chart"                         # 饼图
+#     - "heat_map"                          # 热力图
+#     - "attack_timeline"                   # 攻击时间线
+#     - "rule_hit_ranking"                  # 规则命中排行
+#     - "health_score"                      # 健康分
+#     - "owasp_matrix"                      # OWASP 矩阵
+#     - "active_threats"                    # 活跃威胁
+#     - "llm_cost"                          # LLM 成本
+#     - "honeypot_triggers"                 # 蜜罐引爆
+
+# ============================================================
+# 端到端模拟测试（v18 新增）
+# 内置流量模拟器，验证全链路安全功能
+# API: POST /api/v1/simulate/traffic
+# ============================================================
+# simulate:
+#   enabled: true                           # 是否启用模拟测试（默认 true）
+#   auto_schedule: ""                       # 自动执行 Cron（留空则仅手动触发）
+#   scenarios:                              # 模拟场景
+#     - inbound_injection_block             # 入站注入拦截
+#     - outbound_pii_block                  # 出站 PII 拦截
+#     - llm_rule_detect                     # LLM 规则检测
+#     - llm_canary_detect                   # Canary Token 泄露
+#     - honeypot_trigger                    # 蜜罐引爆
+#     - route_affinity                      # 路由亲和
+#     - trace_correlation                   # trace_id 关联
+#     - audit_integrity                     # 审计完整性
+#   timeout_per_scenario: 10                # 每场景超时秒数
+#   cleanup_after: true                     # 测试后清理模拟数据
+#   notify_webhook: ""                      # 测试完成通知
+
+# ============================================================
+# 出站 PII 正则可配置化（v3.11）
+# 自定义身份证/手机号/银行卡等 PII 检测模式
+# 不配置则使用默认模式
+# ============================================================
+# outbound_pii_patterns:
+#   - name: "身份证号"
+#     pattern: "\\d{17}[\\dXx]"
+#   - name: "手机号"
+#     pattern: "1[3-9]\\d{9}"
+#   - name: "银行卡号"
+#     pattern: "\\d{16,19}"
+#   - name: "邮箱地址"
+#     pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+
+# ============================================================
+# IM↔LLM 会话关联（v17.3）
+# 将 IM 入站消息与 LLM API 调用通过内容指纹+活跃会话双层机制关联
+# ============================================================
+# session_idle_timeout_min: 60    # 会话空闲超时（分钟），同一用户超过此时间没发新消息则切新会话
+                                  # 范围: 1-1440（1分钟~24小时），默认 60
+# session_fp_window_sec: 300      # 内容指纹匹配窗口（秒），LLM 请求在此窗口内匹配 IM 消息指纹
+                                  # 范围: 10-3600（10秒~1小时），默认 300
+
+# ============================================================
+# 配置安全加固（v18.2 新增）
+# ============================================================
+# 敏感字段加密密钥（用于配置文件中敏感值的 AES 加密存储）
+# 长度建议至少 16 字符；留空则不启用配置加密
+# config_encryption_key: "YOUR_CONFIG_ENCRYPTION_KEY_16CH"
+
+# API Token 自动轮换（v18.2）
+# 启用后，management_token 和 JWT secret 将按策略自动轮换
+# api_token_rotation: false
+
+# ============================================================
+# Phase 1: v18.x-v20.x 配置
+# ============================================================
+
+# v18.0 执行信封 — 密码学审计链
+envelope_enabled: true
+envelope_secret_key: "your-hmac-secret-key-change-me"  # HMAC-SHA256 密钥，必须更改！
+
+# v18.1 事件总线
+event_bus:
+  enabled: true
+  targets: []    # Webhook targets: [{name, url, secret, events, retry_count}]
+  chains: []     # Action chains: [{name, trigger, actions}]
+
+# v18.3 自适应决策引擎
+adaptive_decision:
+  enabled: true
+  lookback_days: 30      # 历史回看天数
+  min_samples: 10        # 最小样本数
+  fp_threshold: 0.5      # 误伤率阈值
+  confidence_level: 0.95  # 置信水平
+
+# v18.3 奇点蜜罐 — 拓扑感知暴露预算
+singularity:
+  enabled: true
+  im_exposure_level: 3        # IM 通道暴露等级 0-5
+  llm_exposure_level: 3       # LLM 通道暴露等级 0-5
+  toolcall_exposure_level: 0  # ToolCall 通道暴露等级 0-5
+
+# v19.0 对抗性自进化
+evolution_enabled: true
+evolution_interval_min: 360   # 自进化周期(分钟)
+
+# v19.1 语义检测引擎
+semantic_detector:
+  enabled: true
+  threshold: 0.7          # 检测阈值 (0-1)
+  action: warn            # 超阈值动作: block/warn/log
+  tfidf_weight: 0.3       # TF-IDF 维度权重
+  syntax_weight: 0.3      # 句法维度权重
+  anomaly_weight: 0.2     # 异常维度权重
+  intent_weight: 0.2      # 意图维度权重
+
+# v19.2 蜜罐深度交互
+honeypot_deep:
+  enabled: true
+  auto_feedback_enabled: true
+  auto_feedback_min_score: 50
+  session_timeout_min: 30
+
+# v20.0 工具策略引擎
+tool_policy:
+  enabled: true
+  default_action: warn    # 默认动作: block/warn/allow
+  max_calls_per_min: 60   # 每分钟最大调用数
+
+# v20.1 信息流污染追踪
+taint_tracker:
+  enabled: true
+  action: warn            # 污染检测动作: block/warn/log
+  ttl_minutes: 30         # 污染标签存活时间
+
+# v20.2 污染链逆转
+taint_reversal:
+  enabled: true
+  mode: soft              # 逆转模式: soft/hard/stealth
+
+# v20.3 LLM 响应缓存
+llm_cache:
+  enabled: true
+  max_entries: 1000       # 最大缓存条目
+  ttl_minutes: 60         # 缓存过期时间
+  similarity_min: 0.85    # 语义相似度阈值 (0-1)
+  tenant_isolation: true  # 租户隔离
+  skip_tainted: true      # 跳过被污染的响应
+
+# v20.4 API Gateway
+api_gateway:
+  enabled: true
+  jwt_enabled: true
+  jwt_secret: "your-jwt-secret-change-me"  # JWT 密钥，必须更改！
+  apikey_enabled: true
+  api_keys:
+    - "your-api-key-change-me"  # API Key，必须更改！
+
+# v21.0 K8s 服务发现
+discovery:
+  kubernetes:
+    enabled: false
+    kubeconfig: ""              # 空字符串 = InCluster 模式；填路径则用 kubeconfig 文件
+    namespace: "default"        # 目标 namespace
+    service: "my-gateway"       # Service 名称
+    port_name: "gateway"        # 端口名（Endpoints 中端口的名称），默认 "gateway"
+    label_selector: ""          # 可选，Pod 标签选择器（预留）
+    sync_interval: 15           # 同步间隔秒数
+    insecure_skip_verify: false # 跳过 TLS 证书验证（仅开发环境）

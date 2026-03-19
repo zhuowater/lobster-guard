@@ -1,0 +1,11 @@
+# ============================================================
+# API Gateway（v20.4）
+# ============================================================
+
+api_gateway:
+  enabled: true
+  jwt_enabled: true
+  jwt_secret: "your-jwt-secret-change-me"
+  apikey_enabled: true
+  api_keys:
+    - "your-api-key-change-me"

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -233,6 +235,8 @@ type Config struct {
 	APIGateway APIGatewayConfig `yaml:"api_gateway"`
 	// v21.0 K8s 服务发现
 	Discovery DiscoveryConfig `yaml:"discovery" json:"discovery"`
+	// v20.6 模块配置目录（分层配置）
+	ConfDir string `yaml:"conf_dir" json:"conf_dir"` // 模块配置目录，默认 "conf.d"（相对于主配置文件）
 }
 
 // DiscoveryConfig K8s 服务发现配置（v21.0）
@@ -313,7 +317,53 @@ func loadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
+
+	// v20.6: 加载 conf.d/ 模块配置目录（如果存在）
+	if err := loadConfDir(cfg, path); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// loadConfDir 加载模块配置目录，将 conf.d/*.yaml 按字母序合并到主配置
+func loadConfDir(cfg *Config, mainConfigPath string) error {
+	confDir := cfg.ConfDir
+	if confDir == "" {
+		confDir = "conf.d"
+	}
+
+	// 相对于主配置文件路径解析
+	if !filepath.IsAbs(confDir) {
+		confDir = filepath.Join(filepath.Dir(mainConfigPath), confDir)
+	}
+
+	// 目录不存在 = 不使用模块配置，静默跳过
+	if _, err := os.Stat(confDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	// 按文件名排序加载所有 .yaml/.yml 文件
+	files, err := filepath.Glob(filepath.Join(confDir, "*.yaml"))
+	if err != nil {
+		return fmt.Errorf("扫描 conf.d 失败: %w", err)
+	}
+	ymlFiles, _ := filepath.Glob(filepath.Join(confDir, "*.yml"))
+	files = append(files, ymlFiles...)
+	sort.Strings(files)
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("读取模块配置 %s 失败: %w", f, err)
+		}
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("解析模块配置 %s 失败: %w", filepath.Base(f), err)
+		}
+		log.Printf("[config] 加载模块配置: %s", filepath.Base(f))
+	}
+
+	return nil
 }
 
 func (cfg *Config) IsMetricsEnabled() bool {

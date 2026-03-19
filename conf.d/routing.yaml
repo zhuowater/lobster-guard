@@ -1,0 +1,27 @@
+# ============================================================
+# 路由策略 + 静态上游（v3.8+）
+# ============================================================
+
+# route_default_policy: "least-users"
+# route_persist: true
+
+# --- 静态上游（多容器模式）---
+# static_upstreams:
+#   - id: "openclaw-local"
+#     address: "127.0.0.1"
+#     port: 18790
+#   - id: "openclaw-dev"
+#     address: "10.0.1.10"
+#     port: 18790
+
+# --- 路由策略（基于邮箱/部门/Bot 的策略匹配）---
+# route_policies:
+#   - match:
+#       department: "安全研究院"
+#     upstream_id: "openclaw-security"
+#   - match:
+#       email_suffix: "@security.qianxin.com"
+#     upstream_id: "openclaw-security"
+#   - match:
+#       default: true
+#     upstream_id: ""

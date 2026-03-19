@@ -1,0 +1,14 @@
+# ============================================================
+# K8s 服务发现（v21.0）
+# ============================================================
+
+discovery:
+  kubernetes:
+    enabled: false
+    kubeconfig: ""               # 空 = InCluster 模式
+    namespace: "default"
+    service: "my-gateway"
+    port_name: "gateway"
+    label_selector: ""
+    sync_interval: 15
+    insecure_skip_verify: false

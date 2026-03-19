@@ -1,0 +1,31 @@
+# ============================================================
+# 各平台通道凭据配置
+# 根据 channel 选择对应平台，取消注释并填写
+# ============================================================
+
+# --- 飞书 (channel: feishu) ---
+# feishu_encrypt_key: "YOUR_FEISHU_ENCRYPT_KEY"
+# feishu_verification_token: "YOUR_FEISHU_VERIFICATION_TOKEN"
+# feishu_app_id: "cli_YOUR_APP_ID"         # Bridge 模式需要
+# feishu_app_secret: "YOUR_APP_SECRET"      # Bridge 模式需要
+
+# --- 钉钉 (channel: dingtalk) ---
+# dingtalk_token: "YOUR_DINGTALK_TOKEN"
+# dingtalk_aes_key: "YOUR_DINGTALK_AES_KEY"
+# dingtalk_corp_id: "YOUR_DINGTALK_CORP_ID"
+# dingtalk_client_id: "YOUR_CLIENT_ID"       # Bridge 模式需要
+# dingtalk_client_secret: "YOUR_CLIENT_SECRET" # Bridge 模式需要
+
+# --- 企业微信 (channel: wecom) ---
+# wecom_token: "YOUR_WECOM_TOKEN"
+# wecom_encoding_aes_key: "YOUR_WECOM_ENCODING_AES_KEY"
+# wecom_corp_id: "YOUR_WECOM_CORP_ID"
+# wecom_corp_secret: "YOUR_WECOM_CORP_SECRET"
+
+# --- 蓝信增强 (channel: lanxin) ---
+# lanxin_app_id: "2285568-213248"
+# lanxin_app_secret: "YOUR_LANXIN_APP_SECRET"
+
+# --- 通用 HTTP (channel: generic) ---
+# generic_sender_header: "X-Sender-Id"
+# generic_text_field: "content"

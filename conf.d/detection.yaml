@@ -1,0 +1,63 @@
+# ============================================================
+# 高级检测引擎配置
+# 语义检测 / 对抗性自进化 / 自适应决策 / 蜜罐 / 工具策略 / 污染追踪
+# ============================================================
+
+# --- v19.1 语义检测引擎 ---
+semantic_detector:
+  enabled: true
+  threshold: 0.7
+  action: warn
+  tfidf_weight: 0.3
+  syntax_weight: 0.3
+  anomaly_weight: 0.2
+  intent_weight: 0.2
+
+# --- v19.0 对抗性自进化 ---
+evolution_enabled: true
+evolution_interval_min: 360
+
+# --- v18.3 自适应决策引擎 ---
+adaptive_decision:
+  enabled: true
+  lookback_days: 30
+  min_samples: 10
+  fp_threshold: 0.5
+  confidence_level: 0.95
+
+# --- v18.3 奇点蜜罐 ---
+singularity:
+  enabled: true
+  im_exposure_level: 3
+  llm_exposure_level: 3
+  toolcall_exposure_level: 0
+
+# --- v19.2 蜜罐深度交互 ---
+honeypot_deep:
+  enabled: true
+  auto_feedback_enabled: true
+  auto_feedback_min_score: 50
+  session_timeout_min: 30
+
+# --- v20.0 工具策略引擎 ---
+tool_policy:
+  enabled: true
+  default_action: warn
+  max_calls_per_min: 60
+
+# --- v20.1 信息流污染追踪 ---
+taint_tracker:
+  enabled: true
+  action: warn
+  ttl_minutes: 30
+
+# --- v20.2 污染链逆转 ---
+taint_reversal:
+  enabled: true
+  mode: soft
+
+# --- v18.1 事件总线 ---
+event_bus:
+  enabled: true
+  targets: []
+  chains: []
