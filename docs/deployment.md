@@ -72,7 +72,7 @@ docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
 
 ```bash
 make build      # 编译
-make test       # 运行测试（930 个用例）
+make test       # 运行测试（940 个用例）
 make install    # 安装到系统
 make healthz    # 检查健康状态
 make stats      # 查看统计

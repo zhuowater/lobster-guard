@@ -6,7 +6,7 @@
 
 ```
                         ┌────────────────────────────────────────────────┐
-                        │              lobster-guard 🦞 v20.4.0          │
+                        │              lobster-guard 🦞 v20.5.0          │
                         │                                                │
                         │  ┌─────────────── IM 安全域 ────────────────┐  │
                         │  │                                          │  │
@@ -126,7 +126,7 @@ Agent    ──► :8445  ──► LLM API (Anthropic/OpenAI)
 | TaintTracker | v20.1 | 12 PII + 三端传播 + 血缘阻断 |
 | TaintReversal | v20.2 | soft/hard/stealth + 12模板 |
 | LLMCache | v20.3 | TF-IDF 语义缓存 + 租户隔离 |
-| APIGateway | v20.4 | JWT + APIKey + 灰度路由 |
+| APIGateway | v20.5 | JWT + APIKey + 灰度路由 |
 
 ### 数据流增强
 

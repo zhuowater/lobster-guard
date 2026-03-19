@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 🦞 龙虾卫士 CLI — v20.4
+# 🦞 龙虾卫士 CLI — v20.5
 # 覆盖：系统状态 / IM 安全 / LLM 安全 / 威胁分析 / 安全治理 / 运维 / Phase 1 新功能
 set -euo pipefail
 
-VERSION="20.4"
+VERSION="20.5"
 BASE_URL="${LOBSTER_GUARD_URL:-http://10.44.96.142:9090}"
 TOKEN="${LOBSTER_GUARD_TOKEN:-}"
 REG_TOKEN="${LOBSTER_GUARD_REG_TOKEN:-}"
@@ -206,7 +206,7 @@ cmd_report() {
 # ── 帮助 ──────────────────────────────────────────────────
 cmd_help() {
 cat <<'EOF'
-🦞 龙虾卫士 CLI v20.4
+🦞 龙虾卫士 CLI v20.5
 
 系统状态:
   status / healthz        健康检查

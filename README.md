@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20.4.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v20.5.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-930_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-241_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/tests-940_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-275_routes-purple?style=flat-square" alt="API Routes">
   <img src="https://img.shields.io/badge/dashboard-38_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
@@ -62,11 +62,11 @@
 | ☣️ **污染追踪** | 12 PII 模式 · 三端传播 · 血缘阻断 · 逆转引擎 |
 | 💾 **响应缓存** | TF-IDF 语义匹配 · 租户隔离 · 污染跳过 |
 | 🚪 **API 网关** | JWT + APIKey · 路由优先级 · 灰度发布 |
-| 🖥️ **管理后台** | Vue 3 Dashboard · 38 页面 · 19 组件 · 5 组侧边栏 |
+| 🖥️ **管理后台** | Vue 3 Dashboard · 38 页面 · 21 组件 · 5 组侧边栏 |
 
 ### 🏗️ 设计哲学
 
-- **单二进制部署** — 69 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
+- **单二进制部署** — 70 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
 - **Fail-Open** — 检测异常不阻塞业务，宁可漏检不可误杀
 - **零外部依赖** — 只依赖 SQLite + YAML 解析 + WebSocket + x/crypto（4 个依赖），不引入 Redis/MQ/K8s
 - **向后兼容** — 不配多容器就自动退化为单上游模式，平滑升级
@@ -75,15 +75,15 @@
 
 | 指标 | 数值 |
 |------|------|
-| Go 源文件 | 69 个 |
-| Go 测试文件 | 48 个 |
+| Go 源文件 | 70 个 |
+| Go 测试文件 | 49 个 |
 | Go 源代码行数 | ~42,400 行 |
 | Go 测试行数 | ~27,100 行 |
 | 总 Go 行数 | ~69,500 行 |
-| Vue 前端 | 38 页面 + 19 组件，共 63 个文件，~18,600 行 |
-| API 路由 | ~241 个 |
-| 测试函数 | 930 个 |
-| Git Commit | 148 个 |
+| Vue 前端 | 38 页面 + 21 组件，共 65 个文件，~20,400 行 |
+| API 路由 | ~275 个 |
+| 测试函数 | 940 个 |
+| Git Commit | 165 个 |
 | 外部依赖 | 4 个（sqlite3 + yaml.v3 + gorilla/websocket + x/crypto）|
 
 ---
@@ -176,11 +176,11 @@ open http://localhost:9090/                  # 管理后台
 | [🏛️ 架构说明](docs/architecture.md) | 架构图 · 4 端口 · 数据流 · 插件架构 |
 | [🔌 多通道配置](docs/channels.md) | 5 通道配置示例 · Bridge Mode WSS 长连接 |
 | [🛡️ 安全检测能力](docs/detection.md) | 规则体系 · 检测管线 · 规则模板库 |
-| [📡 API 参考](docs/api-reference.md) | ~241 路由完整列表 · 调用示例 |
+| [📡 API 参考](docs/api-reference.md) | ~275 路由完整列表 · 调用示例 |
 | [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · K8s · Make |
 | [☸️ K8s 服务发现](docs/k8s-discovery.md) | InCluster/Kubeconfig · 自动注册 · RBAC · 零依赖 |
 | [🔀 上游管理](docs/upstream-management.md) | CRUD API · 四种来源 · 路由策略 · Dashboard |
-| [🧪 测试说明](docs/testing.md) | 930 用例 · 端到端模拟 · 性能指标 |
+| [🧪 测试说明](docs/testing.md) | 940 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 完整配置项 · 出站规则合并机制 |
 | [🖥️ 管理后台](docs/dashboard.md) | 38 页面详情 · 组件库 · 截图集合 |
 
@@ -214,13 +214,13 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 ```
 lobster-guard/
-├── src/                    # Go 源代码（69 源 + 48 测试 = 117 个文件）
+├── src/                    # Go 源代码（70 源 + 49 测试 = 119 个文件）
 │   ├── main.go             #   入口 + CLI 参数 + 启动流程
 │   ├── config.go           #   配置加载 + 验证器
 │   ├── plugin.go           #   ChannelPlugin 接口 + 5 通道插件
 │   ├── detect.go           #   RuleEngine (AC自动机 + 正则)
 │   ├── proxy.go            #   入站/出站 HTTP 代理
-│   ├── api.go              #   管理 API (~241 路由)
+│   ├── api.go              #   管理 API (~275 路由)
 │   ├── llm_proxy.go        #   LLM 反向代理
 │   ├── envelope.go         #   密码学执行信封
 │   ├── event_bus.go        #   事件总线 + ActionChain
@@ -230,7 +230,7 @@ lobster-guard/
 │   ├── llm_cache.go        #   LLM 响应缓存
 │   ├── api_gateway.go      #   API 网关
 │   └── ...                 #   其余源文件
-├── dashboard/              # Vue 3 前端 (38 页面 + 19 组件)
+├── dashboard/              # Vue 3 前端 (38 页面 + 21 组件)
 │   ├── src/views/          #   38 个页面
 │   └── src/components/     #   19 个组件
 ├── rules/                  # 规则模板库 (66 条, 4 场景)
@@ -282,5 +282,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v20.4.0 · 69 source files · 69.5K lines · 930 tests · 241 APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v20.5.0 · 70 source files · 70.8K lines · 940 tests · 275 APIs</sub>
 </p>
