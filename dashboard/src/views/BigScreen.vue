@@ -2,8 +2,8 @@
   <div class="bigscreen" @mousemove="showControls" ref="root">
     <!-- Mode switch pills (top-right) -->
     <div class="screen-mode-switch" :class="{ visible: controlsVisible }">
-      <button :class="{ active: screenMode === 'data' }" @click="screenMode = 'data'">📊 数据大屏</button>
-      <button :class="{ active: screenMode === 'map' }" @click="screenMode = 'map'">🗺️ 威胁地图</button>
+      <button :class="{ active: screenMode === 'data' }" @click="screenMode = 'data'"><Icon name="bar-chart" :size="14" /> 数据大屏</button>
+      <button :class="{ active: screenMode === 'map' }" @click="screenMode = 'map'"><Icon name="target" :size="14" /> 威胁地图</button>
       <button class="bs-exit-pill" @click="exitBigScreen" title="退出大屏">✕</button>
     </div>
     <!-- Threat Map mode -->
@@ -101,13 +101,13 @@
           <transition name="cfade" mode="out-in">
             <div :key="cIdx" class="bs-slide">
               <template v-if="cIdx===0">
-                <div class="bs-sl-title">🎯 红队检测率</div>
+                <div class="bs-sl-title"><Icon name="crosshair" :size="14" /> 红队检测率</div>
                 <div class="bs-sl-big" v-if="rtData">{{ rtData.pass_rate?rtData.pass_rate.toFixed(1):'0' }}%</div>
                 <div class="bs-sl-sub" v-if="rtData">{{ rtData.total_tests }} 测试 / {{ rtData.passed }} 通过</div>
                 <div class="bs-sl-big" v-else>N/A</div>
               </template>
               <template v-else-if="cIdx===1">
-                <div class="bs-sl-title">🔬 A/B 测试</div>
+                <div class="bs-sl-title"><Icon name="split" :size="14" /> A/B 测试</div>
                 <div class="bs-sl-big">{{ abCount }} 个测试</div>
                 <div class="bs-sl-sub">{{ abRunning }} 运行中</div>
               </template>

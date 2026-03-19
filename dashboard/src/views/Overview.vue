@@ -110,10 +110,10 @@
       <Skeleton v-if="!loaded" type="chart"/><EmptyState v-else-if="!heatmapData.length" :iconSvg="svgGrid" title="暂无热力图数据" description="系统运行 24 小时后将生成攻击频率热力图"/><HeatMap v-else :data="heatmapData" title=""/></div>
     <!-- 安全洞察（v14-v17 功能摘要） -->
     <div class="card" style="margin-bottom:20px" v-if="summaryLoaded">
-      <div class="card-header"><span class="card-icon">🔍</span><span class="card-title">安全洞察</span></div>
+      <div class="card-header"><span class="card-icon"><Icon name="search" :size="16" /></span><span class="card-title">安全洞察</span></div>
       <div class="insight-grid">
         <div class="insight-card" @click="router.push('/redteam')">
-          <div class="insight-header">🎯 红队测试</div>
+          <div class="insight-header"><Icon name="crosshair" :size="14" /> 红队测试</div>
           <div class="insight-value" :class="summaryRedteamClass">{{ summaryRedteamRate }}%</div>
           <div class="insight-sub">检测率 · {{ summaryRedteamVulns }} 个漏洞</div>
         </div>
@@ -128,17 +128,17 @@
           <div class="insight-sub">活跃链 · {{ summary.attack_chains?.critical_chains || 0 }} 高危</div>
         </div>
         <div class="insight-card" @click="router.push('/leaderboard')">
-          <div class="insight-header">🏆 排行榜</div>
+          <div class="insight-header"><Icon name="trophy" :size="14" /> 排行榜</div>
           <div class="insight-value">{{ summaryTopTenant }}</div>
           <div class="insight-sub">{{ summaryTopScore }} 分 · TOP1</div>
         </div>
         <div class="insight-card" @click="router.push('/behavior')">
-          <div class="insight-header">🧠 行为画像</div>
+          <div class="insight-header"><Icon name="behavior" :size="14" /> 行为画像</div>
           <div class="insight-value" :class="(summary.behavior?.high_risk||0) > 0 ? 'warning' : ''">{{ summary.behavior?.anomaly_count || 0 }}</div>
           <div class="insight-sub">行为突变 · {{ summary.behavior?.high_risk || 0 }} 高风险</div>
         </div>
         <div class="insight-card" @click="router.push('/ab-testing')">
-          <div class="insight-header">🔬 A/B 测试</div>
+          <div class="insight-header"><Icon name="split" :size="14" /> A/B 测试</div>
           <div class="insight-value">{{ summary.ab_testing?.active_tests || 0 }}</div>
           <div class="insight-sub">进行中 · {{ summary.ab_testing?.total_tests || 0 }} 总计</div>
         </div>

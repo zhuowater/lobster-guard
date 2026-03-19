@@ -45,7 +45,7 @@
           </div>
         </div>
         <div class="bc-body bc-learning" v-else>
-          <div class="bc-learning-icon">📡</div>
+          <div class="bc-learning-icon"><Icon name="radio" :size="20" /></div>
           <div class="bc-learning-text">数据收集中...</div>
           <div class="bc-learning-sub">需要至少 3 天数据建立基线</div>
           <div class="bc-progress-wrap">

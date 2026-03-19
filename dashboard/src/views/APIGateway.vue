@@ -2,7 +2,7 @@
   <div class="gateway-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">🚪 API 网关</h1>
+        <h1 class="page-title"><Icon name="door" :size="20" /> API 网关</h1>
         <p class="page-subtitle">统一入口路由 + JWT/APIKey 认证 + 灰度发布 — 安全访问控制</p>
       </div>
       <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
@@ -11,7 +11,7 @@
     <!-- 顶部大数字 -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon">📊</div>
+        <div class="stat-icon"><Icon name="bar-chart" :size="18" /></div>
         <div class="stat-value">{{ stats.total_requests ?? '-' }}</div>
         <div class="stat-label">总请求</div>
       </div>
@@ -26,7 +26,7 @@
         <div class="stat-label">灰度请求</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">🗺️</div>
+        <div class="stat-icon"><Icon name="git-branch" :size="18" /></div>
         <div class="stat-value">{{ stats.route_count ?? '-' }}</div>
         <div class="stat-label">路由数</div>
       </div>
@@ -34,10 +34,10 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'routes' }" @click="activeTab = 'routes'">🗺️ 路由管理 ({{ routes.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'jwt' }" @click="activeTab = 'jwt'">🔑 JWT 工具</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'routes' }" @click="activeTab = 'routes'"><Icon name="git-branch" :size="14" /> 路由管理 ({{ routes.length }})</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'jwt' }" @click="activeTab = 'jwt'"><Icon name="key" :size="14" /> JWT 工具</button>
       <button class="tab-btn" :class="{ active: activeTab === 'log' }" @click="activeTab = 'log'">📜 网关日志 ({{ logs.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'">⚙️ 配置</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'"><Icon name="settings" :size="14" /> 配置</button>
     </div>
 
     <!-- 路由管理 -->
@@ -82,7 +82,7 @@
       <div class="jwt-panels">
         <!-- 生成 Token -->
         <div class="test-panel">
-          <h3 class="section-title">🔑 生成 JWT Token</h3>
+          <h3 class="section-title"><Icon name="key" :size="14" /> 生成 JWT Token</h3>
           <div class="config-field">
             <label class="field-label">租户 ID</label>
             <input v-model="jwtForm.tenant_id" class="field-input" placeholder="e.g. tenant-001">
@@ -100,26 +100,26 @@
             <input v-model.number="jwtForm.expire_hours" class="field-input" type="number" placeholder="24">
           </div>
           <button class="btn btn-primary btn-sm" @click="generateToken" :disabled="generating">
-            {{ generating ? '生成中...' : '🔑 生成 Token' }}
+            <template v-if="!generating"><Icon name="key" :size="14" /> 生成 Token</template><template v-else>生成中...</template>
           </button>
           <div v-if="generatedToken" class="token-output">
             <label class="field-label">生成的 JWT</label>
             <div class="token-box">
               <code class="token-text">{{ generatedToken }}</code>
-              <button class="btn-icon" @click="copyToken(generatedToken)" title="复制">📋</button>
+              <button class="btn-icon" @click="copyToken(generatedToken)" title="复制"><Icon name="clipboard" :size="14" /></button>
             </div>
           </div>
         </div>
 
         <!-- 验证 Token -->
         <div class="test-panel">
-          <h3 class="section-title">🔍 验证 JWT Token</h3>
+          <h3 class="section-title"><Icon name="search" :size="14" /> 验证 JWT Token</h3>
           <div class="config-field">
             <label class="field-label">JWT Token</label>
             <textarea v-model="validateJwt" class="test-input" rows="3" placeholder="粘贴 JWT..."></textarea>
           </div>
           <button class="btn btn-primary btn-sm" @click="validateToken" :disabled="validating || !validateJwt.trim()">
-            {{ validating ? '验证中...' : '🔍 验证' }}
+            <template v-if="!validating"><Icon name="search" :size="14" /> 验证</template><template v-else>验证中...</template>
           </button>
           <div v-if="validateResult" class="validate-output">
             <div class="validate-status" :class="validateResult.valid ? 'valid-yes' : 'valid-no'">
@@ -192,7 +192,7 @@
           </div>
         </div>
         <button class="btn btn-primary" @click="saveGwConfig" :disabled="saving" style="margin-top: var(--space-3)">
-          {{ saving ? '保存中...' : '💾 保存配置' }}
+          <template v-if="!saving"><Icon name="save" :size="14" /> 保存配置</template><template v-else>保存中...</template>
         </button>
         <div v-if="saveMsg" class="save-msg" :class="saveMsgType">{{ saveMsg }}</div>
       </div>

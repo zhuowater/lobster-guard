@@ -2,7 +2,7 @@
   <div class="cache-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">💾 响应缓存</h1>
+        <h1 class="page-title"><Icon name="save" :size="20" /> 响应缓存</h1>
         <p class="page-subtitle">LLM 响应智能缓存 — 节省 Token 开销、降低延迟、支持租户隔离</p>
       </div>
       <button class="btn btn-sm" @click="loadAll">🔄 刷新</button>
@@ -16,7 +16,7 @@
         <div class="stat-label">缓存条目</div>
       </div>
       <div class="stat-card stat-hit">
-        <div class="stat-icon">🎯</div>
+        <div class="stat-icon"><Icon name="crosshair" :size="18" /></div>
         <div class="stat-value">{{ stats.hit_rate != null ? (stats.hit_rate * 100).toFixed(1) + '%' : '-' }}</div>
         <div class="stat-label">命中率</div>
       </div>
@@ -35,9 +35,9 @@
     <!-- Tab 切换 -->
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'entries' }" @click="activeTab = 'entries'">📦 缓存条目 ({{ entries.length }})</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'lookup' }" @click="activeTab = 'lookup'">🔍 测试查询</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'lookup' }" @click="activeTab = 'lookup'"><Icon name="search" :size="14" /> 测试查询</button>
       <button class="tab-btn" :class="{ active: activeTab === 'manage' }" @click="activeTab = 'manage'">🗑️ 管理</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'">⚙️ 配置</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'"><Icon name="settings" :size="14" /> 配置</button>
     </div>
 
     <!-- 缓存条目表格 -->
@@ -89,7 +89,7 @@
         </div>
         <button class="btn btn-primary" @click="lookupCache" :disabled="looking || !lookupQuery.trim()" style="margin-top: var(--space-2)">
           <span v-if="looking" class="spinner"></span>
-          {{ looking ? '查询中...' : '🔍 查询缓存' }}
+          <template v-if="!looking"><Icon name="search" :size="14" /> 查询缓存</template><template v-else>查询中...</template>
         </button>
       </div>
 
@@ -154,7 +154,7 @@
           </label>
         </div>
         <button class="btn btn-primary" @click="saveConfig" :disabled="saving" style="margin-top: var(--space-3)">
-          {{ saving ? '保存中...' : '💾 保存配置' }}
+          <template v-if="!saving"><Icon name="save" :size="14" /> 保存配置</template><template v-else>保存中...</template>
         </button>
         <div v-if="saveMsg" class="save-msg" :class="saveMsgType">{{ saveMsg }}</div>
       </div>

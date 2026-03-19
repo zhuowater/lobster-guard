@@ -58,7 +58,7 @@
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'recommend' }" @click="activeTab = 'recommend'">🎯 推荐放置</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'recommend' }" @click="activeTab = 'recommend'"><Icon name="crosshair" :size="14" /> 推荐放置</button>
       <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'"><Icon name="settings" :size="14" /> 配置控制</button>
       <button class="tab-btn" :class="{ active: activeTab === 'loyalty' }" @click="activeTab = 'loyalty'">🕵️ 忠诚度排行</button>
     </div>

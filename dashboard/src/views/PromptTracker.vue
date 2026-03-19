@@ -63,7 +63,7 @@
     <!-- 版本历史列表 -->
     <div class="card" v-if="versions.length" style="margin-top: 16px;">
       <div class="card-header">
-        <span class="card-icon">📋</span>
+        <span class="card-icon"><Icon name="clipboard" :size="14" /></span>
         <span class="card-title">版本历史</span>
         <span class="version-count">共 {{ versions.length }} 个版本</span>
       </div>

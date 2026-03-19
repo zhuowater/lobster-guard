@@ -2,7 +2,7 @@
   <div class="users-page">
     <div class="page-header">
       <div class="page-header-left">
-        <h1 class="page-title">👥 用户管理</h1>
+        <h1 class="page-title"><Icon name="users" :size="20" /> 用户管理</h1>
         <p class="page-desc">管理系统用户账号、角色和权限</p>
       </div>
       <button class="btn-primary" @click="openCreate">
@@ -140,7 +140,7 @@
     <Transition name="modal-fade">
       <div class="modal-overlay" v-if="showPwdModal" @click.self="closePwdModal">
         <div class="modal-content modal-sm">
-          <h3 class="modal-title">🔑 重置密码</h3>
+          <h3 class="modal-title"><Icon name="key" :size="16" /> 重置密码</h3>
           <p class="modal-desc">为用户 <strong>{{ pwdTarget?.username }}</strong> 设置新密码</p>
 
           <div class="form-group">

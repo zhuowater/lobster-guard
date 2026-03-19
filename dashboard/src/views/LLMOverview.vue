@@ -83,7 +83,7 @@
         <span class="llm-insight-label">蜜罐触发</span>
       </div>
       <div class="llm-insight-card" @click="router.push('/ab-testing')">
-        <span class="llm-insight-icon">🔬</span>
+        <span class="llm-insight-icon"><Icon name="microscope" :size="16" /></span>
         <span class="llm-insight-num">{{ llmSummary.ab_testing?.active_tests || 0 }} / {{ llmSummary.ab_testing?.total_tests || 0 }}</span>
         <span class="llm-insight-label">A/B 测试</span>
       </div>
@@ -93,7 +93,7 @@
         <span class="llm-insight-label">攻击链</span>
       </div>
       <div class="llm-insight-card" @click="router.push('/behavior')">
-        <span class="llm-insight-icon">🧠</span>
+        <span class="llm-insight-icon"><Icon name="brain" :size="16" /></span>
         <span class="llm-insight-num" :class="(llmSummary.behavior?.high_risk||0)>0?'llm-insight-warn':''">{{ llmSummary.behavior?.anomaly_count || 0 }}</span>
         <span class="llm-insight-label">行为异常</span>
       </div>
@@ -234,7 +234,7 @@
 
     <!-- 安全洞察 -->
     <div class="card" v-if="llmSummaryLoaded" style="margin-top:16px">
-      <div class="card-header"><span class="card-icon">🔍</span><span class="card-title">安全洞察</span></div>
+      <div class="card-header"><span class="card-icon"><Icon name="search" :size="16" /></span><span class="card-title">安全洞察</span></div>
       <div class="llm-insight-grid">
         <div class="llm-insight-card" @click="router.push('/honeypot')">
           <span class="llm-insight-icon">🍯</span>
@@ -245,11 +245,11 @@
           <div><div class="llm-insight-val">{{ llmSummary.attack_chains?.active_chains || 0 }}</div><div class="llm-insight-label">攻击链 · {{ llmSummary.attack_chains?.critical_chains || 0 }} 高危</div></div>
         </div>
         <div class="llm-insight-card" @click="router.push('/ab-testing')">
-          <span class="llm-insight-icon">🔬</span>
+          <span class="llm-insight-icon"><Icon name="microscope" :size="16" /></span>
           <div><div class="llm-insight-val">{{ llmSummary.ab_testing?.active_tests || 0 }}</div><div class="llm-insight-label">A/B 测试进行中</div></div>
         </div>
         <div class="llm-insight-card" @click="router.push('/behavior')">
-          <span class="llm-insight-icon">🧠</span>
+          <span class="llm-insight-icon"><Icon name="brain" :size="16" /></span>
           <div><div class="llm-insight-val">{{ llmSummary.behavior?.anomaly_count || 0 }}</div><div class="llm-insight-label">行为突变 · {{ llmSummary.behavior?.high_risk || 0 }} 高风险</div></div>
         </div>
       </div>

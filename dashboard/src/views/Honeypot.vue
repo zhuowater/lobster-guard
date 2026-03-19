@@ -102,7 +102,7 @@
         </div>
         <div v-if="testResult" class="test-result" :class="{ triggered: testResult.triggered }">
           <div v-if="testResult.triggered" class="test-hit">
-            <div class="test-hit-title">🎯 蜜罐已触发！</div>
+            <div class="test-hit-title"><Icon name="crosshair" :size="14" /> 蜜罐已触发！</div>
             <div class="test-row"><span>匹配模板:</span> <strong>{{ testResult.template_name }}</strong></div>
             <div class="test-row"><span>触发类型:</span> <span class="badge">{{ testResult.trigger_type }}</span></div>
             <div class="test-row"><span>响应类型:</span> <span class="badge badge-alt">{{ testResult.response_type }}</span></div>

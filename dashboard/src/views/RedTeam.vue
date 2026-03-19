@@ -3,7 +3,7 @@
     <!-- 页头 -->
     <div class="page-header">
       <div>
-        <h1 class="page-title">🎯 Red Team Autopilot</h1>
+        <h1 class="page-title"><Icon name="crosshair" :size="20" /> Red Team Autopilot</h1>
         <p class="page-subtitle">自动化安全测试 — 龙虾卫士打自己</p>
       </div>
       <button class="btn btn-primary" @click="runTest" :disabled="running">
@@ -87,7 +87,7 @@
               <span class="severity-badge" :class="'sev-' + v.severity">{{ v.severity }}</span>
             </div>
             <div class="vuln-desc">{{ v.description }}</div>
-            <div class="vuln-suggestion" v-if="v.suggestion">💡 {{ v.suggestion }}</div>
+            <div class="vuln-suggestion" v-if="v.suggestion"><Icon name="info" :size="14" /> {{ v.suggestion }}</div>
             <a class="vuln-fix-link" @click.stop="$router.push(v.category && v.category.startsWith('LLM') ? '/llm-rules' : '/rules')"><Icon name="wrench" :size="12" /> 前往规则页修复 →</a>
           </div>
         </div>
@@ -95,7 +95,7 @@
 
       <!-- 建议 -->
       <div class="rec-section" v-if="latestReport.recommendations && latestReport.recommendations.length > 0">
-        <h3 class="section-title">💡 建议</h3>
+        <h3 class="section-title"><Icon name="info" :size="14" /> 建议</h3>
         <ul class="rec-list">
           <li v-for="(rec, idx) in latestReport.recommendations" :key="idx">{{ rec }}</li>
         </ul>
@@ -139,7 +139,7 @@
 
     <!-- 无数据 -->
     <div class="empty-state" v-else-if="!loading">
-      <div class="empty-icon">🎯</div>
+      <div class="empty-icon"><Icon name="crosshair" :size="48" /></div>
       <div class="empty-text">尚未运行红队测试</div>
       <div class="empty-sub">点击「开始测试」运行第一次安全扫描</div>
     </div>

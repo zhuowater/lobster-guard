@@ -3,7 +3,7 @@
     <!-- 标题栏 -->
     <div class="page-header">
       <div class="header-left">
-        <h1 class="page-title">🏆 安全排行榜</h1>
+        <h1 class="page-title"><Icon name="trophy" :size="20" /> 安全排行榜</h1>
         <span class="page-subtitle">租户安全态势全局视图</span>
       </div>
       <div class="header-right">

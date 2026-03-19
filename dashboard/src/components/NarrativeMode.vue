@@ -45,7 +45,7 @@
             </div>
             <div v-if="reviewMode && event._action === 'pass' && !event._expanded" class="review-reason">
               <span class="reason-tag" v-if="event.matched_rules">📏 规则匹配: {{ event.matched_rules }}</span>
-              <span class="reason-tag" v-if="event.semantic_score != null">🧠 语义分: {{ event.semantic_score }}</span>
+              <span class="reason-tag" v-if="event.semantic_score != null"><Icon name="brain" :size="12" /> 语义分: {{ event.semantic_score }}</span>
               <span class="reason-tag" v-if="event.user_risk_score != null">👤 用户画像: {{ event.user_risk_score }}</span>
               <span class="reason-tag" v-if="!event.matched_rules && event.semantic_score == null && event.user_risk_score == null">✅ 默认放行</span>
             </div>
