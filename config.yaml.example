@@ -762,3 +762,15 @@ api_gateway:
   apikey_enabled: true
   api_keys:
     - "your-api-key-change-me"  # API Key，必须更改！
+
+# v21.0 K8s 服务发现
+discovery:
+  kubernetes:
+    enabled: false
+    kubeconfig: ""              # 空字符串 = InCluster 模式；填路径则用 kubeconfig 文件
+    namespace: "default"        # 目标 namespace
+    service: "my-gateway"       # Service 名称
+    port_name: "gateway"        # 端口名（Endpoints 中端口的名称），默认 "gateway"
+    label_selector: ""          # 可选，Pod 标签选择器（预留）
+    sync_interval: 15           # 同步间隔秒数
+    insecure_skip_verify: false # 跳过 TLS 证书验证（仅开发环境）

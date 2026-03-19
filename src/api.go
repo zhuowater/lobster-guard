@@ -147,6 +147,8 @@ type ManagementAPI struct {
 	llmCache *LLMCache
 	// v20.4 API Gateway
 	apiGateway *APIGateway
+	// v21.0 K8s 服务发现
+	k8sDiscovery *K8sDiscovery
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -329,6 +331,20 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/api/v1/upstreams" && method == "GET":
 		api.handleListUpstreams(w, r)
+	case path == "/api/v1/upstreams" && method == "POST":
+		api.handleCreateUpstream(w, r)
+	// v21.0: 上游 CRUD（带 ID 的路由必须在 health-check 之后匹配）
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/health-check") && method == "POST":
+		api.handleUpstreamHealthCheck(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && method == "PUT":
+		api.handleUpdateUpstream(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && method == "DELETE":
+		api.handleDeleteUpstream(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && method == "GET":
+		api.handleGetUpstream(w, r)
+	// v21.0: K8s 发现状态 API
+	case path == "/api/v1/discovery/status" && method == "GET":
+		api.handleDiscoveryStatus(w, r)
 	case path == "/api/v1/routes" && method == "GET":
 		api.handleListRoutes(w, r)
 	case path == "/api/v1/routes/bind" && method == "POST":
@@ -1135,6 +1151,176 @@ func (api *ManagementAPI) handleListUpstreams(w http.ResponseWriter, r *http.Req
 		"upstreams": list, "total": len(upstreams),
 		"healthy": healthyCount, "total_users": totalUsers,
 	})
+}
+
+// ============================================================
+// v21.0 上游 CRUD API
+// ============================================================
+
+// handleCreateUpstream POST /api/v1/upstreams — 创建上游（RESTful 等价于 register）
+func (api *ManagementAPI) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID      string            `json:"id"`
+		Address string            `json:"address"`
+		Port    int               `json:"port"`
+		Tags    map[string]string `json:"tags"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.ID == "" || req.Address == "" || req.Port <= 0 {
+		jsonResponse(w, 400, map[string]string{"error": "id, address, port 均为必填"})
+		return
+	}
+	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[上游CRUD] 创建上游: %s -> %s:%d", req.ID, req.Address, req.Port)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":  "created",
+		"id":      req.ID,
+		"address": req.Address,
+		"port":    req.Port,
+	})
+}
+
+// handleGetUpstream GET /api/v1/upstreams/{id} — 获取单个上游详情
+func (api *ManagementAPI) handleGetUpstream(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/upstreams/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	up, ok := api.pool.GetUpstream(id)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"id": up.ID, "address": up.Address, "port": up.Port,
+		"healthy": up.Healthy, "user_count": up.UserCount, "static": up.Static,
+		"registered_at":  up.RegisteredAt.Format(time.RFC3339),
+		"last_heartbeat": up.LastHeartbeat.Format(time.RFC3339),
+		"tags": up.Tags, "load": up.Load,
+	})
+}
+
+// handleUpdateUpstream PUT /api/v1/upstreams/{id} — 更新上游
+func (api *ManagementAPI) handleUpdateUpstream(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/upstreams/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	var req struct {
+		Address string            `json:"address"`
+		Port    int               `json:"port"`
+		Tags    map[string]string `json:"tags"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := api.pool.Update(id, req.Address, req.Port, req.Tags); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[上游CRUD] 更新上游: %s", id)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "updated",
+		"id":     id,
+	})
+}
+
+// handleDeleteUpstream DELETE /api/v1/upstreams/{id} — 删除上游
+func (api *ManagementAPI) handleDeleteUpstream(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/upstreams/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	up, ok := api.pool.GetUpstream(id)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
+		return
+	}
+
+	// 静态上游不可删除
+	if up.Static {
+		jsonResponse(w, 403, map[string]string{"error": "静态上游不可删除，请修改配置文件"})
+		return
+	}
+
+	// K8s 发现的上游可以删除，但给出提示
+	warning := ""
+	if up.Tags != nil && up.Tags["source"] == "k8s" {
+		warning = "此上游由 K8s 自动管理，手动删除后可能会被重新发现"
+	}
+
+	api.pool.ForceDeregister(id)
+	log.Printf("[上游CRUD] 删除上游: %s", id)
+
+	resp := map[string]interface{}{
+		"status": "deleted",
+		"id":     id,
+	}
+	if warning != "" {
+		resp["warning"] = warning
+	}
+	jsonResponse(w, 200, resp)
+}
+
+// handleUpstreamHealthCheck POST /api/v1/upstreams/{id}/health-check — 手动触发健康检查
+func (api *ManagementAPI) handleUpstreamHealthCheck(w http.ResponseWriter, r *http.Request) {
+	// 从 URL 提取 id: /api/v1/upstreams/{id}/health-check
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/upstreams/")
+	id := strings.TrimSuffix(path, "/health-check")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	up, ok := api.pool.GetUpstream(id)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
+		return
+	}
+
+	// 执行 HTTP 健康检查
+	addr := fmt.Sprintf("http://%s:%d/healthz", up.Address, up.Port)
+	client := &http.Client{Timeout: 5 * time.Second}
+	start := time.Now()
+	resp, err := client.Get(addr)
+	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+
+	result := map[string]interface{}{
+		"id":         id,
+		"address":    addr,
+		"latency_ms": latencyMs,
+	}
+
+	if err != nil {
+		result["healthy"] = false
+		result["error"] = err.Error()
+	} else {
+		resp.Body.Close()
+		result["healthy"] = resp.StatusCode >= 200 && resp.StatusCode < 400
+		result["status_code"] = resp.StatusCode
+	}
+
+	jsonResponse(w, 200, result)
+}
+
+// ============================================================
+// v21.0 K8s 发现状态 API
+// ============================================================
+
+// handleDiscoveryStatus GET /api/v1/discovery/status — 返回 K8s 发现状态
+func (api *ManagementAPI) handleDiscoveryStatus(w http.ResponseWriter, r *http.Request) {
+	if api.k8sDiscovery == nil {
+		jsonResponse(w, 200, K8sDiscoveryStatus{
+			Enabled: api.cfg.Discovery.Kubernetes.Enabled,
+		})
+		return
+	}
+	jsonResponse(w, 200, api.k8sDiscovery.Status())
 }
 
 func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Request) {
@@ -3246,7 +3432,32 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 		chainDeleted = api.attackChainEng.ClearDemoData()
 	}
 
-	log.Printf("[Demo] 清除了 %d 条审计数据, %d 条 LLM 数据, %d 条 Prompt 版本, %d+%d 蜜罐数据, %d A/B 测试, %d 行为画像, %d 攻击链", deleted, llmDeleted, promptDeleted, hpTplDeleted, hpTrigDeleted, abDeleted, bpDeleted, chainDeleted)
+	// v20.5: 清除所有 Phase 1 新增表数据
+	clearCount := func(table string) int64 {
+		res, err := al.db.Exec("DELETE FROM " + table)
+		if err != nil {
+			return 0
+		}
+		n, _ := res.RowsAffected()
+		return n
+	}
+
+	envelopesDeleted := clearCount("execution_envelopes")
+	merkleDeleted := clearCount("merkle_batches")
+	eventsDeleted := clearCount("security_events")
+	deliveriesDeleted := clearCount("event_deliveries")
+	evolutionDeleted := clearCount("evolution_log")
+	redteamDeleted := clearCount("redteam_reports")
+	reportsDeleted := clearCount("reports")
+	gatewayLogDeleted := clearCount("gateway_log")
+	cacheDeleted := clearCount("llm_cache")
+	decisionDeleted := clearCount("decision_outcomes")
+	hpInterDeleted := clearCount("honeypot_interactions")
+	opAuditDeleted := clearCount("op_audit_log")
+
+	log.Printf("[Demo] 清除了 audit=%d llm=%d prompt=%d honeypot=%d+%d ab=%d behavior=%d chain=%d envelope=%d merkle=%d events=%d evolution=%d redteam=%d reports=%d gateway=%d cache=%d decision=%d opaudit=%d",
+		deleted, llmDeleted, promptDeleted, hpTplDeleted, hpTrigDeleted, abDeleted, bpDeleted, chainDeleted,
+		envelopesDeleted, merkleDeleted, eventsDeleted, evolutionDeleted, redteamDeleted, reportsDeleted, gatewayLogDeleted, cacheDeleted, decisionDeleted, opAuditDeleted)
 	jsonResponse(w, 200, map[string]interface{}{
 		"ok":                     true,
 		"deleted":                deleted,
@@ -3257,6 +3468,18 @@ func (api *ManagementAPI) handleDemoClear(w http.ResponseWriter, r *http.Request
 		"ab_tests_deleted":       abDeleted,
 		"behavior_deleted":       bpDeleted,
 		"chain_deleted":          chainDeleted,
+		"envelopes_deleted":      envelopesDeleted,
+		"merkle_deleted":         merkleDeleted,
+		"events_deleted":         eventsDeleted,
+		"deliveries_deleted":     deliveriesDeleted,
+		"evolution_deleted":      evolutionDeleted,
+		"redteam_deleted":        redteamDeleted,
+		"reports_deleted":        reportsDeleted,
+		"gateway_log_deleted":    gatewayLogDeleted,
+		"cache_deleted":          cacheDeleted,
+		"decision_deleted":       decisionDeleted,
+		"hp_interactions_deleted": hpInterDeleted,
+		"op_audit_deleted":       opAuditDeleted,
 	})
 }
 

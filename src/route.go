@@ -182,6 +182,39 @@ func (pool *UpstreamPool) Deregister(id string) {
 	}
 }
 
+// Update 更新已有上游的地址、端口、tags（v21.0 上游 CRUD）
+func (pool *UpstreamPool) Update(id, address string, port int, tags map[string]string) error {
+	pool.mu.Lock(); defer pool.mu.Unlock()
+	up, ok := pool.upstreams[id]
+	if !ok { return fmt.Errorf("上游 %s 不存在", id) }
+	if address != "" { up.Address = address }
+	if port > 0 { up.Port = port }
+	if tags != nil { up.Tags = tags }
+	up.proxy = createReverseProxy(up.Address, up.Port)
+	pool.saveUpstreamToDB(id)
+	log.Printf("[上游池] 更新上游: %s -> %s:%d", id, up.Address, up.Port)
+	return nil
+}
+
+// GetUpstream 获取单个上游详情（v21.0 上游 CRUD）
+func (pool *UpstreamPool) GetUpstream(id string) (*Upstream, bool) {
+	pool.mu.RLock(); defer pool.mu.RUnlock()
+	up, ok := pool.upstreams[id]
+	if !ok { return nil, false }
+	copy := *up
+	return &copy, true
+}
+
+// ForceDeregister 强制注销上游（包括静态上游，K8s 发现的也可以手动删除）
+func (pool *UpstreamPool) ForceDeregister(id string) bool {
+	pool.mu.Lock(); defer pool.mu.Unlock()
+	if _, ok := pool.upstreams[id]; !ok { return false }
+	delete(pool.upstreams, id)
+	if pool.db != nil { pool.db.Exec(`DELETE FROM upstreams WHERE id = ?`, id) }
+	log.Printf("[上游池] 强制注销上游: %s", id)
+	return true
+}
+
 // GetProxy 获取指定上游的反向代理
 func (pool *UpstreamPool) GetProxy(id string) *httputil.ReverseProxy {
 	pool.mu.RLock(); defer pool.mu.RUnlock()

@@ -668,7 +668,24 @@ func main() {
 		llmProxy.apiGateway = apiGateway
 	}
 
+	// v21.0: K8s 服务发现
+	var k8sDiscovery *K8sDiscovery
+	if cfg.Discovery.Kubernetes.Enabled {
+		var err error
+		k8sDiscovery, err = NewK8sDiscovery(cfg, pool)
+		if err != nil {
+			log.Printf("[K8s发现] ⚠️ 初始化失败（将继续运行但不启用发现）: %v", err)
+		} else {
+			fmt.Printf("[初始化] ✅ K8s 服务发现: namespace=%s, service=%s, interval=%ds\n",
+				cfg.Discovery.Kubernetes.Namespace, cfg.Discovery.Kubernetes.Service,
+				func() int { if cfg.Discovery.Kubernetes.SyncInterval > 0 { return cfg.Discovery.Kubernetes.SyncInterval }; return 15 }())
+		}
+	} else {
+		fmt.Println("[初始化] ⚠️ K8s 服务发现: 未启用")
+	}
+
 	mgmtAPI.honeypotDeep = honeypotDeep
+	mgmtAPI.k8sDiscovery = k8sDiscovery // v21.0
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector
 	inbound.semanticDetector = semanticDetector
@@ -693,6 +710,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go pool.HealthCheck(ctx)
+	// v21.0: 启动 K8s 服务发现
+	if k8sDiscovery != nil {
+		go k8sDiscovery.Run(ctx)
+	}
 	if inbound.limiter != nil { go inbound.limiter.startCleanup(ctx) }
 
 	// v18.0: 启动后台调度器

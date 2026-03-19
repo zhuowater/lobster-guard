@@ -231,6 +231,25 @@ type Config struct {
 	LLMCache LLMCacheConfig `yaml:"llm_cache"`
 	// v20.4 API Gateway
 	APIGateway APIGatewayConfig `yaml:"api_gateway"`
+	// v21.0 K8s 服务发现
+	Discovery DiscoveryConfig `yaml:"discovery" json:"discovery"`
+}
+
+// DiscoveryConfig K8s 服务发现配置（v21.0）
+type DiscoveryConfig struct {
+	Kubernetes K8sDiscoveryConfig `yaml:"kubernetes" json:"kubernetes"`
+}
+
+// K8sDiscoveryConfig K8s 发现具体配置
+type K8sDiscoveryConfig struct {
+	Enabled            bool   `yaml:"enabled" json:"enabled"`
+	Kubeconfig         string `yaml:"kubeconfig" json:"kubeconfig"`                   // 空字符串 = InCluster 模式
+	Namespace          string `yaml:"namespace" json:"namespace"`                     // 目标 namespace
+	Service            string `yaml:"service" json:"service"`                         // Service 名称
+	PortName           string `yaml:"port_name" json:"port_name"`                     // 端口名，默认 "gateway"
+	LabelSelector      string `yaml:"label_selector" json:"label_selector"`           // 可选，Pod 标签选择器
+	SyncInterval       int    `yaml:"sync_interval" json:"sync_interval"`             // 同步间隔秒数，默认 15
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify" json:"insecure_skip_verify"` // 跳过 TLS 验证（开发用）
 }
 
 // EventBusConfig 事件总线配置（v18.1）
