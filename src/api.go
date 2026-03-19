@@ -231,7 +231,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
 
 	// Dashboard 静态文件（无需鉴权，页面内输入 Token）
-	if path == "/" || path == "/dashboard" || strings.HasPrefix(path, "/assets/") {
+	if path == "/" || path == "/dashboard" || strings.HasPrefix(path, "/assets/") ||
+		path == "/favicon.svg" || path == "/favicon.ico" || path == "/favicon-32.png" || path == "/apple-touch-icon.png" {
 		getDashboardHandler().ServeHTTP(w, r)
 		return
 	}
