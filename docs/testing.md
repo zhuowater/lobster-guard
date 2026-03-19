@@ -118,7 +118,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 | 内存占用 | < 80MB |
 | 二进制大小 | ~19MB |
 | Dashboard 加载 | < 10KB (gzip) |
-| 测试用例 | 754 (~25s) |
+| 测试用例 | 930 (~30s) |
 
 - 规则引擎基于 **Aho-Corasick 算法**，O(n) 时间复杂度，文本长度无关
 - SQLite **WAL 模式**，支持并发读写

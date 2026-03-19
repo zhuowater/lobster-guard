@@ -1,5 +1,5 @@
 # lobster-guard Dockerfile — 多阶段构建
-# v18.2 工程化基础
+# v20.4 全功能版本
 
 # Stage 1: Build Vue Dashboard
 FROM node:22-alpine AS frontend

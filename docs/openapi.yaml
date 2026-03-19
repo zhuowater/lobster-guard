@@ -5,7 +5,7 @@ info:
     AI Agent 安全网关 — 管理 API 规范文档。
     所有 `/api/v1/` 端点需要 JWT Token 或 management_token 认证。
     认证方式：`Authorization: Bearer <token>`
-  version: 18.2.0
+  version: 20.4.0
   contact:
     name: Lobster Guard Team
   license:
@@ -264,6 +264,26 @@ tags:
     description: 多租户管理
   - name: 系统 (System)
     description: 健康检查、配置、诊断、指标
+  - name: 自适应决策 (Adaptive)
+    description: 贝叶斯自适应决策引擎
+  - name: 奇点蜜罐 (Singularity)
+    description: 拓扑预算蜜罐系统
+  - name: 自进化 (Evolution)
+    description: 对抗性自进化引擎
+  - name: 语义检测 (Semantic)
+    description: 四维语义检测引擎
+  - name: 深度交互 (HoneypotDeep)
+    description: 蜜罐深度交互与忠诚度
+  - name: 工具策略 (Tools)
+    description: 工具调用策略引擎
+  - name: 污染追踪 (Taint)
+    description: PII 污染追踪与血缘
+  - name: 污染逆转 (Reversal)
+    description: 污染逆转引擎
+  - name: LLM 缓存 (Cache)
+    description: LLM 语义缓存
+  - name: API 网关 (Gateway)
+    description: JWT/APIKey 网关路由
 
 paths:
   # ============================================================
@@ -1305,3 +1325,521 @@ paths:
             application/json:
               schema:
                 type: object
+
+  # ============================================================
+  # Phase 1 新增 API (v18-v20)
+  # ============================================================
+
+  # --- 自适应决策 (v18.3) ---
+  /api/v1/adaptive/stats:
+    get:
+      tags: [自适应决策 (Adaptive)]
+      summary: 自适应决策统计
+      responses:
+        '200':
+          description: 决策统计数据
+
+  /api/v1/adaptive/config:
+    get:
+      tags: [自适应决策 (Adaptive)]
+      summary: 获取决策配置
+      responses:
+        '200':
+          description: 决策配置
+    put:
+      tags: [自适应决策 (Adaptive)]
+      summary: 更新决策配置
+      responses:
+        '200':
+          description: 更新成功
+
+  /api/v1/adaptive/feedback:
+    post:
+      tags: [自适应决策 (Adaptive)]
+      summary: 提交误伤/漏报反馈
+      responses:
+        '200':
+          description: 反馈已记录
+
+  /api/v1/adaptive/proof/{id}:
+    get:
+      tags: [自适应决策 (Adaptive)]
+      summary: 获取决策证明
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 决策证明
+
+  # --- 奇点蜜罐 (v18.3) ---
+  /api/v1/singularity/budget:
+    get:
+      tags: [奇点蜜罐 (Singularity)]
+      summary: 拓扑预算概览
+      responses:
+        '200':
+          description: 欧拉χ拓扑预算数据
+
+  /api/v1/singularity/recommend:
+    get:
+      tags: [奇点蜜罐 (Singularity)]
+      summary: 推荐蜜罐放置点
+      responses:
+        '200':
+          description: 推荐放置列表
+
+  /api/v1/singularity/config:
+    get:
+      tags: [奇点蜜罐 (Singularity)]
+      summary: 获取奇点配置
+      responses:
+        '200':
+          description: 奇点配置
+    put:
+      tags: [奇点蜜罐 (Singularity)]
+      summary: 更新奇点配置
+      responses:
+        '200':
+          description: 更新成功
+
+  /api/v1/singularity/history:
+    get:
+      tags: [奇点蜜罐 (Singularity)]
+      summary: 奇点蜜罐历史记录
+      responses:
+        '200':
+          description: 历史记录
+
+  /api/v1/singularity/templates:
+    get:
+      tags: [奇点蜜罐 (Singularity)]
+      summary: 蜜罐模板列表
+      responses:
+        '200':
+          description: 模板列表
+
+  # --- 对抗性自进化 (v19.0) ---
+  /api/v1/evolution/stats:
+    get:
+      tags: [自进化 (Evolution)]
+      summary: 进化引擎统计
+      responses:
+        '200':
+          description: 进化统计数据
+
+  /api/v1/evolution/log:
+    get:
+      tags: [自进化 (Evolution)]
+      summary: 进化日志
+      responses:
+        '200':
+          description: 进化日志列表
+
+  /api/v1/evolution/run:
+    post:
+      tags: [自进化 (Evolution)]
+      summary: 手动运行一轮进化
+      responses:
+        '200':
+          description: 进化结果
+
+  /api/v1/evolution/strategies:
+    get:
+      tags: [自进化 (Evolution)]
+      summary: 变异策略列表
+      responses:
+        '200':
+          description: 6个变异策略
+
+  /api/v1/evolution/config:
+    get:
+      tags: [自进化 (Evolution)]
+      summary: 获取进化配置
+      responses:
+        '200':
+          description: 进化配置
+    put:
+      tags: [自进化 (Evolution)]
+      summary: 更新进化配置
+      responses:
+        '200':
+          description: 更新成功
+
+  # --- 语义检测 (v19.1) ---
+  /api/v1/semantic/stats:
+    get:
+      tags: [语义检测 (Semantic)]
+      summary: 语义检测统计
+      responses:
+        '200':
+          description: 语义统计数据
+
+  /api/v1/semantic/analyze:
+    post:
+      tags: [语义检测 (Semantic)]
+      summary: 实时语义分析
+      responses:
+        '200':
+          description: 四维分析结果
+
+  /api/v1/semantic/patterns:
+    get:
+      tags: [语义检测 (Semantic)]
+      summary: 攻击模式库
+      responses:
+        '200':
+          description: 47个攻击模式
+
+  /api/v1/semantic/config:
+    get:
+      tags: [语义检测 (Semantic)]
+      summary: 获取语义配置
+      responses:
+        '200':
+          description: 语义配置
+    put:
+      tags: [语义检测 (Semantic)]
+      summary: 更新语义配置
+      responses:
+        '200':
+          description: 更新成功
+
+  # --- 蜜罐深度交互 (v19.2) ---
+  /api/v1/honeypot/deep/stats:
+    get:
+      tags: [深度交互 (HoneypotDeep)]
+      summary: 深度交互统计
+      responses:
+        '200':
+          description: 深度交互统计数据
+
+  /api/v1/honeypot/loyalty:
+    get:
+      tags: [深度交互 (HoneypotDeep)]
+      summary: 忠诚度排行
+      responses:
+        '200':
+          description: 攻击者忠诚度排行
+
+  /api/v1/honeypot/loyalty/{id}:
+    get:
+      tags: [深度交互 (HoneypotDeep)]
+      summary: 单个攻击者详情
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 攻击者忠诚度详情
+
+  /api/v1/honeypot/deep/record:
+    post:
+      tags: [深度交互 (HoneypotDeep)]
+      summary: 记录深度交互
+      responses:
+        '200':
+          description: 记录成功
+
+  # --- 工具策略 (v20.0) ---
+  /api/v1/tools/stats:
+    get:
+      tags: [工具策略 (Tools)]
+      summary: 工具策略统计
+      responses:
+        '200':
+          description: 策略统计数据
+
+  /api/v1/tools/evaluate:
+    post:
+      tags: [工具策略 (Tools)]
+      summary: 实时工具调用评估
+      responses:
+        '200':
+          description: 评估结果
+
+  /api/v1/tools/rules:
+    get:
+      tags: [工具策略 (Tools)]
+      summary: 获取工具规则列表
+      responses:
+        '200':
+          description: 18条规则
+    post:
+      tags: [工具策略 (Tools)]
+      summary: 创建工具规则
+      responses:
+        '200':
+          description: 创建成功
+    put:
+      tags: [工具策略 (Tools)]
+      summary: 更新工具规则
+      responses:
+        '200':
+          description: 更新成功
+    delete:
+      tags: [工具策略 (Tools)]
+      summary: 删除工具规则
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/v1/tools/events:
+    get:
+      tags: [工具策略 (Tools)]
+      summary: 工具事件日志
+      responses:
+        '200':
+          description: 事件日志列表
+
+  /api/v1/tools/config:
+    get:
+      tags: [工具策略 (Tools)]
+      summary: 获取工具策略配置
+      responses:
+        '200':
+          description: 策略配置
+    put:
+      tags: [工具策略 (Tools)]
+      summary: 更新工具策略配置
+      responses:
+        '200':
+          description: 更新成功
+
+  # --- 污染追踪 (v20.1) ---
+  /api/v1/taint/stats:
+    get:
+      tags: [污染追踪 (Taint)]
+      summary: 污染追踪统计
+      responses:
+        '200':
+          description: 污染统计数据
+
+  /api/v1/taint/scan:
+    post:
+      tags: [污染追踪 (Taint)]
+      summary: 实时污染扫描
+      responses:
+        '200':
+          description: 扫描结果
+
+  /api/v1/taint/active:
+    get:
+      tags: [污染追踪 (Taint)]
+      summary: 活跃污染列表
+      responses:
+        '200':
+          description: 活跃污染记录
+
+  /api/v1/taint/config:
+    get:
+      tags: [污染追踪 (Taint)]
+      summary: 获取污染配置
+      responses:
+        '200':
+          description: 污染配置
+    put:
+      tags: [污染追踪 (Taint)]
+      summary: 更新污染配置
+      responses:
+        '200':
+          description: 更新成功
+
+  /api/v1/taint/trace/{id}:
+    get:
+      tags: [污染追踪 (Taint)]
+      summary: 污染链详情
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 污染传播链
+
+  # --- 污染逆转 (v20.2) ---
+  /api/v1/reversal/stats:
+    get:
+      tags: [污染逆转 (Reversal)]
+      summary: 逆转统计
+      responses:
+        '200':
+          description: 逆转统计数据
+
+  /api/v1/reversal/records:
+    get:
+      tags: [污染逆转 (Reversal)]
+      summary: 逆转记录列表
+      responses:
+        '200':
+          description: 逆转记录
+
+  /api/v1/reversal/templates:
+    get:
+      tags: [污染逆转 (Reversal)]
+      summary: 逆转模板列表
+      responses:
+        '200':
+          description: 12个逆转模板
+
+  /api/v1/reversal/test:
+    post:
+      tags: [污染逆转 (Reversal)]
+      summary: 测试逆转效果
+      responses:
+        '200':
+          description: 测试结果
+
+  /api/v1/reversal/config:
+    get:
+      tags: [污染逆转 (Reversal)]
+      summary: 获取逆转配置
+      responses:
+        '200':
+          description: 逆转配置
+    put:
+      tags: [污染逆转 (Reversal)]
+      summary: 更新逆转配置
+      responses:
+        '200':
+          description: 更新成功
+
+  # --- LLM 缓存 (v20.3) ---
+  /api/v1/cache/stats:
+    get:
+      tags: [LLM 缓存 (Cache)]
+      summary: 缓存统计
+      responses:
+        '200':
+          description: 缓存命中率/节省数据
+
+  /api/v1/cache/entries:
+    get:
+      tags: [LLM 缓存 (Cache)]
+      summary: 缓存条目列表
+      responses:
+        '200':
+          description: 缓存条目
+    delete:
+      tags: [LLM 缓存 (Cache)]
+      summary: 清除全部缓存
+      responses:
+        '200':
+          description: 清除成功
+
+  /api/v1/cache/lookup:
+    post:
+      tags: [LLM 缓存 (Cache)]
+      summary: 缓存查询测试
+      responses:
+        '200':
+          description: 查询结果
+
+  /api/v1/cache/tenant/{id}:
+    delete:
+      tags: [LLM 缓存 (Cache)]
+      summary: 清除租户缓存
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 清除成功
+
+  /api/v1/cache/config:
+    get:
+      tags: [LLM 缓存 (Cache)]
+      summary: 获取缓存配置
+      responses:
+        '200':
+          description: 缓存配置
+    put:
+      tags: [LLM 缓存 (Cache)]
+      summary: 更新缓存配置
+      responses:
+        '200':
+          description: 更新成功
+
+  # --- API 网关 (v20.4) ---
+  /api/v1/gateway/stats:
+    get:
+      tags: [API 网关 (Gateway)]
+      summary: 网关统计
+      responses:
+        '200':
+          description: 网关统计数据
+
+  /api/v1/gateway/routes:
+    get:
+      tags: [API 网关 (Gateway)]
+      summary: 获取路由列表
+      responses:
+        '200':
+          description: 路由列表
+    post:
+      tags: [API 网关 (Gateway)]
+      summary: 创建路由
+      responses:
+        '200':
+          description: 创建成功
+    put:
+      tags: [API 网关 (Gateway)]
+      summary: 更新路由
+      responses:
+        '200':
+          description: 更新成功
+    delete:
+      tags: [API 网关 (Gateway)]
+      summary: 删除路由
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/v1/gateway/token:
+    post:
+      tags: [API 网关 (Gateway)]
+      summary: 生成 JWT Token
+      responses:
+        '200':
+          description: JWT Token
+
+  /api/v1/gateway/validate:
+    post:
+      tags: [API 网关 (Gateway)]
+      summary: 验证 JWT Token
+      responses:
+        '200':
+          description: 验证结果
+
+  /api/v1/gateway/log:
+    get:
+      tags: [API 网关 (Gateway)]
+      summary: 网关访问日志
+      responses:
+        '200':
+          description: 日志列表
+
+  /api/v1/gateway/config:
+    get:
+      tags: [API 网关 (Gateway)]
+      summary: 获取网关配置
+      responses:
+        '200':
+          description: 网关配置
+    put:
+      tags: [API 网关 (Gateway)]
+      summary: 更新网关配置
+      responses:
+        '200':
+          description: 更新成功

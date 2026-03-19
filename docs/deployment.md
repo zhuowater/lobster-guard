@@ -72,9 +72,47 @@ docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
 
 ```bash
 make build      # 编译
-make test       # 运行测试（754 个用例）
+make test       # 运行测试（930 个用例）
 make install    # 安装到系统
 make healthz    # 检查健康状态
 make stats      # 查看统计
 make logs       # 查看审计日志
 ```
+
+## Phase 1 部署注意事项 (v18-v20)
+
+### 新增配置要求
+
+v18-v20 引入了多个新引擎，部署时需注意以下配置：
+
+1. **执行信封** — `envelope.hmac_key` 建议显式配置（否则随机生成，重启后变更）
+2. **事件总线** — 如需 Webhook 推送，配置 `event_bus.targets`
+3. **自适应决策** — 默认启用，`adaptive.fp_target` 控制误伤率目标
+4. **对抗性自进化** — `evolution.auto_apply: false`（默认），生产环境建议手动审核
+5. **LLM 缓存** — `llm_cache.tenant_isolation: true` 确保多租户数据隔离
+6. **API 网关** — `api_gateway.jwt_secret` 必须配置（≥32字符）
+7. **污染逆转** — `reversal.auto_reverse: false`（默认），建议先在 warn 模式下观察
+
+### 数据库迁移
+
+v18-v20 自动迁移 SQLite 表结构，无需手动操作。首次启动新版本时会创建以下新表：
+
+- `envelopes` / `merkle_batches` — 执行信封
+- `security_events` / `event_targets` — 事件总线
+- `adaptive_decisions` / `adaptive_feedback` — 自适应决策
+- `evolution_log` / `evolution_rules` — 自进化
+- `semantic_patterns` — 语义检测
+- `honeypot_interactions` / `loyalty_scores` — 深度交互
+- `tool_policy_rules` / `tool_events` — 工具策略
+- `taint_records` / `taint_lineage` — 污染追踪
+- `reversal_records` — 污染逆转
+- `llm_cache` — LLM 缓存
+- `gateway_routes` / `gateway_log` — API 网关
+
+### 资源建议
+
+| 规模 | CPU | 内存 | 磁盘 |
+|------|-----|------|------|
+| 小型 (<100 用户) | 1 核 | 256MB | 1GB |
+| 中型 (100-1000 用户) | 2 核 | 512MB | 5GB |
+| 大型 (>1000 用户) | 4 核 | 1GB | 20GB |
