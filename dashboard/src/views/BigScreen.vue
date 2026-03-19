@@ -1,13 +1,23 @@
 <template>
   <div class="bigscreen" @mousemove="showControls" ref="root">
-    <header class="bs-header">
+    <!-- Mode switch pills (top-right) -->
+    <div class="screen-mode-switch" :class="{ visible: controlsVisible }">
+      <button :class="{ active: screenMode === 'data' }" @click="screenMode = 'data'">📊 数据大屏</button>
+      <button :class="{ active: screenMode === 'map' }" @click="screenMode = 'map'">🗺️ 威胁地图</button>
+      <button class="bs-exit-pill" @click="exitBigScreen" title="退出大屏">✕</button>
+    </div>
+    <!-- Threat Map mode -->
+    <div v-if="screenMode === 'map'" class="threat-map-wrapper">
+      <ThreatMap />
+    </div>
+    <!-- Data dashboard mode -->
+    <header v-if="screenMode === 'data'" class="bs-header">
       <div class="bs-title"><span class="bs-logo">🦞</span><span class="bs-title-text">龙虾卫士 态势感知中心</span></div>
       <div class="bs-header-right">
         <span class="bs-clock">{{ clock }}</span>
-        <button class="bs-exit-btn" :class="{ visible: controlsVisible }" @click="exitBigScreen" title="退出大屏">✕ 退出</button>
       </div>
     </header>
-    <div class="bs-grid">
+    <div v-if="screenMode === 'data'" class="bs-grid">
       <div class="bs-card bs-metric" v-for="m in metrics" :key="m.key">
         <div class="bs-metric-label">{{ m.label }}</div>
         <div class="bs-metric-value" :style="{ color: m.color }"><span class="bs-metric-num">{{ m.display }}</span><span class="bs-metric-unit" v-if="m.unit">{{ m.unit }}</span></div>
@@ -123,8 +133,10 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api.js'
+import ThreatMap from '../components/ThreatMap.vue'
 
 const router = useRouter()
+const screenMode = ref('data')
 const clock = ref('')
 let clockT = null
 function updClock() {
@@ -266,6 +278,16 @@ onUnmounted(()=>{clearInterval(clockT);clearInterval(dataT);clearInterval(carous
 .bs-exit-btn{background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;opacity:0;transition:opacity 0.3s;font-size:0.7rem}
 .bs-exit-btn.visible{opacity:1}
 .bs-exit-btn:hover{background:rgba(239,68,68,0.3)}
+
+/* Mode switch pills */
+.screen-mode-switch{position:fixed;top:12px;right:16px;z-index:10001;display:flex;gap:2px;background:rgba(10,10,25,0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(99,102,241,0.2);border-radius:20px;padding:3px;opacity:0;transition:opacity 0.3s}
+.screen-mode-switch.visible{opacity:1}
+.screen-mode-switch button{background:transparent;border:none;color:#64748b;font-size:0.7rem;padding:4px 12px;border-radius:16px;cursor:pointer;transition:all 0.2s;white-space:nowrap}
+.screen-mode-switch button.active{background:rgba(99,102,241,0.2);color:#a5b4fc;font-weight:600}
+.screen-mode-switch button:hover:not(.active){background:rgba(255,255,255,0.05);color:#94a3b8}
+.bs-exit-pill{color:#f87171!important;font-weight:700;font-size:0.75rem!important}
+.bs-exit-pill:hover{background:rgba(239,68,68,0.2)!important;color:#fca5a5!important}
+.threat-map-wrapper{position:absolute;inset:0;z-index:1}
 
 .bs-grid{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 2fr;grid-template-rows:1fr 1.2fr 1.2fr;gap:clamp(3px,0.4vw,8px);padding:clamp(3px,0.4vw,8px);overflow:hidden}
 .bs-card{background:rgba(15,15,30,0.8);border:1px solid rgba(99,102,241,0.15);border-radius:8px;padding:clamp(6px,0.8vh,16px) clamp(6px,0.6vw,14px);overflow:hidden;box-shadow:0 0 12px rgba(99,102,241,0.08);display:flex;flex-direction:column}
