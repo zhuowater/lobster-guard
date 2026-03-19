@@ -180,7 +180,7 @@ const imItems = [
   { path: '/audit', label: '审计', icon: 'file-text' },
 ]
 
-// LLM 安全导航项 (6项)
+// LLM 安全导航项 (8项)
 const llmItems = [
   { path: '/llm', label: 'LLM 概览', icon: 'brain' },
   { path: '/llm-rules', label: 'LLM 规则', icon: 'shield-check' },
@@ -188,9 +188,11 @@ const llmItems = [
   { path: '/sessions', label: '会话回放', icon: 'clapperboard' },
   { path: '/prompts', label: 'Prompt 追踪', icon: 'file-check' },
   { path: '/ab-testing', label: 'A/B 测试', icon: 'split' },
+  { path: '/tools', label: '工具策略', icon: 'wrench' },
+  { path: '/cache', label: '响应缓存', icon: 'save' },
 ]
 
-// 威胁分析导航项 (6项)
+// 威胁分析导航项 (8项)
 const threatItems = [
   { path: '/user-profiles', label: '用户画像', icon: 'user-scan' },
   { path: '/behavior', label: '行为画像', icon: 'behavior' },
@@ -198,6 +200,8 @@ const threatItems = [
   { path: '/honeypot', label: 'Agent 蜜罐', icon: 'flame' },
   { path: '/anomaly', label: '异常检测', icon: 'chart-line' },
   { path: '/singularity', label: '奇点蜜罐', icon: 'orbit' },
+  { path: '/semantic', label: '语义检测', icon: 'microscope' },
+  { path: '/taint', label: '污染追踪', icon: 'biohazard' },
 ]
 
 // 安全治理导航项 (7项)
@@ -211,11 +215,12 @@ const governItems = [
   { path: '/evolution', label: '自进化', icon: 'dna' },
 ]
 
-// 系统导航项 (4项)
+// 系统导航项 (5项)
 const sysItems = [
   { path: '/monitor', label: '监控', icon: 'activity' },
   { path: '/users', label: '用户管理', icon: 'users' },
   { path: '/ops', label: '运维', icon: 'wrench' },
+  { path: '/gateway', label: 'API 网关', icon: 'door' },
   { path: '/settings', label: '设置', icon: 'settings' },
 ]
 
