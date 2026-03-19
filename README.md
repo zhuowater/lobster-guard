@@ -11,12 +11,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20.5.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v20.6.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-940_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-950_passed-brightgreen?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/API-275_routes-purple?style=flat-square" alt="API Routes">
   <img src="https://img.shields.io/badge/dashboard-38_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
@@ -76,14 +76,14 @@
 | 指标 | 数值 |
 |------|------|
 | Go 源文件 | 70 个 |
-| Go 测试文件 | 49 个 |
+| Go 测试文件 | 50 个 |
 | Go 源代码行数 | ~42,400 行 |
 | Go 测试行数 | ~27,100 行 |
 | 总 Go 行数 | ~69,500 行 |
 | Vue 前端 | 38 页面 + 21 组件，共 65 个文件，~20,400 行 |
 | API 路由 | ~275 个 |
-| 测试函数 | 940 个 |
-| Git Commit | 165 个 |
+| 测试函数 | 950 个 |
+| Git Commit | 168 个 |
 | 外部依赖 | 4 个（sqlite3 + yaml.v3 + gorilla/websocket + x/crypto）|
 
 ---
@@ -126,9 +126,12 @@ CGO_ENABLED=1 go build -o lobster-guard .
 ### 2. 配置
 
 ```bash
-cp config.yaml.example config.yaml
+cp config.yaml.example config.yaml    # 核心配置（~70 行，必填项）
+cp -r conf.d/ /etc/lobster-guard/     # 可选：模块配置（按需启用）
 vim config.yaml
 ```
+
+**v20.6 分层配置**：核心 `config.yaml` 只有 ~70 行必填项，高级功能拆分到 `conf.d/` 目录（10 个模块文件）。不配 `conf.d/` 也能跑，向后完全兼容。
 
 **最小配置（单机模式）：**
 
@@ -138,17 +141,11 @@ callbackSignToken: "你的签名令牌"
 inbound_listen: ":18443"
 outbound_listen: ":18444"
 openclaw_upstream: "http://127.0.0.1:18790"
-lanxin_upstream: "https://apigw.lx.qianxin.com"
-llm_proxy:
-  enabled: true
-  listen: ":8445"
 management_listen: ":9090"
-management_token: "your-secret-management-token"
+management_token: "your-secret-token"
 auth:
   enabled: true
   jwt_secret: "your-jwt-secret-at-least-32-chars"
-inbound_detect_enabled: true
-outbound_audit_enabled: true
 db_path: "./audit.db"
 ```
 
@@ -174,11 +171,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v20.5 .
+docker build -t lobster-guard:v20.6 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v20.5
+  lobster-guard:v20.6
 ```
 
 ### 6. Kubernetes 部署
@@ -188,6 +185,8 @@ docker run -d --name lobster-guard \
 kubectl apply -f k8s/namespace.yaml
 kubectl create configmap lobster-guard-config \
   --from-file=config.yaml -n lobster-guard
+kubectl create configmap lobster-guard-confd \
+  --from-file=conf.d/ -n lobster-guard   # 可选：模块配置
 kubectl apply -f k8s/rbac.yaml
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
@@ -213,7 +212,7 @@ open http://localhost:9090/
 | [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · K8s · Make |
 | [☸️ K8s 服务发现](docs/k8s-discovery.md) | InCluster/Kubeconfig · 自动注册 · RBAC · 零依赖 |
 | [🔀 上游管理](docs/upstream-management.md) | CRUD API · 四种来源 · 路由策略 · Dashboard |
-| [🧪 测试说明](docs/testing.md) | 940 用例 · 端到端模拟 · 性能指标 |
+| [🧪 测试说明](docs/testing.md) | 950 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 完整配置项 · 出站规则合并机制 |
 | [🖥️ 管理后台](docs/dashboard.md) | 38 页面详情 · 组件库 · 截图集合 |
 
@@ -247,7 +246,7 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 ```
 lobster-guard/
-├── src/                    # Go 源代码（70 源 + 49 测试 = 119 个文件）
+├── src/                    # Go 源代码（70 源 + 50 测试 = 120 个文件）
 │   ├── main.go             #   入口 + CLI 参数 + 启动流程
 │   ├── config.go           #   配置加载 + 验证器
 │   ├── plugin.go           #   ChannelPlugin 接口 + 5 通道插件
@@ -280,7 +279,18 @@ lobster-guard/
 ├── skills/                 # OpenClaw Agent Skill
 ├── Dockerfile              # 多阶段构建（frontend → backend → runtime）
 ├── docker-compose.yml      # Docker Compose 一键启动
-├── config.yaml.example     # 配置模板（含 K8s 发现 + 上游管理）
+├── conf.d/                 # 模块配置（10 个功能域，按需启用）
+│   ├── channels.yaml       #   平台凭据（蓝信/飞书/钉钉/企微）
+│   ├── rules-inbound.yaml  #   入站检测规则
+│   ├── rules-outbound.yaml #   出站审计规则
+│   ├── llm-proxy.yaml      #   LLM 代理配置
+│   ├── detection.yaml      #   检测引擎（语义/自进化/蜜罐/污染）
+│   ├── routing.yaml        #   路由策略 + 静态上游
+│   ├── api-gateway.yaml    #   API 网关
+│   ├── discovery.yaml      #   K8s 服务发现
+│   ├── llm-cache.yaml      #   LLM 响应缓存
+│   └── advanced.yaml       #   运维（WebSocket/备份/限流）
+├── config.yaml.example     # 核心配置模板（~70 行，必填项）
 ├── Makefile                # 编译/测试/部署
 ├── ROADMAP.md              # 版本路线图
 └── go.mod / go.sum         # Go 依赖 (4 个)
@@ -322,5 +332,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v20.5.0 · 70 source files · 70.8K lines · 940 tests · 275 APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v20.6.0 · 70 source files · 71.1K lines · 950 tests · 275 APIs</sub>
 </p>

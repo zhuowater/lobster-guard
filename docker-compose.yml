@@ -3,7 +3,7 @@ version: "3.8"
 services:
   lobster-guard:
     build: .
-    image: lobster-guard:v20.5
+    image: lobster-guard:v20.6
     container_name: lobster-guard
     ports:
       - "18443:18443"   # 入站代理（IM → Agent）
@@ -12,6 +12,7 @@ services:
       - "9090:9090"     # 管理 API + Dashboard
     volumes:
       - ./config.yaml:/etc/lobster-guard/config.yaml:ro
+      - ./conf.d:/etc/lobster-guard/conf.d:ro
       - lobster-data:/var/lib/lobster-guard
     restart: unless-stopped
     environment:

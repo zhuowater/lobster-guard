@@ -2,7 +2,26 @@
 
 > 返回 [README](../README.md)
 
-详细配置说明参见 `config.yaml.example`，涵盖以下配置分组：
+v20.6 起采用**分层配置**：核心 `config.yaml`（~70 行必填项）+ 可选 `conf.d/` 模块目录。
+
+```
+config.yaml              ← 核心配置（端口/认证/存储），必须改
+conf.d/                   ← 模块配置，按需启用（不存在时静默跳过）
+├── channels.yaml         ← 通道加密凭据
+├── rules-inbound.yaml    ← 入站检测规则
+├── rules-outbound.yaml   ← 出站审计规则
+├── llm-proxy.yaml        ← LLM 代理
+├── detection.yaml        ← 高级检测引擎
+├── routing.yaml          ← 路由策略 + 静态上游
+├── api-gateway.yaml      ← API 网关
+├── discovery.yaml        ← K8s 服务发现
+├── llm-cache.yaml        ← LLM 响应缓存
+└── advanced.yaml         ← 运维/WebSocket/备份/限流
+```
+
+加载顺序：主配置 → `conf.d/` 按文件名字母序合并。旧版单文件模式向后兼容。
+
+详细配置分组：
 
 | 分组 | 主要配置项 |
 |------|-----------|

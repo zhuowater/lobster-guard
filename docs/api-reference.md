@@ -227,7 +227,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | DELETE | `/api/v1/cache/tenant/:id` | 清除租户 |
 | GET/PUT | `/api/v1/cache/config` | 缓存配置 |
 
-### API 网关 (v20.5)
+### API 网关 (v20.6)
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/gateway/stats` | 网关统计 |

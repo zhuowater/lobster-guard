@@ -113,7 +113,7 @@ spec:
       serviceAccountName: lobster-guard
       containers:
       - name: lobster-guard
-        image: lobster-guard:v20.5
+        image: lobster-guard:v20.6
         ports:
         - containerPort: 18443
           name: inbound

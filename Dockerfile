@@ -1,10 +1,10 @@
 # lobster-guard Dockerfile — 多阶段构建
-# v20.5 全功能版本（含 K8s 服务发现 + 上游 CRUD + Dashboard 三模式）
+# v20.6 全功能版本（分层配置 + K8s 服务发现 + Dashboard 三模式）
 #
 # 构建: docker build -t lobster-guard:v20.5 .
 # 运行: docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
 #          -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-#          lobster-guard:v20.5
+#          lobster-guard:v20.6
 
 # ── Stage 1: Build Vue Dashboard ──
 FROM node:22-alpine AS frontend
@@ -33,6 +33,7 @@ RUN apk add --no-cache ca-certificates sqlite-libs tzdata \
     && addgroup -S lobster && adduser -S lobster -G lobster
 COPY --from=backend /lobster-guard /usr/local/bin/lobster-guard
 COPY config.yaml.example /etc/lobster-guard/config.yaml
+COPY conf.d/ /etc/lobster-guard/conf.d/
 
 RUN mkdir -p /var/lib/lobster-guard && chown lobster:lobster /var/lib/lobster-guard
 

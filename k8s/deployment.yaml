@@ -5,7 +5,7 @@ metadata:
   namespace: lobster-guard
   labels:
     app.kubernetes.io/name: lobster-guard
-    app.kubernetes.io/version: "20.5.0"
+    app.kubernetes.io/version: "20.6.0"
 spec:
   replicas: 1
   selector:
@@ -24,7 +24,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: lobster-guard
-        image: lobster-guard:v20.5
+        image: lobster-guard:v20.6
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 18443
@@ -60,7 +60,11 @@ spec:
           periodSeconds: 10
         volumeMounts:
         - name: config
-          mountPath: /etc/lobster-guard
+          mountPath: /etc/lobster-guard/config.yaml
+          subPath: config.yaml
+          readOnly: true
+        - name: confd
+          mountPath: /etc/lobster-guard/conf.d
           readOnly: true
         - name: data
           mountPath: /var/lib/lobster-guard
@@ -68,5 +72,9 @@ spec:
       - name: config
         configMap:
           name: lobster-guard-config
+      - name: confd
+        configMap:
+          name: lobster-guard-confd
+          optional: true                 # conf.d 可选，不存在时静默跳过
       - name: data
         emptyDir: {}                     # 生产环境改为 PVC
