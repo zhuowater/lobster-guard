@@ -355,6 +355,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleMigrateRoute(w, r)
 	case path == "/api/v1/routes/batch-bind" && method == "POST":
 		api.handleBatchBindRoute(w, r)
+	case path == "/api/v1/routes/batch-unbind" && method == "POST":
+		api.handleBatchUnbindRoute(w, r)
+	case path == "/api/v1/routes/batch-migrate" && method == "POST":
+		api.handleBatchMigrateRoute(w, r)
 	case path == "/api/v1/routes/stats" && method == "GET":
 		api.handleRouteStats(w, r)
 	case path == "/api/v1/rules/reload" && method == "POST":
@@ -532,6 +536,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleConfigGet(w, r)
 	case path == "/api/v1/config/validate" && method == "GET":
 		api.handleConfigValidate(w, r)
+	case path == "/api/v1/config/settings" && method == "PUT":
+		api.handleConfigSettingsUpdate(w, r)
+	case path == "/api/v1/alerts/test" && method == "POST":
+		api.handleAlertTest(w, r)
+	case path == "/api/v1/alerts/config" && method == "PUT":
+		api.handleAlertsConfigUpdate(w, r)
 	case path == "/api/v1/system/diag" && method == "GET":
 		api.handleSystemDiag(w, r)
 	case path == "/api/v1/alerts/history" && method == "GET":
@@ -1440,6 +1450,54 @@ func (api *ManagementAPI) handleBatchBindRoute(w http.ResponseWriter, r *http.Re
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "batch_bound", "count": bound})
+}
+
+// handleBatchUnbindRoute POST /api/v1/routes/batch-unbind — 批量解绑路由
+func (api *ManagementAPI) handleBatchUnbindRoute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Entries []struct {
+			SenderID string `json:"sender_id"`
+			AppID    string `json:"app_id"`
+		} `json:"entries"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || len(req.Entries) == 0 {
+		jsonResponse(w, 400, map[string]string{"error": "entries required"})
+		return
+	}
+	count := 0
+	for _, e := range req.Entries {
+		if e.SenderID == "" {
+			continue
+		}
+		api.routes.Unbind(e.SenderID, e.AppID)
+		count++
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "batch_unbound", "count": count})
+}
+
+// handleBatchMigrateRoute POST /api/v1/routes/batch-migrate — 批量迁移路由到新上游
+func (api *ManagementAPI) handleBatchMigrateRoute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Entries []struct {
+			SenderID string `json:"sender_id"`
+			AppID    string `json:"app_id"`
+		} `json:"entries"`
+		To string `json:"to"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.To == "" || len(req.Entries) == 0 {
+		jsonResponse(w, 400, map[string]string{"error": "entries and to required"})
+		return
+	}
+	migrated := 0
+	for _, e := range req.Entries {
+		if e.SenderID == "" {
+			continue
+		}
+		if api.routes.Migrate(e.SenderID, e.AppID, "", req.To) {
+			migrated++
+		}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "batch_migrated", "count": migrated, "to": req.To})
 }
 
 func (api *ManagementAPI) handleRouteStats(w http.ResponseWriter, r *http.Request) {
@@ -4152,6 +4210,327 @@ func (api *ManagementAPI) handleConfigValidate(w http.ResponseWriter, r *http.Re
 			"security_issues": len(securityIssues),
 			"total":           len(allIssues),
 		},
+	})
+}
+
+// handleConfigSettingsUpdate PUT /api/v1/config/settings — 批量更新配置字段并持久化
+func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *http.Request) {
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	needRestart := false
+	updated := []string{}
+
+	// 读取配置文件用于持久化
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "read config failed: " + err.Error()})
+		return
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "parse config failed: " + err.Error()})
+		return
+	}
+
+	// 基础配置
+	if v, ok := req["inbound_listen"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.InboundListen = s
+		raw["inbound_listen"] = s
+		updated = append(updated, "inbound_listen")
+		needRestart = true
+	}
+	if v, ok := req["outbound_listen"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.OutboundListen = s
+		raw["outbound_listen"] = s
+		updated = append(updated, "outbound_listen")
+		needRestart = true
+	}
+	if v, ok := req["management_listen"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.ManagementListen = s
+		raw["management_listen"] = s
+		updated = append(updated, "management_listen")
+		needRestart = true
+	}
+	if v, ok := req["openclaw_upstream"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.OpenClawUpstream = s
+		raw["openclaw_upstream"] = s
+		updated = append(updated, "openclaw_upstream")
+	}
+	if v, ok := req["lanxin_upstream"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.LanxinUpstream = s
+		raw["lanxin_upstream"] = s
+		updated = append(updated, "lanxin_upstream")
+	}
+	if v, ok := req["log_level"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.LogLevel = s
+		raw["log_level"] = s
+		updated = append(updated, "log_level")
+	}
+	if v, ok := req["log_format"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.LogFormat = s
+		raw["log_format"] = s
+		updated = append(updated, "log_format")
+	}
+
+	// 安全检测
+	if v, ok := req["inbound_detect_enabled"]; ok {
+		b, _ := v.(bool)
+		api.cfg.InboundDetectEnabled = b
+		raw["inbound_detect_enabled"] = b
+		updated = append(updated, "inbound_detect_enabled")
+	}
+	if v, ok := req["outbound_audit_enabled"]; ok {
+		b, _ := v.(bool)
+		api.cfg.OutboundAuditEnabled = b
+		raw["outbound_audit_enabled"] = b
+		updated = append(updated, "outbound_audit_enabled")
+	}
+	if v, ok := req["detect_timeout_ms"]; ok {
+		n := toInt(v)
+		if n > 0 {
+			api.cfg.DetectTimeoutMs = n
+			raw["detect_timeout_ms"] = n
+			updated = append(updated, "detect_timeout_ms")
+		}
+	}
+
+	// 限流配置
+	if v, ok := req["rate_limit"]; ok {
+		if rlMap, ok2 := v.(map[string]interface{}); ok2 {
+			if gv, ok3 := rlMap["global_rps"]; ok3 {
+				api.cfg.RateLimit.GlobalRPS = toFloat64(gv)
+			}
+			if gv, ok3 := rlMap["global_burst"]; ok3 {
+				api.cfg.RateLimit.GlobalBurst = toInt(gv)
+			}
+			if gv, ok3 := rlMap["per_sender_rps"]; ok3 {
+				api.cfg.RateLimit.PerSenderRPS = toFloat64(gv)
+			}
+			if gv, ok3 := rlMap["per_sender_burst"]; ok3 {
+				api.cfg.RateLimit.PerSenderBurst = toInt(gv)
+			}
+			raw["rate_limit"] = rlMap
+			updated = append(updated, "rate_limit")
+		}
+	}
+
+	// 会话关联
+	if v, ok := req["session_idle_timeout_min"]; ok {
+		n := toInt(v)
+		if n > 0 {
+			api.cfg.SessionIdleTimeoutMin = n
+			raw["session_idle_timeout_min"] = n
+			updated = append(updated, "session_idle_timeout_min")
+			if api.sessionCorrelator != nil {
+				api.sessionCorrelator.mu.Lock()
+				api.sessionCorrelator.idleTimeoutMs = int64(n) * 60 * 1000
+				api.sessionCorrelator.mu.Unlock()
+			}
+		}
+	}
+	if v, ok := req["session_fp_window_sec"]; ok {
+		n := toInt(v)
+		if n > 0 {
+			api.cfg.SessionFPWindowSec = n
+			raw["session_fp_window_sec"] = n
+			updated = append(updated, "session_fp_window_sec")
+			if api.sessionCorrelator != nil {
+				api.sessionCorrelator.mu.Lock()
+				api.sessionCorrelator.fpWindowMs = int64(n) * 1000
+				api.sessionCorrelator.mu.Unlock()
+			}
+		}
+	}
+
+	// 告警配置
+	if v, ok := req["alert_webhook"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.AlertWebhook = s
+		raw["alert_webhook"] = s
+		updated = append(updated, "alert_webhook")
+	}
+	if v, ok := req["alert_min_interval"]; ok {
+		n := toInt(v)
+		api.cfg.AlertMinInterval = n
+		raw["alert_min_interval"] = n
+		updated = append(updated, "alert_min_interval")
+	}
+	if v, ok := req["alert_format"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.AlertFormat = s
+		raw["alert_format"] = s
+		updated = append(updated, "alert_format")
+	}
+
+	// 高级配置
+	if v, ok := req["db_path"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.DBPath = s
+		raw["db_path"] = s
+		updated = append(updated, "db_path")
+		needRestart = true
+	}
+	if v, ok := req["heartbeat_interval_sec"]; ok {
+		n := toInt(v)
+		if n > 0 {
+			api.cfg.HeartbeatIntervalSec = n
+			raw["heartbeat_interval_sec"] = n
+			updated = append(updated, "heartbeat_interval_sec")
+		}
+	}
+	if v, ok := req["route_default_policy"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.RouteDefaultPolicy = s
+		raw["route_default_policy"] = s
+		updated = append(updated, "route_default_policy")
+	}
+	if v, ok := req["audit_retention_days"]; ok {
+		n := toInt(v)
+		if n > 0 {
+			api.cfg.AuditRetentionDays = n
+			raw["audit_retention_days"] = n
+			updated = append(updated, "audit_retention_days")
+		}
+	}
+	if v, ok := req["ws_idle_timeout"]; ok {
+		n := toInt(v)
+		api.cfg.WSIdleTimeout = n
+		raw["ws_idle_timeout"] = n
+		updated = append(updated, "ws_idle_timeout")
+	}
+	if v, ok := req["backup_auto_interval"]; ok {
+		n := toInt(v)
+		api.cfg.BackupAutoInterval = n
+		raw["backup_auto_interval"] = n
+		updated = append(updated, "backup_auto_interval")
+	}
+
+	if len(updated) == 0 {
+		jsonResponse(w, 400, map[string]string{"error": "no fields to update"})
+		return
+	}
+
+	// 写回 config.yaml
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "marshal config failed: " + err.Error()})
+		return
+	}
+	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "write config failed: " + err.Error()})
+		return
+	}
+
+	log.Printf("[配置设置] 已更新 %d 个字段: %v (need_restart=%v)", len(updated), updated, needRestart)
+	jsonResponse(w, 200, map[string]interface{}{
+		"ok":           true,
+		"updated":      updated,
+		"need_restart": needRestart,
+	})
+}
+
+// toInt 将 interface{} 转换为 int
+func toInt(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+// toFloat64 将 interface{} 转换为 float64
+func toFloat64(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	default:
+		return 0
+	}
+}
+
+// handleAlertTest POST /api/v1/alerts/test — 发送测试告警
+func (api *ManagementAPI) handleAlertTest(w http.ResponseWriter, r *http.Request) {
+	if api.alertNotifier == nil || api.cfg.AlertWebhook == "" {
+		jsonResponse(w, 400, map[string]string{"error": "alert webhook not configured"})
+		return
+	}
+	api.alertNotifier.Notify("inbound", "test-user", "[测试告警]", "这是一条龙虾卫士告警测试消息，请忽略", "")
+	jsonResponse(w, 200, map[string]interface{}{
+		"ok":      true,
+		"message": "test alert sent",
+	})
+}
+
+// handleAlertsConfigUpdate PUT /api/v1/alerts/config — 更新告警配置
+func (api *ManagementAPI) handleAlertsConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Webhook     *string `json:"alert_webhook"`
+		MinInterval *int    `json:"alert_min_interval"`
+		Format      *string `json:"alert_format"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	data, err := os.ReadFile(api.cfgPath)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "read config failed"})
+		return
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "parse config failed"})
+		return
+	}
+
+	if req.Webhook != nil {
+		api.cfg.AlertWebhook = *req.Webhook
+		raw["alert_webhook"] = *req.Webhook
+	}
+	if req.MinInterval != nil {
+		api.cfg.AlertMinInterval = *req.MinInterval
+		raw["alert_min_interval"] = *req.MinInterval
+	}
+	if req.Format != nil {
+		api.cfg.AlertFormat = *req.Format
+		raw["alert_format"] = *req.Format
+	}
+
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "marshal failed"})
+		return
+	}
+	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "write failed"})
+		return
+	}
+
+	log.Printf("[告警配置] 已更新告警配置")
+	jsonResponse(w, 200, map[string]interface{}{
+		"ok":     true,
+		"format": api.cfg.AlertFormat,
 	})
 }
 
