@@ -591,6 +591,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAnomalyConfigGet(w, r)
 	case path == "/api/v1/anomaly/config" && method == "PUT":
 		api.handleAnomalyConfigPut(w, r)
+	case strings.HasPrefix(path, "/api/v1/anomaly/metric-thresholds/") && method == "PUT":
+		api.handleAnomalyMetricThresholdPut(w, r)
+	case path == "/api/v1/anomaly/metric-thresholds" && method == "GET":
+		api.handleAnomalyMetricThresholdsGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/anomaly/trend/") && method == "GET":
+		api.handleAnomalyTrend(w, r)
 	// v14.3 排行榜 + SLA API
 	case path == "/api/v1/leaderboard" && method == "GET":
 		api.handleLeaderboard(w, r)
@@ -888,6 +894,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleTaintConfigUpdate(w, r)
 	case path == "/api/v1/taint/scan" && method == "POST":
 		api.handleTaintScan(w, r)
+	case path == "/api/v1/taint/cleanup" && method == "POST":
+		api.handleTaintCleanup(w, r)
+	case strings.HasPrefix(path, "/api/v1/taint/entry/") && method == "DELETE":
+		api.handleTaintEntryDelete(w, r)
+	case path == "/api/v1/taint/inject" && method == "POST":
+		api.handleTaintInject(w, r)
 
 	// v20.2: 污染链逆转 API
 	case path == "/api/v1/reversal/stats" && method == "GET":
@@ -6181,6 +6193,53 @@ func (api *ManagementAPI) handleAnomalyConfigPut(w http.ResponseWriter, r *http.
 		"config": newCfg,
 		"note":   "Config updated. Baseline/check intervals take effect on next cycle.",
 	})
+}
+
+// handleAnomalyMetricThresholdsGet GET /api/v1/anomaly/metric-thresholds — 获取所有指标的独立阈值
+func (api *ManagementAPI) handleAnomalyMetricThresholdsGet(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 200, map[string]interface{}{"thresholds": map[string]interface{}{}})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"thresholds": api.anomalyDetector.GetMetricThresholds()})
+}
+
+// handleAnomalyMetricThresholdPut PUT /api/v1/anomaly/metric-thresholds/:name — 设置单个指标阈值
+func (api *ManagementAPI) handleAnomalyMetricThresholdPut(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 404, map[string]string{"error": "anomaly detector not available"})
+		return
+	}
+	metricName := strings.TrimPrefix(r.URL.Path, "/api/v1/anomaly/metric-thresholds/")
+	if metricName == "" {
+		jsonResponse(w, 400, map[string]string{"error": "metric name required"})
+		return
+	}
+	var body struct {
+		WarningThreshold  float64 `json:"warning_threshold"`
+		CriticalThreshold float64 `json:"critical_threshold"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	api.anomalyDetector.SetMetricThreshold(metricName, body.WarningThreshold, body.CriticalThreshold)
+	jsonResponse(w, 200, map[string]interface{}{"status": "ok", "metric": metricName, "warning_threshold": body.WarningThreshold, "critical_threshold": body.CriticalThreshold})
+}
+
+// handleAnomalyTrend GET /api/v1/anomaly/trend/:name — 指标的24h趋势数据（含基线+阈值带）
+func (api *ManagementAPI) handleAnomalyTrend(w http.ResponseWriter, r *http.Request) {
+	if api.anomalyDetector == nil {
+		jsonResponse(w, 200, map[string]interface{}{"points": []interface{}{}})
+		return
+	}
+	metricName := strings.TrimPrefix(r.URL.Path, "/api/v1/anomaly/trend/")
+	if metricName == "" {
+		jsonResponse(w, 400, map[string]string{"error": "metric name required"})
+		return
+	}
+	trend := api.anomalyDetector.GetMetricTrend(metricName)
+	jsonResponse(w, 200, trend)
 }
 
 // ============================================================

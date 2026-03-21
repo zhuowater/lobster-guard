@@ -559,3 +559,32 @@ func (tt *TaintTracker) cleanup() {
 func (tt *TaintTracker) CleanupNow() {
 	tt.cleanup()
 }
+
+// DeleteEntry 删除单条污染标记
+func (tt *TaintTracker) DeleteEntry(traceID string) {
+	tt.mu.Lock()
+	delete(tt.active, traceID)
+	tt.mu.Unlock()
+	if tt.db != nil {
+		tt.db.Exec(`DELETE FROM taint_entries WHERE trace_id = ?`, traceID)
+	}
+}
+
+// InjectManual 手动注入污染标记（管理 API / 测试）
+func (tt *TaintTracker) InjectManual(traceID string, labels []string, source, detail string) {
+	entry := &TaintEntry{
+		TraceID:      traceID,
+		Labels:       labels,
+		Source:       source,
+		SourceDetail: detail,
+		Timestamp:    time.Now(),
+		Propagations: []TaintPropagation{
+			{Stage: "manual_inject", Label: strings.Join(labels, ","), Action: "inject", Timestamp: time.Now(), Detail: detail},
+		},
+	}
+	tt.mu.Lock()
+	tt.active[traceID] = entry
+	tt.totalMarked++
+	tt.mu.Unlock()
+	tt.persistEntry(entry)
+}

@@ -41,14 +41,21 @@ func DefaultAnomalyConfig() AnomalyConfig {
 	}
 }
 
+// MetricThreshold 单个指标的独立阈值配置
+type MetricThreshold struct {
+	WarningThreshold  float64 `json:"warning_threshold"`
+	CriticalThreshold float64 `json:"critical_threshold"`
+}
+
 // AnomalyDetector 异常基线检测器
 type AnomalyDetector struct {
-	db        *sql.DB
-	mu        sync.RWMutex
-	baselines map[string]*Baseline // key: metric_name
-	alerts    []AnomalyAlert
-	maxAlerts int
-	config    AnomalyConfig
+	db               *sql.DB
+	mu               sync.RWMutex
+	baselines        map[string]*Baseline // key: metric_name
+	alerts           []AnomalyAlert
+	maxAlerts        int
+	config           AnomalyConfig
+	metricThresholds map[string]MetricThreshold // per-metric overrides
 }
 
 // Baseline 一个指标的基线
@@ -108,11 +115,12 @@ func MetricDisplayName(metricName string) string {
 func NewAnomalyDetector(db *sql.DB) *AnomalyDetector {
 	cfg := DefaultAnomalyConfig()
 	d := &AnomalyDetector{
-		db:        db,
-		baselines: make(map[string]*Baseline),
-		alerts:    []AnomalyAlert{},
-		maxAlerts: cfg.MaxAlerts,
-		config:    cfg,
+		db:               db,
+		baselines:        make(map[string]*Baseline),
+		alerts:           []AnomalyAlert{},
+		maxAlerts:        cfg.MaxAlerts,
+		config:           cfg,
+		metricThresholds: make(map[string]MetricThreshold),
 	}
 	return d
 }
@@ -642,6 +650,112 @@ func averageFactor() float64 {
 		}
 	}
 	return sum / 24
+}
+
+// ============================================================
+// 指标独立阈值管理
+// ============================================================
+
+// GetMetricThresholds 获取所有指标的独立阈值
+func (d *AnomalyDetector) GetMetricThresholds() map[string]MetricThreshold {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	cp := make(map[string]MetricThreshold, len(d.metricThresholds))
+	for k, v := range d.metricThresholds {
+		cp[k] = v
+	}
+	return cp
+}
+
+// SetMetricThreshold 设置单个指标的独立阈值
+func (d *AnomalyDetector) SetMetricThreshold(metricName string, warn, crit float64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if warn < 0.5 {
+		warn = 0.5
+	}
+	if crit <= warn {
+		crit = warn + 1.0
+	}
+	d.metricThresholds[metricName] = MetricThreshold{
+		WarningThreshold:  warn,
+		CriticalThreshold: crit,
+	}
+	log.Printf("[异常检测] 指标 %s 阈值已更新: warn=%.1fσ crit=%.1fσ", metricName, warn, crit)
+}
+
+// getEffectiveThresholds 获取指标的有效阈值（优先指标独立阈值，降级全局配置）
+func (d *AnomalyDetector) getEffectiveThresholds(metricName string) (float64, float64) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if mt, ok := d.metricThresholds[metricName]; ok {
+		return mt.WarningThreshold, mt.CriticalThreshold
+	}
+	return d.config.WarningThreshold, d.config.CriticalThreshold
+}
+
+// ============================================================
+// 趋势数据
+// ============================================================
+
+// TrendPoint 趋势数据点
+type TrendPoint struct {
+	Hour          int     `json:"hour"`
+	BaselineMean  float64 `json:"baseline_mean"`
+	BaselineStd   float64 `json:"baseline_std"`
+	UpperWarn     float64 `json:"upper_warn"`
+	LowerWarn     float64 `json:"lower_warn"`
+	UpperCrit     float64 `json:"upper_crit"`
+	LowerCrit     float64 `json:"lower_crit"`
+	CurrentValue  float64 `json:"current_value,omitempty"`
+	IsCurrent     bool    `json:"is_current,omitempty"`
+}
+
+// GetMetricTrend 获取指标的24h趋势数据（基线+阈值带）
+func (d *AnomalyDetector) GetMetricTrend(metricName string) map[string]interface{} {
+	d.mu.RLock()
+	baseline, ok := d.baselines[metricName]
+	d.mu.RUnlock()
+
+	points := make([]TrendPoint, 0, 24)
+	warnT, critT := d.getEffectiveThresholds(metricName)
+	currentHour := time.Now().UTC().Hour()
+	currentValue := d.queryCurrentMetric(metricName)
+
+	if ok && baseline.Ready {
+		for h := 0; h < 24; h++ {
+			m := baseline.HourlyMean[h]
+			s := baseline.HourlyStd[h]
+			if s < d.GetConfig().MinStdDev {
+				s = d.GetConfig().MinStdDev
+			}
+			pt := TrendPoint{
+				Hour:         h,
+				BaselineMean: math.Round(m*100) / 100,
+				BaselineStd:  math.Round(s*100) / 100,
+				UpperWarn:    math.Round((m+warnT*s)*100) / 100,
+				LowerWarn:    math.Round(math.Max(0, m-warnT*s)*100) / 100,
+				UpperCrit:    math.Round((m+critT*s)*100) / 100,
+				LowerCrit:    math.Round(math.Max(0, m-critT*s)*100) / 100,
+			}
+			if h == currentHour {
+				pt.CurrentValue = math.Round(currentValue*100) / 100
+				pt.IsCurrent = true
+			}
+			points = append(points, pt)
+		}
+	}
+
+	return map[string]interface{}{
+		"metric_name":        metricName,
+		"display_name":       MetricDisplayName(metricName),
+		"points":             points,
+		"warning_threshold":  warnT,
+		"critical_threshold": critT,
+		"current_hour":       currentHour,
+		"current_value":      math.Round(currentValue*100) / 100,
+		"ready":              ok && baseline.Ready,
+	}
 }
 
 // ============================================================

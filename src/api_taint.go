@@ -4,9 +4,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // handleTaintStats GET /api/v1/taint/stats
@@ -117,5 +119,66 @@ func (api *ManagementAPI) handleTaintScan(w http.ResponseWriter, r *http.Request
 		"matches":  matchedNames,
 		"labels":   labels,
 		"patterns": len(piiPatterns),
+	})
+}
+
+// handleTaintCleanup POST /api/v1/taint/cleanup — 批量清理过期标记
+func (api *ManagementAPI) handleTaintCleanup(w http.ResponseWriter, r *http.Request) {
+	if api.taintTracker == nil {
+		jsonResponse(w, 400, map[string]string{"error": "taint tracker not initialized"})
+		return
+	}
+	api.taintTracker.CleanupNow()
+	stats := api.taintTracker.Stats()
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":       "cleaned",
+		"active_count": stats["active_count"],
+	})
+}
+
+// handleTaintEntryDelete DELETE /api/v1/taint/entry/:trace_id — 删除单条污染标记
+func (api *ManagementAPI) handleTaintEntryDelete(w http.ResponseWriter, r *http.Request) {
+	if api.taintTracker == nil {
+		jsonResponse(w, 400, map[string]string{"error": "taint tracker not initialized"})
+		return
+	}
+	path := r.URL.Path
+	parts := strings.Split(path, "/")
+	if len(parts) < 6 {
+		jsonResponse(w, 400, map[string]string{"error": "missing trace_id"})
+		return
+	}
+	traceID := parts[5]
+	api.taintTracker.DeleteEntry(traceID)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":   "deleted",
+		"trace_id": traceID,
+	})
+}
+
+// handleTaintInject POST /api/v1/taint/inject — 注入污染标记（测试用）
+func (api *ManagementAPI) handleTaintInject(w http.ResponseWriter, r *http.Request) {
+	if api.taintTracker == nil {
+		jsonResponse(w, 400, map[string]string{"error": "taint tracker not initialized"})
+		return
+	}
+	var req struct {
+		Labels []string `json:"labels"`
+		Source string   `json:"source"`
+		Detail string   `json:"detail"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if len(req.Labels) == 0 {
+		jsonResponse(w, 400, map[string]string{"error": "labels required"})
+		return
+	}
+	traceID := fmt.Sprintf("manual-%d", time.Now().UnixNano())
+	api.taintTracker.InjectManual(traceID, req.Labels, req.Source, req.Detail)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":   "injected",
+		"trace_id": traceID,
 	})
 }
