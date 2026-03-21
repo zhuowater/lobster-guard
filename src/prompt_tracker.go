@@ -34,6 +34,7 @@ type PromptVersion struct {
 	LastSeen  string  `json:"last_seen"`
 	CallCount int     `json:"call_count"`
 	PrevHash  string  `json:"prev_hash,omitempty"`
+	Tag       string  `json:"tag,omitempty"`
 	// 安全指标（聚合，查询时计算）
 	TotalCalls    int     `json:"total_calls"`
 	CanaryLeaks   int     `json:"canary_leaks"`
@@ -41,6 +42,14 @@ type PromptVersion struct {
 	FlaggedTools  int     `json:"flagged_tools"`
 	AvgTokens     float64 `json:"avg_tokens"`
 	ErrorRate     float64 `json:"error_rate"`
+}
+
+// PromptStats Prompt 版本统计概览
+type PromptStats struct {
+	Total      int     `json:"total"`
+	Active     int     `json:"active"`
+	AvgTokens  float64 `json:"avg_tokens"`
+	LastChange string  `json:"last_change"`
 }
 
 // PromptDiff 两个版本之间的差异
@@ -86,6 +95,9 @@ func NewPromptTracker(db *sql.DB) *PromptTracker {
 	)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_prompt_versions_hash ON prompt_versions(hash)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_prompt_versions_first_seen ON prompt_versions(first_seen)`)
+
+	// v15: tag 列
+	db.Exec(`ALTER TABLE prompt_versions ADD COLUMN tag TEXT DEFAULT ''`)
 
 	// llm_calls 表新增 prompt_hash 列（忽略已存在的错误）
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN prompt_hash TEXT DEFAULT ''`)
@@ -156,9 +168,9 @@ func (pt *PromptTracker) GetCurrent() *PromptVersion {
 // GetVersion 获取指定版本（含安全指标）
 func (pt *PromptTracker) GetVersion(hash string) *PromptVersion {
 	v := &PromptVersion{}
-	err := pt.db.QueryRow(`SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,'')
+	err := pt.db.QueryRow(`SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,''), COALESCE(tag,'')
 		FROM prompt_versions WHERE hash=?`, hash).Scan(
-		&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash)
+		&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash, &v.Tag)
 	if err != nil {
 		return nil
 	}
@@ -198,7 +210,7 @@ func (pt *PromptTracker) fillMetrics(v *PromptVersion) {
 
 // ListVersions 列出所有版本（按时间倒序）
 func (pt *PromptTracker) ListVersions() []PromptVersion {
-	rows, err := pt.db.Query(`SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,'')
+	rows, err := pt.db.Query(`SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,''), COALESCE(tag,'')
 		FROM prompt_versions ORDER BY id DESC`)
 	if err != nil {
 		return nil
@@ -208,7 +220,7 @@ func (pt *PromptTracker) ListVersions() []PromptVersion {
 	var versions []PromptVersion
 	for rows.Next() {
 		var v PromptVersion
-		if rows.Scan(&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash) == nil {
+		if rows.Scan(&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash, &v.Tag) == nil {
 			pt.fillMetrics(&v)
 			versions = append(versions, v)
 		}
@@ -219,7 +231,7 @@ func (pt *PromptTracker) ListVersions() []PromptVersion {
 // ListVersionsTenant v14.0: 租户感知的版本列表
 func (pt *PromptTracker) ListVersionsTenant(tenantID string) []PromptVersion {
 	tClause, tArgs := TenantFilter(tenantID)
-	query := `SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,'')
+	query := `SELECT id, hash, content, model, first_seen, last_seen, call_count, COALESCE(prev_hash,''), COALESCE(tag,'')
 		FROM prompt_versions WHERE 1=1` + tClause + ` ORDER BY id DESC`
 	rows, err := pt.db.Query(query, tArgs...)
 	if err != nil {
@@ -230,7 +242,7 @@ func (pt *PromptTracker) ListVersionsTenant(tenantID string) []PromptVersion {
 	var versions []PromptVersion
 	for rows.Next() {
 		var v PromptVersion
-		if rows.Scan(&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash) == nil {
+		if rows.Scan(&v.ID, &v.Hash, &v.Content, &v.Model, &v.FirstSeen, &v.LastSeen, &v.CallCount, &v.PrevHash, &v.Tag) == nil {
 			pt.fillMetrics(&v)
 			versions = append(versions, v)
 		}
@@ -580,6 +592,57 @@ func (pt *PromptTracker) SeedPromptDemoData(db *sql.DB) int {
 	}
 
 	return inserted
+}
+
+// SetTag 给版本设置标签 (production/staging/deprecated/空字符串清除)
+func (pt *PromptTracker) SetTag(hash string, tag string) error {
+	validTags := map[string]bool{"production": true, "staging": true, "deprecated": true, "": true}
+	if !validTags[tag] {
+		return fmt.Errorf("invalid tag: %s (valid: production, staging, deprecated)", tag)
+	}
+	// 如果设为 production，清除其他版本的 production 标签
+	if tag == "production" {
+		pt.db.Exec(`UPDATE prompt_versions SET tag='' WHERE tag='production'`)
+	}
+	result, err := pt.db.Exec(`UPDATE prompt_versions SET tag=? WHERE hash=?`, tag, hash)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("version not found: %s", hash)
+	}
+	log.Printf("[PromptTracker] 标签更新: hash=%s tag=%s", hash, tag)
+	return nil
+}
+
+// Rollback 回滚到指定版本（设为当前活跃版本）
+func (pt *PromptTracker) Rollback(hash string) error {
+	// 验证版本存在
+	var exists int
+	pt.db.QueryRow(`SELECT COUNT(*) FROM prompt_versions WHERE hash=?`, hash).Scan(&exists)
+	if exists == 0 {
+		return fmt.Errorf("version not found: %s", hash)
+	}
+	pt.mu.Lock()
+	pt.currentHash = hash
+	pt.mu.Unlock()
+	// 更新 last_seen
+	now := time.Now().UTC().Format(time.RFC3339)
+	pt.db.Exec(`UPDATE prompt_versions SET last_seen=? WHERE hash=?`, now, hash)
+	log.Printf("[PromptTracker] 🔄 回滚到版本: hash=%s", hash)
+	return nil
+}
+
+// GetStats 获取统计概览
+func (pt *PromptTracker) GetStats() PromptStats {
+	stats := PromptStats{}
+	pt.db.QueryRow(`SELECT COUNT(*) FROM prompt_versions`).Scan(&stats.Total)
+	// active = 最近7天有调用的版本数
+	pt.db.QueryRow(`SELECT COUNT(*) FROM prompt_versions WHERE last_seen >= datetime('now', '-7 days')`).Scan(&stats.Active)
+	pt.db.QueryRow(`SELECT COALESCE(AVG(avg_t), 0) FROM (SELECT COALESCE(AVG(total_tokens),0) as avg_t FROM llm_calls WHERE prompt_hash != '' GROUP BY prompt_hash)`).Scan(&stats.AvgTokens)
+	pt.db.QueryRow(`SELECT COALESCE(MAX(first_seen),'') FROM prompt_versions`).Scan(&stats.LastChange)
+	return stats
 }
 
 // ClearPromptData 清除 Prompt 追踪数据

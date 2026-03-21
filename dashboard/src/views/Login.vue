@@ -11,14 +11,24 @@
       </div>
 
       <form class="login-form" @submit.prevent="doLogin">
-        <div class="login-field">
+        <div class="login-field" :class="{ 'field-invalid': fieldErrors.username }">
           <label for="username">用户名</label>
-          <input id="username" v-model="username" type="text" placeholder="请输入用户名" autocomplete="username" autofocus />
+          <input id="username" v-model="username" type="text" placeholder="请输入用户名" autocomplete="username" autofocus @input="fieldErrors.username = ''" />
+          <Transition name="fade"><span v-if="fieldErrors.username" class="field-hint">{{ fieldErrors.username }}</span></Transition>
         </div>
-        <div class="login-field">
+        <div class="login-field" :class="{ 'field-invalid': fieldErrors.password }">
           <label for="password">密码</label>
-          <input id="password" v-model="password" type="password" placeholder="请输入密码" autocomplete="current-password" @keyup.enter="doLogin" />
+          <div class="password-wrap">
+            <input id="password" v-model="password" :type="showPwd ? 'text' : 'password'" placeholder="请输入密码" autocomplete="current-password" @keyup.enter="doLogin" @input="fieldErrors.password = ''" />
+            <button type="button" class="pwd-toggle" @click="showPwd = !showPwd" tabindex="-1">{{ showPwd ? '🙈' : '👁️' }}</button>
+          </div>
+          <Transition name="fade"><span v-if="fieldErrors.password" class="field-hint">{{ fieldErrors.password }}</span></Transition>
         </div>
+
+        <label class="remember-row">
+          <input type="checkbox" v-model="rememberMe" />
+          <span>记住用户名</span>
+        </label>
 
         <button class="login-btn" type="submit" :disabled="loading">
           <span v-if="loading" class="login-spinner"></span>
@@ -26,28 +36,36 @@
         </button>
 
         <Transition name="fade">
-          <div v-if="error" class="login-error">{{ error }}</div>
+          <div v-if="error" class="login-error">
+            <span class="login-error-icon">⚠️</span>
+            <span>{{ error }}</span>
+          </div>
         </Transition>
       </form>
 
       <div class="login-footer">
-        AI Agent 安全网关
+        <span class="login-footer-brand">🛡️ AI Agent 安全网关</span>
+        <span class="login-footer-ver">v1.0</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { saveToken } from '../api.js'
 import { loginUser } from '../stores/app.js'
 
+const REMEMBER_KEY = 'lg_remember_user'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
+const rememberMe = ref(false)
+const showPwd = ref(false)
+const fieldErrors = reactive({ username: '', password: '' })
 
 // --- Particle background ---
 const particleCanvas = ref(null)
@@ -135,12 +153,19 @@ onUnmounted(() => {
   if (resizeHandler) window.removeEventListener('resize', resizeHandler)
 })
 
+// --- Restore remembered username ---
+const savedUser = localStorage.getItem(REMEMBER_KEY)
+if (savedUser) { username.value = savedUser; rememberMe.value = true }
+
 // --- Login logic ---
 async function doLogin() {
-  if (!username.value || !password.value) {
-    error.value = '请输入用户名和密码'
-    return
-  }
+  // Validate fields
+  fieldErrors.username = ''; fieldErrors.password = ''
+  let valid = true
+  if (!username.value.trim()) { fieldErrors.username = '请输入用户名'; valid = false }
+  if (!password.value) { fieldErrors.password = '请输入密码'; valid = false }
+  if (!valid) return
+
   error.value = ''
   loading.value = true
 
@@ -153,10 +178,14 @@ async function doLogin() {
     const data = await res.json()
 
     if (!res.ok || !data.token) {
-      error.value = data.error || '登录失败'
+      error.value = data.error || '登录失败，请检查用户名和密码'
       loading.value = false
       return
     }
+
+    // Remember me
+    if (rememberMe.value) { localStorage.setItem(REMEMBER_KEY, username.value) }
+    else { localStorage.removeItem(REMEMBER_KEY) }
 
     saveToken(data.token)
     loginUser(data.token, data.user)
@@ -390,6 +419,21 @@ async function doLogin() {
   to { transform: rotate(360deg); }
 }
 
+/* Password toggle */
+.password-wrap { position: relative; display: flex; align-items: center; }
+.password-wrap input { width: 100%; padding-right: 40px; }
+.pwd-toggle { position: absolute; right: 10px; background: none; border: none; cursor: pointer; font-size: 16px; padding: 0; opacity: 0.5; transition: opacity 0.15s; }
+.pwd-toggle:hover { opacity: 1; }
+
+/* Field validation */
+.field-invalid input { border-color: rgba(239, 68, 68, 0.5); }
+.field-invalid input:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.5); }
+.field-hint { font-size: 11px; color: #f87171; margin-top: 2px; display: block; }
+
+/* Remember me */
+.remember-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-tertiary, rgba(255,255,255,0.4)); cursor: pointer; user-select: none; }
+.remember-row input { accent-color: var(--color-primary, #6366f1); cursor: pointer; }
+
 .login-error {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
@@ -397,8 +441,11 @@ async function doLogin() {
   color: #f87171;
   font-size: 13px;
   padding: 10px 14px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.login-error-icon { flex-shrink: 0; }
 
 .login-footer {
   text-align: center;
@@ -406,7 +453,13 @@ async function doLogin() {
   font-size: 11px;
   color: var(--text-disabled, rgba(255,255,255,0.15));
   letter-spacing: 1px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
 }
+.login-footer-brand { opacity: 0.6; }
+.login-footer-ver { background: rgba(99,102,241,0.15); color: rgba(99,102,241,0.5); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-family: var(--font-mono, monospace); }
 
 .fade-enter-active { animation: fade-in 0.2s ease-out; }
 .fade-leave-active { animation: fade-in 0.15s ease-in reverse; }

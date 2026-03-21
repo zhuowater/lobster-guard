@@ -504,6 +504,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handlePromptsCurrent(w, r)
 	case strings.HasPrefix(path, "/api/v1/prompts/") && strings.HasSuffix(path, "/diff") && method == "GET":
 		api.handlePromptsDiff(w, r)
+	case strings.HasPrefix(path, "/api/v1/prompts/") && strings.HasSuffix(path, "/tag") && method == "POST":
+		api.handlePromptsTag(w, r)
+	case strings.HasPrefix(path, "/api/v1/prompts/") && strings.HasSuffix(path, "/rollback") && method == "POST":
+		api.handlePromptsRollback(w, r)
+	case path == "/api/v1/prompts/stats" && method == "GET":
+		api.handlePromptsStats(w, r)
 	case strings.HasPrefix(path, "/api/v1/prompts/") && method == "GET":
 		api.handlePromptsGet(w, r)
 	// v13.0 会话回放 API
@@ -6315,6 +6321,63 @@ func (api *ManagementAPI) handlePromptsDiff(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	jsonResponse(w, 200, diff)
+}
+
+// handlePromptsTag POST /api/v1/prompts/:hash/tag — 给版本打标签
+func (api *ManagementAPI) handlePromptsTag(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 404, map[string]string{"error": "prompt tracker not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/prompts/")
+	hash := strings.TrimSuffix(path, "/tag")
+	if hash == "" {
+		jsonResponse(w, 400, map[string]string{"error": "hash required"})
+		return
+	}
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Tag == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tag required"})
+		return
+	}
+	err := api.promptTracker.SetTag(hash, body.Tag)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "ok", "hash": hash, "tag": body.Tag})
+}
+
+// handlePromptsRollback POST /api/v1/prompts/:hash/rollback — 回滚到指定版本
+func (api *ManagementAPI) handlePromptsRollback(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 404, map[string]string{"error": "prompt tracker not available"})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/prompts/")
+	hash := strings.TrimSuffix(path, "/rollback")
+	if hash == "" {
+		jsonResponse(w, 400, map[string]string{"error": "hash required"})
+		return
+	}
+	err := api.promptTracker.Rollback(hash)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "ok", "hash": hash, "message": "rolled back successfully"})
+}
+
+// handlePromptsStats GET /api/v1/prompts/stats — Prompt 版本统计
+func (api *ManagementAPI) handlePromptsStats(w http.ResponseWriter, r *http.Request) {
+	if api.promptTracker == nil {
+		jsonResponse(w, 200, map[string]interface{}{"total": 0, "active": 0, "avg_tokens": 0, "last_change": ""})
+		return
+	}
+	stats := api.promptTracker.GetStats()
+	jsonResponse(w, 200, stats)
 }
 
 // ============================================================

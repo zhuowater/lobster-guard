@@ -1,7 +1,7 @@
 <template>
   <div class="custom-dashboard">
-    <!-- Toolbar -->
-    <div class="cd-toolbar">
+    <!-- Toolbar (hidden in preview mode) -->
+    <div class="cd-toolbar" v-show="!previewMode">
       <div class="cd-toolbar-left">
         <span class="cd-title"><Icon name="grid" :size="16" /> 自定义布局</span>
         <select v-model="selectedPreset" @change="applyPreset" class="cd-preset-select">
@@ -24,9 +24,17 @@
           <Icon name="refresh" :size="14" /> 重置
         </button>
         <button
+          class="cd-btn cd-btn-preview"
+          :class="{ active: previewMode }"
+          @click="togglePreview"
+          :title="previewMode ? '退出预览' : '预览模式'"
+        >
+          {{ previewMode ? '👁️ 预览中' : '👁️ 预览' }}
+        </button>
+        <button
           class="cd-btn"
           :class="editMode ? 'cd-btn-edit-on' : 'cd-btn-edit-off'"
-          @click="editMode = !editMode"
+          @click="editMode = !editMode; previewMode = false"
         >
           {{ editMode ? '✅ 完成编辑' : '✏️ 编辑模式' }}
         </button>
@@ -80,6 +88,14 @@
             <button class="cd-btn cd-btn-reset" @click="showSaveDialog = false">取消</button>
           </div>
         </div>
+      </div>
+    </Transition>
+
+    <!-- Preview mode exit bar -->
+    <Transition name="picker-fade">
+      <div v-if="previewMode" class="preview-bar">
+        <span>👁️ 预览模式 — 点击退出</span>
+        <button class="cd-btn" @click="previewMode = false">退出预览</button>
       </div>
     </Transition>
 
@@ -253,12 +269,15 @@
         </div>
       </template>
     </DraggableGrid>
+
+    <ConfirmModal :visible="showResetConfirm" title="重置布局" message="确定要重置为默认布局吗？当前未保存的更改将丢失。" type="warning" @confirm="doResetLayout" @cancel="showResetConfirm = false" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
 import Icon from '../components/Icon.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import DraggableGrid from '../components/DraggableGrid.vue'
 
@@ -266,6 +285,7 @@ const showToast = inject('showToast', (msg) => alert(msg))
 
 // State
 const editMode = ref(false)
+const previewMode = ref(false)
 const panels = ref([])
 const presets = ref([])
 const allPanelDefs = ref([])
@@ -337,6 +357,11 @@ function togglePanelVisibility(id) {
       panels.value.push({ ...def, visible: true, order: panels.value.length })
     }
   }
+}
+
+function togglePreview() {
+  previewMode.value = !previewMode.value
+  if (previewMode.value) editMode.value = false
 }
 
 function onPanelsUpdate(newPanels) {
@@ -426,14 +451,13 @@ async function confirmSave() {
   }
 }
 
-function resetLayout() {
-  if (!confirm('确定要重置为默认布局吗？')) return
-  // Apply SOC preset as default
+const showResetConfirm = ref(false)
+function resetLayout() { showResetConfirm.value = true }
+function doResetLayout() {
   const soc = presets.value.find(p => p.id === 'preset-soc')
-  if (soc) {
-    panels.value = JSON.parse(JSON.stringify(soc.panels))
-  }
+  if (soc) { panels.value = JSON.parse(JSON.stringify(soc.panels)) }
   activeLayoutId.value = ''
+  showResetConfirm.value = false
   showToast('已重置为默认布局')
 }
 
@@ -598,6 +622,40 @@ onMounted(async () => {
 
 .cd-btn-edit-off {
   border-color: #666;
+}
+
+.cd-btn-preview {
+  border-color: #8B5CF6;
+  color: #8B5CF6;
+}
+.cd-btn-preview.active {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: #8B5CF6;
+  color: #8B5CF6;
+}
+.cd-btn-preview:hover {
+  background: rgba(139, 92, 246, 0.1);
+}
+
+/* Preview mode bar */
+.preview-bar {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(139, 92, 246, 0.15);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--text-sm, 14px);
+  color: #c4b5fd;
+  z-index: 100;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 /* Panel Picker */

@@ -1,9 +1,17 @@
 <template>
-  <div class="bigscreen" @mousemove="showControls" ref="root">
+  <div class="bigscreen" @mousemove="showControls" @keydown="onKeydown" tabindex="-1" ref="root">
     <!-- Mode switch pills (top-right) -->
     <div class="screen-mode-switch" :class="{ visible: controlsVisible }">
       <button :class="{ active: screenMode === 'data' }" @click="screenMode = 'data'"><Icon name="bar-chart" :size="14" /> 数据大屏</button>
       <button :class="{ active: screenMode === 'map' }" @click="screenMode = 'map'"><Icon name="target" :size="14" /> 威胁地图</button>
+      <!-- Refresh rate picker -->
+      <select v-model="refreshRate" class="bs-refresh-select" @change="setRefreshRate" title="刷新频率">
+        <option :value="10000">10s</option>
+        <option :value="30000">30s</option>
+        <option :value="60000">1min</option>
+      </select>
+      <!-- Fullscreen toggle -->
+      <button class="bs-fs-pill" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏'">{{ isFullscreen ? '⛶' : '⛶' }}</button>
       <button class="bs-exit-pill" @click="exitBigScreen" title="退出大屏">✕</button>
     </div>
     <!-- Threat Map mode -->
@@ -18,9 +26,9 @@
       </div>
     </header>
     <div v-if="screenMode === 'data'" class="bs-grid">
-      <div class="bs-card bs-metric" v-for="m in metrics" :key="m.key">
+      <div class="bs-card bs-metric" v-for="m in metrics" :key="m.key" :class="{ 'bs-alert-flash': m.key === 'br' && parseFloat(m.display) > 30 }">
         <div class="bs-metric-label">{{ m.label }}</div>
-        <div class="bs-metric-value" :style="{ color: m.color }"><span class="bs-metric-num">{{ m.display }}</span><span class="bs-metric-unit" v-if="m.unit">{{ m.unit }}</span></div>
+        <div class="bs-metric-value" :style="{ color: m.color }"><span class="bs-metric-num" :data-key="m.key" ref="metricNums">{{ animatedMetrics[m.key] != null ? animatedMetrics[m.key] : m.display }}</span><span class="bs-metric-unit" v-if="m.unit">{{ m.unit }}</span></div>
         <div class="bs-metric-trend" :class="m.trendClass">{{ m.trendText }}</div>
       </div>
       <div class="bs-card bs-trend-chart">
@@ -130,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import Icon from '../components/Icon.vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api.js'
@@ -139,6 +147,10 @@ import ThreatMap from '../components/ThreatMap.vue'
 const router = useRouter()
 const screenMode = ref('data')
 const clock = ref('')
+const refreshRate = ref(30000)
+const isFullscreen = ref(false)
+const animatedMetrics = reactive({})
+const metricNums = ref([])
 let clockT = null
 function updClock() {
   const n = new Date()
@@ -150,6 +162,36 @@ const controlsVisible = ref(true)
 let hideT = null
 function showControls(){ controlsVisible.value=true; clearTimeout(hideT); hideT=setTimeout(()=>{controlsVisible.value=false},5000) }
 function exitBigScreen(){ try{document.exitFullscreen()}catch{}; router.push('/overview') }
+function toggleFullscreen(){ if(document.fullscreenElement){document.exitFullscreen();isFullscreen.value=false}else{document.documentElement.requestFullscreen().then(()=>{isFullscreen.value=true}).catch(()=>{})} }
+function onKeydown(e){ if(e.key==='F11'){e.preventDefault();toggleFullscreen()} }
+function setRefreshRate(){ clearInterval(dataT); dataT=setInterval(async()=>{await fetchAll();await fetchOwasp()}, refreshRate.value) }
+
+// Number rolling animation
+function animateNumber(key, target) {
+  const start = parseFloat(animatedMetrics[key]) || 0
+  const end = parseFloat(target)
+  if (isNaN(end)) { animatedMetrics[key] = target; return }
+  const dur = 800, startT = performance.now()
+  function tick(now) {
+    const p = Math.min((now - startT) / dur, 1)
+    const eased = 1 - Math.pow(1 - p, 3)
+    const v = start + (end - start) * eased
+    animatedMetrics[key] = String(target).includes('.') ? v.toFixed(1) : Math.round(v)
+    if (p < 1) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
+// Watch metrics for animation
+let prevMetricVals = {}
+function updateAnimatedMetrics(ms) {
+  for (const m of ms) {
+    if (prevMetricVals[m.key] !== m.display) { animateNumber(m.key, m.display); prevMetricVals[m.key] = m.display }
+  }
+}
+
+// Fullscreen change listener
+function onFsChange() { isFullscreen.value = !!document.fullscreenElement }
 
 const healthScore = ref(null)
 const statsData = ref(null)
@@ -259,13 +301,16 @@ function genDemoTrend(){if(trendData.value.total.length>0)return;const t=[],b=[]
 let dataT = null
 onMounted(async()=>{
   updClock();clockT=setInterval(updClock,1000)
-  try{await document.documentElement.requestFullscreen()}catch{}
+  try{await document.documentElement.requestFullscreen();isFullscreen.value=true}catch{}
+  document.addEventListener('fullscreenchange', onFsChange)
+  root.value?.focus()
   await fetchAll();await fetchOwasp();await fetchCarousel();genDemoTrend()
-  dataT=setInterval(async()=>{await fetchAll();await fetchOwasp()},30000)
+  updateAnimatedMetrics(metrics.value)
+  dataT=setInterval(async()=>{await fetchAll();await fetchOwasp();updateAnimatedMetrics(metrics.value)}, refreshRate.value)
   setInterval(fetchCarousel,30000)
   startCarousel();await nextTick();startScroll();showControls()
 })
-onUnmounted(()=>{clearInterval(clockT);clearInterval(dataT);clearInterval(carouselT);clearInterval(scrollT);clearTimeout(hideT);try{if(document.fullscreenElement)document.exitFullscreen()}catch{}})
+onUnmounted(()=>{clearInterval(clockT);clearInterval(dataT);clearInterval(carouselT);clearInterval(scrollT);clearTimeout(hideT);document.removeEventListener('fullscreenchange',onFsChange);try{if(document.fullscreenElement)document.exitFullscreen()}catch{}})
 </script>
 
 <style scoped>
@@ -383,10 +428,31 @@ onUnmounted(()=>{clearInterval(clockT);clearInterval(dataT);clearInterval(carous
 
 .bs-empty{flex:1;display:flex;align-items:center;justify-content:center;color:#475569;font-size:clamp(0.5rem,0.6vw,0.7rem)}
 
+/* Refresh rate select */
+.bs-refresh-select{background:transparent;border:1px solid rgba(99,102,241,0.2);border-radius:12px;color:#94a3b8;font-size:0.65rem;padding:3px 8px;cursor:pointer;outline:none}
+.bs-refresh-select option{background:#0a0a1a;color:#e2e8f0}
+.bs-fs-pill{color:#a5b4fc!important;font-size:0.8rem!important}
+.bs-fs-pill:hover{background:rgba(99,102,241,0.2)!important}
+
+/* Alert flash animation */
+.bs-alert-flash{animation:alertPulse 2s ease-in-out infinite}
+@keyframes alertPulse{0%,100%{box-shadow:0 0 12px rgba(99,102,241,0.08)}50%{box-shadow:0 0 24px rgba(239,68,68,0.3),inset 0 0 12px rgba(239,68,68,0.05)}}
+
+/* Number rolling transition */
+.bs-metric-num{transition:color 0.5s ease;font-variant-numeric:tabular-nums}
+
 /* Glow animation for cards */
 .bs-card{transition:box-shadow 0.5s ease}
 .bs-card:hover{box-shadow:0 0 20px rgba(99,102,241,0.15)}
 
+/* Data glow effect */
+.bs-card::after{content:'';position:absolute;top:-1px;left:-1px;right:-1px;bottom:-1px;border-radius:9px;background:linear-gradient(135deg,rgba(99,102,241,0.1),transparent 50%);pointer-events:none;opacity:0;transition:opacity 0.3s}
+.bs-card:hover::after{opacity:1}
+.bs-card{position:relative}
+
+/* Responsive: standard screens */
+@media(max-width:1400px){.bs-grid{grid-template-columns:1fr 1fr 1fr 1fr;grid-template-rows:auto}.bs-right-panel{grid-column:1/-1;grid-row:auto;max-height:200px}}
+@media(max-width:900px){.bs-grid{grid-template-columns:1fr 1fr;gap:4px;padding:4px}.bs-trend-chart{grid-column:1/-1}.bs-owasp,.bs-chains,.bs-leaderboard,.bs-honeypot{grid-column:span 1}.bs-right-panel{grid-column:1/-1}}
 /* Responsive 4K */
 @media(min-width:3000px){.bs-metric-num{font-size:5rem}.bs-chain-num{font-size:4rem}.bs-hp-num{font-size:3rem}.bs-sl-big{font-size:5rem}}
 </style>
