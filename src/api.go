@@ -1464,12 +1464,25 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
 	traceID := r.URL.Query().Get("trace_id")
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
 	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
-	limit := 50
+	// 支持 since 简写: from=24h → 转为 RFC3339
+	if from != "" && !strings.Contains(from, "T") {
+		from = parseSinceParam(from)
+	}
+	limit := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil { limit = n }
 	}
-	logs, err := api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, limit)
+	if limit > 10000 { limit = 10000 }
+	var logs []map[string]interface{}
+	var err error
+	if from != "" || to != "" {
+		logs, err = api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, limit)
+	} else {
+		logs, err = api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, limit)
+	}
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -2026,6 +2039,29 @@ func (api *ManagementAPI) handleReloadInboundRules(w http.ResponseWriter, r *htt
 
 // handleListOutboundRules GET /api/v1/outbound-rules — 列出当前出站规则
 func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http.Request) {
+	// v6.4: ?detail=1 返回含 patterns 的完整规则信息
+	if r.URL.Query().Get("detail") == "1" {
+		configs := api.outboundEngine.GetRuleConfigs()
+		detailRules := make([]map[string]interface{}, len(configs))
+		for i, c := range configs {
+			detailRules[i] = map[string]interface{}{
+				"name":           c.Name,
+				"patterns":       c.Patterns,
+				"patterns_count": len(c.Patterns),
+				"action":         c.Action,
+				"priority":       c.Priority,
+				"message":        c.Message,
+			}
+		}
+		piiPatterns := api.inboundEngine.ListPIIPatterns()
+		jsonResponse(w, 200, map[string]interface{}{
+			"rules":        detailRules,
+			"total":        len(detailRules),
+			"pii_patterns": piiPatterns,
+		})
+		return
+	}
+
 	api.outboundEngine.mu.RLock()
 	rules := make([]map[string]interface{}, len(api.outboundEngine.rules))
 	for i, rule := range api.outboundEngine.rules {

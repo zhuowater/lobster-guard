@@ -5,15 +5,28 @@
         <div class="editor-header">
           <span class="modal-icon"><Icon :name="isEdit ? 'edit' : 'plus'" :size="18" /></span>
           <span class="modal-title">{{ isEdit ? '编辑规则' : '新建规则' }}</span>
+          <span class="direction-badge" :class="directionClass">{{ directionLabel }}</span>
+          <span style="flex:1"></span>
           <button class="editor-close" @click="close">✕</button>
         </div>
         <div class="editor-body">
-          <div class="form-group">
+          <div class="form-group" :class="{ 'has-error': errors.name }">
             <label>名称 <span class="required">*</span></label>
             <input type="text" v-model="form.name" placeholder="如 my_custom_rule" :disabled="isEdit" />
+            <div v-if="errors.name" class="field-error">{{ errors.name }}</div>
           </div>
+
+          <!-- Direction selector (only for create) -->
+          <div class="form-group" v-if="!isEdit">
+            <label>方向</label>
+            <select v-model="form.direction">
+              <option value="inbound">入站 (Inbound)</option>
+              <option value="outbound">出站 (Outbound)</option>
+            </select>
+          </div>
+
           <div class="form-row">
-            <div class="form-group" style="flex:1">
+            <div class="form-group" style="flex:1" v-if="isInbound">
               <label>类型</label>
               <select v-model="form.type">
                 <option value="keyword">keyword (关键词)</option>
@@ -34,14 +47,16 @@
               <label>优先级 (0-100)</label>
               <input type="number" v-model.number="form.priority" min="0" max="100" />
             </div>
-            <div class="form-group" style="flex:1">
+            <div class="form-group" style="flex:1" v-if="isInbound">
               <label>分组</label>
               <input type="text" v-model="form.group" placeholder="如 injection / jailbreak / pii" />
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" :class="{ 'has-error': errors.patterns }">
             <label>模式列表 <span class="required">*</span> <span class="hint">(每行一个 pattern)</span></label>
             <textarea v-model="form.patternsText" rows="6" placeholder="每行一个模式&#10;如:&#10;ignore previous instructions&#10;忽略之前的指令" class="mono-textarea"></textarea>
+            <div v-if="errors.patterns" class="field-error">{{ errors.patterns }}</div>
+            <div v-if="patternValidation && !errors.patterns" class="field-error">{{ patternValidation }}</div>
           </div>
           <div class="form-group">
             <label>自定义拦截消息 <span class="hint">(可选)</span></label>
@@ -69,12 +84,17 @@ import Icon from './Icon.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  rule: { type: Object, default: null }, // null = create, object = edit
+  rule: { type: Object, default: null },
+  direction: { type: String, default: 'inbound' },
+  errors: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['close', 'save'])
 
 const isEdit = computed(() => !!props.rule)
+const isInbound = computed(() => form.value.direction === 'inbound')
+const directionLabel = computed(() => form.value.direction === 'outbound' ? '出站' : '入站')
+const directionClass = computed(() => form.value.direction === 'outbound' ? 'dir-outbound' : 'dir-inbound')
 
 const form = ref({
   name: '',
@@ -84,11 +104,11 @@ const form = ref({
   group: '',
   patternsText: '',
   message: '',
+  direction: 'inbound',
 })
 
 watch(() => props.visible, (v) => {
   if (v && props.rule) {
-    // Edit mode - populate from rule
     form.value = {
       name: props.rule.name || '',
       type: props.rule.type || 'keyword',
@@ -97,10 +117,14 @@ watch(() => props.visible, (v) => {
       group: props.rule.group || '',
       patternsText: (props.rule.patterns || []).join('\n'),
       message: props.rule.message || '',
+      direction: props.direction || 'inbound',
     }
   } else if (v) {
-    // Create mode - reset
-    form.value = { name: '', type: 'keyword', action: 'block', priority: 0, group: '', patternsText: '', message: '' }
+    form.value = {
+      name: '', type: 'keyword', action: 'block', priority: 0,
+      group: '', patternsText: '', message: '',
+      direction: props.direction || 'inbound',
+    }
   }
 })
 
@@ -109,26 +133,38 @@ const firstPattern = computed(() => {
   return lines[0] || ''
 })
 
-const canSubmit = computed(() => {
-  return form.value.name.trim() && form.value.patternsText.trim()
+// Real-time regex validation
+const patternValidation = computed(() => {
+  if (form.value.type !== 'regex') return ''
+  const lines = form.value.patternsText.split('\n').map(l => l.trim()).filter(l => l)
+  for (const line of lines) {
+    try { new RegExp(line) } catch (e) { return '正则语法错误: "' + line + '" — ' + e.message }
+  }
+  return ''
 })
 
-function close() {
-  emit('close')
-}
+const canSubmit = computed(() => {
+  return form.value.name.trim() && form.value.patternsText.trim() && !patternValidation.value
+})
+
+function close() { emit('close') }
 
 function submit() {
   const patterns = form.value.patternsText.split('\n').map(l => l.trim()).filter(l => l)
   if (!patterns.length) return
-  emit('save', {
+  const data = {
     name: form.value.name.trim(),
     type: form.value.type,
     action: form.value.action,
     priority: form.value.priority,
-    group: form.value.group.trim(),
     patterns: patterns,
     message: form.value.message.trim(),
-  })
+  }
+  // Include group only for inbound
+  if (isInbound.value) {
+    data.group = form.value.group.trim()
+  }
+  emit('save', data)
 }
 </script>
 
@@ -137,17 +173,14 @@ function submit() {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,.5); z-index: 1000;
   display: flex; align-items: flex-start; justify-content: center;
-  padding-top: 40px;
-  animation: fadeIn .2s;
-  overflow-y: auto;
+  padding-top: 40px; animation: fadeIn .2s; overflow-y: auto;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .editor-panel {
   background: var(--bg-surface); border: 1px solid var(--border-default);
-  border-radius: var(--radius); width: 600px; max-width: 95vw;
+  border-radius: var(--radius, 8px); width: 600px; max-width: 95vw;
   box-shadow: 0 16px 64px rgba(0,0,0,.5);
-  animation: slideUp .25s ease-out;
-  margin-bottom: 40px;
+  animation: slideUp .25s ease-out; margin-bottom: 40px;
 }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 .editor-header {
@@ -155,12 +188,17 @@ function submit() {
   padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);
 }
 .modal-icon { font-size: 1.2rem; }
-.modal-title { font-size: 1.05rem; font-weight: 600; flex: 1; color: var(--text); }
+.modal-title { font-size: 1.05rem; font-weight: 600; color: var(--text, var(--text-primary)); }
+.direction-badge {
+  font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+}
+.dir-inbound { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+.dir-outbound { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 .editor-close {
   background: none; border: none; color: var(--text-secondary); font-size: 1.2rem;
   cursor: pointer; padding: 4px 8px; border-radius: 4px;
 }
-.editor-close:hover { background: rgba(255,255,255,.1); color: var(--text); }
+.editor-close:hover { background: rgba(255,255,255,.1); color: var(--text, var(--text-primary)); }
 .editor-body { padding: 20px; max-height: 70vh; overflow-y: auto; }
 .editor-footer {
   display: flex; justify-content: flex-end; gap: 8px;
@@ -171,7 +209,7 @@ function submit() {
   display: block; font-size: .82rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;
 }
 .form-group input, .form-group select, .form-group textarea {
-  width: 100%; background: rgba(0,0,0,.3); color: var(--text);
+  width: 100%; background: rgba(0,0,0,.3); color: var(--text, var(--text-primary));
   border: 1px solid var(--border-default); border-radius: 6px;
   padding: 8px 10px; font-size: .85rem;
 }
@@ -182,6 +220,14 @@ function submit() {
 .form-group textarea { resize: vertical; font-family: inherit; }
 .mono-textarea { font-family: 'Courier New', monospace !important; }
 .form-row { display: flex; gap: 12px; }
-.required { color: var(--color-danger); }
+.required { color: var(--color-danger, #ff4466); }
 .hint { color: var(--text-secondary); font-size: .75rem; font-weight: 400; }
+
+/* Validation errors */
+.has-error input, .has-error textarea {
+  border-color: var(--color-danger, #ff4466) !important;
+}
+.field-error {
+  color: var(--color-danger, #ff4466); font-size: .75rem; margin-top: 4px;
+}
 </style>
