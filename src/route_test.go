@@ -664,6 +664,53 @@ func TestRoutePolicyEngine_Empty(t *testing.T) {
 	}
 }
 
+// TestRoutePolicyEngine_DefaultFallback 测试 default 策略作为兜底（即使排在第一个）
+func TestRoutePolicyEngine_DefaultFallback(t *testing.T) {
+	// 关键场景：default 排在第一位，但精确匹配仍应优先
+	policies := []RoutePolicyConfig{
+		{Match: RoutePolicyMatch{Default: true}, UpstreamID: "fallback"},          // 排第一
+		{Match: RoutePolicyMatch{Email: "vip@example.com"}, UpstreamID: "vip"},    // 精确邮箱
+		{Match: RoutePolicyMatch{Department: "天眼事业部"}, UpstreamID: "tianyan"},   // 部门
+		{Match: RoutePolicyMatch{EmailSuffix: "@test.com"}, UpstreamID: "test"},   // 邮箱后缀
+	}
+	engine := NewRoutePolicyEngine(policies)
+
+	// 精确邮箱匹配应优先于 default
+	uid, matched := engine.Match(&UserInfo{Email: "vip@example.com", Department: "市场部"}, "")
+	if !matched || uid != "vip" {
+		t.Errorf("email match: got %q matched=%v, want 'vip'", uid, matched)
+	}
+
+	// 部门匹配应优先于 default
+	uid, matched = engine.Match(&UserInfo{Email: "user@other.com", Department: "天眼事业部"}, "")
+	if !matched || uid != "tianyan" {
+		t.Errorf("department match: got %q matched=%v, want 'tianyan'", uid, matched)
+	}
+
+	// 邮箱后缀匹配应优先于 default
+	uid, matched = engine.Match(&UserInfo{Email: "someone@test.com", Department: "其他部"}, "")
+	if !matched || uid != "test" {
+		t.Errorf("email suffix match: got %q matched=%v, want 'test'", uid, matched)
+	}
+
+	// 无匹配条件时 fallback 到 default
+	uid, matched = engine.Match(&UserInfo{Email: "nobody@random.org", Department: "无关部门"}, "")
+	if !matched || uid != "fallback" {
+		t.Errorf("default fallback: got %q matched=%v, want 'fallback'", uid, matched)
+	}
+
+	// TestMatch 也应同样工作
+	idx, policy, matched := engine.TestMatch(&UserInfo{Email: "vip@example.com"}, "")
+	if !matched || policy.UpstreamID != "vip" || idx != 1 {
+		t.Errorf("TestMatch email: idx=%d upstream=%q matched=%v, want idx=1 upstream='vip'", idx, policy.UpstreamID, matched)
+	}
+
+	idx, policy, matched = engine.TestMatch(&UserInfo{Email: "nobody@random.org", Department: "无关"}, "")
+	if !matched || policy.UpstreamID != "fallback" || idx != 0 {
+		t.Errorf("TestMatch default: idx=%d upstream=%q matched=%v, want idx=0 upstream='fallback'", idx, policy.UpstreamID, matched)
+	}
+}
+
 // TestCreateUserInfoProvider 测试 provider 工厂函数
 func TestCreateUserInfoProvider(t *testing.T) {
 	// Lanxin with credentials
