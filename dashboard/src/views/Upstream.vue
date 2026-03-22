@@ -68,6 +68,7 @@
       >
         <template #cell-address_port="{ row }">
           <code class="addr-code">{{ row.address || row.addr || row.host }}:{{ row.port }}</code>
+          <span v-if="row.path_prefix" class="prefix-tag">{{ row.path_prefix }}</span>
         </template>
 
         <template #cell-healthy="{ row }">
@@ -111,6 +112,7 @@
           <div class="expand-detail">
             <div><span class="detail-label">ID</span><span class="detail-value" style="font-weight:500">{{ row.id }}</span></div>
             <div><span class="detail-label">地址</span><span class="detail-value mono">{{ row.address || row.addr || row.host }}:{{ row.port }}</span></div>
+            <div><span class="detail-label">路径前缀</span><span class="detail-value mono">{{ row.path_prefix || '(无)' }}</span></div>
             <div><span class="detail-label">静态</span><span class="detail-value">{{ row.static ? '是' : '否' }}</span></div>
             <div><span class="detail-label">用户数</span><span class="detail-value" style="color:var(--color-primary)">{{ row.user_count || 0 }}</span></div>
             <div v-if="row.tags"><span class="detail-label">Tags</span><span class="detail-value mono">{{ JSON.stringify(row.tags) }}</span></div>
@@ -145,6 +147,10 @@
           <div class="form-group">
             <label>端口</label>
             <input v-model.number="form.port" type="number" placeholder="例如: 18789" />
+          </div>
+          <div class="form-group">
+            <label>路径前缀 <span class="label-hint">(可选，如 /api/v1)</span></label>
+            <input v-model="form.path_prefix" placeholder="例如: /api/v1" />
           </div>
           <div class="form-group">
             <label>Tags</label>
@@ -221,6 +227,7 @@ const form = reactive({
   id: '',
   address: '',
   port: 18789,
+  path_prefix: '',
   tags: [] // [{key, value}]
 })
 
@@ -305,6 +312,7 @@ function openAddModal() {
   form.id = ''
   form.address = ''
   form.port = 18789
+  form.path_prefix = ''
   form.tags = []
   modalVisible.value = true
 }
@@ -314,6 +322,7 @@ function openEditModal(row) {
   form.id = row.id
   form.address = row.address || row.addr || row.host || ''
   form.port = row.port || 18789
+  form.path_prefix = row.path_prefix || ''
   // Convert tags object to array
   form.tags = []
   if (row.tags && typeof row.tags === 'object') {
@@ -354,6 +363,7 @@ async function saveUpstream() {
         id: form.id.trim(),
         address: form.address.trim(),
         port: form.port,
+        path_prefix: form.path_prefix.trim(),
         tags
       })
       showToast('上游添加成功', 'success')
@@ -361,6 +371,7 @@ async function saveUpstream() {
       await apiPut('/api/v1/upstreams/' + encodeURIComponent(form.id), {
         address: form.address.trim(),
         port: form.port,
+        path_prefix: form.path_prefix.trim(),
         tags
       })
       showToast('上游更新成功', 'success')
@@ -560,6 +571,21 @@ onMounted(() => {
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   color: var(--text-primary);
+}
+.prefix-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+}
+.label-hint {
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
 }
 .health-badge {
   display: inline-flex;

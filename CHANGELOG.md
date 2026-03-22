@@ -1,5 +1,33 @@
 # Changelog
 
+## v20.8.0 (2026-03-22) — 安全加固 + 规则模板 + path_prefix
+
+### 🔒 安全加固 (Issue #1)
+- **移除硬编码默认密码** — 未配置时自动生成随机 16 字符密码
+- **移除密码明文日志** — 仅输出密码长度
+- **移除 URL query token 认证** — 改用 Cookie (`lg_token`) 方式
+- **WebSocket Origin 白名单** — 新增 `ws_allowed_origins` 配置项
+- **密码最小长度提升** — 从 4 位提高到 8 位（创建+修改共 3 处）
+- **SQLite 文件权限** — 自动设置 0600
+- **JWT 未配置警告加强** — 明确提示生产环境必须配置
+
+### 🛡️ 规则模板库 (64 条规则)
+- **通用模板** (general.yaml) — 16 条：Prompt Injection / Jailbreak / 命令注入 / 社工 / 数据泄露
+- **金融模板** (financial.yaml) — 16 条：银行卡 PII / 反洗钱 / 制裁 / BEC / 交易合规
+- **医疗模板** (medical.yaml) — 16 条：HIPAA 患者隐私 / 用药安全 / 过敏检查 / 医保欺诈
+- **政务模板** (government.yaml) — 16 条：涉密信息 / 公民 PII / 数据跨境 / 政策泄露
+
+### 🔀 上游路径前缀 (path_prefix)
+- 上游配置新增 `path_prefix` 字段，支持非根路径上游服务
+- DB 持久化：schema 迁移 + 读写完整链路
+- `path.Clean()` 防路径穿越
+- **Dashboard 上游管理页面**：列表显示前缀标签、展开详情、编辑表单
+
+### 🔧 工程改进
+- `.gitignore` 不再排除 `src/rules/`，规则模板纳入版本控制
+- `config.yaml.example` 新增 `path_prefix`、`ws_allowed_origins`、安全配置注释
+- **main 分支保护**：必须 PR + 1 approve review 才能合并
+
 ## v20.7.0 (2026-03-21) — Dashboard 企业级打磨
 
 ### 🏢 Dashboard 全面重构

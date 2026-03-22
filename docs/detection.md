@@ -12,7 +12,7 @@
 |------|------|------|
 | 关键词 | AC 自动机 | O(n) 多模式匹配，40+ 内置规则 |
 | 正则 | regexp | 自定义正则模式，100ms 超时保护 |
-| 规则模板 | go:embed | 4 场景 66 条规则（通用/金融/医疗/政务）|
+| 规则模板 | go:embed | 4 场景 64 条规则（通用/金融/医疗/政务）|
 | 上下文感知 | SessionDetector | 会话级风险积分 · 多轮攻击识别 · 自动升级 |
 | 语义分析 | LLMDetector | 可选 · async/sync · 外部 LLM API · fail-open |
 | 结果缓存 | DetectCache | SHA-256 LRU · pass/warn 缓存 · block 不缓存 |
