@@ -15,6 +15,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 type mockUpstream struct {
 	server       *httptest.Server
 	requestCount int64
+	mu           sync.Mutex
 	lastBody     []byte
 	lastPath     string
 	lastMethod   string
@@ -42,9 +44,11 @@ func newMockUpstream() *mockUpstream {
 	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&m.requestCount, 1)
 		body, _ := io.ReadAll(r.Body)
+		m.mu.Lock()
 		m.lastBody = body
 		m.lastPath = r.URL.Path
 		m.lastMethod = r.Method
+		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(m.responseCode)
 		w.Write([]byte(m.responseBody))
@@ -62,6 +66,7 @@ func (m *mockUpstream) count() int64 { return atomic.LoadInt64(&m.requestCount) 
 type mockLanxinAPI struct {
 	server       *httptest.Server
 	requestCount int64
+	mu           sync.Mutex
 	lastBody     []byte
 	lastPath     string
 	blocked      bool // 模拟蓝信 API 不可用
@@ -70,15 +75,20 @@ type mockLanxinAPI struct {
 func newMockLanxinAPI() *mockLanxinAPI {
 	m := &mockLanxinAPI{}
 	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m.blocked {
+		m.mu.Lock()
+		blocked := m.blocked
+		m.mu.Unlock()
+		if blocked {
 			w.WriteHeader(503)
 			w.Write([]byte(`{"errcode":503,"errmsg":"service unavailable"}`))
 			return
 		}
 		atomic.AddInt64(&m.requestCount, 1)
 		body, _ := io.ReadAll(r.Body)
+		m.mu.Lock()
 		m.lastBody = body
 		m.lastPath = r.URL.Path
+		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
 		w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))

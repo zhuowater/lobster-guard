@@ -24,46 +24,103 @@ import (
 // v18: Trace 关联缓存 — 入站 senderID→traceID 映射，出站按 recipient 反查
 // ============================================================
 
-// TraceCorrelator 维护 sender→最近 trace_id 的映射（LRU 淘汰）
+// TraceCorrelator 维护 sender→最近 trace_id 的映射（O(1) LRU 淘汰）
 type TraceCorrelator struct {
-	mu      sync.RWMutex
-	entries map[string]traceEntry
+	mu      sync.Mutex
+	entries map[string]*traceNode
+	head    *traceNode // 最新
+	tail    *traceNode // 最旧
 	maxSize int
+	size    int
 }
 
-type traceEntry struct {
+type traceNode struct {
+	key     string // senderID
 	traceID string
 	ts      time.Time
+	prev    *traceNode
+	next    *traceNode
 }
 
 func NewTraceCorrelator(maxSize int) *TraceCorrelator {
 	if maxSize <= 0 {
 		maxSize = 10000
 	}
-	return &TraceCorrelator{entries: make(map[string]traceEntry), maxSize: maxSize}
+	return &TraceCorrelator{entries: make(map[string]*traceNode, maxSize), maxSize: maxSize}
 }
 
-// Set 入站时记录 sender→trace 映射
+// moveToFront 将节点移到链表头（最新位置）
+func (tc *TraceCorrelator) moveToFront(node *traceNode) {
+	if node == tc.head {
+		return
+	}
+	// 从当前位置摘出
+	if node.prev != nil {
+		node.prev.next = node.next
+	}
+	if node.next != nil {
+		node.next.prev = node.prev
+	}
+	if node == tc.tail {
+		tc.tail = node.prev
+	}
+	// 插到头部
+	node.prev = nil
+	node.next = tc.head
+	if tc.head != nil {
+		tc.head.prev = node
+	}
+	tc.head = node
+	if tc.tail == nil {
+		tc.tail = node
+	}
+}
+
+// removeTail 删除链表尾（最旧）
+func (tc *TraceCorrelator) removeTail() {
+	if tc.tail == nil {
+		return
+	}
+	old := tc.tail
+	delete(tc.entries, old.key)
+	tc.tail = old.prev
+	if tc.tail != nil {
+		tc.tail.next = nil
+	} else {
+		tc.head = nil
+	}
+	tc.size--
+}
+
+// Set 入站时记录 sender→trace 映射（O(1)）
 func (tc *TraceCorrelator) Set(senderID, traceID string) {
 	if senderID == "" || traceID == "" {
 		return
 	}
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	tc.entries[senderID] = traceEntry{traceID: traceID, ts: time.Now()}
-	// 简单淘汰：超过 maxSize 时删最老的
-	if len(tc.entries) > tc.maxSize {
-		var oldest string
-		var oldestTs time.Time
-		for k, v := range tc.entries {
-			if oldest == "" || v.ts.Before(oldestTs) {
-				oldest = k
-				oldestTs = v.ts
-			}
-		}
-		if oldest != "" {
-			delete(tc.entries, oldest)
-		}
+	if node, ok := tc.entries[senderID]; ok {
+		// 更新已有节点
+		node.traceID = traceID
+		node.ts = time.Now()
+		tc.moveToFront(node)
+		return
+	}
+	// 新建节点
+	node := &traceNode{key: senderID, traceID: traceID, ts: time.Now()}
+	tc.entries[senderID] = node
+	node.next = tc.head
+	if tc.head != nil {
+		tc.head.prev = node
+	}
+	tc.head = node
+	if tc.tail == nil {
+		tc.tail = node
+	}
+	tc.size++
+	// 淘汰最旧的（O(1)）
+	for tc.size > tc.maxSize {
+		tc.removeTail()
 	}
 }
 
@@ -72,17 +129,18 @@ func (tc *TraceCorrelator) Get(recipientID string) string {
 	if recipientID == "" {
 		return ""
 	}
-	tc.mu.RLock()
-	defer tc.mu.RUnlock()
-	e, ok := tc.entries[recipientID]
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	node, ok := tc.entries[recipientID]
 	if !ok {
 		return ""
 	}
 	// 5 分钟窗口
-	if time.Since(e.ts) > 5*time.Minute {
+	if time.Since(node.ts) > 5*time.Minute {
 		return ""
 	}
-	return e.traceID
+	tc.moveToFront(node) // 读也算访问
+	return node.traceID
 }
 
 // ============================================================
@@ -176,75 +234,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		// 路由决策
 		var upstreamID string
 		if senderID != "" {
-			uid, found := ip.routes.Lookup(senderID, appID)
-			if found {
-				if ip.pool.IsHealthy(uid) {
-					upstreamID = uid
-				} else {
-					newUID := ip.pool.SelectUpstream(ip.policy)
-					if newUID != "" && newUID != uid {
-						ip.pool.IncrUserCount(uid, -1)
-						ip.pool.IncrUserCount(newUID, 1)
-						ip.routes.Migrate(senderID, appID, uid, newUID)
-						upstreamID = newUID
-						log.Printf("[桥接路由] 故障转移 sender=%s app=%s: %s -> %s", senderID, appID, uid, newUID)
-					} else {
-						upstreamID = uid
-					}
-				}
-			} else {
-				// v3.9: 先尝试策略匹配
-				policyMatched := false
-				if ip.policyEng != nil && ip.userCache != nil {
-					if info := ip.userCache.GetCached(senderID); info != nil {
-						if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" {
-							if ip.pool.IsHealthy(pUID) {
-								upstreamID = pUID
-								ip.routes.Bind(senderID, appID, upstreamID)
-								ip.pool.IncrUserCount(upstreamID, 1)
-								policyMatched = true
-								log.Printf("[桥接路由] 策略匹配绑定 sender=%s app=%s -> %s (email=%s dept=%s)", senderID, appID, upstreamID, info.Email, info.Department)
-							}
-						}
-					}
-				}
-				if !policyMatched {
-					upstreamID = ip.pool.SelectUpstream(ip.policy)
-					if upstreamID != "" {
-						ip.routes.Bind(senderID, appID, upstreamID)
-						ip.pool.IncrUserCount(upstreamID, 1)
-						log.Printf("[桥接路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
-					}
-				}
-			}
-		}
-
-		// v3.9: 异步获取用户信息 + 策略路由纠偏
-		if senderID != "" && ip.userCache != nil {
-			go func(sid, aID string) {
-				defer func() { recover() }()
-				info, err := ip.userCache.GetOrFetch(sid)
-				if err == nil && info != nil {
-					ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
-					// 策略路由纠偏：新用户首次请求时缓存为空，可能被负载均衡分配到错误上游
-					// 拿到用户信息后重新匹配策略，如果结果不同则迁移绑定
-					if ip.policyEng != nil {
-						if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
-							if currentUID, found := ip.routes.Lookup(sid, aID); !found || currentUID != pUID {
-								oldUID := currentUID
-								ip.routes.Bind(sid, aID, pUID)
-								if !found {
-									ip.pool.IncrUserCount(pUID, 1)
-								} else {
-									ip.pool.IncrUserCount(pUID, 1)
-									ip.pool.IncrUserCount(oldUID, -1)
-								}
-								log.Printf("[桥接路由] 策略纠偏 sender=%s app=%s: %s -> %s (dept=%s email=%s)", sid, aID, oldUID, pUID, info.Department, info.Email)
-							}
-						}
-					}
-				}
-			}(senderID, appID)
+			upstreamID = ip.resolveUpstream(senderID, appID, "[桥接路由]")
 		}
 
 		// 限流检查（安检之前）
@@ -449,6 +439,102 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 	return nil
 }
 
+// resolveUpstream 统一路由决策：亲和查找 → 故障转移 → 策略匹配(同步) → 负载均衡 → 异步纠偏
+// 修复 Race #1(首条消息走错) #2(Lookup+Bind非原子) #3(计数漂移) #5(故障转移+纠偏冲突)
+func (ip *InboundProxy) resolveUpstream(senderID, appID, logPrefix string) string {
+	// 1. 亲和路由查找
+	uid, found := ip.routes.Lookup(senderID, appID)
+	if found {
+		if ip.pool.IsHealthy(uid) {
+			// 异步刷新用户信息（不影响路由）
+			ip.asyncRefreshUserInfo(senderID, appID, uid, logPrefix)
+			return uid
+		}
+		// 故障转移：用原子迁移
+		newUID := ip.pool.SelectUpstream(ip.policy)
+		if newUID != "" && newUID != uid {
+			if ip.routes.Migrate(senderID, appID, uid, newUID) {
+				ip.pool.TransferUserCount(uid, newUID)
+				log.Printf("%s 故障转移 sender=%s app=%s: %s -> %s", logPrefix, senderID, appID, uid, newUID)
+			}
+			return newUID
+		}
+		return uid // failopen
+	}
+
+	// 2. 新用户：同步获取用户信息（带超时），优先策略匹配
+	if ip.policyEng != nil && ip.userCache != nil {
+		// 同步等待最多 500ms 获取用户信息，超时降级到负载均衡
+		info, _ := ip.userCache.GetOrFetchWithTimeout(senderID, 500*time.Millisecond)
+		if info != nil {
+			ip.routes.UpdateUserInfo(senderID, info.Name, info.Email, info.Department)
+			if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+				ip.routes.Bind(senderID, appID, pUID)
+				ip.pool.IncrUserCount(pUID, 1)
+				log.Printf("%s 策略匹配绑定 sender=%s app=%s -> %s (dept=%s email=%s)",
+					logPrefix, senderID, appID, pUID, info.Department, info.Email)
+				return pUID
+			}
+		}
+	}
+
+	// 3. 降级到负载均衡
+	upstreamID := ip.pool.SelectUpstream(ip.policy)
+	if upstreamID != "" {
+		ip.routes.Bind(senderID, appID, upstreamID)
+		ip.pool.IncrUserCount(upstreamID, 1)
+		log.Printf("%s 新用户绑定 sender=%s app=%s -> %s", logPrefix, senderID, appID, upstreamID)
+		// 异步纠偏：如果上面 500ms 内没拿到用户信息，后台继续获取并纠偏
+		ip.asyncPolicyCorrection(senderID, appID, upstreamID, logPrefix)
+	}
+	return upstreamID
+}
+
+// asyncRefreshUserInfo 异步刷新用户信息（仅更新缓存和 display_name，不改路由）
+func (ip *InboundProxy) asyncRefreshUserInfo(senderID, appID, currentUID, logPrefix string) {
+	if ip.userCache == nil {
+		return
+	}
+	go func(sid, aID, curUID string) {
+		defer func() { recover() }()
+		info, err := ip.userCache.GetOrFetch(sid)
+		if err != nil || info == nil {
+			return
+		}
+		ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
+		// 纠偏：如果策略匹配到不同上游，原子迁移
+		if ip.policyEng != nil {
+			if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) && pUID != curUID {
+				if AtomicMigrate(ip.routes, ip.pool, sid, aID, curUID, pUID) {
+					log.Printf("%s 策略纠偏 sender=%s app=%s: %s -> %s (dept=%s email=%s)",
+						logPrefix, sid, aID, curUID, pUID, info.Department, info.Email)
+				}
+			}
+		}
+	}(senderID, appID, currentUID)
+}
+
+// asyncPolicyCorrection 异步策略纠偏：负载均衡分配后，后台获取用户信息并纠偏
+func (ip *InboundProxy) asyncPolicyCorrection(senderID, appID, assignedUID, logPrefix string) {
+	if ip.userCache == nil || ip.policyEng == nil {
+		return
+	}
+	go func(sid, aID, curUID string) {
+		defer func() { recover() }()
+		info, err := ip.userCache.GetOrFetch(sid)
+		if err != nil || info == nil {
+			return
+		}
+		ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
+		if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) && pUID != curUID {
+			if AtomicMigrate(ip.routes, ip.pool, sid, aID, curUID, pUID) {
+				log.Printf("%s 异步策略纠偏 sender=%s app=%s: %s -> %s (dept=%s email=%s)",
+					logPrefix, sid, aID, curUID, pUID, info.Department, info.Email)
+			}
+		}
+	}(senderID, appID, assignedUID)
+}
+
 func (ip *InboundProxy) handleWecomVerify(w http.ResponseWriter, r *http.Request, wp *WecomPlugin) {
 	q := r.URL.Query()
 	msgSignature := q.Get("msg_signature")
@@ -630,80 +716,10 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 路由决策
+	// 路由决策（统一方法，修复 Race #1/#2/#3/#5）
 	var upstreamID string
 	if senderID != "" {
-		uid, found := ip.routes.Lookup(senderID, appID)
-		if found {
-			if ip.pool.IsHealthy(uid) {
-				upstreamID = uid
-			} else {
-				// 故障转移：选择新的健康上游
-				newUID := ip.pool.SelectUpstream(ip.policy)
-				if newUID != "" && newUID != uid {
-					ip.pool.IncrUserCount(uid, -1)
-					ip.pool.IncrUserCount(newUID, 1)
-					ip.routes.Migrate(senderID, appID, uid, newUID)
-					upstreamID = newUID
-					log.Printf("[路由] 故障转移 sender=%s app=%s: %s -> %s", senderID, appID, uid, newUID)
-				} else {
-					upstreamID = uid // failopen: 仍尝试原上游
-				}
-			}
-		} else {
-			// v3.9: 先尝试策略匹配
-			policyMatched := false
-			if ip.policyEng != nil && ip.userCache != nil {
-				if info := ip.userCache.GetCached(senderID); info != nil {
-					if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" {
-						if ip.pool.IsHealthy(pUID) {
-							upstreamID = pUID
-							ip.routes.Bind(senderID, appID, upstreamID)
-							ip.pool.IncrUserCount(upstreamID, 1)
-							policyMatched = true
-							log.Printf("[路由] 策略匹配绑定 sender=%s app=%s -> %s (email=%s dept=%s)", senderID, appID, upstreamID, info.Email, info.Department)
-						}
-					}
-				}
-			}
-			if !policyMatched {
-				// 新用户分配
-				upstreamID = ip.pool.SelectUpstream(ip.policy)
-				if upstreamID != "" {
-					ip.routes.Bind(senderID, appID, upstreamID)
-					ip.pool.IncrUserCount(upstreamID, 1)
-					log.Printf("[路由] 新用户绑定 sender=%s app=%s -> %s", senderID, appID, upstreamID)
-				}
-			}
-		}
-	}
-
-	// v3.9: 异步获取用户信息 + 策略路由纠偏
-	if senderID != "" && ip.userCache != nil {
-		go func(sid, aID string) {
-			defer func() { recover() }()
-			info, err := ip.userCache.GetOrFetch(sid)
-			if err == nil && info != nil {
-				ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
-				// 策略路由纠偏：新用户首次请求时缓存为空，可能被负载均衡分配到错误上游
-				// 拿到用户信息后重新匹配策略，如果结果不同则迁移绑定
-				if ip.policyEng != nil {
-					if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
-						if currentUID, found := ip.routes.Lookup(sid, aID); !found || currentUID != pUID {
-							oldUID := currentUID
-							ip.routes.Bind(sid, aID, pUID)
-							if !found {
-								ip.pool.IncrUserCount(pUID, 1)
-							} else {
-								ip.pool.IncrUserCount(pUID, 1)
-								ip.pool.IncrUserCount(oldUID, -1)
-							}
-							log.Printf("[路由] 策略纠偏 sender=%s app=%s: %s -> %s (dept=%s email=%s)", sid, aID, oldUID, pUID, info.Department, info.Email)
-						}
-					}
-				}
-			}
-		}(senderID, appID)
+		upstreamID = ip.resolveUpstream(senderID, appID, "[路由]")
 	}
 
 	// 获取代理

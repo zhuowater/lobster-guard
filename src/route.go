@@ -281,7 +281,26 @@ func (pool *UpstreamPool) IsHealthy(id string) bool {
 // IncrUserCount 增加上游用户计数
 func (pool *UpstreamPool) IncrUserCount(id string, delta int) {
 	pool.mu.Lock(); defer pool.mu.Unlock()
-	if up, ok := pool.upstreams[id]; ok { up.UserCount += delta }
+	if up, ok := pool.upstreams[id]; ok {
+		up.UserCount += delta
+		if up.UserCount < 0 { up.UserCount = 0 } // 防止负数
+	}
+}
+
+// TransferUserCount 原子转移用户计数：from -1, to +1，单次加锁
+func (pool *UpstreamPool) TransferUserCount(fromID, toID string) {
+	pool.mu.Lock(); defer pool.mu.Unlock()
+	if fromID != "" {
+		if up, ok := pool.upstreams[fromID]; ok {
+			up.UserCount--
+			if up.UserCount < 0 { up.UserCount = 0 }
+		}
+	}
+	if toID != "" {
+		if up, ok := pool.upstreams[toID]; ok {
+			up.UserCount++
+		}
+	}
 }
 
 // Count returns total and healthy upstream counts
@@ -454,6 +473,83 @@ func (c *UserInfoCache) GetOrFetch(senderID string) (*UserInfo, error) {
 		c.saveToDB(info)
 	}
 	return info, nil
+}
+
+// GetOrFetchWithTimeout 带超时的 GetOrFetch — 用于新用户首次请求时同步等待用户信息
+// 内存/DB 缓存命中时立即返回；需要 API 调用时限制在 timeout 内完成
+// 超时返回 nil（调用方降级到负载均衡）
+func (c *UserInfoCache) GetOrFetchWithTimeout(senderID string, timeout time.Duration) (*UserInfo, error) {
+	if senderID == "" || timeout <= 0 {
+		return nil, nil
+	}
+
+	// 1. 内存缓存（无需等待）
+	c.mu.RLock()
+	if info, ok := c.memory[senderID]; ok {
+		if ft, ok2 := c.memTime[senderID]; ok2 && time.Since(ft) < c.ttl {
+			c.mu.RUnlock()
+			return info, nil
+		}
+	}
+	c.mu.RUnlock()
+
+	// 2. DB 缓存（无需等待）
+	if c.db != nil {
+		info, err := c.loadFromDB(senderID)
+		if err == nil && info != nil && time.Since(info.FetchedAt) < c.ttl {
+			c.putMemory(info)
+			return info, nil
+		}
+	}
+
+	// 3. API 获取（有超时限制）
+	if c.provider == nil {
+		return nil, nil
+	}
+	type fetchResult struct {
+		info *UserInfo
+		err  error
+	}
+	ch := make(chan fetchResult, 1)
+	go func() {
+		defer func() {
+			if rv := recover(); rv != nil {
+				ch <- fetchResult{nil, fmt.Errorf("panic: %v", rv)}
+			}
+		}()
+		info, err := c.provider.FetchUserInfo(senderID)
+		ch <- fetchResult{info, err}
+	}()
+
+	select {
+	case result := <-ch:
+		if result.err != nil {
+			return nil, result.err
+		}
+		if result.info == nil {
+			return nil, nil
+		}
+		result.info.SenderID = senderID
+		result.info.FetchedAt = time.Now()
+		c.putMemory(result.info)
+		if c.db != nil {
+			c.saveToDB(result.info)
+		}
+		return result.info, nil
+	case <-time.After(timeout):
+		// 超时：API 调用仍在后台跑（goroutine 最终会完成并写入缓存），但不阻塞请求
+		go func() {
+			if result := <-ch; result.err == nil && result.info != nil {
+				result.info.SenderID = senderID
+				result.info.FetchedAt = time.Now()
+				c.putMemory(result.info)
+				if c.db != nil {
+					c.saveToDB(result.info)
+				}
+			}
+		}()
+		return nil, nil
+	}
 }
 
 // GetCached 仅从缓存获取（不调API）
@@ -1289,6 +1385,44 @@ func (rt *RouteTable) Migrate(senderID, appID, fromID, toID string) bool {
 	return true
 }
 
+// CompareAndBind 原子比较并绑定 — 仅当当前绑定等于 expectedUID 时才更新为 newUID
+// 返回 (是否成功, 当前实际绑定的 upstreamID)
+// expectedUID 为空字符串表示期望无绑定
+func (rt *RouteTable) CompareAndBind(senderID, appID, expectedUID, newUID string) (bool, string) {
+	rt.mu.Lock(); defer rt.mu.Unlock()
+	key := routeKey(senderID, appID)
+	current, exists := rt.exact[key]
+	if expectedUID == "" {
+		// 期望无绑定
+		if exists {
+			return false, current
+		}
+	} else {
+		// 期望绑定到 expectedUID
+		if !exists || current != expectedUID {
+			return false, current
+		}
+	}
+	rt.exact[key] = newUID
+	if rt.db != nil {
+		now := time.Now().Format(time.RFC3339)
+		rt.db.Exec(`INSERT OR REPLACE INTO user_routes (sender_id, app_id, upstream_id, department, display_name, created_at, updated_at) VALUES(?,?,?,'','',?,?)`,
+			senderID, appID, newUID, now, now)
+	}
+	return true, newUID
+}
+
+// AtomicMigrate 原子迁移：比较当前绑定并迁移，同时调整 UserCount
+// 返回 true 表示成功迁移
+func AtomicMigrate(rt *RouteTable, pool *UpstreamPool, senderID, appID, expectedUID, newUID string) bool {
+	ok, _ := rt.CompareAndBind(senderID, appID, expectedUID, newUID)
+	if !ok {
+		return false
+	}
+	pool.TransferUserCount(expectedUID, newUID)
+	return true
+}
+
 // ListRoutes 返回结构化路由列表（v3.8）
 func (rt *RouteTable) ListRoutes() []RouteEntry {
 	rt.mu.RLock(); defer rt.mu.RUnlock()
@@ -1334,15 +1468,13 @@ func (rt *RouteTable) BindBatch(entries []RouteEntry) {
 
 // UpdateUserInfo 更新路由表中用户的显示名、邮箱和部门（v3.9）
 func (rt *RouteTable) UpdateUserInfo(senderID, displayName, email, department string) {
+	rt.mu.Lock(); defer rt.mu.Unlock()
 	if rt.db == nil {
 		return
 	}
 	now := time.Now().Format(time.RFC3339)
-	rt.db.Exec(`UPDATE user_routes SET display_name=?, department=?, updated_at=? WHERE sender_id=? AND (display_name='' OR display_name IS NULL OR display_name!=?)`,
-		displayName, department, now, senderID, displayName)
-	// Also update email column if it exists
-	rt.db.Exec(`UPDATE user_routes SET email=?, updated_at=? WHERE sender_id=? AND (email='' OR email IS NULL OR email!=?)`,
-		email, now, senderID, email)
+	rt.db.Exec(`UPDATE user_routes SET display_name=?, department=?, email=?, updated_at=? WHERE sender_id=? AND (display_name='' OR display_name IS NULL OR display_name!=? OR email='' OR email IS NULL OR email!=?)`,
+		displayName, department, email, now, senderID, displayName, email)
 }
 
 func (rt *RouteTable) Count() int {
