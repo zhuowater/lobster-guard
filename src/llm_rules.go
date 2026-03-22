@@ -3,6 +3,7 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"regexp"
 	"strings"
@@ -83,6 +84,8 @@ type LLMRuleEngine struct {
 	respRegex []*compiledLLMRegexRule
 	// 命中统计
 	hits map[string]*LLMRuleHit
+	// Issue #7 fix: 持久化支持
+	db *sql.DB
 }
 
 // llmACEntry AC 自动机中每个 pattern 对应的规则信息
@@ -125,12 +128,12 @@ var defaultLLMRules = []LLMRule{
 		Patterns: []string{`(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16})`},
 		Action: "rewrite", RewriteTo: "[REDACTED-KEY]", Enabled: true, Priority: 25},
 
-	// v20.7.1: Chinese PII patterns
+	// v20.8.1: Chinese PII patterns
 	{ID: "llm-pii-004", Name: "Chinese ID Card in Response", Category: "pii_leak", Direction: "response", Type: "regex",
-		Patterns: []string{`[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]`},
+		Patterns: []string{`(?:\D|^)([1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx])(?:\D|$)`},
 		Action: "warn", Enabled: true, Severity: "high", Priority: 22},
 	{ID: "llm-pii-005", Name: "Chinese Phone Number in Response", Category: "pii_leak", Direction: "response", Type: "regex",
-		Patterns: []string{`1[3-9]\d{9}`},
+		Patterns: []string{`(?:\D|^)(1[3-9]\d{9})(?:\D|$)`},
 		Action: "warn", Enabled: true, Severity: "medium", Priority: 21},
 
 	// Sensitive Topic（双向）
@@ -199,6 +202,51 @@ func NewLLMRuleEngine(rules []LLMRule) *LLMRuleEngine {
 	}
 	e.buildIndex(rules)
 	return e
+}
+
+// SetDB 设置数据库引用，启用命中计数持久化
+func (e *LLMRuleEngine) SetDB(db *sql.DB) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.db = db
+
+	// 创建表
+	db.Exec(`CREATE TABLE IF NOT EXISTS llm_rule_hits (
+		rule_id TEXT PRIMARY KEY,
+		count INTEGER DEFAULT 0,
+		shadow_hits INTEGER DEFAULT 0,
+		last_hit TEXT
+	)`)
+
+	// 从 DB 恢复命中计数
+	rows, err := db.Query(`SELECT rule_id, count, shadow_hits, last_hit FROM llm_rule_hits`)
+	if err != nil {
+		log.Printf("[LLM规则] 命中计数恢复失败: %v", err)
+		return
+	}
+	defer rows.Close()
+	restored := 0
+	for rows.Next() {
+		var ruleID, lastHitStr string
+		var count, shadowHits int64
+		if rows.Scan(&ruleID, &count, &shadowHits, &lastHitStr) != nil {
+			continue
+		}
+		hit, ok := e.hits[ruleID]
+		if !ok {
+			hit = &LLMRuleHit{}
+			e.hits[ruleID] = hit
+		}
+		hit.Count = count
+		hit.ShadowHits = shadowHits
+		if t, err := time.Parse(time.RFC3339, lastHitStr); err == nil {
+			hit.LastHit = t
+		}
+		restored++
+	}
+	if restored > 0 {
+		log.Printf("[LLM规则] 恢复命中计数: %d 条规则", restored)
+	}
 }
 
 // buildIndex 从规则列表构建内部索引（AC 自动机 + 正则）
@@ -283,6 +331,9 @@ func (e *LLMRuleEngine) buildIndex(rules []LLMRule) {
 			e.hits[rule.ID] = &LLMRuleHit{}
 		}
 	}
+
+	log.Printf("[LLM规则] buildIndex 完成: 总规则%d, req_ac=%d req_regex=%d resp_ac=%d resp_regex=%d",
+		len(rules), len(reqEntries), len(reqRegex), len(respEntries), len(respRegex))
 }
 
 // UpdateRules 热更新规则（并发安全）
@@ -330,6 +381,16 @@ func (e *LLMRuleEngine) recordHit(ruleID string, shadow bool) {
 		hit.Count++
 	}
 	hit.LastHit = time.Now()
+
+	// Issue #7 fix: 异步持久化到 DB
+	if e.db != nil {
+		go func(rid string, c, s int64, t time.Time) {
+			e.db.Exec(`INSERT INTO llm_rule_hits (rule_id, count, shadow_hits, last_hit)
+				VALUES (?, ?, ?, ?) ON CONFLICT(rule_id) DO UPDATE SET
+				count=?, shadow_hits=?, last_hit=?`,
+				rid, c, s, t.Format(time.RFC3339), c, s, t.Format(time.RFC3339))
+		}(ruleID, hit.Count, hit.ShadowHits, hit.LastHit)
+	}
 }
 
 // CheckRequest 检测请求内容，返回匹配结果

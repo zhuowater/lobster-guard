@@ -238,6 +238,7 @@ func main() {
 		// v10.0: 初始化 LLM 规则引擎（v18: 合并用户配置 + 默认规则）
 		llmRules := mergeLLMRuleDefaults(cfg.LLMProxy.Rules)
 		llmRuleEngine = NewLLMRuleEngine(llmRules)
+		llmRuleEngine.SetDB(logger.DB()) // Issue #7 fix: 命中计数持久化
 		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则 (用户%d+默认补充)", len(llmRules), len(cfg.LLMProxy.Rules))
 
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)

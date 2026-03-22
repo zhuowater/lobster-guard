@@ -363,6 +363,31 @@ func (pool *UpstreamPool) HealthCheck(ctx context.Context) {
 			pool.mu.Lock()
 			now := time.Now()
 			timeout := pool.heartbeatInterval * time.Duration(pool.heartbeatTimeout)
+			// Issue #5 fix: 静态上游也做 TCP 健康检查
+			for _, up := range pool.upstreams {
+				if !up.Static { continue }
+				go func(u *Upstream) {
+					addr := fmt.Sprintf("%s:%d", u.Address, u.Port)
+					conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+					if err != nil {
+						pool.mu.Lock()
+						if u.Healthy {
+							u.Healthy = false
+							log.Printf("[健康检查] 静态上游 %s (%s) TCP 不可达，标记为不健康", u.ID, addr)
+						}
+						pool.mu.Unlock()
+					} else {
+						conn.Close()
+						pool.mu.Lock()
+						if !u.Healthy {
+							u.Healthy = true
+							log.Printf("[健康检查] 静态上游 %s (%s) TCP 恢复，标记为健康", u.ID, addr)
+						}
+						pool.mu.Unlock()
+					}
+				}(up)
+			}
+
 			var toRemove []string
 			for id, up := range pool.upstreams {
 				if up.Static { continue }
