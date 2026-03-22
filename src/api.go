@@ -2106,6 +2106,16 @@ func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http
 		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
 		return
 	}
+	// D-007 fix: upstream_id 不能为空
+	if req.UpstreamID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (including default policy)"})
+		return
+	}
+	// R2-002 fix: match 条件不能全空
+	if !req.Match.Default && req.Match.Department == "" && req.Match.EmailSuffix == "" && req.Match.Email == "" && req.Match.AppID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "match conditions cannot be empty, set at least one field or use default:true"})
+		return
+	}
 	if api.policyEng == nil {
 		jsonResponse(w, 500, map[string]string{"error": "route policy engine not initialized"})
 		return
@@ -2147,6 +2157,11 @@ func (api *ManagementAPI) handleUpdateRoutePolicy(w http.ResponseWriter, r *http
 	var req RoutePolicyConfig
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// D-007 fix: upstream_id 不能为空
+	if req.UpstreamID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (including default policy)"})
 		return
 	}
 	if api.policyEng == nil {
