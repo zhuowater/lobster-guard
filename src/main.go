@@ -578,6 +578,11 @@ func main() {
 		fmt.Println("[初始化] ⚠️ 奇点蜜罐: 未启用")
 	}
 	mgmtAPI.singularityEngine = singularityEngine
+	// v18.3: 注入奇点蜜罐到代理
+	inbound.singularityEngine = singularityEngine
+	if llmProxy != nil {
+		llmProxy.singularityEngine = singularityEngine
+	}
 
 	// v19.2: 蜜罐深度交互引擎
 	var honeypotDeep *HoneypotDeepEngine
