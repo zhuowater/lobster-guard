@@ -452,7 +452,7 @@ func (ip *InboundProxy) resolveUpstream(senderID, appID, logPrefix string) strin
 
 	// ── 第一优先级：策略路由（权威） ──
 	if ip.policyEng != nil && ip.userCache != nil {
-		// 尝试获取用户信息（缓存命中立即返回，否则同步等 500ms）
+		// 尝试获取用户信息（缓存命中立即返回，否则同步等最多 1.5s）
 		info, _ := ip.userCache.GetOrFetchWithTimeout(senderID, 1500*time.Millisecond)
 		if info != nil {
 			ip.routes.UpdateUserInfo(senderID, info.Name, info.Email, info.Department)
