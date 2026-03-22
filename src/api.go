@@ -164,11 +164,13 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 }
 
 func (api *ManagementAPI) checkManagementAuth(r *http.Request) bool {
-	if api.managementToken == "" { return true }
+	if api.managementToken == "" {
+		return true // 未配置 token 时允许访问（启动时已有 🔴 警告，建议生产环境必须配置）
+	}
 	auth := r.Header.Get("Authorization")
 	if auth == "Bearer "+api.managementToken { return true }
-	// 支持 query parameter token（用于 iframe/下载等无法设 header 的场景）
-	if qToken := r.URL.Query().Get("token"); qToken == api.managementToken { return true }
+	// Cookie 方式（用于 Dashboard iframe/下载等无法设 header 的场景）
+	if cookie, err := r.Cookie("lg_token"); err == nil && cookie.Value == api.managementToken { return true }
 	return false
 }
 
