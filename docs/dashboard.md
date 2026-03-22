@@ -4,164 +4,122 @@
 
 访问 `http://your-server:9090/` 即可打开管理后台（需 JWT 登录）。
 
-## Vue 3 Dashboard（38 页面 · 19 组件）
+## Vue 3 Dashboard（38 页面 · 21 组件）
 
-> 深色科技主题 · Indigo 配色
+> 深色科技主题 · Indigo (#6366F1) 配色 · 企业产品级交互
 
-### Dashboard 全览
+### v20.7 企业级打磨标准
 
-![Dashboard Full](screenshots/dashboard-overview-v17.png)
+每个页面都满足：
 
-### 态势感知大屏
+- ✅ CRUD 闭环 — 能创建就能编辑、删除
+- ✅ 配置页面化 — 所有配置项都在页面操作，修改自动回写 config.yaml
+- ✅ 操作反馈 — Toast 成功/失败 + Loading 状态
+- ✅ 确认对话框 — 删除等危险操作 ConfirmModal 二次确认
+- ✅ 空状态引导 — EmptyState 组件 + 操作按钮
+- ✅ 搜索和过滤 — 列表页有搜索框 + 多维过滤
+- ✅ 批量操作 — checkbox 多选 + 批量启用/禁用/删除
+- ✅ 表单验证 — 必填+格式+实时错误提示
+- ✅ 统一组件库 — DataTable / StatCard / ConfirmModal / EmptyState / Skeleton / Icon / Toast
+- ✅ 响应式 — 1024px+ 正常使用
+- ✅ Skeleton 骨架屏 — 数据加载中显示骨架占位
 
-> 全屏驾驶舱 · 实时攻防态势 · OWASP 矩阵 · 攻击链关联 · 安全排行榜
+## 页面列表（38 页面）
 
-![Dashboard Bigscreen](screenshots/dashboard-bigscreen-v17.png)
+### 安全总览
 
-## 页面列表
+| 页面 | 功能 | v20.7 增强 |
+|------|------|-----------|
+| Overview | 安全驾驶舱 | 时间范围选择器 · 快捷操作 · 自动刷新 · 健康分环形图 · 数据变化闪烁 |
+| CustomDashboard | 自定义大屏 | 布局保存/加载 · 预览模式 |
+| AnomalyDetection | 异常检测 | 基线管理+迷你SVG图 · 独立阈值配置 · 趋势图弹窗 · 异常脉冲动画 |
+| Monitor | 监控指标 | 4指标图表 · 阈值设置 · 告警联动(超阈值红色脉冲) · 自动刷新 |
 
-| 分组 | 页面 | 说明 |
-|------|------|------|
-| **IM 安全** | Overview | 总览：请求/拦截/告警大数字 + 趋势图 + 饼图 |
-| | Rules | 入站/出站规则管理 + 热更新 + 命中率排行 |
-| | Audit | 审计日志 + 时间线 + 全文搜索 + CSV/JSON 导出 |
-| | Monitor | 实时监控 + QPS 柱状图 + 攻击实时流 |
-| | Routes | 路由管理 + 策略匹配 + Bot/部门筛选 |
-| **LLM 安全** | LLMOverview | LLM 代理概览 + Token 成本看板 |
-| | LLMRules | LLM 规则管理（11 条默认 + 自定义）|
-| | PromptTracker | Prompt 版本追踪 + Diff 对比 |
-| | Honeypot | 蜜罐管理 + 8 模板 + 引爆记录 |
-| | ABTesting | Prompt A/B 测试 + 效果量化 |
-| | SessionReplay | 会话回放 + 时间线 + 标签 |
-| **威胁分析** | UserProfiles | 攻击者画像 + 驾驶舱模式 |
-| | BehaviorProfile | 行为画像 + 特征提取 + 模式学习 |
-| | AttackChain | 攻击链检测 + Kill Chain 映射 |
-| | AnomalyDetection | 异常基线检测 + 健康分 + OWASP 矩阵 |
-| | RedTeam | Red Team Autopilot + 33 攻击向量 |
-| **安全治理** | Reports | 安全日报/周报 + 合规审计 + PDF 导出 |
-| | Leaderboard | 安全排行榜 + SLA 达成率 |
-| | Tenants | 多租户管理 + 租户隔离 |
-| | Settings | 系统设置 + 参数配置 |
-| **系统** | Operations | 运维工具箱（配置/备份/诊断/告警）|
-| | Upstream | 上游容器管理 + 健康检查 |
-| | Users | 用户管理 CRUD |
-| | BigScreen | 态势感知大屏 + 4 预设模板 |
+### 威胁中心
 
-*附加页面：CustomDashboard（可拖拽自定义布局）/ Login / UserDetail / SessionDetail*
+| 页面 | 功能 | v20.7 增强 |
+|------|------|-----------|
+| Audit | 审计日志 | 统计面板 · 高级过滤+URL同步 · 日志详情展开+关联跳转 · 归档管理 |
+| SessionReplay | 会话回放 | 统计卡片 · 高级筛选 · 风险标记 · 卡片展开预览 |
+| SessionDetail | 会话详情 | 聊天气泡风格 · 安全事件标注 · 标签注释 · 导出JSON/MD · 键盘导航 |
+| AttackChain | 攻击链 | 攻击时间线 · 处置操作(确认/误报/封禁) · 分析配置 |
+| UserProfiles | 用户画像 | 风险评分进度条 · 搜索过滤+排序 |
+| UserDetail | 用户详情 | 行为时间线 · 封禁/解封 · 标签系统 · 关联数据 |
 
-## 组件库（19 个）
+### 策略引擎
 
-TrendChart / PieChart / HeatMap / RuleEditor / TimelineChart 等，统一 Indigo 配色主题。
+| 页面 | 功能 | v20.7 增强 |
+|------|------|-----------|
+| Rules | 入站/出站规则 | 出站CRUD完整 · 批量操作 · 搜索过滤 · 正则校验 · 优先级可视化 |
+| Routes | 路由策略 | 三Tab · 策略优先级调整 · 批量解绑/迁移 · SVG绑定关系图 |
+| Upstream | 上游管理 | 搜索过滤 · 批量健检 · 健康可视化 · K8s发现面板 |
+| Envelopes | 执行信封 | 3Tab(信封/Merkle/链验证) · 配置管理 |
+| ToolPolicy | 工具策略 | 搜索过滤 · 批量操作 · 策略详情展开 |
+| Evolution | 自进化 | 3Tab(日志/策略/学习曲线) · 配置 |
+| EventBus | 事件总线 | 4Tab(事件流/目标/送达/ActionChain) · 目标CRUD |
 
-## 侧边栏导航（5 组）
+### LLM 策略
 
-| 分组 | 页面 | 功能 |
-|------|------|------|
-| 🛡️ **IM 安全** | Overview / Rules / Audit / Monitor / Routes | IM 入站出站安全管控 |
-| 🤖 **LLM 安全** | LLMOverview / LLMRules / PromptTracker / Honeypot / ABTesting / SessionReplay | LLM 代理审计与检测 |
-| 🔍 **威胁分析** | UserProfiles / BehaviorProfile / AttackChain / AnomalyDetection / RedTeam | 高级威胁分析与画像 |
-| 📋 **安全治理** | Reports / Leaderboard / Tenants / Settings | 报告、排行榜、租户管理 |
-| ⚙️ **系统** | Operations / Upstream / Users / BigScreen | 运维工具箱、态势大屏 |
+| 页面 | 功能 | v20.7 增强 |
+|------|------|-----------|
+| LLMRules | LLM规则 | 4维过滤 · 规则测试器 · 批量操作 · 影子模式 |
+| LLMOverview | LLM概览 | 快捷操作 · Token消耗双饼图 |
+| LLMCache | 响应缓存 | 缓存列表+搜索 · 策略配置(TTL/LRU/LFU) · 批量操作 |
+| SemanticDetector | 语义检测 | 四维雷达图 · 模式库搜索+快速测试 · 检测历史 · 配置 |
+| PromptTracker | Prompt追踪 | 版本diff(split/unified) · 标签管理 · 回滚 |
+| ABTesting | A/B测试 | 统计面板 · 显著性检验 · 应用胜出方案 |
+| APIGateway | API网关 | 搜索+方法过滤 · JWT增强 · 路由测试Tab · 批量 |
 
-## 启动画面
+### 威胁狩猎
 
-```
-  _         _         _                                         _
- | |   ___ | |__  ___| |_ ___ _ __       __ _ _   _  __ _ _ __| |
- | |  / _ \| '_ \/ __| __/ _ \ '__|____ / _' | | | |/ _' | '__| |
- | |_| (_) | |_) \__ \ ||  __/ | |_____| (_| | |_| | (_| | |  | |_
- |___|\___/|_.__/|___/\__\___|_|        \__, |\__,_|\__,_|_|  |___|
-                                         |___/
-        龙虾卫士 - AI Agent 安全网关 v20.6.0
-        双安全域 | IM检测 | LLM审计 | 态势感知 | 蜜罐 | Red Team
+| 页面 | 功能 | v20.7 增强 |
+|------|------|-----------|
+| RedTeam | 红队测试 | 场景管理+自定义 · 批量执行+进度 · 漏洞报告 |
+| Honeypot | Agent蜜罐 | 模板搜索 · 部署管理Tab · 触发记录展开 |
+| Singularity | 奇点蜜罐 | 诱饵配置 · 捕获记录+历史Tab |
+| TaintTracker | 污染追踪 | 传播路径时间线 · 清理操作 · 配置Tab |
+| BehaviorProfile | 行为画像 | 策略配置 · 行为模式可视化 · 活跃热力格 |
+| AgentBehavior | Agent行为 | 规则CRUD · 异常标记 · 高危导出 |
 
-┌─────────────────────────────────────────────────┐
-│              配置摘要 v20.6.0                    │
-├─────────────────────────────────────────────────┤
-│ 消息通道:    lanxin                             │
-│ 接入模式:    webhook                            │
-│ IM 入站:     :18443                             │
-│ IM 出站:     :18444                             │
-│ LLM 代理:    :8445                              │
-│ Dashboard:   :9090                              │
-│ 入站检测:    true                               │
-│ 出站审计:    true                               │
-│ 入站规则:    40 patterns (内置默认)              │
-│ 出站规则:    6 (默认) + 用户自定义               │
-│ LLM 规则:    11 (默认) + 用户自定义              │
-│ 路由策略:    least-users                        │
-│ 限流:        100 rps (全局) / 5 rps (每用户)    │
-│ Metrics:     :9090/metrics (Prometheus)          │
-│ 蜜罐:        8 模板 + 水印追踪                   │
-│ Red Team:    33 攻击向量                         │
-│ 多租户:      JWT 认证 + 租户隔离                 │
-│ 大屏:        4 预设模板 + 自定义布局              │
-└─────────────────────────────────────────────────┘
-```
+### 运营管理
 
-## 更多截图
+| 页面 | 功能 | v20.7 增强 |
+|------|------|-----------|
+| Reports | 报告中心 | 模板管理 · 定时任务 · 预览/下载 · 进度动画 |
+| Leaderboard | 排行榜 | 时间范围 · 多维排行 · 导出CSV/JSON · 金银铜 |
+| Tenants | 租户管理 | 双视图 · 成员批量 · 安全配置分组 |
+| Users | 用户管理 | 密码强度 · 角色权限 · 操作审计弹窗 |
+| Settings | 系统设置 | ⭐ 6组配置页面化 · 变更预览 · YAML回写 |
+| Operations | 运维工具 | YAML高亮 · 备份策略 · 诊断6宫格 · 告警CRUD |
+| BigScreen | 态势大屏 | 全屏(F11) · 数字滚动 · 告警闪烁 |
+| Login | 登录 | 记住登录 · 密码显隐 · 表单验证 |
 
-<details>
-<summary>展开查看全部截图</summary>
+## 组件库（21 个）
 
-### LLM 安全域
-![LLM Overview](screenshots/dashboard-llm-overview-v17.png)
+| 组件 | 用途 |
+|------|------|
+| DataTable | 通用数据表格（排序/分页/展开/多选） |
+| StatCard | 统计卡片（动画数字/趋势/可点击） |
+| ConfirmModal | 确认弹窗（danger/warning 两种模式） |
+| EmptyState | 空状态引导（图标+文案+操作按钮） |
+| Skeleton | 骨架屏加载占位 |
+| Toast | 全局消息提示（success/error/warning） |
+| Icon | SVG 图标系统 |
+| TrendChart | 趋势折线图（纯 CSS/SVG） |
+| PieChart | 饼图 |
+| HeatMap | 热力图 |
+| JsonHighlight | JSON 语法高亮 |
+| Sidebar | 侧边栏导航（可折叠/子分组） |
+| BindModal | 绑定操作弹窗 |
+| UpstreamSelect | 上游选择器 |
+| RuleEditor | 规则编辑器（入站/出站） |
+| RegexTester | 正则测试器 |
+| DraggableGrid | 拖拽网格布局 |
+| 其他 | 4 个辅助组件 |
 
-### 威胁分析
-![User Profiles](screenshots/dashboard-user-profiles-v17.png)
-![Behavior Profile](screenshots/dashboard-behavior-v17.png)
-![Attack Chains](screenshots/dashboard-attack-chains-v17.png)
-![Anomaly Detection](screenshots/dashboard-anomaly-v17.png)
+## 技术栈
 
-### 安全治理
-![Red Team](screenshots/dashboard-redteam-v17.png)
-![Honeypot](screenshots/dashboard-honeypot-v17.png)
-![Leaderboard](screenshots/dashboard-leaderboard-v17.png)
-![Reports](screenshots/dashboard-reports-v17.png)
-![Sessions](screenshots/dashboard-sessions-v17.png)
-
-### 审计与监控
-![Audit](screenshots/dashboard-audit-v17.png)
-![Routes](screenshots/dashboard-routes-v17.png)
-![Rules](screenshots/dashboard-rules-v17.png)
-
-### 态势大屏
-![Bigscreen](screenshots/dashboard-bigscreen-v17.png)
-
-</details>
-
-## Phase 1 新增页面 (v18-v20)
-
-### 🔐 执行信封 (`/envelopes`)
-- StatCards: 总信封数 / Merkle批次 / 待处理叶子 / 批次大小
-- 信封列表表格 + Merkle批次表格 (Tab切换)
-- 单条验证 + 批次验证
-
-### 📡 事件总线 (`/events`)
-- StatCards: 总事件 / 严重程度分布 / Webhook目标 / 最近24h
-- 事件列表 (severity颜色标签) + 三维筛选
-
-### 🧬 对抗性自进化 (`/evolution`)
-- 大数字: 代数 / 变异 / 绕过(红) / 生成规则(绿)
-- 一键运行进化 + 进化日志 + 变异策略卡片
-
-### 🌀 奇点蜜罐 (`/singularity`)
-- SVG圆环预算仪表盘 + 欧拉χ + 三通道进度条
-- 推荐放置 + 配置滑块 + 忠诚度排行
-
-### 🔬 语义检测 (`/semantic`)
-- 实时分析区(四维雷达: TF-IDF/句法/异常/意图)
-- 攻击模式库(47) + 配置(阈值/权重/动作)
-
-### 🔧 工具策略 (`/tools`)
-- 实时评估 + 规则CRUD(18规则) + 事件日志
-
-### ☣️ 污染追踪 (`/taint`)
-- 实时扫描 + 活跃污染列表(传播链可展开)
-- 逆转记录 + 双栏配置(追踪+逆转)
-
-### 💾 响应缓存 (`/cache`)
-- 命中率/节省Token/成本 + 缓存条目 + 测试查询 + 管理
-
-### 🚪 API 网关 (`/gateway`)
-- JWT生成/验证工具 + 路由CRUD + 网关日志 + 配置
+- **Vue 3.5** + Vue Router 4.5 + Vite 6.2
+- **零 UI 库** — 所有组件手写，纯 CSS
+- **go:embed** — 构建产物嵌入 Go 二进制，部署仍为单文件
+- **配色** — Indigo 主色 (#6366F1)，参考 Linear/Vercel 风格

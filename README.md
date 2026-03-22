@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20.6.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v20.7.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
@@ -77,10 +77,10 @@
 |------|------|
 | Go 源文件 | 70 个 |
 | Go 测试文件 | 50 个 |
-| Go 源代码行数 | ~42,400 行 |
-| Go 测试行数 | ~27,100 行 |
-| 总 Go 行数 | ~69,500 行 |
-| Vue 前端 | 38 页面 + 21 组件，共 65 个文件，~20,400 行 |
+| Go 源代码行数 | ~44,100 行 |
+| Go 测试行数 | ~27,800 行 |
+| 总 Go 行数 | ~71,900 行 |
+| Vue 前端 | 38 页面 + 21 组件，共 65 个文件，~23,700 行 |
 | API 路由 | ~275 个 |
 | 测试函数 | 950 个 |
 | Git Commit | 168 个 |
@@ -320,6 +320,7 @@ lobster-guard/
 | **v18** | 密码学审计链（执行信封）+ 事件总线 + 奇点蜜罐 + 自适应决策 |
 | **v19** | 对抗性自进化 + 语义检测引擎 + 蜜罐深度交互 |
 | **v20** | 工具策略引擎 + 污染追踪/逆转 + LLM 响应缓存 + API 网关 |
+| **v20.7** | 🏢 **Dashboard 企业级打磨** — 38 页面全部重构：完整 CRUD 闭环 · 配置页面化(YAML 回写) · 搜索过滤 · 批量操作 · 表单验证 · Toast/ConfirmModal · 统一 Indigo 配色 · 响应式布局 |
 
 详细版本历史参见 [ROADMAP.md](ROADMAP.md)。
 
@@ -332,5 +333,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v20.6.0 · 70 source files · 71.1K lines · 950 tests · 275 APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v20.7.0 · 70 source files · 71.9K lines · 950 tests · 275+ APIs</sub>
 </p>
