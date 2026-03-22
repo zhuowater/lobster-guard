@@ -27,6 +27,7 @@ type LLMRule struct {
 	RewriteTo   string   `yaml:"rewrite_to" json:"rewrite_to"`   // 仅 action=rewrite 时有效
 	Enabled     bool     `yaml:"enabled" json:"enabled"`
 	Priority    int      `yaml:"priority" json:"priority"`
+	Severity    string   `yaml:"severity" json:"severity,omitempty"`   // high / medium / low
 	ShadowMode  bool     `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不执行
 }
 
@@ -123,6 +124,14 @@ var defaultLLMRules = []LLMRule{
 	{ID: "llm-pii-003", Name: "API Key in Response", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{`(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16})`},
 		Action: "rewrite", RewriteTo: "[REDACTED-KEY]", Enabled: true, Priority: 25},
+
+	// v20.7.1: Chinese PII patterns
+	{ID: "llm-pii-004", Name: "Chinese ID Card in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+		Patterns: []string{`[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]`},
+		Action: "warn", Enabled: true, Severity: "high", Priority: 22},
+	{ID: "llm-pii-005", Name: "Chinese Phone Number in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+		Patterns: []string{`1[3-9]\d{9}`},
+		Action: "warn", Enabled: true, Severity: "medium", Priority: 21},
 
 	// Sensitive Topic（双向）
 	{ID: "llm-st-001", Name: "Sensitive Topics", Category: "sensitive_topic", Direction: "both", Type: "keyword",

@@ -6,15 +6,15 @@ import (
 )
 
 func TestLLMRules_DefaultRules(t *testing.T) {
-	// v18: 新增3条响应方向规则(resp-001/002/003)，总计11条
-	if len(defaultLLMRules) != 11 {
-		t.Errorf("默认规则应有11条，实际 %d", len(defaultLLMRules))
+	// v20.8.1: 13条（含中国PII规则 llm-pii-004/005）
+	if len(defaultLLMRules) != 13 {
+		t.Errorf("默认规则应有13条，实际 %d", len(defaultLLMRules))
 	}
 
 	engine := NewLLMRuleEngine(defaultLLMRules)
 	rules := engine.GetRules()
-	if len(rules) != 11 {
-		t.Errorf("引擎加载后规则数应为11，实际 %d", len(rules))
+	if len(rules) != 13 {
+		t.Errorf("引擎加载后规则数应为13，实际 %d", len(rules))
 	}
 
 	// 验证每条规则都有基本字段

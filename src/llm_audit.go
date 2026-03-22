@@ -261,15 +261,31 @@ func ParseAnthropicResponse(body []byte) *AnthropicResponseInfo {
 		}
 	}
 
-	// usage
+	// usage — support both Anthropic (input_tokens/output_tokens) and OpenAI (prompt_tokens/completion_tokens) formats
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
+		// Anthropic format
 		if v, ok := usage["input_tokens"].(float64); ok {
 			info.InputTokens = int(v)
 		}
 		if v, ok := usage["output_tokens"].(float64); ok {
 			info.OutputTokens = int(v)
 		}
-		info.TotalTokens = info.InputTokens + info.OutputTokens
+		// OpenAI format fallback (also used by DashScope/Qwen)
+		if info.InputTokens == 0 {
+			if v, ok := usage["prompt_tokens"].(float64); ok {
+				info.InputTokens = int(v)
+			}
+		}
+		if info.OutputTokens == 0 {
+			if v, ok := usage["completion_tokens"].(float64); ok {
+				info.OutputTokens = int(v)
+			}
+		}
+		if v, ok := usage["total_tokens"].(float64); ok {
+			info.TotalTokens = int(v)
+		} else {
+			info.TotalTokens = info.InputTokens + info.OutputTokens
+		}
 	}
 
 	// content — scan for tool_use
@@ -386,6 +402,40 @@ func ParseSSEEvents(events []byte) *AnthropicResponseInfo {
 			if usage, ok := evt["usage"].(map[string]interface{}); ok {
 				if v, ok := usage["output_tokens"].(float64); ok {
 					info.OutputTokens = int(v)
+				}
+			}
+
+		default:
+			// v20.8.1: OpenAI streaming format — events may lack "type" field
+			// Check for usage object (appears in the final chunk with stream_options)
+			if usage, ok := evt["usage"].(map[string]interface{}); ok {
+				if v, ok := usage["prompt_tokens"].(float64); ok {
+					info.InputTokens = int(v)
+				}
+				if v, ok := usage["completion_tokens"].(float64); ok {
+					info.OutputTokens = int(v)
+				}
+				if v, ok := usage["total_tokens"].(float64); ok {
+					info.TotalTokens = int(v)
+				}
+			}
+			// Check for tool_calls in OpenAI delta format
+			if choices, ok := evt["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
+							for _, tc := range toolCalls {
+								if tcMap, ok := tc.(map[string]interface{}); ok {
+									if fn, ok := tcMap["function"].(map[string]interface{}); ok {
+										if name, ok := fn["name"].(string); ok && name != "" {
+											info.ToolNames = append(info.ToolNames, name)
+											info.HasToolUse = true
+										}
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 		}
