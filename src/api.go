@@ -1365,8 +1365,17 @@ func (api *ManagementAPI) handleDiscoveryStatus(w http.ResponseWriter, r *http.R
 	jsonResponse(w, 200, api.k8sDiscovery.Status())
 }
 
+// RouteEntryWithConflict 路由条目 + 策略冲突信息
+type RouteEntryWithConflict struct {
+	RouteEntry
+	PolicyConflict  bool   `json:"policy_conflict"`
+	PolicyUpstream  string `json:"policy_upstream,omitempty"`
+	PolicyRule      string `json:"policy_rule,omitempty"`
+}
+
 func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Request) {
 	appIDFilter := r.URL.Query().Get("app_id")
+	senderIDFilter := r.URL.Query().Get("sender_id")
 	var entries []RouteEntry
 	if appIDFilter != "" {
 		entries = api.routes.ListByApp(appIDFilter)
@@ -1376,7 +1385,89 @@ func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Reques
 	if entries == nil {
 		entries = []RouteEntry{}
 	}
-	jsonResponse(w, 200, map[string]interface{}{"routes": entries, "total": len(entries)})
+	// sender_id 过滤（精确匹配）
+	if senderIDFilter != "" {
+		var filtered []RouteEntry
+		for _, e := range entries {
+			if e.SenderID == senderIDFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+	}
+
+	// 策略冲突检测：对每条路由，用用户信息匹配策略，看结果是否和当前绑定一致
+	enriched := make([]RouteEntryWithConflict, 0, len(entries))
+	conflictCount := 0
+	for _, e := range entries {
+		ec := RouteEntryWithConflict{RouteEntry: e}
+		if api.policyEng != nil {
+			// 构造 UserInfo 用于策略匹配
+			info := &UserInfo{
+				SenderID:   e.SenderID,
+				Name:       e.DisplayName,
+				Email:      e.Email,
+				Department: e.Department,
+			}
+			// 如果路由条目没有用户信息，尝试从缓存获取
+			if info.Department == "" && info.Email == "" && api.userCache != nil {
+				if cached := api.userCache.GetCached(e.SenderID); cached != nil {
+					info = cached
+				}
+			}
+			if pUID, ok := api.policyEng.Match(info, e.AppID); ok && pUID != "" {
+				ec.PolicyUpstream = pUID
+				if pUID != e.UpstreamID {
+					ec.PolicyConflict = true
+					ec.PolicyRule = api.describePolicyMatch(info, e.AppID)
+					conflictCount++
+				}
+			}
+		}
+		enriched = append(enriched, ec)
+	}
+	resp := map[string]interface{}{
+		"routes": enriched,
+		"total":  len(enriched),
+	}
+	if conflictCount > 0 {
+		resp["conflict_count"] = conflictCount
+		resp["conflict_warning"] = fmt.Sprintf("%d 条路由与策略规则冲突，下次请求时将自动迁移到策略指定的上游", conflictCount)
+	}
+	jsonResponse(w, 200, resp)
+}
+
+// describePolicyMatch 描述匹配到的策略规则（人类可读）
+func (api *ManagementAPI) describePolicyMatch(info *UserInfo, appID string) string {
+	if api.policyEng == nil || info == nil {
+		return ""
+	}
+	api.policyEng.mu.RLock()
+	defer api.policyEng.mu.RUnlock()
+	for _, p := range api.policyEng.policies {
+		if p.Match.Default {
+			continue
+		}
+		if p.Match.Department != "" && containsDepartment(info.Department, p.Match.Department) {
+			return fmt.Sprintf("department=%s → %s", p.Match.Department, p.UpstreamID)
+		}
+		if p.Match.EmailSuffix != "" && info.Email != "" && strings.HasSuffix(info.Email, p.Match.EmailSuffix) {
+			return fmt.Sprintf("email_suffix=%s → %s", p.Match.EmailSuffix, p.UpstreamID)
+		}
+		if p.Match.Email != "" && info.Email == p.Match.Email {
+			return fmt.Sprintf("email=%s → %s", p.Match.Email, p.UpstreamID)
+		}
+		if p.Match.AppID != "" && appID == p.Match.AppID {
+			return fmt.Sprintf("app_id=%s → %s", p.Match.AppID, p.UpstreamID)
+		}
+	}
+	// 命中了默认策略
+	for _, p := range api.policyEng.policies {
+		if p.Match.Default {
+			return fmt.Sprintf("default → %s", p.UpstreamID)
+		}
+	}
+	return ""
 }
 
 func (api *ManagementAPI) handleBindRoute(w http.ResponseWriter, r *http.Request) {

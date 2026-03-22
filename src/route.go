@@ -368,14 +368,14 @@ func (pool *UpstreamPool) HealthCheck(ctx context.Context) {
 
 // RouteEntry 路由条目（v3.8 结构化）
 type RouteEntry struct {
-	SenderID    string `json:"sender_id"`
-	AppID       string `json:"app_id"`
-	UpstreamID  string `json:"upstream_id"`
-	Department  string `json:"department,omitempty"`
-	DisplayName string `json:"display_name,omitempty"`
-	Email       string `json:"email,omitempty"`    // v3.9
-	CreatedAt   string `json:"created_at,omitempty"`
-	UpdatedAt   string `json:"updated_at,omitempty"`
+	SenderID       string `json:"sender_id"`
+	AppID          string `json:"app_id"`
+	UpstreamID     string `json:"upstream_id"`
+	Department     string `json:"department,omitempty"`
+	DisplayName    string `json:"display_name,omitempty"`
+	Email          string `json:"email,omitempty"`    // v3.9
+	CreatedAt      string `json:"created_at,omitempty"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
 }
 
 // routeKey 生成复合路由键

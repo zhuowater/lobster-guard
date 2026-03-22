@@ -34,7 +34,11 @@
         <div class="route-stat-item"><span class="route-stat-label">Bot</span><span class="route-stat-value" style="color:var(--color-primary)">{{ routeStats.appCount }}</span></div><div class="route-stat-divider"></div>
         <div class="route-stat-item"><span class="route-stat-label">用户</span><span class="route-stat-value" style="color:var(--color-success)">{{ routeStats.senderCount }}</span></div><div class="route-stat-divider"></div>
         <div class="route-stat-item"><span class="route-stat-label">上游</span><span class="route-stat-value" style="color:var(--color-info)">{{ routeStats.upstreamCount }}</span></div><div class="route-stat-divider"></div>
-        <div class="route-stat-item"><span class="route-stat-label">路由</span><span class="route-stat-value" style="color:var(--color-warning)">{{ routeStats.total }}</span></div>
+        <div class="route-stat-item"><span class="route-stat-label">路由</span><span class="route-stat-value" style="color:var(--color-warning)">{{ routeStats.total }}</span></div><div class="route-stat-divider"></div>
+        <div class="route-stat-item" v-if="conflictCount > 0" @click="toggleConflictFilter" style="cursor:pointer" :title="'点击' + (filterConflict ? '取消' : '') + '筛选冲突路由'">
+          <span class="route-stat-label" :style="filterConflict ? 'color:var(--color-danger)' : ''">⚠️ 冲突</span>
+          <span class="route-stat-value" style="color:var(--color-danger);font-weight:700">{{ conflictCount }}</span>
+        </div>
       </div>
       <div class="filters">
         <select v-model="filterApp"><option value="">全部 Bot</option><option v-for="a in apps" :key="a" :value="a">{{ a.length > 20 ? a.substring(0, 20) + '...' : a }}</option></select>
@@ -57,7 +61,14 @@
         </template>
         <template #cell-sender_id="{ row }"><span style="font-size:.75rem;font-family:var(--font-mono)">{{ row.sender_id }}</span></template>
         <template #cell-app_id="{ row }"><span style="font-size:.75rem" :title="row.app_id">{{ (row.app_id||'--').length > 16 ? row.app_id.substring(0,16)+'...' : (row.app_id||'--') }}</span></template>
-        <template #cell-upstream_id="{ row }"><span class="tag" style="background:var(--color-primary-dim);color:var(--color-primary);font-weight:500">{{ row.upstream_id }}</span></template>
+        <template #cell-upstream_id="{ row }">
+          <span v-if="row.policy_conflict" class="tag policy-conflict-tag" :title="'策略冲突: 当前绑定 ' + row.upstream_id + '，策略指定 ' + row.policy_upstream + '\n规则: ' + (row.policy_rule || '未知')">
+            ⚠️ {{ row.upstream_id }}
+            <span class="conflict-arrow">→</span>
+            <span class="conflict-target">{{ row.policy_upstream }}</span>
+          </span>
+          <span v-else class="tag" style="background:var(--color-primary-dim);color:var(--color-primary);font-weight:500">{{ row.upstream_id }}</span>
+        </template>
         <template #cell-created_at="{ row }"><span style="font-size:.75rem;color:var(--text-tertiary)">{{ formatTime(row.created_at) }}</span></template>
         <template #expand="{ row }">
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px 24px;font-size:.82rem">
@@ -68,6 +79,14 @@
             <div><span class="expand-label">部门</span><span class="expand-value">{{ getUserInfo(row,'department') }}</span></div>
             <div><span class="expand-label">App</span><span class="expand-value" style="font-family:var(--font-mono);font-size:.75rem">{{ row.app_id||'--' }}</span></div>
             <div><span class="expand-label">上游</span><span class="expand-value">{{ row.upstream_id }}</span></div>
+            <div v-if="row.policy_conflict" style="grid-column:1/-1;background:var(--color-danger-dim);border-radius:8px;padding:10px 14px;border-left:3px solid var(--color-danger)">
+              <div style="font-weight:600;color:var(--color-danger);margin-bottom:4px">⚠️ 策略路由冲突</div>
+              <div style="font-size:.8rem;color:var(--text-secondary)">
+                当前绑定: <strong>{{ row.upstream_id }}</strong> · 策略指定: <strong style="color:var(--color-danger)">{{ row.policy_upstream }}</strong>
+              </div>
+              <div v-if="row.policy_rule" style="font-size:.75rem;color:var(--text-tertiary);margin-top:2px">匹配规则: {{ row.policy_rule }}</div>
+              <div style="font-size:.75rem;color:var(--text-tertiary);margin-top:4px">下次消息请求时将自动迁移到策略指定上游</div>
+            </div>
             <div><span class="expand-label">绑定时间</span><span class="expand-value">{{ row.created_at || '--' }}</span></div>
             <div><span class="expand-label">更新时间</span><span class="expand-value">{{ row.updated_at || '--' }}</span></div>
           </div>
@@ -352,6 +371,10 @@ const filterDept = ref('')
 const filterUpstream = ref('')
 const searchText = ref('')
 const sortBy = ref('')
+const filterConflict = ref(false)
+
+const conflictCount = computed(() => allRoutes.value.filter(r => r.policy_conflict).length)
+function toggleConflictFilter() { filterConflict.value = !filterConflict.value }
 const showBindModal = ref(false)
 const showBatchModal = ref(false)
 const showMigrateModal = ref(false)
@@ -404,6 +427,7 @@ const filteredRoutes = computed(() => {
   if (filterApp.value) list = list.filter(r => r.app_id === filterApp.value)
   if (filterDept.value) list = list.filter(r => r.department === filterDept.value)
   if (filterUpstream.value) list = list.filter(r => r.upstream_id === filterUpstream.value)
+  if (filterConflict.value) list = list.filter(r => r.policy_conflict)
   if (searchText.value) {
     const q = searchText.value.toLowerCase()
     list = list.filter(r =>
@@ -624,4 +648,29 @@ onMounted(refresh)
 /* Bind Map */
 .bindmap-container { padding: 16px; overflow-x: auto; }
 .bindmap-svg { display: block; margin: 0 auto; }
+
+/* 策略冲突高亮 */
+.policy-conflict-tag {
+  background: var(--color-danger-dim, rgba(239,68,68,0.12)) !important;
+  color: var(--color-danger, #ef4444) !important;
+  font-weight: 600;
+  border: 1px solid var(--color-danger, #ef4444);
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: .78rem;
+  line-height: 1.4;
+}
+.conflict-arrow {
+  color: var(--text-tertiary);
+  font-size: .7rem;
+  margin: 0 1px;
+}
+.conflict-target {
+  color: var(--color-success, #22c55e);
+  font-weight: 700;
+}
 </style>
