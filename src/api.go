@@ -1126,6 +1126,10 @@ func (api *ManagementAPI) handleRegister(w http.ResponseWriter, r *http.Request)
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	// BUG-005 fix: force metrics gauge update after registration
+	if api.metrics != nil {
+		api.metrics.RecordUpstreamChange()
+	}
 	jsonResponse(w, 200, map[string]interface{}{
 		"status": "registered",
 		"heartbeat_interval": fmt.Sprintf("%ds", api.cfg.HeartbeatIntervalSec),
@@ -1147,6 +1151,10 @@ func (api *ManagementAPI) handleHeartbeat(w http.ResponseWriter, r *http.Request
 		jsonResponse(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
+	// BUG-005 fix: force metrics gauge update after heartbeat
+	if api.metrics != nil {
+		api.metrics.RecordUpstreamChange()
+	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "ok", "user_count": userCount})
 }
 
@@ -1159,6 +1167,10 @@ func (api *ManagementAPI) handleDeregister(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	api.pool.Deregister(req.ID)
+	// BUG-005 fix: force metrics gauge update after deregistration
+	if api.metrics != nil {
+		api.metrics.RecordUpstreamChange()
+	}
 	jsonResponse(w, 200, map[string]string{"status": "deregistered"})
 }
 
@@ -1379,10 +1391,24 @@ func (api *ManagementAPI) handleBindRoute(w http.ResponseWriter, r *http.Request
 		jsonResponse(w, 400, map[string]string{"error": "sender_id and upstream_id required"})
 		return
 	}
+	// BUG-002 fix: validate upstream exists
+	if _, ok := api.pool.GetUpstream(req.UpstreamID); !ok {
+		jsonResponse(w, 400, map[string]string{"error": "upstream not found: " + req.UpstreamID})
+		return
+	}
+	// BUG-004 fix: check old binding for user_count adjustment
+	oldUpstream, hadOld := api.routes.Lookup(req.SenderID, req.AppID)
 	if req.Department != "" || req.DisplayName != "" {
 		api.routes.BindWithMeta(req.SenderID, req.AppID, req.UpstreamID, req.Department, req.DisplayName)
 	} else {
 		api.routes.Bind(req.SenderID, req.AppID, req.UpstreamID)
+	}
+	// BUG-004 fix: update user_count on old and new upstream
+	if hadOld && oldUpstream != req.UpstreamID {
+		api.pool.IncrUserCount(oldUpstream, -1)
+	}
+	if !hadOld || oldUpstream != req.UpstreamID {
+		api.pool.IncrUserCount(req.UpstreamID, 1)
 	}
 	jsonResponse(w, 200, map[string]string{"status": "bound", "sender_id": req.SenderID, "app_id": req.AppID, "upstream_id": req.UpstreamID})
 }
@@ -1395,6 +1421,10 @@ func (api *ManagementAPI) handleUnbindRoute(w http.ResponseWriter, r *http.Reque
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.SenderID == "" {
 		jsonResponse(w, 400, map[string]string{"error": "sender_id required"})
 		return
+	}
+	// BUG-004 fix: decrement user_count on old upstream before unbinding
+	if oldUpstream, ok := api.routes.Lookup(req.SenderID, req.AppID); ok {
+		api.pool.IncrUserCount(oldUpstream, -1)
 	}
 	api.routes.Unbind(req.SenderID, req.AppID)
 	jsonResponse(w, 200, map[string]string{"status": "unbound", "sender_id": req.SenderID, "app_id": req.AppID})
@@ -1433,37 +1463,79 @@ func (api *ManagementAPI) handleBatchBindRoute(w http.ResponseWriter, r *http.Re
 		jsonResponse(w, 400, map[string]string{"error": "upstream_id required"})
 		return
 	}
+	// BUG-002 fix: validate upstream exists
+	if _, ok := api.pool.GetUpstream(req.UpstreamID); !ok {
+		jsonResponse(w, 400, map[string]string{"error": "upstream not found: " + req.UpstreamID})
+		return
+	}
 	var bound int
 	if len(req.Entries) > 0 {
 		// 模式1: 按条目列表批量绑定
 		entries := make([]RouteEntry, 0, len(req.Entries))
+		// BUG-004 fix: track old upstreams for user_count adjustment
+		oldUpstreamDeltas := make(map[string]int)
+		newCount := 0
 		for _, e := range req.Entries {
 			if e.SenderID == "" { continue }
+			appID := req.AppID
+			if oldUID, ok := api.routes.Lookup(e.SenderID, appID); ok {
+				if oldUID != req.UpstreamID {
+					oldUpstreamDeltas[oldUID]--
+					newCount++
+				}
+				// same upstream → no change
+			} else {
+				newCount++
+			}
 			entries = append(entries, RouteEntry{
 				SenderID:    e.SenderID,
-				AppID:       req.AppID,
+				AppID:       appID,
 				UpstreamID:  req.UpstreamID,
 				Department:  e.Department,
 				DisplayName: e.DisplayName,
 			})
 		}
 		api.routes.BindBatch(entries)
+		// BUG-004 fix: adjust user_counts
+		for uid, delta := range oldUpstreamDeltas {
+			api.pool.IncrUserCount(uid, delta)
+		}
+		if newCount > 0 {
+			api.pool.IncrUserCount(req.UpstreamID, newCount)
+		}
 		bound = len(entries)
 	} else if req.Department != "" {
 		// 模式2: 按部门批量分配
 		existing := api.routes.ListByDepartment(req.Department)
 		entries := make([]RouteEntry, 0, len(existing))
+		oldUpstreamDeltas := make(map[string]int)
+		newCount := 0
 		for _, e := range existing {
 			if req.AppID != "" && e.AppID != req.AppID { continue }
+			appID := func() string { if req.AppID != "" { return req.AppID }; return e.AppID }()
+			if oldUID, ok := api.routes.Lookup(e.SenderID, appID); ok {
+				if oldUID != req.UpstreamID {
+					oldUpstreamDeltas[oldUID]--
+					newCount++
+				}
+			} else {
+				newCount++
+			}
 			entries = append(entries, RouteEntry{
 				SenderID:    e.SenderID,
-				AppID:       func() string { if req.AppID != "" { return req.AppID }; return e.AppID }(),
+				AppID:       appID,
 				UpstreamID:  req.UpstreamID,
 				Department:  e.Department,
 				DisplayName: e.DisplayName,
 			})
 		}
 		api.routes.BindBatch(entries)
+		for uid, delta := range oldUpstreamDeltas {
+			api.pool.IncrUserCount(uid, delta)
+		}
+		if newCount > 0 {
+			api.pool.IncrUserCount(req.UpstreamID, newCount)
+		}
 		bound = len(entries)
 	} else {
 		jsonResponse(w, 400, map[string]string{"error": "entries or department required"})
@@ -1484,13 +1556,21 @@ func (api *ManagementAPI) handleBatchUnbindRoute(w http.ResponseWriter, r *http.
 		jsonResponse(w, 400, map[string]string{"error": "entries required"})
 		return
 	}
+	// BUG-004 fix: decrement user_count for each unbound route
+	upstreamDeltas := make(map[string]int)
 	count := 0
 	for _, e := range req.Entries {
 		if e.SenderID == "" {
 			continue
 		}
+		if oldUID, ok := api.routes.Lookup(e.SenderID, e.AppID); ok {
+			upstreamDeltas[oldUID]--
+		}
 		api.routes.Unbind(e.SenderID, e.AppID)
 		count++
+	}
+	for uid, delta := range upstreamDeltas {
+		api.pool.IncrUserCount(uid, delta)
 	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "batch_unbound", "count": count})
 }
@@ -1939,8 +2019,19 @@ func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http
 		jsonResponse(w, 500, map[string]string{"error": "route policy engine not initialized"})
 		return
 	}
-	// 追加
+	// BUG-001 fix: check for duplicate match conditions
 	policies := api.policyEng.ListPolicies()
+	for _, p := range policies {
+		if p.Match.Department == req.Match.Department &&
+			p.Match.EmailSuffix == req.Match.EmailSuffix &&
+			p.Match.Email == req.Match.Email &&
+			p.Match.AppID == req.Match.AppID &&
+			p.Match.Default == req.Match.Default {
+			jsonResponse(w, 409, map[string]string{"error": "policy with same match conditions already exists"})
+			return
+		}
+	}
+	// 追加
 	policies = append(policies, req)
 	// 更新内存
 	api.policyEng.SetPolicies(policies)

@@ -65,7 +65,7 @@ type SemanticDetector struct {
 }
 
 func NewSemanticDetector(db *sql.DB, cfg SemanticConfig) *SemanticDetector {
-	if cfg.Threshold <= 0 { cfg.Threshold = 0.7 }
+	if cfg.Threshold <= 0 { cfg.Threshold = 0.35 } // BUG-006 fix: lower default threshold from 0.7 to 0.35
 	if cfg.Action == "" { cfg.Action = "warn" }
 	if cfg.TFIDFWeight <= 0 { cfg.TFIDFWeight = 0.3 }
 	if cfg.SyntaxWeight <= 0 { cfg.SyntaxWeight = 0.3 }

@@ -334,8 +334,8 @@ func TestSemanticThreshold(t *testing.T) {
 	cfgDefault := SemanticConfig{Enabled: true}
 	sdDefault := NewSemanticDetector(nil, cfgDefault)
 	cfg := sdDefault.GetConfig()
-	if cfg.Threshold != 0.7 {
-		t.Errorf("default threshold = %.1f, want 0.7", cfg.Threshold)
+	if cfg.Threshold != 0.35 {
+		t.Errorf("default threshold = %.2f, want 0.35", cfg.Threshold)
 	}
 }
 

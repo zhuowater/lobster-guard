@@ -439,52 +439,79 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 	return nil
 }
 
-// resolveUpstream 统一路由决策：亲和查找 → 故障转移 → 策略匹配(同步) → 负载均衡 → 异步纠偏
-// 修复 Race #1(首条消息走错) #2(Lookup+Bind非原子) #3(计数漂移) #5(故障转移+纠偏冲突)
+// resolveUpstream 统一路由决策：策略优先 → 亲和兜底 → 负载均衡
+//
+// 优先级模型（策略路由是权威的）：
+//   1. 有策略规则能匹配 → 用策略结果（即使亲和绑定不同，也迁移）
+//   2. 策略匹配不到 → 走亲和路由（已有绑定就用，故障就转移）
+//   3. 都没有 → 负载均衡分配 + 异步纠偏
+//
+// 这保证管理员配的策略规则始终生效，不会被历史亲和绑定架空。
 func (ip *InboundProxy) resolveUpstream(senderID, appID, logPrefix string) string {
-	// 1. 亲和路由查找
-	uid, found := ip.routes.Lookup(senderID, appID)
-	if found {
-		if ip.pool.IsHealthy(uid) {
-			// 异步刷新用户信息（不影响路由）
-			ip.asyncRefreshUserInfo(senderID, appID, uid, logPrefix)
-			return uid
-		}
-		// 故障转移：用原子迁移
-		newUID := ip.pool.SelectUpstream(ip.policy)
-		if newUID != "" && newUID != uid {
-			if ip.routes.Migrate(senderID, appID, uid, newUID) {
-				ip.pool.TransferUserCount(uid, newUID)
-				log.Printf("%s 故障转移 sender=%s app=%s: %s -> %s", logPrefix, senderID, appID, uid, newUID)
-			}
-			return newUID
-		}
-		return uid // failopen
-	}
+	currentUID, hasBind := ip.routes.Lookup(senderID, appID)
 
-	// 2. 新用户：同步获取用户信息（带超时），优先策略匹配
+	// ── 第一优先级：策略路由（权威） ──
 	if ip.policyEng != nil && ip.userCache != nil {
-		// 同步等待最多 500ms 获取用户信息，超时降级到负载均衡
+		// 尝试获取用户信息（缓存命中立即返回，否则同步等 500ms）
 		info, _ := ip.userCache.GetOrFetchWithTimeout(senderID, 500*time.Millisecond)
 		if info != nil {
 			ip.routes.UpdateUserInfo(senderID, info.Name, info.Email, info.Department)
 			if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+				if hasBind && currentUID == pUID {
+					// 策略结果和亲和绑定一致，直接走
+					return pUID
+				}
+				if hasBind && currentUID != pUID {
+					// 策略结果与亲和绑定不一致 → 迁移到策略指定的上游
+					if AtomicMigrate(ip.routes, ip.pool, senderID, appID, currentUID, pUID) {
+						log.Printf("%s 策略路由覆盖亲和 sender=%s app=%s: %s -> %s (dept=%s email=%s)",
+							logPrefix, senderID, appID, currentUID, pUID, info.Department, info.Email)
+					} else {
+						// CAS 失败（被并发修改），强制绑定
+						ip.routes.Bind(senderID, appID, pUID)
+						log.Printf("%s 策略路由强制绑定 sender=%s app=%s -> %s", logPrefix, senderID, appID, pUID)
+					}
+					return pUID
+				}
+				// 新用户，直接按策略绑定
 				ip.routes.Bind(senderID, appID, pUID)
 				ip.pool.IncrUserCount(pUID, 1)
 				log.Printf("%s 策略匹配绑定 sender=%s app=%s -> %s (dept=%s email=%s)",
 					logPrefix, senderID, appID, pUID, info.Department, info.Email)
 				return pUID
 			}
+		} else if !hasBind {
+			// 500ms 内没拿到用户信息，也没有旧绑定 → 降级到负载均衡，后面异步纠偏
+			// （有旧绑定的情况下面走亲和路由兜底）
 		}
 	}
 
-	// 3. 降级到负载均衡
+	// ── 第二优先级：亲和路由（策略未匹配时的兜底） ──
+	if hasBind {
+		if ip.pool.IsHealthy(currentUID) {
+			// 异步刷新用户信息（下次请求时策略可能就能匹配了）
+			ip.asyncRefreshUserInfo(senderID, appID, currentUID, logPrefix)
+			return currentUID
+		}
+		// 故障转移
+		newUID := ip.pool.SelectUpstream(ip.policy)
+		if newUID != "" && newUID != currentUID {
+			if ip.routes.Migrate(senderID, appID, currentUID, newUID) {
+				ip.pool.TransferUserCount(currentUID, newUID)
+				log.Printf("%s 故障转移 sender=%s app=%s: %s -> %s", logPrefix, senderID, appID, currentUID, newUID)
+			}
+			return newUID
+		}
+		return currentUID // failopen
+	}
+
+	// ── 第三优先级：负载均衡（新用户，无策略匹配） ──
 	upstreamID := ip.pool.SelectUpstream(ip.policy)
 	if upstreamID != "" {
 		ip.routes.Bind(senderID, appID, upstreamID)
 		ip.pool.IncrUserCount(upstreamID, 1)
 		log.Printf("%s 新用户绑定 sender=%s app=%s -> %s", logPrefix, senderID, appID, upstreamID)
-		// 异步纠偏：如果上面 500ms 内没拿到用户信息，后台继续获取并纠偏
+		// 异步纠偏：后台获取用户信息，下次请求时策略生效
 		ip.asyncPolicyCorrection(senderID, appID, upstreamID, logPrefix)
 	}
 	return upstreamID

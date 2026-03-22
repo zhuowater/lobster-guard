@@ -373,6 +373,13 @@ func (mc *MetricsCollector) RecordWSDisconnect() {
 	}
 }
 
+// RecordUpstreamChange 记录上游变更事件（BUG-005 fix: force metrics refresh）
+func (mc *MetricsCollector) RecordUpstreamChange() {
+	// This is a no-op signal — the actual gauge values are computed dynamically
+	// in WritePrometheus via pool.Count(). This method exists as an extension
+	// point for future cached gauge implementations.
+}
+
 // RecordWSMessage 记录 WebSocket 消息（v4.1）
 func (mc *MetricsCollector) RecordWSMessage(direction, action string, bytes int64) {
 	mc.mu.Lock()

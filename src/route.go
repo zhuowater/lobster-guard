@@ -59,7 +59,7 @@ func NewUpstreamPool(cfg *Config, db *sql.DB) *UpstreamPool {
 		db:                db,
 	}
 	if pool.heartbeatInterval <= 0 { pool.heartbeatInterval = 10 * time.Second }
-	if pool.heartbeatTimeout <= 0 { pool.heartbeatTimeout = 3 }
+	if pool.heartbeatTimeout <= 0 { pool.heartbeatTimeout = 30 } // BUG-012 fix: default 30 * interval = 5min @10s
 	for _, su := range cfg.StaticUpstreams {
 		up := &Upstream{
 			ID: su.ID, Address: su.Address, Port: su.Port, PathPrefix: su.PathPrefix, Healthy: true,

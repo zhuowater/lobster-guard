@@ -424,3 +424,164 @@ func TestConcurrentTransferUserCount(t *testing.T) {
 	// a 被 floor 到 0 后不再减：最终 a=0, b=200, 总和=200（初始100+净增100）
 	// 这是预期行为：floor 保护导致不守恒，但避免了负数
 }
+
+// TestPolicyOverridesAffinity 验证策略路由优先于亲和路由
+// 场景：用户已被负载均衡绑定到 upstream-a，但策略规则指定该部门应走 upstream-b
+// 期望：下次请求时策略路由覆盖亲和绑定，迁移到 upstream-b
+func TestPolicyOverridesAffinity(t *testing.T) {
+	db := setupRaceTestDB(t)
+	defer db.Close()
+
+	cfg := &Config{}
+	pool := NewUpstreamPool(cfg, db)
+	pool.Register("upstream-a", "127.0.0.1", 8001, nil)
+	pool.Register("upstream-b", "127.0.0.1", 8002, nil)
+	pool.IncrUserCount("upstream-a", 1)
+
+	rt := NewRouteTable(db, true)
+	// 模拟：用户已被绑定到 upstream-a（历史亲和）
+	rt.Bind("user-tianyan", "bot1", "upstream-a")
+
+	// 创建用户信息缓存，预填充用户信息
+	provider := &mockUserProvider{
+		users: map[string]*UserInfo{
+			"user-tianyan": {Name: "测试用户", Email: "test@qianxin.com", Department: "天眼事业部"},
+		},
+	}
+	cache := NewUserInfoCache(db, provider, 24*time.Hour)
+	cache.GetOrFetch("user-tianyan") // 预热
+
+	// 创建策略引擎：天眼事业部 → upstream-b
+	policies := []RoutePolicyConfig{
+		{
+			Match:      RoutePolicyMatch{Department: "天眼事业部"},
+			UpstreamID: "upstream-b",
+			
+		},
+	}
+	engine := NewRoutePolicyEngine(policies)
+
+	// 构建 InboundProxy（只需路由相关字段）
+	ip := &InboundProxy{
+		pool:      pool,
+		routes:    rt,
+		policy:    "least-users",
+		policyEng: engine,
+		userCache: cache,
+	}
+
+	// 执行路由决策
+	result := ip.resolveUpstream("user-tianyan", "bot1", "[测试]")
+
+	// 期望：策略路由覆盖亲和，结果应该是 upstream-b
+	if result != "upstream-b" {
+		t.Fatalf("策略路由应覆盖亲和路由: 期望 upstream-b, 实际 %s", result)
+	}
+
+	// 验证绑定已更新
+	uid, found := rt.Lookup("user-tianyan", "bot1")
+	if !found || uid != "upstream-b" {
+		t.Fatalf("绑定应已迁移到 upstream-b: found=%v uid=%s", found, uid)
+	}
+}
+
+// TestAffinityWorksWhenNoPolicyMatch 验证策略不匹配时亲和路由仍然生效
+func TestAffinityWorksWhenNoPolicyMatch(t *testing.T) {
+	db := setupRaceTestDB(t)
+	defer db.Close()
+
+	cfg := &Config{}
+	pool := NewUpstreamPool(cfg, db)
+	pool.Register("upstream-a", "127.0.0.1", 8001, nil)
+	pool.Register("upstream-b", "127.0.0.1", 8002, nil)
+
+	rt := NewRouteTable(db, true)
+	rt.Bind("user-misc", "bot1", "upstream-a")
+
+	// 用户不属于任何策略部门
+	provider := &mockUserProvider{
+		users: map[string]*UserInfo{
+			"user-misc": {Name: "普通用户", Email: "misc@qianxin.com", Department: "市场部"},
+		},
+	}
+	cache := NewUserInfoCache(db, provider, 24*time.Hour)
+	cache.GetOrFetch("user-misc")
+
+	// 策略只有天眼事业部的规则
+	policies := []RoutePolicyConfig{
+		{
+			Match:      RoutePolicyMatch{Department: "天眼事业部"},
+			UpstreamID: "upstream-b",
+			
+		},
+	}
+	engine := NewRoutePolicyEngine(policies)
+
+	ip := &InboundProxy{
+		pool:      pool,
+		routes:    rt,
+		policy:    "least-users",
+		policyEng: engine,
+		userCache: cache,
+	}
+
+	result := ip.resolveUpstream("user-misc", "bot1", "[测试]")
+
+	// 策略不匹配 → 走亲和路由
+	if result != "upstream-a" {
+		t.Fatalf("策略不匹配时应走亲和路由: 期望 upstream-a, 实际 %s", result)
+	}
+}
+
+// TestDefaultPolicyOverridesAffinity 验证默认策略也能覆盖亲和路由
+func TestDefaultPolicyOverridesAffinity(t *testing.T) {
+	db := setupRaceTestDB(t)
+	defer db.Close()
+
+	cfg := &Config{}
+	pool := NewUpstreamPool(cfg, db)
+	pool.Register("upstream-a", "127.0.0.1", 8001, nil)
+	pool.Register("default-pool", "127.0.0.1", 8002, nil)
+	pool.IncrUserCount("upstream-a", 1)
+
+	rt := NewRouteTable(db, true)
+	rt.Bind("user-random", "bot1", "upstream-a")
+
+	provider := &mockUserProvider{
+		users: map[string]*UserInfo{
+			"user-random": {Name: "随机用户", Email: "rand@other.com", Department: "外部部门"},
+		},
+	}
+	cache := NewUserInfoCache(db, provider, 24*time.Hour)
+	cache.GetOrFetch("user-random")
+
+	// 策略：天眼专用 + 默认兜底
+	policies := []RoutePolicyConfig{
+		{
+			Match:      RoutePolicyMatch{Department: "天眼事业部"},
+			UpstreamID: "upstream-a",
+			
+		},
+		{
+			Match:      RoutePolicyMatch{Default: true},
+			UpstreamID: "default-pool",
+			
+		},
+	}
+	engine := NewRoutePolicyEngine(policies)
+
+	ip := &InboundProxy{
+		pool:      pool,
+		routes:    rt,
+		policy:    "least-users",
+		policyEng: engine,
+		userCache: cache,
+	}
+
+	result := ip.resolveUpstream("user-random", "bot1", "[测试]")
+
+	// 外部部门 → 不匹配天眼 → 命中默认策略 → default-pool
+	if result != "default-pool" {
+		t.Fatalf("默认策略应覆盖亲和: 期望 default-pool, 实际 %s", result)
+	}
+}
