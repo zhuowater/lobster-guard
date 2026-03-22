@@ -27,6 +27,11 @@
           <button class="btn btn-sm" @click="showBindModal = true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 绑定用户</button>
           <button class="btn btn-ghost btn-sm" @click="showBatchModal = true"><Icon name="import" :size="14" /> 批量绑定</button>
           <button class="btn btn-ghost btn-sm" @click="showMigrateModal = true"><Icon name="refresh" :size="14" /> 迁移用户</button>
+          <button class="btn btn-ghost btn-sm" @click="refreshAllUserInfo" :disabled="refreshingAll" :title="'从蓝信批量获取所有用户的最新部门/邮箱信息'">
+            <svg v-if="!refreshingAll" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            {{ refreshingAll ? '获取中...' : '刷新用户信息' }}
+          </button>
           <button class="btn btn-ghost btn-sm" @click="refresh"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
         </div>
       </div>
@@ -92,6 +97,10 @@
           </div>
         </template>
         <template #actions="{ row }">
+          <button class="btn btn-ghost btn-sm" @click.stop="refreshUserInfo(row)" :title="'从蓝信获取 ' + (row.display_name || row.sender_id) + ' 的最新信息'" :disabled="refreshingUsers.has(row.sender_id)">
+            <svg v-if="!refreshingUsers.has(row.sender_id)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
           <button class="btn btn-ghost btn-sm" @click.stop="openMigrateFor(row)" title="迁移"><Icon name="refresh" :size="14" /></button>
           <button class="btn btn-danger btn-sm" @click.stop="confirmUnbind(row)" style="margin-left:4px">解绑</button>
         </template>
@@ -481,6 +490,43 @@ async function loadRouteStats() {
 async function loadUsers() { try { const d = await api('/api/v1/users'); const m = {}; (d.users || []).forEach(u => { m[u.sender_id] = u }); userCache.value = m } catch {} }
 function refresh() { loadRoutes(); loadRouteStats(); loadUsers(); loadPolicies() }
 
+// ==================== 用户信息刷新（从蓝信获取） ====================
+const refreshingUsers = ref(new Set())
+const refreshingAll = ref(false)
+
+async function refreshUserInfo(row) {
+  const sid = row.sender_id
+  refreshingUsers.value.add(sid)
+  refreshingUsers.value = new Set(refreshingUsers.value) // trigger reactivity
+  try {
+    const d = await apiPost('/api/v1/users/' + encodeURIComponent(sid) + '/refresh', {})
+    const name = d.name || d.display_name || ''
+    const dept = d.department || ''
+    showToast('已更新: ' + (name || sid) + (dept ? ' (' + dept + ')' : ''), 'success')
+    refresh() // 刷新列表以显示最新信息和冲突状态
+  } catch (e) {
+    showToast('获取失败: ' + e.message, 'error')
+  } finally {
+    refreshingUsers.value.delete(sid)
+    refreshingUsers.value = new Set(refreshingUsers.value)
+  }
+}
+
+async function refreshAllUserInfo() {
+  refreshingAll.value = true
+  try {
+    const d = await apiPost('/api/v1/users/refresh-all', {})
+    const ok = d.success || 0
+    const fail = d.failed || 0
+    showToast('批量刷新完成: ' + ok + ' 成功' + (fail > 0 ? ', ' + fail + ' 失败' : ''), ok > 0 ? 'success' : 'warning')
+    refresh()
+  } catch (e) {
+    showToast('批量刷新失败: ' + e.message, 'error')
+  } finally {
+    refreshingAll.value = false
+  }
+}
+
 // ==================== Route Actions ====================
 function confirmUnbind(row) {
   confirmTitle.value = '确认解绑'; confirmMsg.value = '确认解绑用户 ' + row.sender_id + ' (' + (row.display_name || '--') + ') ?'; confirmBtnText.value = '解绑'
@@ -673,4 +719,6 @@ onMounted(refresh)
   color: var(--color-success, #22c55e);
   font-weight: 700;
 }
+@keyframes spin { to { transform: rotate(360deg) } }
+.spin { animation: spin 1s linear infinite; }
 </style>
