@@ -1,0 +1,135 @@
+# government.yaml — 政务行业安全规则模板
+# lobster-guard v5.1 内置规则库
+rules:
+  # === 国家秘密 ===
+  - name: gov_classified_info
+    patterns: ["classified information", "机密文件", "绝密", "秘密级", "top secret"]
+    action: block
+    category: classified
+    priority: 100
+    message: "检测到涉密信息"
+    group: government_classified
+
+  - name: gov_internal_only
+    patterns: ["internal use only", "内部资料", "不得外传", "仅限内部"]
+    action: warn
+    category: classified
+    priority: 80
+    message: "检测到内部限定信息"
+    group: government_classified
+
+  - name: gov_state_secret
+    patterns: ["state secret", "国家秘密", "保密法", "定密依据"]
+    action: block
+    category: classified
+    priority: 100
+    message: "检测到涉及国家秘密的内容"
+    group: government_classified
+
+  # === 公民隐私 ===
+  - name: gov_citizen_id
+    patterns: ["身份证号", "居民身份证", "citizen ID", "ID number"]
+    action: block
+    category: pii
+    priority: 100
+    message: "检测到公民身份证号"
+    group: government_pii
+
+  - name: gov_household_register
+    patterns: ["户籍信息", "户口本", "household register", "户籍所在地"]
+    action: warn
+    category: pii
+    priority: 85
+    message: "检测到户籍信息"
+    group: government_pii
+
+  - name: gov_social_credit
+    patterns: ["社会信用", "信用评分", "失信被执行人", "social credit"]
+    action: warn
+    category: pii
+    priority: 80
+    message: "检测到社会信用信息"
+    group: government_pii
+
+  - name: gov_criminal_record
+    patterns: ["criminal record", "犯罪记录", "案底", "前科"]
+    action: block
+    category: pii
+    priority: 100
+    message: "检测到犯罪记录信息"
+    group: government_pii
+
+  # === 政务安全 ===
+  - name: gov_policy_leak
+    patterns: ["未发布政策", "draft policy", "政策草案", "内部会议纪要"]
+    action: block
+    category: compliance
+    priority: 95
+    message: "检测到未公开政策信息"
+    group: government_compliance
+
+  - name: gov_approval_bypass
+    patterns: ["bypass approval", "skip review", "跳过审批", "绕过流程"]
+    action: block
+    category: compliance
+    priority: 95
+    message: "检测到审批流程绕过尝试"
+    group: government_compliance
+
+  - name: gov_unauthorized_disclosure
+    patterns: ["leak to media", "泄露给媒体", "告诉记者", "disclose to press"]
+    action: block
+    category: compliance
+    priority: 100
+    message: "检测到未授权信息披露"
+    group: government_compliance
+
+  # === 数据跨境 ===
+  - name: gov_cross_border_data
+    patterns: ["transfer overseas", "数据出境", "跨境传输", "send abroad"]
+    action: block
+    category: compliance
+    priority: 95
+    message: "检测到数据跨境传输风险"
+    group: government_compliance
+
+  - name: gov_foreign_access
+    patterns: ["foreign government", "外国政府", "境外机构", "foreign agency"]
+    action: warn
+    category: compliance
+    priority: 85
+    message: "检测到涉外信息访问"
+    group: government_compliance
+
+  # === Prompt Injection (政务增强) ===
+  - name: gov_injection_access
+    patterns: ["grant me access to", "give me admin", "提升我的权限", "授予管理员"]
+    action: block
+    category: prompt_injection
+    priority: 100
+    message: "检测到权限提升注入攻击"
+    group: prompt_injection
+
+  - name: gov_injection_data_export
+    patterns: ["export all data", "dump database", "导出全部数据", "批量下载"]
+    action: block
+    category: prompt_injection
+    priority: 95
+    message: "检测到数据批量导出注入"
+    group: prompt_injection
+
+  - name: gov_impersonation
+    patterns: ["I am from inspection", "纪检组要求", "上级领导指示", "巡视组要求"]
+    action: warn
+    category: social_engineering
+    priority: 80
+    message: "检测到冒充上级/巡视社工攻击"
+    group: social_engineering
+
+  - name: gov_election_interference
+    patterns: ["manipulate votes", "election fraud", "操纵选举", "篡改投票"]
+    action: block
+    category: compliance
+    priority: 100
+    message: "检测到选举干预相关内容"
+    group: government_compliance
