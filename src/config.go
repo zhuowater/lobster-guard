@@ -169,6 +169,7 @@ type Config struct {
 	WSIdleTimeout      int    `yaml:"ws_idle_timeout"`      // 空闲超时秒数，默认 300
 	WSMaxDuration      int    `yaml:"ws_max_duration"`      // 最大连接时长秒数，默认 3600
 	WSMaxConnections   int    `yaml:"ws_max_connections"`   // 最大并发 WebSocket 连接数，默认 100
+	WSAllowedOrigins   []string `yaml:"ws_allowed_origins"`   // WebSocket 允许的 Origin 白名单，空则允许全部
 	// v4.2 高可用
 	ShutdownTimeout    int    `yaml:"shutdown_timeout"`     // 优雅关闭超时秒数，默认 30
 	BackupDir          string `yaml:"backup_dir"`           // 备份目录，默认 /var/lib/lobster-guard/backups/
@@ -598,7 +599,7 @@ func validateConfig(cfg *Config) []string {
 
 	// management_token 不能为空
 	if cfg.ManagementToken == "" {
-		log.Printf("[配置警告] ⚠️ management_token 为空，管理 API 将无需认证")
+		log.Printf("[配置警告] 🔴 management_token 为空，管理 API 仅限 localhost 访问（生产环境必须配置）")
 	}
 
 	// rate_limit 参数合理（>0）

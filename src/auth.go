@@ -160,7 +160,7 @@ func NewAuthManager(db *sql.DB, cfg *AuthConfig) *AuthManager {
 		// 自动生成随机密钥（每次重启会变化，token 失效）
 		am.jwtKey = make([]byte, 32)
 		rand.Read(am.jwtKey)
-		log.Println("[认证] JWT secret 未配置，已自动生成随机密钥（重启后 token 将失效）")
+		log.Println("[认证] ⚠️ JWT secret 未配置，已自动生成随机密钥（重启后所有 token 将失效，生产环境请配置 jwt_secret）")
 	}
 
 	am.initSchema()
@@ -207,7 +207,11 @@ func (am *AuthManager) ensureDefaultAdmin(defaultPassword string) {
 	}
 
 	if defaultPassword == "" {
-		defaultPassword = "lobster-guard"
+		// 生成随机16字符密码，不再使用硬编码默认值
+		b := make([]byte, 12)
+		rand.Read(b)
+		defaultPassword = base64.URLEncoding.EncodeToString(b)[:16]
+		log.Printf("[认证] ⚠️ 未配置 default_password，已生成随机密码，请查看日志或配置文件设置固定密码")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(defaultPassword), bcrypt.DefaultCost)
@@ -224,7 +228,7 @@ func (am *AuthManager) ensureDefaultAdmin(defaultPassword string) {
 		return
 	}
 
-	log.Printf("[认证] ✅ 已创建默认管理员 admin（密码: %s）", defaultPassword)
+	log.Printf("[认证] ✅ 已创建默认管理员 admin（密码已设置，长度: %d）", len(defaultPassword))
 }
 
 // ============================================================
@@ -340,8 +344,8 @@ func (am *AuthManager) CreateUser(username, password, displayName, role, tenantI
 	if role != "admin" && role != "operator" && role != "viewer" {
 		return nil, fmt.Errorf("角色必须是 admin/operator/viewer")
 	}
-	if len(password) < 4 {
-		return nil, fmt.Errorf("密码长度至少 4 位")
+	if len(password) < 8 {
+		return nil, fmt.Errorf("密码长度至少 8 位")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -420,8 +424,8 @@ func (am *AuthManager) ChangePassword(username, oldPassword, newPassword string)
 		return fmt.Errorf("旧密码错误")
 	}
 
-	if len(newPassword) < 4 {
-		return fmt.Errorf("新密码长度至少 4 位")
+	if len(newPassword) < 8 {
+		return fmt.Errorf("新密码长度至少 8 位")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -438,8 +442,8 @@ func (am *AuthManager) ChangePassword(username, oldPassword, newPassword string)
 
 // ResetPassword 管理员重置密码（不需要旧密码）
 func (am *AuthManager) ResetPassword(userID int, newPassword string) error {
-	if len(newPassword) < 4 {
-		return fmt.Errorf("新密码长度至少 4 位")
+	if len(newPassword) < 8 {
+		return fmt.Errorf("新密码长度至少 8 位")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)

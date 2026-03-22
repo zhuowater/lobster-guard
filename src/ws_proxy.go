@@ -81,6 +81,8 @@ type WSConnectionInfo struct {
 
 // NewWSProxyManager 创建 WebSocket 代理管理器
 func NewWSProxyManager(cfg *Config, engine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, pool *UpstreamPool, routes *RouteTable, ruleHits *RuleHitStats) *WSProxyManager {
+	// 用配置的白名单覆盖全局 wsUpgrader
+	wsUpgrader = newWSUpgrader(cfg.WSAllowedOrigins)
 	return &WSProxyManager{
 		connections:    make(map[string]*WSConnection),
 		engine:         engine,
@@ -193,11 +195,31 @@ func (wm *WSProxyManager) getWSMaxConnections() int {
 // WebSocket Upgrade 处理
 // ============================================================
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin:  func(r *http.Request) bool { return true },
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
+// newWSUpgrader 创建带 Origin 白名单校验的 WebSocket Upgrader
+func newWSUpgrader(allowedOrigins []string) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			if len(allowedOrigins) == 0 {
+				return true // 未配置白名单时允许全部（向后兼容）
+			}
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // 非浏览器请求无 Origin 头
+			}
+			for _, allowed := range allowedOrigins {
+				if allowed == "*" || strings.EqualFold(origin, allowed) {
+					return true
+				}
+			}
+			log.Printf("[WebSocket] 拒绝 Origin: %s（不在白名单中）", origin)
+			return false
+		},
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+	}
 }
+
+var wsUpgrader = newWSUpgrader(nil) // 默认允许全部，由 WSProxyManager.Init 覆盖
 
 // IsWebSocketUpgrade 检测请求是否是 WebSocket Upgrade
 func IsWebSocketUpgrade(r *http.Request) bool {

@@ -573,6 +573,8 @@ func initDB(dbPath string) (*sql.DB, error) {
 	}
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil { return nil, err }
+	// 确保数据库文件权限为 0600（仅 owner 可读写）
+	os.Chmod(dbPath, 0600)
 
 	// v2.0 schema
 	schema := `
