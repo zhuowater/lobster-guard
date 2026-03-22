@@ -259,9 +259,8 @@ func main() {
 
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, cfg.RoutePersist)
-	for _, up := range pool.ListUpstreams() {
-		pool.IncrUserCount(up.ID, routes.CountByUpstream(up.ID))
-	}
+	// D-006: 从路由表聚合恢复 user_count（比逐个 CountByUpstream 更精确）
+	pool.RestoreUserCounts(db)
 
 	var metrics *MetricsCollector
 	if cfg.IsMetricsEnabled() { metrics = NewMetricsCollector() }
@@ -397,6 +396,7 @@ func main() {
 	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
 	outbound.realtime = realtime
 	outbound.traceCorrelator = traceCorrelator
+	outbound.routes = routes // D-005: 出站代理路由感知
 	fmt.Println("[初始化] ✅ Trace 关联缓存 (入站↔出站 trace_id 自动关联, 5min 窗口)")
 
 	// v4.1 WebSocket 代理管理器

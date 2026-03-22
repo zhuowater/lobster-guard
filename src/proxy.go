@@ -325,7 +325,9 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 
 		// 拦截
 		if detectResult.Action == "block" {
-			log.Printf("[桥接入站] 拦截 sender=%s reasons=%v", senderID, detectResult.Reasons)
+			// D-009: 桥接模式 block 明确标记消息被丢弃（无法通知用户）
+			// TODO: 后续版本通过蓝信 API 给发送者发送拦截通知
+			log.Printf("[桥接入站] ⚠️ 消息已拦截并丢弃（桥接模式无法通知用户）sender=%s reasons=%v", senderID, detectResult.Reasons)
 			// v3.10 告警通知
 			if ip.alertNotifier != nil {
 				rule := strings.Join(detectResult.MatchedRules, ",")
@@ -395,20 +397,42 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			}
 		}
 
-		// 获取上游地址
+		// D-003: 获取上游地址（包含 path_prefix + 健康降级）
 		var targetURL string
 		func() {
 			ip.pool.mu.RLock()
 			defer ip.pool.mu.RUnlock()
 			if upstreamID != "" {
 				if up, ok := ip.pool.upstreams[upstreamID]; ok {
-					targetURL = fmt.Sprintf("http://%s:%d", up.Address, up.Port)
+					targetURL = fmt.Sprintf("http://%s:%d%s", up.Address, up.Port, up.PathPrefix)
 				}
 			}
 			if targetURL == "" {
-				for _, up := range ip.pool.upstreams {
-					targetURL = fmt.Sprintf("http://%s:%d", up.Address, up.Port)
-					break
+				// 降级：使用 SelectUpstream 而非随机遍历 map
+				var fallbackUID string
+				for id, up := range ip.pool.upstreams {
+					if up.Healthy {
+						targetURL = fmt.Sprintf("http://%s:%d%s", up.Address, up.Port, up.PathPrefix)
+						fallbackUID = id
+						break
+					}
+				}
+				if targetURL == "" {
+					// 所有都不健康，failopen 取第一个
+					for id, up := range ip.pool.upstreams {
+						targetURL = fmt.Sprintf("http://%s:%d%s", up.Address, up.Port, up.PathPrefix)
+						fallbackUID = id
+						break
+					}
+				}
+				// 降级后更新路由表
+				if fallbackUID != "" && fallbackUID != upstreamID && senderID != "" {
+					log.Printf("[桥接路由] ⚠️ 上游 %s 不可用，降级到 %s sender=%s", upstreamID, fallbackUID, senderID)
+					if upstreamID != "" {
+						ip.routes.Bind(senderID, appID, fallbackUID)
+						ip.pool.TransferUserCount(upstreamID, fallbackUID)
+					}
+					upstreamID = fallbackUID
 				}
 			}
 		}()
@@ -456,29 +480,43 @@ func (ip *InboundProxy) resolveUpstream(senderID, appID, logPrefix string) strin
 		info, _ := ip.userCache.GetOrFetchWithTimeout(senderID, 1500*time.Millisecond)
 		if info != nil {
 			ip.routes.UpdateUserInfo(senderID, info.Name, info.Email, info.Department)
-			if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
-				if hasBind && currentUID == pUID {
-					// 策略结果和亲和绑定一致，直接走
-					return pUID
-				}
-				if hasBind && currentUID != pUID {
-					// 策略结果与亲和绑定不一致 → 迁移到策略指定的上游
-					if AtomicMigrate(ip.routes, ip.pool, senderID, appID, currentUID, pUID) {
-						log.Printf("%s 策略路由覆盖亲和 sender=%s app=%s: %s -> %s (dept=%s email=%s)",
-							logPrefix, senderID, appID, currentUID, pUID, info.Department, info.Email)
-					} else {
-						// CAS 失败（被并发修改），强制绑定
-						ip.routes.Bind(senderID, appID, pUID)
-						log.Printf("%s 策略路由强制绑定 sender=%s app=%s -> %s", logPrefix, senderID, appID, pUID)
+			if pUID, ok := ip.policyEng.Match(info, appID); ok && pUID != "" {
+				if ip.pool.IsHealthy(pUID) {
+					if hasBind && currentUID == pUID {
+						// 策略结果和亲和绑定一致，直接走
+						return pUID
 					}
+					if hasBind && currentUID != pUID {
+						// 策略结果与亲和绑定不一致 → 迁移到策略指定的上游
+						if AtomicMigrate(ip.routes, ip.pool, senderID, appID, currentUID, pUID) {
+							log.Printf("%s 策略路由覆盖亲和 sender=%s app=%s: %s -> %s (dept=%s email=%s)",
+								logPrefix, senderID, appID, currentUID, pUID, info.Department, info.Email)
+						} else {
+							// CAS 失败（被并发修改），强制绑定
+							ip.routes.Bind(senderID, appID, pUID)
+							log.Printf("%s 策略路由强制绑定 sender=%s app=%s -> %s", logPrefix, senderID, appID, pUID)
+						}
+						return pUID
+					}
+					// 新用户，直接按策略绑定
+					ip.routes.Bind(senderID, appID, pUID)
+					ip.pool.IncrUserCount(pUID, 1)
+					log.Printf("%s 策略匹配绑定 sender=%s app=%s -> %s (dept=%s email=%s)",
+						logPrefix, senderID, appID, pUID, info.Department, info.Email)
 					return pUID
 				}
-				// 新用户，直接按策略绑定
-				ip.routes.Bind(senderID, appID, pUID)
-				ip.pool.IncrUserCount(pUID, 1)
-				log.Printf("%s 策略匹配绑定 sender=%s app=%s -> %s (dept=%s email=%s)",
-					logPrefix, senderID, appID, pUID, info.Department, info.Email)
-				return pUID
+				// D-001: 策略匹配到但上游不健康 → 明确警告 + 审计日志
+				log.Printf("%s ⚠️ 策略上游 %s 不健康，降级 sender=%s app=%s (dept=%s email=%s)",
+					logPrefix, pUID, senderID, appID, info.Department, info.Email)
+				if ip.logger != nil {
+					ip.logger.Log("inbound", senderID, "policy_degraded",
+						fmt.Sprintf("policy_upstream=%s unhealthy, degraded", pUID),
+						"", "", 0, pUID, appID)
+				}
+				if ip.realtime != nil {
+					ip.realtime.RecordEvent("inbound", senderID, "policy_degraded",
+						fmt.Sprintf("策略上游 %s 不健康", pUID), "")
+				}
 			}
 		} else if !hasBind {
 			// 500ms 内没拿到用户信息，也没有旧绑定 → 降级到负载均衡，后面异步纠偏
@@ -754,8 +792,18 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if upstreamID != "" {
 		proxy = ip.pool.GetProxy(upstreamID)
 	}
+	// D-002: 当 GetProxy 返回 nil 需要降级时，更新路由表和计数
 	if proxy == nil {
-		proxy, upstreamID = ip.pool.GetAnyHealthyProxy()
+		var fallbackUID string
+		proxy, fallbackUID = ip.pool.GetAnyHealthyProxy()
+		if fallbackUID != "" && fallbackUID != upstreamID && senderID != "" {
+			log.Printf("[路由] ⚠️ 上游 %s proxy不可用，降级到 %s sender=%s", upstreamID, fallbackUID, senderID)
+			if upstreamID != "" {
+				ip.routes.Bind(senderID, appID, fallbackUID)
+				ip.pool.TransferUserCount(upstreamID, fallbackUID)
+			}
+			upstreamID = fallbackUID // 确保审计日志记录实际上游
+		}
 	}
 	if proxy == nil {
 		w.WriteHeader(502)
@@ -1051,6 +1099,8 @@ type OutboundProxy struct {
 	taintTracker *TaintTracker
 	// v20.2 污染链逆转引擎
 	reversalEngine *TaintReversalEngine
+	// D-005: 出站代理路由表引用（路由感知）
+	routes *RouteTable
 }
 
 func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, logger *AuditLogger, metrics *MetricsCollector, ruleHits *RuleHitStats, honeypot *HoneypotEngine) (*OutboundProxy, error) {
@@ -1198,8 +1248,13 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result := op.outboundEngine.Detect(text)
 	latMs := float64(time.Since(start).Microseconds()) / 1000.0
 
-	// 获取来源容器 ID（从 X-Upstream-Id header 或来源 IP）
+	// D-005: 获取来源容器 ID — 优先 header，其次通过 traceCorrelator 反查入站 sender → 路由表查 upstream
 	upstreamID := r.Header.Get("X-Upstream-Id")
+	if upstreamID == "" && op.routes != nil && recipient != "" {
+		if uid, ok := op.routes.Lookup(recipient, outAppID); ok {
+			upstreamID = uid
+		}
+	}
 
 	pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
 

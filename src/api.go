@@ -1292,9 +1292,23 @@ func (api *ManagementAPI) handleDeleteUpstream(w http.ResponseWriter, r *http.Re
 	}
 
 	// K8s 发现的上游可以删除，但给出提示
-	warning := ""
+	warnings := []string{}
 	if up.Tags != nil && up.Tags["source"] == "k8s" {
-		warning = "此上游由 K8s 自动管理，手动删除后可能会被重新发现"
+		warnings = append(warnings, "此上游由 K8s 自动管理，手动删除后可能会被重新发现")
+	}
+
+	// R2-003: 删除上游前清理孤儿路由
+	orphanedRoutes := api.routes.CountByUpstream(id)
+	if orphanedRoutes > 0 {
+		// 清理绑定到该上游的所有路由
+		routes := api.routes.ListRoutes()
+		for _, r := range routes {
+			if r.UpstreamID == id {
+				api.routes.Unbind(r.SenderID, r.AppID)
+			}
+		}
+		warnings = append(warnings, fmt.Sprintf("%d routes were bound to this upstream and have been unbound", orphanedRoutes))
+		log.Printf("[上游CRUD] 清理了 %d 条孤儿路由 (upstream=%s)", orphanedRoutes, id)
 	}
 
 	api.pool.ForceDeregister(id)
@@ -1304,8 +1318,11 @@ func (api *ManagementAPI) handleDeleteUpstream(w http.ResponseWriter, r *http.Re
 		"status": "deleted",
 		"id":     id,
 	}
-	if warning != "" {
-		resp["warning"] = warning
+	if orphanedRoutes > 0 {
+		resp["orphaned_routes"] = orphanedRoutes
+	}
+	if len(warnings) > 0 {
+		resp["warning"] = strings.Join(warnings, "; ")
 	}
 	jsonResponse(w, 200, resp)
 }
@@ -1482,6 +1499,11 @@ func (api *ManagementAPI) handleBindRoute(w http.ResponseWriter, r *http.Request
 		jsonResponse(w, 400, map[string]string{"error": "sender_id and upstream_id required"})
 		return
 	}
+	// R2-004: 长度限制
+	if len(req.SenderID) > 256 || len(req.AppID) > 256 || len(req.UpstreamID) > 256 {
+		jsonResponse(w, 400, map[string]string{"error": "sender_id, app_id, upstream_id must be <= 256 characters"})
+		return
+	}
 	// BUG-002 fix: validate upstream exists
 	if _, ok := api.pool.GetUpstream(req.UpstreamID); !ok {
 		jsonResponse(w, 400, map[string]string{"error": "upstream not found: " + req.UpstreamID})
@@ -1552,6 +1574,11 @@ func (api *ManagementAPI) handleBatchBindRoute(w http.ResponseWriter, r *http.Re
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.UpstreamID == "" {
 		jsonResponse(w, 400, map[string]string{"error": "upstream_id required"})
+		return
+	}
+	// R2-004: 长度限制
+	if len(req.UpstreamID) > 256 || len(req.AppID) > 256 {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id, app_id must be <= 256 characters"})
 		return
 	}
 	// BUG-002 fix: validate upstream exists
@@ -1959,7 +1986,8 @@ func (api *ManagementAPI) handleRefreshUser(w http.ResponseWriter, r *http.Reque
 	}
 	info, err := api.userCache.Refresh(senderID)
 	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		// R2-001: 用户不存在返回 404 而非 500
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
 	// 更新路由表
@@ -2099,6 +2127,32 @@ func (api *ManagementAPI) respondPolicies(w http.ResponseWriter, policies []Rout
 	jsonResponse(w, 200, map[string]interface{}{"policies": policies, "total": len(policies)})
 }
 
+// D-004: reevaluateAllRoutes 策略变更后重评估所有路由绑定
+func (api *ManagementAPI) reevaluateAllRoutes() int {
+	if api.policyEng == nil || api.userCache == nil {
+		return 0
+	}
+	routes := api.routes.ListRoutes()
+	migrated := 0
+	for _, r := range routes {
+		info := api.userCache.GetCached(r.SenderID)
+		if info == nil {
+			continue
+		}
+		if pUID, ok := api.policyEng.Match(info, r.AppID); ok && pUID != "" && pUID != r.UpstreamID {
+			if _, exists := api.pool.GetUpstream(pUID); exists {
+				if AtomicMigrate(api.routes, api.pool, r.SenderID, r.AppID, r.UpstreamID, pUID) {
+					migrated++
+				}
+			}
+		}
+	}
+	if migrated > 0 {
+		log.Printf("[策略路由] 策略变更触发重评估: %d 条路由迁移", migrated)
+	}
+	return migrated
+}
+
 // handleCreateRoutePolicy POST /api/v1/route-policies — 新增策略
 func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request) {
 	var req RoutePolicyConfig
@@ -2109,6 +2163,11 @@ func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http
 	// D-007 fix: upstream_id 不能为空
 	if req.UpstreamID == "" {
 		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (including default policy)"})
+		return
+	}
+	// R2-004: 长度限制
+	if len(req.UpstreamID) > 256 {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id must be <= 256 characters"})
 		return
 	}
 	// R2-002 fix: match 条件不能全空
@@ -2132,6 +2191,12 @@ func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http
 			return
 		}
 	}
+	// R2-005: 策略可指向不存在上游 → warn 而非 block
+	upstreamWarning := ""
+	if _, exists := api.pool.GetUpstream(req.UpstreamID); !exists {
+		upstreamWarning = "upstream not currently registered: " + req.UpstreamID
+		log.Printf("[策略路由] ⚠️ 新增策略指向未注册上游: %s", req.UpstreamID)
+	}
 	// 追加
 	policies = append(policies, req)
 	// 更新内存
@@ -2142,7 +2207,17 @@ func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http
 		return
 	}
 	log.Printf("[策略路由] 新增策略: upstream_id=%s", req.UpstreamID)
-	api.respondPolicies(w, policies)
+	// D-004: 策略变更触发全量路由重评估
+	migrated := api.reevaluateAllRoutes()
+	resp := map[string]interface{}{"policies": policies, "total": len(policies)}
+	if migrated > 0 {
+		resp["routes_migrated"] = migrated
+	}
+	if upstreamWarning != "" {
+		resp["warning"] = upstreamWarning
+	}
+	jsonResponse(w, 200, resp)
+	return
 }
 
 // handleUpdateRoutePolicy PUT /api/v1/route-policies/:index — 修改策略
@@ -2180,7 +2255,13 @@ func (api *ManagementAPI) handleUpdateRoutePolicy(w http.ResponseWriter, r *http
 		return
 	}
 	log.Printf("[策略路由] 修改策略 #%d: upstream_id=%s", idx, req.UpstreamID)
-	api.respondPolicies(w, policies)
+	// D-004: 策略变更触发全量路由重评估
+	migrated := api.reevaluateAllRoutes()
+	resp := map[string]interface{}{"policies": policies, "total": len(policies)}
+	if migrated > 0 {
+		resp["routes_migrated"] = migrated
+	}
+	jsonResponse(w, 200, resp)
 }
 
 // handleDeleteRoutePolicy DELETE /api/v1/route-policies/:index — 删除策略
@@ -2207,7 +2288,13 @@ func (api *ManagementAPI) handleDeleteRoutePolicy(w http.ResponseWriter, r *http
 		return
 	}
 	log.Printf("[策略路由] 删除策略 #%d", idx)
-	api.respondPolicies(w, policies)
+	// D-004: 策略变更触发全量路由重评估
+	migrated := api.reevaluateAllRoutes()
+	resp := map[string]interface{}{"policies": policies, "total": len(policies)}
+	if migrated > 0 {
+		resp["routes_migrated"] = migrated
+	}
+	jsonResponse(w, 200, resp)
 }
 
 // ============================================================

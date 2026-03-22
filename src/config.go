@@ -311,7 +311,7 @@ func loadConfig(path string) (*Config, error) {
 	cfg := &Config{
 		InboundListen: ":8443", OutboundListen: ":8444",
 		OpenClawUpstream: "http://localhost:18790", LanxinUpstream: "https://apigw.lx.qianxin.com",
-		DBPath: "/var/lib/lobster-guard/audit.db", LogLevel: "info", DetectTimeoutMs: 50,
+		DBPath: "/var/lib/lobster-guard/audit.db", LogLevel: "info", DetectTimeoutMs: 200,
 		InboundDetectEnabled: true, OutboundAuditEnabled: true,
 		ManagementListen: ":9090", HeartbeatIntervalSec: 10, HeartbeatTimeoutCount: 3,
 		RouteDefaultPolicy: "least-users", RoutePersist: true,

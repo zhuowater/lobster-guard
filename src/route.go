@@ -229,6 +229,31 @@ func (pool *UpstreamPool) ForceDeregister(id string) bool {
 	return true
 }
 
+// D-006: RestoreUserCounts 从路由表聚合恢复 user_count（重启后）
+func (pool *UpstreamPool) RestoreUserCounts(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	rows, err := db.Query("SELECT upstream_id, COUNT(*) as cnt FROM user_routes GROUP BY upstream_id")
+	if err != nil {
+		log.Printf("[上游池] 恢复用户计数失败: %v", err)
+		return
+	}
+	defer rows.Close()
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	for rows.Next() {
+		var uid string
+		var cnt int
+		if rows.Scan(&uid, &cnt) == nil {
+			if up, ok := pool.upstreams[uid]; ok {
+				up.UserCount = cnt
+				log.Printf("[上游池] 恢复用户计数: %s = %d", uid, cnt)
+			}
+		}
+	}
+}
+
 // GetProxy 获取指定上游的反向代理
 func (pool *UpstreamPool) GetProxy(id string) *httputil.ReverseProxy {
 	pool.mu.RLock(); defer pool.mu.RUnlock()
