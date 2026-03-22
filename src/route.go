@@ -1060,9 +1060,15 @@ func (rpe *RoutePolicyEngine) Match(info *UserInfo, appID string) (string, bool)
 	rpe.mu.RLock()
 	defer rpe.mu.RUnlock()
 
+	// default 策略作为兜底，必须在所有精确匹配之后才生效
+	var defaultUpstream string
+	hasDefault := false
+
 	for _, p := range rpe.policies {
 		if p.Match.Default {
-			return p.UpstreamID, true
+			defaultUpstream = p.UpstreamID
+			hasDefault = true
+			continue // 记录但不立即返回，继续匹配更精确的规则
 		}
 		matched := true
 		hasCondition := false
@@ -1094,6 +1100,10 @@ func (rpe *RoutePolicyEngine) Match(info *UserInfo, appID string) (string, bool)
 		if hasCondition && matched {
 			return p.UpstreamID, true
 		}
+	}
+	// 没有精确匹配命中，使用 default 兜底
+	if hasDefault {
+		return defaultUpstream, true
 	}
 	return "", false
 }
@@ -1123,9 +1133,13 @@ func (rpe *RoutePolicyEngine) TestMatch(info *UserInfo, appID string) (int, *Rou
 	rpe.mu.RLock()
 	defer rpe.mu.RUnlock()
 
+	// default 策略作为兜底，必须在所有精确匹配之后才生效
+	defaultIdx := -1
+
 	for i, p := range rpe.policies {
 		if p.Match.Default {
-			return i, &rpe.policies[i], true
+			defaultIdx = i
+			continue // 记录但不立即返回
 		}
 		matched := true
 		hasCondition := false
@@ -1157,6 +1171,10 @@ func (rpe *RoutePolicyEngine) TestMatch(info *UserInfo, appID string) (int, *Rou
 		if hasCondition && matched {
 			return i, &rpe.policies[i], true
 		}
+	}
+	// 没有精确匹配命中，使用 default 兜底
+	if defaultIdx >= 0 {
+		return defaultIdx, &rpe.policies[defaultIdx], true
 	}
 	return -1, nil, false
 }
