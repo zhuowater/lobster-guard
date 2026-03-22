@@ -1561,3 +1561,13 @@ func (la *LLMAuditor) ClearDemoData(db *sql.DB) int64 {
 	}
 	return total
 }
+// LogSingularityExpose 记录奇点蜜罐暴露事件到 LLM 审计日志
+func (la *LLMAuditor) LogSingularityExpose(traceID, channel, templateName string, level int) {
+	if la == nil || la.db == nil {
+		return
+	}
+	la.db.Exec(`INSERT INTO audit_log (timestamp, direction, sender_id, action, reason, preview, hash, latency_ms, upstream_id, app_id, trace_id)
+		VALUES (datetime('now'), ?, '', 'singularity_expose', ?, ?, '', 0, '', '', ?)`,
+		channel+"_singularity", fmt.Sprintf("channel=%s,level=%d,template=%s", channel, level, templateName),
+		fmt.Sprintf("singularity_%s_%s_level%d", channel, templateName, level), traceID)
+}

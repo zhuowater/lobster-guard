@@ -47,6 +47,8 @@ type LLMProxy struct {
 	llmCache *LLMCache
 	// v20.4 API Gateway
 	apiGateway *APIGateway
+	// v18.3 奇点蜜罐引擎
+	singularityEngine *SingularityEngine
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -209,6 +211,22 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						Details: map[string]interface{}{"rule_id": topMatch.RuleID, "category": topMatch.Category, "rules": llmReqRules},
 					})
 				}
+				// v18.3: 奇点蜜罐暴露 — LLM block 时注入蜜罐内容
+				if lp.singularityEngine != nil {
+					if shouldExpose, tpl := lp.singularityEngine.ShouldExpose("llm", traceID); shouldExpose && tpl != nil {
+						if lp.auditor != nil {
+							lp.auditor.LogSingularityExpose(traceID, "llm", tpl.Name, tpl.Level)
+						}
+						if lp.envelopeMgr != nil {
+							lp.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_llm_" + tpl.Name}, "")
+						}
+						log.Printf("[LLM代理] 🔮 奇点暴露 template=%s level=%d trace_id=%s", tpl.Name, tpl.Level, traceID)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(200)
+						fmt.Fprintf(w, `%s`, tpl.Content)
+						return
+					}
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(403)
 				fmt.Fprintf(w, `{"error":"Request blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
@@ -225,6 +243,22 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						Summary: fmt.Sprintf("LLM 请求告警: %s (%s)", topMatch.RuleName, topMatch.Category),
 						Details: map[string]interface{}{"rule_id": topMatch.RuleID, "category": topMatch.Category, "action": "warn"},
 					})
+				}
+				// v18.3: 奇点蜜罐暴露 — LLM warn 时注入蜜罐内容
+				if lp.singularityEngine != nil {
+					if shouldExpose, tpl := lp.singularityEngine.ShouldExpose("llm", traceID); shouldExpose && tpl != nil {
+						if lp.auditor != nil {
+							lp.auditor.LogSingularityExpose(traceID, "llm", tpl.Name, tpl.Level)
+						}
+						if lp.envelopeMgr != nil {
+							lp.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_llm_" + tpl.Name}, "")
+						}
+						log.Printf("[LLM代理] 🔮 奇点暴露(warn) template=%s level=%d trace_id=%s", tpl.Name, tpl.Level, traceID)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(200)
+						fmt.Fprintf(w, `%s`, tpl.Content)
+						return
+					}
 				}
 			case "log":
 				log.Printf("[LLM规则] 请求日志: rule=%s category=%s",

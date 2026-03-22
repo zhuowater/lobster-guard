@@ -132,6 +132,8 @@ type InboundProxy struct {
 	honeypotDeep *HoneypotDeepEngine
 	// v20.1 污染追踪引擎
 	taintTracker *TaintTracker
+	// v18.3 奇点蜜罐引擎
+	singularityEngine *SingularityEngine
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -341,6 +343,13 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					Details: map[string]interface{}{"rules": detectResult.MatchedRules, "app_id": appID},
 				})
 			}
+			// v18.3: 奇点蜜罐暴露（桥接模式）
+			if ip.singularityEngine != nil {
+				if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", bridgeTraceID); shouldExpose && tpl != nil {
+					ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+					log.Printf("[桥接入站] 🔮 奇点暴露 sender=%s template=%s level=%d", senderID, tpl.Name, tpl.Level)
+				}
+			}
 			return
 		}
 		if detectResult.Action == "warn" {
@@ -377,6 +386,14 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					}
 					log.Printf("[桥接入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s", senderID, tpl.Name, watermark)
 					return // 不转发给上游，蜜罐已介入
+				}
+			}
+			// v18.3: 奇点蜜罐暴露（桥接 warn 模式）
+			if ip.singularityEngine != nil {
+				if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", bridgeTraceID); shouldExpose && tpl != nil {
+					ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+					log.Printf("[桥接入站] 🔮 奇点暴露(warn) sender=%s template=%s level=%d", senderID, tpl.Name, tpl.Level)
+					return // 蜜罐已介入，不转发
 				}
 			}
 		}
@@ -780,6 +797,21 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Details: map[string]interface{}{"rules": detectResult.MatchedRules, "app_id": appID},
 			})
 		}
+		// v18.3: 奇点蜜罐暴露 — block 时注入蜜罐内容
+		if ip.singularityEngine != nil {
+			if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", traceID); shouldExpose && tpl != nil {
+				ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, traceID)
+				if ip.envelopeMgr != nil {
+					ip.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
+				}
+				log.Printf("[入站] 🔮 奇点暴露 sender=%s template=%s level=%d trace_id=%s", senderID, tpl.Name, tpl.Level, traceID)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Trace-ID", traceID)
+				w.WriteHeader(200)
+				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","singularity_response":%q}`, tpl.Content)))
+				return
+			}
+		}
 		code, respBody := ip.channel.BlockResponseWithMessage(detectResult.Message)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Trace-ID", traceID)
@@ -829,6 +861,21 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-Trace-ID", traceID)
 				w.WriteHeader(200)
 				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","honeypot_response":%q}`, fakeResp)))
+				return
+			}
+		}
+		// v18.3: 奇点蜜罐暴露 — warn 时也可注入蜜罐内容（蜜罐未触发时）
+		if ip.singularityEngine != nil {
+			if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", traceID); shouldExpose && tpl != nil {
+				ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, traceID)
+				if ip.envelopeMgr != nil {
+					ip.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
+				}
+				log.Printf("[入站] 🔮 奇点暴露(warn) sender=%s template=%s level=%d trace_id=%s", senderID, tpl.Name, tpl.Level, traceID)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Trace-ID", traceID)
+				w.WriteHeader(200)
+				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","singularity_response":%q}`, tpl.Content)))
 				return
 			}
 		}
