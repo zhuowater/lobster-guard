@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 🦞 龙虾卫士 CLI — v20.6
+# 🦞 龙虾卫士 CLI — v20.7
 # 覆盖：系统状态 / IM 安全 / LLM 安全 / 威胁分析 / 安全治理 / 运维 / Phase 1 新功能
 set -euo pipefail
 
@@ -206,7 +206,7 @@ cmd_report() {
 # ── 帮助 ──────────────────────────────────────────────────
 cmd_help() {
 cat <<'EOF'
-🦞 龙虾卫士 CLI v20.6
+🦞 龙虾卫士 CLI v20.7
 
 系统状态:
   status / healthz        健康检查

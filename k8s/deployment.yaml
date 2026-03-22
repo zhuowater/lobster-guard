@@ -5,7 +5,7 @@ metadata:
   namespace: lobster-guard
   labels:
     app.kubernetes.io/name: lobster-guard
-    app.kubernetes.io/version: "20.6.0"
+    app.kubernetes.io/version: "20.7.0"
 spec:
   replicas: 1
   selector:
@@ -24,7 +24,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: lobster-guard
-        image: lobster-guard:v20.6
+        image: lobster-guard:v20.7
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 18443

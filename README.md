@@ -171,11 +171,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v20.6 .
+docker build -t lobster-guard:v20.7 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v20.6
+  lobster-guard:v20.7
 ```
 
 ### 6. Kubernetes 部署

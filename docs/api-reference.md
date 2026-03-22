@@ -227,7 +227,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | DELETE | `/api/v1/cache/tenant/:id` | 清除租户 |
 | GET/PUT | `/api/v1/cache/config` | 缓存配置 |
 
-### API 网关 (v20.6)
+### API 网关 (v20.4)
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/gateway/stats` | 网关统计 |
@@ -236,3 +236,21 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | POST | `/api/v1/gateway/validate` | 验证 JWT |
 | GET | `/api/v1/gateway/log` | 网关日志 |
 | GET/PUT | `/api/v1/gateway/config` | 网关配置 |
+
+### Dashboard 企业级打磨 (v20.7)
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| PUT | `/api/v1/config/settings` | 批量更新配置（回写 config.yaml + 内存） |
+| POST | `/api/v1/alerts/test` | 发送测试告警 |
+| PUT | `/api/v1/alerts/config` | 更新告警配置 |
+| POST | `/api/v1/routes/batch-unbind` | 批量解绑路由 |
+| POST | `/api/v1/routes/batch-migrate` | 批量迁移路由 |
+| GET | `/api/v1/anomaly/metric-thresholds` | 获取指标独立阈值 |
+| PUT | `/api/v1/anomaly/metric-thresholds/:name` | 设置指标阈值 |
+| GET | `/api/v1/anomaly/trend/:name` | 24h 趋势数据 |
+| POST | `/api/v1/prompts/:hash/tag` | 设置 Prompt 版本标签 |
+| POST | `/api/v1/prompts/:hash/rollback` | 回滚 Prompt 版本 |
+| GET | `/api/v1/prompts/stats` | Prompt 统计概览 |
+| POST | `/api/v1/taint/cleanup` | 批量清理过期标记 |
+| DELETE | `/api/v1/taint/entry/:trace_id` | 删除污染标记 |
+| POST | `/api/v1/taint/inject` | 手动注入标记 |

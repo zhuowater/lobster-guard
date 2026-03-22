@@ -5,7 +5,7 @@ info:
     AI Agent 安全网关 — 管理 API 规范文档。
     所有 `/api/v1/` 端点需要 JWT Token 或 management_token 认证。
     认证方式：`Authorization: Bearer <token>`
-  version: 20.4.0
+  version: 20.7.0
   contact:
     name: Lobster Guard Team
   license:
