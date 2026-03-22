@@ -725,7 +725,8 @@ func TestUserInfoManagementAPI(t *testing.T) {
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (
 		id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1,
-		registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}'
+		registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}',
+		path_prefix TEXT DEFAULT ''
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (
 		sender_id TEXT NOT NULL, app_id TEXT NOT NULL DEFAULT '', upstream_id TEXT NOT NULL,
@@ -982,7 +983,8 @@ func TestUserInfoManagementAPI_NilCache(t *testing.T) {
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (
 		id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1,
-		registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}'
+		registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}',
+		path_prefix TEXT DEFAULT ''
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (
 		sender_id TEXT NOT NULL, app_id TEXT NOT NULL DEFAULT '', upstream_id TEXT NOT NULL,

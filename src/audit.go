@@ -602,7 +602,8 @@ func initDB(dbPath string) (*sql.DB, error) {
 		registered_at TEXT NOT NULL,
 		last_heartbeat TEXT,
 		tags TEXT DEFAULT '{}',
-		load TEXT DEFAULT '{}'
+		load TEXT DEFAULT '{}',
+		path_prefix TEXT DEFAULT ''
 	);
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -616,6 +617,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 	// v5.0: trace_id 列
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN trace_id TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trace ON audit_log(trace_id)`)
+
+	// v20.8: upstreams 增加 path_prefix 列（兼容旧库）
+	db.Exec(`ALTER TABLE upstreams ADD COLUMN path_prefix TEXT DEFAULT ''`)
 
 	// v14.0: tenant_id 列（在 TenantManager.initSchema 中也会添加，这里确保测试也有）
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN tenant_id TEXT DEFAULT 'default'`)

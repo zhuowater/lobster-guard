@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,7 +95,8 @@ func NewUpstreamPool(cfg *Config, db *sql.DB) *UpstreamPool {
 func createReverseProxy(address string, port int, pathPrefix string) *httputil.ReverseProxy {
 	target := fmt.Sprintf("http://%s:%d", address, port)
 	u, _ := url.Parse(target)
-	prefix := strings.TrimRight(pathPrefix, "/")
+	prefix := path.Clean("/" + strings.TrimRight(pathPrefix, "/"))
+	if prefix == "/" { prefix = "" } // Clean("/") → "/" but we want empty
 	p := httputil.NewSingleHostReverseProxy(u)
 	p.Transport = &http.Transport{
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -121,23 +123,23 @@ func createReverseProxy(address string, port int, pathPrefix string) *httputil.R
 
 func (pool *UpstreamPool) loadUpstreamsFromDB() {
 	if pool.db == nil { return }
-	rows, err := pool.db.Query(`SELECT id, address, port, healthy, registered_at, last_heartbeat, tags, load FROM upstreams`)
+	rows, err := pool.db.Query(`SELECT id, address, port, healthy, registered_at, last_heartbeat, tags, load, COALESCE(path_prefix,'') FROM upstreams`)
 	if err != nil { return }
 	defer rows.Close()
 	for rows.Next() {
-		var id, address, regAt, hbAt, tagsJSON, loadJSON string
+		var id, address, regAt, hbAt, tagsJSON, loadJSON, pathPrefix string
 		var port, healthy int
-		if rows.Scan(&id, &address, &port, &healthy, &regAt, &hbAt, &tagsJSON, &loadJSON) != nil { continue }
+		if rows.Scan(&id, &address, &port, &healthy, &regAt, &hbAt, &tagsJSON, &loadJSON, &pathPrefix) != nil { continue }
 		if _, exists := pool.upstreams[id]; exists { continue }
-		up := &Upstream{ID: id, Address: address, Port: port, Healthy: healthy == 1,
+		up := &Upstream{ID: id, Address: address, Port: port, PathPrefix: pathPrefix, Healthy: healthy == 1,
 			Tags: map[string]string{}, Load: map[string]interface{}{}}
 		up.RegisteredAt, _ = time.Parse(time.RFC3339, regAt)
 		up.LastHeartbeat, _ = time.Parse(time.RFC3339, hbAt)
 		json.Unmarshal([]byte(tagsJSON), &up.Tags)
 		json.Unmarshal([]byte(loadJSON), &up.Load)
-		up.proxy = createReverseProxy(address, port, "")
+		up.proxy = createReverseProxy(address, port, pathPrefix)
 		pool.upstreams[id] = up
-		log.Printf("[上游池] 从数据库恢复上游: %s -> %s:%d healthy=%v", id, address, port, up.Healthy)
+		log.Printf("[上游池] 从数据库恢复上游: %s -> %s:%d prefix=%s healthy=%v", id, address, port, pathPrefix, up.Healthy)
 	}
 }
 
@@ -148,9 +150,9 @@ func (pool *UpstreamPool) saveUpstreamToDB(id string) {
 	tagsJSON, _ := json.Marshal(up.Tags)
 	loadJSON, _ := json.Marshal(up.Load)
 	h := 0; if up.Healthy { h = 1 }
-	pool.db.Exec(`INSERT OR REPLACE INTO upstreams (id,address,port,healthy,registered_at,last_heartbeat,tags,load) VALUES(?,?,?,?,?,?,?,?)`,
+	pool.db.Exec(`INSERT OR REPLACE INTO upstreams (id,address,port,healthy,registered_at,last_heartbeat,tags,load,path_prefix) VALUES(?,?,?,?,?,?,?,?,?)`,
 		id, up.Address, up.Port, h, up.RegisteredAt.Format(time.RFC3339), up.LastHeartbeat.Format(time.RFC3339),
-		string(tagsJSON), string(loadJSON))
+		string(tagsJSON), string(loadJSON), up.PathPrefix)
 }
 
 func (pool *UpstreamPool) Register(id, address string, port int, tags map[string]string) error {

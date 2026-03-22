@@ -345,7 +345,7 @@ func TestInboundProxy_RateLimit_Webhook(t *testing.T) {
 	db, _ := sql.Open("sqlite3", ":memory:")
 	defer db.Close()
 	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT, app_id TEXT DEFAULT '', trace_id TEXT DEFAULT '')`)
-	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}')`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}', path_prefix TEXT DEFAULT '')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (sender_id TEXT PRIMARY KEY, upstream_id TEXT, created_at TEXT, updated_at TEXT)`)
 
 	logger, _ := NewAuditLogger(db)
@@ -392,7 +392,7 @@ func TestHealthz_RateLimiter(t *testing.T) {
 	db, _ := sql.Open("sqlite3", ":memory:")
 	defer db.Close()
 	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT, app_id TEXT DEFAULT '', trace_id TEXT DEFAULT '')`)
-	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}')`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}', path_prefix TEXT DEFAULT '')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (sender_id TEXT PRIMARY KEY, upstream_id TEXT, created_at TEXT, updated_at TEXT)`)
 
 	logger, _ := NewAuditLogger(db)
@@ -445,7 +445,7 @@ func TestManagementAPI_RateLimitEndpoints(t *testing.T) {
 	db, _ := sql.Open("sqlite3", ":memory:")
 	defer db.Close()
 	db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, direction TEXT, sender_id TEXT, action TEXT, reason TEXT, content_preview TEXT, full_request_hash TEXT, latency_ms REAL, upstream_id TEXT, app_id TEXT DEFAULT '', trace_id TEXT DEFAULT '')`)
-	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}')`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS upstreams (id TEXT PRIMARY KEY, address TEXT, port INTEGER, healthy INTEGER DEFAULT 1, registered_at TEXT, last_heartbeat TEXT, tags TEXT DEFAULT '{}', load TEXT DEFAULT '{}', path_prefix TEXT DEFAULT '')`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_routes (sender_id TEXT PRIMARY KEY, upstream_id TEXT, created_at TEXT, updated_at TEXT)`)
 
 	logger, _ := NewAuditLogger(db)
