@@ -21,14 +21,14 @@ lanxin_upstream: "https://apigw.lx.qianxin.com"
 
 # --- 管理 ---
 management_listen: ":9090"
-management_token: "YOUR_MANAGEMENT_TOKEN"
+management_token: "YOUR_MANAGEMENT_TOKEN"  # 🔴 生产环境必须配置，否则管理 API 无认证
 
 # --- JWT 认证 ---
 auth:
   enabled: true
-  jwt_secret: "your-jwt-secret-at-least-32-chars"
+  jwt_secret: "your-jwt-secret-at-least-32-chars"  # 必须配置，否则重启后所有 token 失效
   # token_expire_hours: 24
-  # default_password: "admin"
+  # default_password: ""     # 未设置时自动生成随机密码（查看启动日志），密码最少 8 位
 
 # --- 存储 & 日志 ---
 db_path: "/var/lib/lobster-guard/audit.db"
@@ -52,6 +52,11 @@ static_upstreams:
   - id: "openclaw-local"
     address: "127.0.0.1"
     port: 18790
+    # path_prefix: "/api/v1"  # 可选：上游服务的路径前缀
+
+# --- WebSocket 安全 ---
+# ws_allowed_origins:        # WebSocket Origin 白名单（空则允许全部）
+#   - "https://your-domain.com"
 
 # --- 白名单（跳过入站检测的 sender_id）---
 whitelist:

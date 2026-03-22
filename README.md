@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20.7.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v20.8.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
@@ -40,7 +40,7 @@
 
 | 能力 | 说明 |
 |------|------|
-| 🛡️ **智能检测** | AC 自动机 + 正则 + 检测链 Pipeline + LLM 语义分析 · 4 场景规则模板库（66 条）|
+| 🛡️ **智能检测** | AC 自动机 + 正则 + 检测链 Pipeline + LLM 语义分析 · 4 场景规则模板库（64 条）|
 | 🧠 **上下文感知** | 会话级风险积分 · 多轮对话攻击识别 · 自动升级（warn → block）|
 | 🔒 **出站拦截** | 默认 6 条规则（PII/凭据/命令）· 用户自定义 · v18 智能合并 |
 | 🔀 **多 Bot 亲和路由** | 按 (用户ID, BotID) 复合键绑定 · 邮箱/部门策略路由 |
@@ -171,11 +171,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v20.7 .
+docker build -t lobster-guard:v20.8 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v20.7
+  lobster-guard:v20.8
 ```
 
 ### 6. Kubernetes 部署
@@ -265,7 +265,7 @@ lobster-guard/
 ├── dashboard/              # Vue 3 前端 (38 页面 + 21 组件)
 │   ├── src/views/          #   38 个页面
 │   └── src/components/     #   21 个组件
-├── rules/                  # 规则模板库 (66 条, 4 场景)
+├── rules/                  # 规则模板库 (64 条, 4 场景)
 │   ├── general.yaml        #   通用 (越狱/注入/社工)
 │   ├── financial.yaml      #   金融
 │   ├── medical.yaml        #   医疗
@@ -320,6 +320,7 @@ lobster-guard/
 | **v18** | 密码学审计链（执行信封）+ 事件总线 + 奇点蜜罐 + 自适应决策 |
 | **v19** | 对抗性自进化 + 语义检测引擎 + 蜜罐深度交互 |
 | **v20** | 工具策略引擎 + 污染追踪/逆转 + LLM 响应缓存 + API 网关 |
+| **v20.8** | 🔒 **安全加固 + 规则模板** — 8 漏洞修复(默认密码/URL Token/WS CORS/密码长度) · 64 条内置规则(通用/金融/医疗/政务) · 上游 path_prefix(DB 持久化+Dashboard UI) · 分支保护 |
 | **v20.7** | 🏢 **Dashboard 企业级打磨** — 38 页面全部重构：完整 CRUD 闭环 · 配置页面化(YAML 回写) · 搜索过滤 · 批量操作 · 表单验证 · Toast/ConfirmModal · 统一 Indigo 配色 · 响应式布局 |
 
 详细版本历史参见 [ROADMAP.md](ROADMAP.md)。
@@ -333,5 +334,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v20.7.0 · 70 source files · 71.9K lines · 950 tests · 275+ APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v20.8.0 · 70 source files · 71.9K lines · 950 tests · 275+ APIs</sub>
 </p>
