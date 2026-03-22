@@ -219,20 +219,27 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			}
 		}
 
-		// v3.9: 异步获取用户信息
+		// v3.9: 异步获取用户信息 + 策略路由纠偏
 		if senderID != "" && ip.userCache != nil {
 			go func(sid, aID string) {
 				defer func() { recover() }()
 				info, err := ip.userCache.GetOrFetch(sid)
 				if err == nil && info != nil {
 					ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
-					// 如果还没通过策略匹配路由，尝试策略匹配
+					// 策略路由纠偏：新用户首次请求时缓存为空，可能被负载均衡分配到错误上游
+					// 拿到用户信息后重新匹配策略，如果结果不同则迁移绑定
 					if ip.policyEng != nil {
-						if _, found := ip.routes.Lookup(sid, aID); !found {
-							if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+						if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+							if currentUID, found := ip.routes.Lookup(sid, aID); !found || currentUID != pUID {
+								oldUID := currentUID
 								ip.routes.Bind(sid, aID, pUID)
-								ip.pool.IncrUserCount(pUID, 1)
-								log.Printf("[桥接路由] 异步策略匹配绑定 sender=%s -> %s", sid, pUID)
+								if !found {
+									ip.pool.IncrUserCount(pUID, 1)
+								} else {
+									ip.pool.IncrUserCount(pUID, 1)
+									ip.pool.IncrUserCount(oldUID, -1)
+								}
+								log.Printf("[桥接路由] 策略纠偏 sender=%s app=%s: %s -> %s (dept=%s email=%s)", sid, aID, oldUID, pUID, info.Department, info.Email)
 							}
 						}
 					}
@@ -671,20 +678,27 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// v3.9: 异步获取用户信息
+	// v3.9: 异步获取用户信息 + 策略路由纠偏
 	if senderID != "" && ip.userCache != nil {
 		go func(sid, aID string) {
 			defer func() { recover() }()
 			info, err := ip.userCache.GetOrFetch(sid)
 			if err == nil && info != nil {
 				ip.routes.UpdateUserInfo(sid, info.Name, info.Email, info.Department)
-				// 如果还没通过策略匹配路由，尝试策略匹配
+				// 策略路由纠偏：新用户首次请求时缓存为空，可能被负载均衡分配到错误上游
+				// 拿到用户信息后重新匹配策略，如果结果不同则迁移绑定
 				if ip.policyEng != nil {
-					if _, found := ip.routes.Lookup(sid, aID); !found {
-						if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+					if pUID, ok := ip.policyEng.Match(info, aID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+						if currentUID, found := ip.routes.Lookup(sid, aID); !found || currentUID != pUID {
+							oldUID := currentUID
 							ip.routes.Bind(sid, aID, pUID)
-							ip.pool.IncrUserCount(pUID, 1)
-							log.Printf("[路由] 异步策略匹配绑定 sender=%s -> %s", sid, pUID)
+							if !found {
+								ip.pool.IncrUserCount(pUID, 1)
+							} else {
+								ip.pool.IncrUserCount(pUID, 1)
+								ip.pool.IncrUserCount(oldUID, -1)
+							}
+							log.Printf("[路由] 策略纠偏 sender=%s app=%s: %s -> %s (dept=%s email=%s)", sid, aID, oldUID, pUID, info.Department, info.Email)
 						}
 					}
 				}
