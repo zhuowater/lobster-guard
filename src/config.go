@@ -281,9 +281,10 @@ type OutboundRuleConfig struct {
 }
 
 type StaticUpstreamConfig struct {
-	ID      string `yaml:"id"`
-	Address string `yaml:"address"`
-	Port    int    `yaml:"port"`
+	ID         string `yaml:"id"`
+	Address    string `yaml:"address"`
+	Port       int    `yaml:"port"`
+	PathPrefix string `yaml:"path_prefix"`
 }
 
 // RoutePolicyConfig 路由策略配置（v3.9）

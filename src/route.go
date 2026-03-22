@@ -30,6 +30,7 @@ type Upstream struct {
 	ID            string                 `json:"id"`
 	Address       string                 `json:"address"`
 	Port          int                    `json:"port"`
+	PathPrefix    string                 `json:"path_prefix,omitempty"`
 	Healthy       bool                   `json:"healthy"`
 	RegisteredAt  time.Time              `json:"registered_at"`
 	LastHeartbeat time.Time              `json:"last_heartbeat"`
@@ -60,13 +61,13 @@ func NewUpstreamPool(cfg *Config, db *sql.DB) *UpstreamPool {
 	if pool.heartbeatTimeout <= 0 { pool.heartbeatTimeout = 3 }
 	for _, su := range cfg.StaticUpstreams {
 		up := &Upstream{
-			ID: su.ID, Address: su.Address, Port: su.Port, Healthy: true,
+			ID: su.ID, Address: su.Address, Port: su.Port, PathPrefix: su.PathPrefix, Healthy: true,
 			RegisteredAt: time.Now(), LastHeartbeat: time.Now(),
 			Tags: map[string]string{"type": "static"}, Load: map[string]interface{}{}, Static: true,
 		}
-		up.proxy = createReverseProxy(up.Address, up.Port)
+		up.proxy = createReverseProxy(up.Address, up.Port, up.PathPrefix)
 		pool.upstreams[up.ID] = up
-		log.Printf("[上游池] 加载静态上游: %s -> %s:%d", up.ID, up.Address, up.Port)
+		log.Printf("[上游池] 加载静态上游: %s -> %s:%d prefix=%s", up.ID, up.Address, up.Port, up.PathPrefix)
 	}
 	if len(pool.upstreams) == 0 && cfg.OpenClawUpstream != "" {
 		u, err := url.Parse(cfg.OpenClawUpstream)
@@ -75,30 +76,41 @@ func NewUpstreamPool(cfg *Config, db *sql.DB) *UpstreamPool {
 			if u.Port() != "" { fmt.Sscanf(u.Port(), "%d", &port) }
 			host := u.Hostname()
 			if host == "" { host = "127.0.0.1" }
+			pathPrefix := strings.TrimRight(u.Path, "/")
 			up := &Upstream{
-				ID: "openclaw-default", Address: host, Port: port, Healthy: true,
+				ID: "openclaw-default", Address: host, Port: port, PathPrefix: pathPrefix, Healthy: true,
 				RegisteredAt: time.Now(), LastHeartbeat: time.Now(),
 				Tags: map[string]string{"type": "legacy"}, Load: map[string]interface{}{}, Static: true,
 			}
-			up.proxy = createReverseProxy(host, port)
+			up.proxy = createReverseProxy(host, port, pathPrefix)
 			pool.upstreams[up.ID] = up
-			log.Printf("[上游池] v1.0 兼容上游: %s -> %s:%d", up.ID, host, port)
+			log.Printf("[上游池] v1.0 兼容上游: %s -> %s:%d prefix=%s", up.ID, host, port, pathPrefix)
 		}
 	}
 	pool.loadUpstreamsFromDB()
 	return pool
 }
 
-func createReverseProxy(address string, port int) *httputil.ReverseProxy {
+func createReverseProxy(address string, port int, pathPrefix string) *httputil.ReverseProxy {
 	target := fmt.Sprintf("http://%s:%d", address, port)
 	u, _ := url.Parse(target)
+	prefix := strings.TrimRight(pathPrefix, "/")
 	p := httputil.NewSingleHostReverseProxy(u)
 	p.Transport = &http.Transport{
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		MaxIdleConns: 100, MaxIdleConnsPerHost: 50, IdleConnTimeout: 90 * time.Second,
 	}
 	od := p.Director
-	p.Director = func(r *http.Request) { od(r); r.Host = u.Host }
+	p.Director = func(r *http.Request) {
+		od(r)
+		r.Host = u.Host
+		if prefix != "" {
+			r.URL.Path = prefix + r.URL.Path
+			if r.URL.RawPath != "" {
+				r.URL.RawPath = prefix + r.URL.RawPath
+			}
+		}
+	}
 	p.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
 		log.Printf("[上游] 转发错误 -> %s: %v", target, e)
 		w.WriteHeader(502)
@@ -123,7 +135,7 @@ func (pool *UpstreamPool) loadUpstreamsFromDB() {
 		up.LastHeartbeat, _ = time.Parse(time.RFC3339, hbAt)
 		json.Unmarshal([]byte(tagsJSON), &up.Tags)
 		json.Unmarshal([]byte(loadJSON), &up.Load)
-		up.proxy = createReverseProxy(address, port)
+		up.proxy = createReverseProxy(address, port, "")
 		pool.upstreams[id] = up
 		log.Printf("[上游池] 从数据库恢复上游: %s -> %s:%d healthy=%v", id, address, port, up.Healthy)
 	}
@@ -148,13 +160,13 @@ func (pool *UpstreamPool) Register(id, address string, port int, tags map[string
 		existing.Address = address; existing.Port = port
 		existing.Healthy = true; existing.LastHeartbeat = now
 		if tags != nil { existing.Tags = tags }
-		existing.proxy = createReverseProxy(address, port)
+		existing.proxy = createReverseProxy(address, port, existing.PathPrefix)
 	} else {
 		up := &Upstream{ID: id, Address: address, Port: port, Healthy: true,
 			RegisteredAt: now, LastHeartbeat: now,
 			Tags: tags, Load: map[string]interface{}{}}
 		if up.Tags == nil { up.Tags = map[string]string{} }
-		up.proxy = createReverseProxy(address, port)
+		up.proxy = createReverseProxy(address, port, "")
 		pool.upstreams[id] = up
 	}
 	pool.saveUpstreamToDB(id)
@@ -190,9 +202,9 @@ func (pool *UpstreamPool) Update(id, address string, port int, tags map[string]s
 	if address != "" { up.Address = address }
 	if port > 0 { up.Port = port }
 	if tags != nil { up.Tags = tags }
-	up.proxy = createReverseProxy(up.Address, up.Port)
+	up.proxy = createReverseProxy(up.Address, up.Port, up.PathPrefix)
 	pool.saveUpstreamToDB(id)
-	log.Printf("[上游池] 更新上游: %s -> %s:%d", id, up.Address, up.Port)
+	log.Printf("[上游池] 更新上游: %s -> %s:%d prefix=%s", id, up.Address, up.Port, up.PathPrefix)
 	return nil
 }
 
