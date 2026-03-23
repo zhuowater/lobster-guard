@@ -69,6 +69,7 @@ type LLMTargetConfig struct {
 	Name         string `yaml:"name" json:"name"`
 	Upstream     string `yaml:"upstream" json:"upstream"`
 	PathPrefix   string `yaml:"path_prefix" json:"path_prefix"`
+	StripPrefix  bool   `yaml:"strip_prefix" json:"strip_prefix"` // strip path_prefix before forwarding
 	APIKeyHeader string `yaml:"api_key_header" json:"api_key_header"`
 }
 

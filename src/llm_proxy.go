@@ -308,8 +308,16 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 构建上游请求
-	upstreamURL := strings.TrimRight(target.Upstream, "/") + r.URL.RequestURI()
+	// 构建上游请求（strip_prefix 模式下去掉 path_prefix 再转发）
+	requestPath := r.URL.RequestURI()
+	if target.StripPrefix && target.PathPrefix != "" && strings.HasPrefix(requestPath, target.PathPrefix) {
+		stripped := strings.TrimPrefix(requestPath, target.PathPrefix)
+		if !strings.HasPrefix(stripped, "/") {
+			stripped = "/" + stripped
+		}
+		requestPath = stripped
+	}
+	upstreamURL := strings.TrimRight(target.Upstream, "/") + requestPath
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		log.Printf("[LLM代理] 创建上游请求失败: %v", err)
