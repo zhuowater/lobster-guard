@@ -174,6 +174,7 @@ const allNavItems = {
   'llm':               { path: '/llm',            label: 'LLM 概览',      icon: 'brain' },
   'ops':               { path: '/ops',            label: '运维工具',       icon: 'wrench' },
   'settings':          { path: '/settings',       label: '设置',           icon: 'settings' },
+  'gateway-monitor':   { path: '/gateway-monitor', label: 'Gateway 监控',  icon: 'activity' },
 }
 
 // 当前 Tab 配置
