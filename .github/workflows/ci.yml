@@ -24,7 +24,7 @@ jobs:
         run: sudo apt-get install -y libsqlite3-dev
       - name: Build Dashboard
         working-directory: dashboard
-        run: npm ci --ignore-scripts && npm run build
+        run: npm ci && npm run build
       - name: Copy Dashboard dist to src/
         run: cp -r dashboard/dist src/dashboard/dist
       - name: Build
