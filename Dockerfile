@@ -17,14 +17,13 @@ RUN npm run build
 # ── Stage 2: Build Go binary ──
 FROM golang:1.23-alpine AS backend
 RUN apk add --no-cache gcc musl-dev sqlite-dev
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY src/ ./src/
-COPY rules/ ./src/rules/
-# Embed built dashboard
-COPY --from=frontend /app/dashboard/dist ./src/dashboard/dist/
 WORKDIR /app/src
+COPY src/go.mod src/go.sum ./
+RUN go mod download
+COPY src/ ./
+COPY rules/ ./rules/
+# Embed built dashboard
+COPY --from=frontend /app/dashboard/dist ./dashboard/dist/
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /lobster-guard .
 
 # ── Stage 3: Runtime ──
