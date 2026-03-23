@@ -1113,16 +1113,17 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 
 func (api *ManagementAPI) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID      string            `json:"id"`
-		Address string            `json:"address"`
-		Port    int               `json:"port"`
-		Tags    map[string]string `json:"tags"`
+		ID         string            `json:"id"`
+		Address    string            `json:"address"`
+		Port       int               `json:"port"`
+		Tags       map[string]string `json:"tags"`
+		PathPrefix string            `json:"path_prefix"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.ID == "" {
 		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
 		return
 	}
-	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags); err != nil {
+	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags, req.PathPrefix); err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1202,16 +1203,17 @@ func (api *ManagementAPI) handleListUpstreams(w http.ResponseWriter, r *http.Req
 // handleCreateUpstream POST /api/v1/upstreams — 创建上游（RESTful 等价于 register）
 func (api *ManagementAPI) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID      string            `json:"id"`
-		Address string            `json:"address"`
-		Port    int               `json:"port"`
-		Tags    map[string]string `json:"tags"`
+		ID         string            `json:"id"`
+		Address    string            `json:"address"`
+		Port       int               `json:"port"`
+		Tags       map[string]string `json:"tags"`
+		PathPrefix string            `json:"path_prefix"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.ID == "" || req.Address == "" || req.Port <= 0 {
 		jsonResponse(w, 400, map[string]string{"error": "id, address, port 均为必填"})
 		return
 	}
-	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags); err != nil {
+	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags, req.PathPrefix); err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1253,15 +1255,16 @@ func (api *ManagementAPI) handleUpdateUpstream(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var req struct {
-		Address string            `json:"address"`
-		Port    int               `json:"port"`
-		Tags    map[string]string `json:"tags"`
+		Address    string            `json:"address"`
+		Port       int               `json:"port"`
+		Tags       map[string]string `json:"tags"`
+		PathPrefix string            `json:"path_prefix"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if err := api.pool.Update(id, req.Address, req.Port, req.Tags); err != nil {
+	if err := api.pool.Update(id, req.Address, req.Port, req.Tags, req.PathPrefix); err != nil {
 		jsonResponse(w, 404, map[string]string{"error": err.Error()})
 		return
 	}

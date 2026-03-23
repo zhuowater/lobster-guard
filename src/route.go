@@ -155,24 +155,27 @@ func (pool *UpstreamPool) saveUpstreamToDB(id string) {
 		string(tagsJSON), string(loadJSON), up.PathPrefix)
 }
 
-func (pool *UpstreamPool) Register(id, address string, port int, tags map[string]string) error {
+func (pool *UpstreamPool) Register(id, address string, port int, tags map[string]string, pathPrefix ...string) error {
 	pool.mu.Lock(); defer pool.mu.Unlock()
 	now := time.Now()
+	pp := ""
+	if len(pathPrefix) > 0 { pp = pathPrefix[0] }
 	if existing, ok := pool.upstreams[id]; ok {
 		existing.Address = address; existing.Port = port
 		existing.Healthy = true; existing.LastHeartbeat = now
 		if tags != nil { existing.Tags = tags }
+		if pp != "" { existing.PathPrefix = pp }
 		existing.proxy = createReverseProxy(address, port, existing.PathPrefix)
 	} else {
-		up := &Upstream{ID: id, Address: address, Port: port, Healthy: true,
+		up := &Upstream{ID: id, Address: address, Port: port, PathPrefix: pp, Healthy: true,
 			RegisteredAt: now, LastHeartbeat: now,
 			Tags: tags, Load: map[string]interface{}{}}
 		if up.Tags == nil { up.Tags = map[string]string{} }
-		up.proxy = createReverseProxy(address, port, "")
+		up.proxy = createReverseProxy(address, port, pp)
 		pool.upstreams[id] = up
 	}
 	pool.saveUpstreamToDB(id)
-	log.Printf("[上游池] 注册上游: %s -> %s:%d", id, address, port)
+	log.Printf("[上游池] 注册上游: %s -> %s:%d prefix=%s", id, address, port, pp)
 	return nil
 }
 
@@ -196,14 +199,15 @@ func (pool *UpstreamPool) Deregister(id string) {
 	}
 }
 
-// Update 更新已有上游的地址、端口、tags（v21.0 上游 CRUD）
-func (pool *UpstreamPool) Update(id, address string, port int, tags map[string]string) error {
+// Update 更新已有上游的地址、端口、tags、path_prefix（v21.0 上游 CRUD）
+func (pool *UpstreamPool) Update(id, address string, port int, tags map[string]string, pathPrefix ...string) error {
 	pool.mu.Lock(); defer pool.mu.Unlock()
 	up, ok := pool.upstreams[id]
 	if !ok { return fmt.Errorf("上游 %s 不存在", id) }
 	if address != "" { up.Address = address }
 	if port > 0 { up.Port = port }
 	if tags != nil { up.Tags = tags }
+	if len(pathPrefix) > 0 { up.PathPrefix = pathPrefix[0] }
 	up.proxy = createReverseProxy(up.Address, up.Port, up.PathPrefix)
 	pool.saveUpstreamToDB(id)
 	log.Printf("[上游池] 更新上游: %s -> %s:%d prefix=%s", id, up.Address, up.Port, up.PathPrefix)
