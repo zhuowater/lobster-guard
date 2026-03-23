@@ -366,7 +366,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isSSE {
 		// SSE 流式处理
 		w.WriteHeader(resp.StatusCode)
-		lp.handleSSEResponse(w, resp, auditCtx)
+		lp.handleSSEResponse(w, resp, auditCtx, taintTraceID)
 	} else {
 		// 非流式：读取完整响应
 		respBody, err := io.ReadAll(resp.Body)
@@ -499,7 +499,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSSEResponse 处理 SSE 流式响应
-func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response, auditCtx *LLMAuditContext) {
+func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response, auditCtx *LLMAuditContext, taintTraceID string) {
 	flusher, hasFlusher := w.(http.Flusher)
 	scanner := bufio.NewScanner(resp.Body)
 	// 增大缓冲区以处理大的 SSE 事件
@@ -570,6 +570,35 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 				}
 			}
 		}()
+	}
+
+	// v20.2: SSE 流式响应侧 taint 传播 + 逆转
+	if lp.taintTracker != nil && taintTraceID != "" {
+		lp.taintTracker.Propagate(taintTraceID, "llm_response",
+			fmt.Sprintf("SSE stream completed (llm_trace=%s)", auditCtx.TraceID))
+	}
+	if lp.reversalEngine != nil && len(eventData) > 0 && taintTraceID != "" {
+		originalStr := string(eventData)
+		reversed, record := lp.reversalEngine.Reverse(taintTraceID, originalStr)
+		if record != nil {
+			// 提取追加的缓解提示（reversed = original + template content）
+			reversalContent := strings.TrimPrefix(reversed, originalStr)
+			if reversalContent == "" {
+				// hard 模式下 reversed 替换了原始内容
+				reversalContent = reversed
+			}
+			reversalContent = strings.TrimSpace(reversalContent)
+			if reversalContent != "" {
+				sseEvent := fmt.Sprintf("event: lobster_guard_taint_reversal\ndata: %s\n\n",
+					strings.ReplaceAll(reversalContent, "\n", "\ndata: "))
+				fmt.Fprint(w, sseEvent)
+				if hasFlusher {
+					flusher.Flush()
+				}
+			}
+			log.Printf("[LLM代理] 🔄 SSE 污染逆转 trace=%s taint_trace=%s mode=%s template=%s",
+				auditCtx.TraceID, taintTraceID, record.Mode, record.TemplateID)
+		}
 	}
 
 	go lp.auditor.ProcessSSEBuffer(auditCtx, eventData)
