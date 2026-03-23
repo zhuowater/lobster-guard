@@ -79,9 +79,62 @@
        └── pass  → 放行（缓存）
 ```
 
+## 污染追踪（Taint Tracking）
+
+### IM↔LLM Trace 关联 (v20.8.1+)
+
+LLM Proxy 在处理请求时，优先使用 `SessionCorrelator` 关联的 IM `trace_id`（而非 LLM 自身生成的 trace_id），确保入站 IM 检测阶段标记的 taint 在 LLM 响应路径中被正确关联。
+
+```
+IM 入站（trace_id=T1）
+  → PII 检测命中 → taint_entries 写入 T1
+  → 转发 OpenClaw
+  → Agent 调用 LLM Proxy
+  → SessionCorrelator 查询: sender → T1
+  → taintTraceID = T1（而非 LLM 自身 trace）
+  → taint propagation 使用 T1
+  → reversal 检查 T1 的 labels
+```
+
+这解决了之前 LLM trace_id 与入站 IM trace_id 不匹配导致 taint 链断裂的问题。
+
+### SSE 流式逆转
+
+当 LLM 响应以 SSE (Server-Sent Events) 流式传输时，数据已逐行推送给客户端。龙虾卫士在流结束后执行逆转：
+
+1. 流正常传输完毕
+2. `taint propagation` 使用关联的 IM trace_id 触发
+3. `reversalEngine.Reverse()` 检查活跃的 taint labels
+4. 命中时追加一个自定义 SSE 事件：
+
+```
+event: lobster_guard_taint_reversal
+data: {"warning": "检测到敏感信息泄露风险...", "template": "pii-soft-1", "labels": ["pii_phone"]}
+```
+
+5. 客户端通过 `event` 类型区分正常 LLM 输出和安全缓解提示
+
+**客户端集成示例**（EventSource）:
+
+```javascript
+const es = new EventSource('/v1/chat/completions');
+es.addEventListener('lobster_guard_taint_reversal', (e) => {
+  const warning = JSON.parse(e.data);
+  showSecurityWarning(warning);
+});
+```
+
+### 非流式逆转
+
+普通 HTTP 响应模式下，`reversalEngine.Reverse()` 在响应返回客户端前自动调用：
+
+- **soft 模式**：在响应体末尾追加安全提示
+- **hard 模式**：替换整个响应内容为安全提示
+- **stealth 模式**：静默记录到 `taint_reversals` 表，不修改响应
+
 ## 规则模板库
 
-4 场景 66 条预置规则，通过 `go:embed` 编译进二进制：
+4 场景 64 条预置规则，通过 `go:embed` 编译进二进制：
 
 | 模板 | 场景 | 规则数 |
 |------|------|--------|

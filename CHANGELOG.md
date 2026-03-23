@@ -1,5 +1,51 @@
 # Changelog
 
+## v20.8.1 (2026-03-23) — Taint 全链路闭环 + 设计级修复 + E2E 验证
+
+> 125 Go 源文件 · 55 测试文件 · ~75,000 行 · 1112 测试全部通过 · 197 commits
+
+### 🔄 Taint 全链路（IM↔LLM trace 关联 + SSE 逆转）
+
+- **IM↔LLM trace 关联** — `llm_proxy.go` 新增 `taintTraceID` 变量，优先使用 SessionCorrelator 关联的 IM trace_id，解决 LLM trace_id 与入站 IM trace_id 不匹配导致 taint 链断裂 (c2e23fa)
+- **非流式自动逆转** — `reversalEngine.Reverse()` 在非流式 LLM 响应路径自动调用，不再依赖手动 API 触发；taint propagation 统一使用 `taintTraceID` (c2e23fa)
+- **SSE 流式逆转** — `handleSSEResponse()` 接收 `taintTraceID` 参数，流结束后自动检查 taint 并追加自定义 SSE 事件 `event: lobster_guard_taint_reversal`，客户端通过 event type 区分正常输出和安全缓解提示 (a377690)
+
+### 🏗️ 设计级修复（9 项）
+
+- **D-001** 策略上游不健康时记录 `policy_degraded` 审计事件 + Dashboard 告警，不再静默降级
+- **D-002** 转发降级时更新路由表绑定和 user_count，审计日志记录实际上游 ID
+- **D-003** 桥接模式转发支持 `path_prefix`，降级使用 `SelectUpstream` 而非 map 随机遍历
+- **D-004** 策略 CRUD 变更后触发全量路由重评估（`reevaluateAllRoutes`）
+- **D-005** 出站代理注入 `X-Lobster-Upstream` header 标记来源上游
+- **D-006** 启动时从路由表聚合恢复 `user_count`，重启后 least-users 策略立即生效
+- **D-007** 默认策略 `upstream_id=""` 在 Dashboard 显示为"不路由(LB 托管)"，创建时校验
+- **D-008** 检测超时默认值调整为 200ms，语义/LLM 阶段支持独立超时配置
+- **D-009** 桥接模式 block 时主动推送拦截提示消息给发送者
+
+### 🔬 E2E 验证修复（7 项 + QA R2 5 项）
+
+- **E2E #1** Token 计数支持 OpenAI 格式 (`prompt_tokens`/`completion_tokens`) — `llm_audit.go` 添加格式 fallback
+- **E2E #2** 新增中国 PII 检测规则 `llm-pii-004`（身份证）、`llm-pii-005`（手机号）
+- **E2E #3** `LLMRule` 结构体添加 `Severity` 字段
+- **E2E #4** 中国 PII 正则改进：添加 word boundary anchors 防止部分匹配；`buildIndex()` 添加规则编译统计日志
+- **E2E #5** 静态上游启用 TCP 健康检查（3s dial timeout），不再跳过
+- **E2E #6** `ParseSSEEvents()` 支持 OpenAI SSE 流式 token 格式
+- **E2E #7** LLM 规则命中计数持久化到 SQLite（`llm_rule_hits` 表），重启后恢复
+- **QA R2** sender_id 长度限制（≤256）、空 match 策略拒绝创建、不存在用户查询返回 404、策略上游存在性校验、路由绑定原子性保证
+
+### 🔀 LLM Proxy 增强
+
+- **strip_prefix 路由** — `LLMTargetConfig` 新增 `StripPrefix bool` 字段 (`strip_prefix` in YAML)；当 `strip_prefix: true` 时，转发前去掉 `path_prefix`（如 `/qax/v1/...` → `/v1/...`），支持将 OpenClaw LLM 流量透明引入龙虾卫士审计 (db80b8e)
+
+### 📊 质量方法论
+
+- **DESIGN-REVIEW.md** — 9 项深层设计问题系统审查（数据流追踪、边界行为分析）
+- **QA-REPORT-R2.md** — 46 场景第二轮测试，33 PASS / 4 FAIL / 9 INFO，旧 7 Bug 全部回归通过
+- **E2E-TEST-REPORT.md** — 全链路实战测试：LLM 安全域 15+ 请求、IM 侧 53+ 消息（含 50 并发）、17 页面 Dashboard 验证
+- **全链路闭环验证** — 蓝信→入站检测→OpenClaw→LLM Proxy→taint 传播→SSE 逆转→出站审计，3 条消息（正常/PII/PI）端到端通过
+
+---
+
 ## v20.8.0 (2026-03-22) — 安全加固 + 规则模板 + path_prefix
 
 ### 🔒 安全加固 (Issue #1)

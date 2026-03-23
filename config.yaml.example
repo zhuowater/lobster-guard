@@ -1,5 +1,5 @@
 # ============================================================
-# 龙虾卫士 v20.7 核心配置
+# 龙虾卫士 v20.8.1 核心配置
 # 完整参考: config.yaml.full-example（776 行完整版）
 # 模块配置: conf.d/ 目录（可选，按需启用）
 # ============================================================
@@ -18,6 +18,26 @@ inbound_listen: ":18443"   # IM 入站代理（消息平台 → Agent）
 outbound_listen: ":18444"  # IM 出站代理（Agent → 消息平台 API）
 openclaw_upstream: "http://localhost:18790"
 lanxin_upstream: "https://apigw.lx.qianxin.com"
+
+# --- LLM 代理（可选）---
+# llm_proxy:
+#   enabled: true
+#   listen: ":8445"
+#   targets:
+#     - name: "deepseek"
+#       upstream: "https://api.deepseek.com"
+#       path_prefix: "/v1/"
+#       strip_prefix: false         # 保持原路径转发
+#       api_key_header: "Authorization"
+#     - name: "qax-llm"
+#       upstream: "https://aip.b.qianxin-inc.cn"
+#       path_prefix: "/qax/v1/"
+#       strip_prefix: true          # /qax/v1/... → /v1/...（去掉前缀再转发）
+#       api_key_header: "Authorization"
+#   # strip_prefix 说明：
+#   #   当 strip_prefix: true 时，转发前去掉 path_prefix。
+#   #   用于将 OpenClaw LLM 流量透明引入龙虾卫士审计，无需修改上游 API 路径。
+#   #   例如 /qax/v1/chat/completions 会以 /v1/chat/completions 发送到上游。
 
 # --- 管理 ---
 management_listen: ":9090"

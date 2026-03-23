@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20.8.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v20.8.1-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-950_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-275_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/tests-1112_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-280+_routes-purple?style=flat-square" alt="API Routes">
   <img src="https://img.shields.io/badge/dashboard-38_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
@@ -59,14 +59,14 @@
 | 🌀 **奇点蜜罐** | 拓扑预算(欧拉χ) · 暴露等级 · 帕累托推荐 |
 | 🔬 **语义检测** | TF-IDF + 句法 + 异常 + 意图四维分析 · 47 模式 |
 | 🔧 **工具策略** | tool_calls 18 规则 · 通配符匹配 · 滑窗限流 |
-| ☣️ **污染追踪** | 12 PII 模式 · 三端传播 · 血缘阻断 · 逆转引擎 |
+| ☣️ **污染追踪** | 12 PII 模式 · 三端传播 · 血缘阻断 · 逆转引擎 · IM↔LLM trace 关联 · SSE 流式逆转 |
 | 💾 **响应缓存** | TF-IDF 语义匹配 · 租户隔离 · 污染跳过 |
 | 🚪 **API 网关** | JWT + APIKey · 路由优先级 · 灰度发布 |
 | 🖥️ **管理后台** | Vue 3 Dashboard · 38 页面 · 21 组件 · 5 组侧边栏 |
 
 ### 🏗️ 设计哲学
 
-- **单二进制部署** — 70 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
+- **单二进制部署** — 125 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
 - **Fail-Open** — 检测异常不阻塞业务，宁可漏检不可误杀
 - **零外部依赖** — 只依赖 SQLite + YAML 解析 + WebSocket + x/crypto（4 个依赖），不引入 Redis/MQ/K8s
 - **向后兼容** — 不配多容器就自动退化为单上游模式，平滑升级
@@ -75,15 +75,13 @@
 
 | 指标 | 数值 |
 |------|------|
-| Go 源文件 | 70 个 |
-| Go 测试文件 | 50 个 |
-| Go 源代码行数 | ~44,100 行 |
-| Go 测试行数 | ~27,800 行 |
-| 总 Go 行数 | ~71,900 行 |
-| Vue 前端 | 38 页面 + 21 组件，共 65 个文件，~23,700 行 |
-| API 路由 | ~275 个 |
-| 测试函数 | 950 个 |
-| Git Commit | 168 个 |
+| Go 源文件 | 125 个 |
+| Go 测试文件 | 55 个 |
+| Go 代码行数 | ~75,000 行 |
+| Vue 前端 | 38 页面 + 21 组件，~23,300 行 |
+| API 路由 | ~280+ 个 |
+| 测试函数 | 1112 个（全部通过）|
+| Git Commit | 197 个 |
 | 外部依赖 | 4 个（sqlite3 + yaml.v3 + gorilla/websocket + x/crypto）|
 
 ---
@@ -171,11 +169,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v20.8 .
+docker build -t lobster-guard:v20.8.1 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v20.8
+  lobster-guard:v20.8.1
 ```
 
 ### 6. Kubernetes 部署
@@ -205,14 +203,14 @@ open http://localhost:9090/
 
 | 文档 | 说明 |
 |------|------|
-| [🏛️ 架构说明](docs/architecture.md) | 架构图 · 4 端口 · 数据流 · 插件架构 |
+| [🏛️ 架构说明](docs/architecture.md) | 架构图 · 4 端口 · 数据流 · 插件架构 · Taint 全链路 |
 | [🔌 多通道配置](docs/channels.md) | 5 通道配置示例 · Bridge Mode WSS 长连接 |
 | [🛡️ 安全检测能力](docs/detection.md) | 规则体系 · 检测管线 · 规则模板库 |
-| [📡 API 参考](docs/api-reference.md) | ~275 路由完整列表 · 调用示例 |
+| [📡 API 参考](docs/api-reference.md) | ~280+ 路由完整列表 · 调用示例 |
 | [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · K8s · Make |
 | [☸️ K8s 服务发现](docs/k8s-discovery.md) | InCluster/Kubeconfig · 自动注册 · RBAC · 零依赖 |
 | [🔀 上游管理](docs/upstream-management.md) | CRUD API · 四种来源 · 路由策略 · Dashboard |
-| [🧪 测试说明](docs/testing.md) | 950 用例 · 端到端模拟 · 性能指标 |
+| [🧪 测试说明](docs/testing.md) | 1112 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 完整配置项 · 出站规则合并机制 |
 | [🖥️ 管理后台](docs/dashboard.md) | 38 页面详情 · 组件库 · 截图集合 |
 
@@ -246,7 +244,7 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 ```
 lobster-guard/
-├── src/                    # Go 源代码（70 源 + 50 测试 = 120 个文件）
+├── src/                    # Go 源代码（125 源 + 55 测试 = 180 个文件）
 │   ├── main.go             #   入口 + CLI 参数 + 启动流程
 │   ├── config.go           #   配置加载 + 验证器
 │   ├── plugin.go           #   ChannelPlugin 接口 + 5 通道插件
@@ -320,6 +318,7 @@ lobster-guard/
 | **v18** | 密码学审计链（执行信封）+ 事件总线 + 奇点蜜罐 + 自适应决策 |
 | **v19** | 对抗性自进化 + 语义检测引擎 + 蜜罐深度交互 |
 | **v20** | 工具策略引擎 + 污染追踪/逆转 + LLM 响应缓存 + API 网关 |
+| **v20.8.1** | ☣️ **Taint 全链路闭环 + 设计级修复** — IM↔LLM trace 关联 · SSE 流式逆转 · strip_prefix 路由 · 9 设计问题修复 · E2E 全链路验证 · 1112 测试 |
 | **v20.8** | 🔒 **安全加固 + 规则模板** — 8 漏洞修复(默认密码/URL Token/WS CORS/密码长度) · 64 条内置规则(通用/金融/医疗/政务) · 上游 path_prefix(DB 持久化+Dashboard UI) · 分支保护 |
 | **v20.7** | 🏢 **Dashboard 企业级打磨** — 38 页面全部重构：完整 CRUD 闭环 · 配置页面化(YAML 回写) · 搜索过滤 · 批量操作 · 表单验证 · Toast/ConfirmModal · 统一 Indigo 配色 · 响应式布局 |
 
@@ -334,5 +333,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v20.8.0 · 70 source files · 71.9K lines · 950 tests · 275+ APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v20.8.1 · 125 source files · 75K lines · 1112 tests · 280+ APIs</sub>
 </p>
