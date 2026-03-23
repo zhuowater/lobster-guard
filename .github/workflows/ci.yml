@@ -26,7 +26,7 @@ jobs:
         working-directory: dashboard
         run: npm ci && npm run build
       - name: Copy Dashboard dist to src/
-        run: cp -r dashboard/dist src/dashboard/dist
+        run: mkdir -p src/dashboard && cp -r dashboard/dist src/dashboard/dist
       - name: Build
         working-directory: src
         run: CGO_ENABLED=1 go build -o /dev/null .
