@@ -266,9 +266,14 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// v20.1: LLM 请求侧污染传播
+	// v20.1: LLM 请求侧污染传播（使用关联的 IM trace_id 以匹配入站标记）
+	taintTraceID := traceID
+	if sessionLink != nil && sessionLink.IMTraceID != "" {
+		taintTraceID = sessionLink.IMTraceID
+	}
 	if lp.taintTracker != nil {
-		lp.taintTracker.Propagate(traceID, "llm_request", "user message forwarded to LLM")
+		lp.taintTracker.Propagate(taintTraceID, "llm_request",
+			fmt.Sprintf("user message forwarded to LLM (llm_trace=%s)", traceID))
 	}
 
 	// v18.0: 执行信封 — 请求侧（非 block 的也要记录）
@@ -445,9 +450,22 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// v20.1: LLM 响应侧污染传播
+		// v20.1: LLM 响应侧污染传播（使用关联的 IM trace_id）
 		if lp.taintTracker != nil {
-			lp.taintTracker.Propagate(traceID, "llm_response", "LLM response received")
+			lp.taintTracker.Propagate(taintTraceID, "llm_response",
+				fmt.Sprintf("LLM response received (llm_trace=%s)", traceID))
+		}
+
+		// v20.2: 污染链逆转 — 对被污染的 LLM 响应自动注入缓解提示
+		if lp.reversalEngine != nil && len(respBody) > 0 {
+			reversed, record := lp.reversalEngine.Reverse(taintTraceID, string(respBody))
+			if record != nil {
+				respBody = []byte(reversed)
+				log.Printf("[LLM代理] 🔄 污染逆转 trace=%s taint_trace=%s mode=%s template=%s",
+					traceID, taintTraceID, record.Mode, record.TemplateID)
+				// 更新 Content-Length
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
+			}
 		}
 
 		// v18.0: 执行信封 — 响应侧（非 block 的也要记录）
