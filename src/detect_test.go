@@ -1189,7 +1189,10 @@ func TestRuleHitStats_API(t *testing.T) {
 	}
 
 	// Verify reset
-	resp2, _ := http.Get(srv.URL + "/api/v1/rules/hits")
+	resp2, err := http.Get(srv.URL + "/api/v1/rules/hits")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
 	defer resp2.Body.Close()
 	body2, _ := io.ReadAll(resp2.Body)
 	var details2 []RuleHitDetail

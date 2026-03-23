@@ -100,7 +100,10 @@ func TestFeishuBridge_TokenRefresh(t *testing.T) {
 	body2, _ := json.Marshal(map[string]string{
 		"app_id": "test_app_id", "app_secret": "test_app_secret",
 	})
-	resp2, _ := client.Post(server.URL, "application/json", bytes.NewReader(body2))
+	resp2, err2 := client.Post(server.URL, "application/json", bytes.NewReader(body2))
+	if err2 != nil {
+		t.Fatalf("request failed: %v", err2)
+	}
 	defer resp2.Body.Close()
 	var result2 struct {
 		Code              int    `json:"code"`
@@ -115,7 +118,10 @@ func TestFeishuBridge_TokenRefresh(t *testing.T) {
 	bodyBad, _ := json.Marshal(map[string]string{
 		"app_id": "wrong", "app_secret": "wrong",
 	})
-	resp3, _ := client.Post(server.URL, "application/json", bytes.NewReader(bodyBad))
+	resp3, err3 := client.Post(server.URL, "application/json", bytes.NewReader(bodyBad))
+	if err3 != nil {
+		t.Fatalf("request failed: %v", err3)
+	}
 	defer resp3.Body.Close()
 	var result3 struct {
 		Code int `json:"code"`
@@ -173,7 +179,10 @@ func TestDingtalkBridge_TicketAcquire(t *testing.T) {
 	reqBad, _ := json.Marshal(map[string]interface{}{
 		"clientId": "wrong", "clientSecret": "wrong",
 	})
-	resp2, _ := client.Post(server.URL, "application/json", bytes.NewReader(reqBad))
+	resp2, err2 := client.Post(server.URL, "application/json", bytes.NewReader(reqBad))
+	if err2 != nil {
+		t.Fatalf("request failed: %v", err2)
+	}
 	defer resp2.Body.Close()
 	var result2 struct {
 		Endpoint string `json:"endpoint"`
