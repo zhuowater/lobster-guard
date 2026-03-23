@@ -39,6 +39,7 @@ type Upstream struct {
 	Load          map[string]interface{} `json:"load"`
 	UserCount     int                    `json:"user_count"`
 	Static        bool                   `json:"static"`
+	GatewayToken  string                 `json:"-"` // 不暴露在 JSON 响应中！安全考虑
 	proxy         *httputil.ReverseProxy
 }
 
@@ -65,6 +66,7 @@ func NewUpstreamPool(cfg *Config, db *sql.DB) *UpstreamPool {
 			ID: su.ID, Address: su.Address, Port: su.Port, PathPrefix: su.PathPrefix, Healthy: true,
 			RegisteredAt: time.Now(), LastHeartbeat: time.Now(),
 			Tags: map[string]string{"type": "static"}, Load: map[string]interface{}{}, Static: true,
+			GatewayToken: su.GatewayToken,
 		}
 		up.proxy = createReverseProxy(up.Address, up.Port, up.PathPrefix)
 		pool.upstreams[up.ID] = up
@@ -123,16 +125,22 @@ func createReverseProxy(address string, port int, pathPrefix string) *httputil.R
 
 func (pool *UpstreamPool) loadUpstreamsFromDB() {
 	if pool.db == nil { return }
-	rows, err := pool.db.Query(`SELECT id, address, port, healthy, registered_at, last_heartbeat, tags, load, COALESCE(path_prefix,'') FROM upstreams`)
+	rows, err := pool.db.Query(`SELECT id, address, port, healthy, registered_at, last_heartbeat, tags, load, COALESCE(path_prefix,''), COALESCE(gateway_token,'') FROM upstreams`)
 	if err != nil { return }
 	defer rows.Close()
 	for rows.Next() {
-		var id, address, regAt, hbAt, tagsJSON, loadJSON, pathPrefix string
+		var id, address, regAt, hbAt, tagsJSON, loadJSON, pathPrefix, gatewayToken string
 		var port, healthy int
-		if rows.Scan(&id, &address, &port, &healthy, &regAt, &hbAt, &tagsJSON, &loadJSON, &pathPrefix) != nil { continue }
-		if _, exists := pool.upstreams[id]; exists { continue }
+		if rows.Scan(&id, &address, &port, &healthy, &regAt, &hbAt, &tagsJSON, &loadJSON, &pathPrefix, &gatewayToken) != nil { continue }
+		if _, exists := pool.upstreams[id]; exists {
+			// 静态上游已存在，但要从 DB 恢复 gateway_token
+			if gatewayToken != "" && pool.upstreams[id].GatewayToken == "" {
+				pool.upstreams[id].GatewayToken = gatewayToken
+			}
+			continue
+		}
 		up := &Upstream{ID: id, Address: address, Port: port, PathPrefix: pathPrefix, Healthy: healthy == 1,
-			Tags: map[string]string{}, Load: map[string]interface{}{}}
+			Tags: map[string]string{}, Load: map[string]interface{}{}, GatewayToken: gatewayToken}
 		up.RegisteredAt, _ = time.Parse(time.RFC3339, regAt)
 		up.LastHeartbeat, _ = time.Parse(time.RFC3339, hbAt)
 		json.Unmarshal([]byte(tagsJSON), &up.Tags)
@@ -150,9 +158,9 @@ func (pool *UpstreamPool) saveUpstreamToDB(id string) {
 	tagsJSON, _ := json.Marshal(up.Tags)
 	loadJSON, _ := json.Marshal(up.Load)
 	h := 0; if up.Healthy { h = 1 }
-	pool.db.Exec(`INSERT OR REPLACE INTO upstreams (id,address,port,healthy,registered_at,last_heartbeat,tags,load,path_prefix) VALUES(?,?,?,?,?,?,?,?,?)`,
+	pool.db.Exec(`INSERT OR REPLACE INTO upstreams (id,address,port,healthy,registered_at,last_heartbeat,tags,load,path_prefix,gateway_token) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		id, up.Address, up.Port, h, up.RegisteredAt.Format(time.RFC3339), up.LastHeartbeat.Format(time.RFC3339),
-		string(tagsJSON), string(loadJSON), up.PathPrefix)
+		string(tagsJSON), string(loadJSON), up.PathPrefix, up.GatewayToken)
 }
 
 func (pool *UpstreamPool) Register(id, address string, port int, tags map[string]string, pathPrefix ...string) error {
@@ -221,6 +229,32 @@ func (pool *UpstreamPool) GetUpstream(id string) (*Upstream, bool) {
 	if !ok { return nil, false }
 	copy := *up
 	return &copy, true
+}
+
+// SetGatewayToken 设置上游的 Gateway Token（v22.0 Gateway 监控中心）
+func (pool *UpstreamPool) SetGatewayToken(id, token string) error {
+	pool.mu.Lock(); defer pool.mu.Unlock()
+	up, ok := pool.upstreams[id]
+	if !ok { return fmt.Errorf("上游 %s 不存在", id) }
+	up.GatewayToken = token
+	pool.saveUpstreamToDB(id)
+	return nil
+}
+
+// GetGatewayToken 获取上游的 Gateway Token（v22.0 Gateway 监控中心）
+func (pool *UpstreamPool) GetGatewayToken(id string) (string, bool) {
+	pool.mu.RLock(); defer pool.mu.RUnlock()
+	up, ok := pool.upstreams[id]
+	if !ok { return "", false }
+	return up.GatewayToken, true
+}
+
+// HasGatewayToken 检查上游是否配置了 Gateway Token
+func (pool *UpstreamPool) HasGatewayToken(id string) bool {
+	pool.mu.RLock(); defer pool.mu.RUnlock()
+	up, ok := pool.upstreams[id]
+	if !ok { return false }
+	return up.GatewayToken != ""
 }
 
 // ForceDeregister 强制注销上游（包括静态上游，K8s 发现的也可以手动删除）

@@ -283,10 +283,11 @@ type OutboundRuleConfig struct {
 }
 
 type StaticUpstreamConfig struct {
-	ID         string `yaml:"id"`
-	Address    string `yaml:"address"`
-	Port       int    `yaml:"port"`
-	PathPrefix string `yaml:"path_prefix"`
+	ID           string `yaml:"id"`
+	Address      string `yaml:"address"`
+	Port         int    `yaml:"port"`
+	PathPrefix   string `yaml:"path_prefix"`
+	GatewayToken string `yaml:"gateway_token"` // OpenClaw Gateway auth token
 }
 
 // RoutePolicyConfig 路由策略配置（v3.9）

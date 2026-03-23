@@ -335,6 +335,25 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListUpstreams(w, r)
 	case path == "/api/v1/upstreams" && method == "POST":
 		api.handleCreateUpstream(w, r)
+	// v22.0: Gateway 监控中心 — 聚合概览（必须在 /upstreams/{id} 前匹配）
+	case path == "/api/v1/upstreams/gateway/overview" && method == "GET":
+		api.handleGatewayOverview(w, r)
+	// v22.0: Gateway Token 管理
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway-token/status") && method == "GET":
+		api.handleGatewayTokenStatus(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway-token") && method == "PUT":
+		api.handleGatewayTokenPut(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway-token") && method == "DELETE":
+		api.handleGatewayTokenDelete(w, r)
+	// v22.0: Gateway 代理 API
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/ping") && method == "GET":
+		api.handleGatewayPing(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/sessions") && method == "GET":
+		api.handleGatewaySessions(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/cron") && method == "GET":
+		api.handleGatewayCron(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/status") && method == "GET":
+		api.handleGatewayStatus(w, r)
 	// v21.0: 上游 CRUD（带 ID 的路由必须在 health-check 之后匹配）
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/health-check") && method == "POST":
 		api.handleUpstreamHealthCheck(w, r)
@@ -1113,11 +1132,12 @@ func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) 
 
 func (api *ManagementAPI) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID         string            `json:"id"`
-		Address    string            `json:"address"`
-		Port       int               `json:"port"`
-		Tags       map[string]string `json:"tags"`
-		PathPrefix string            `json:"path_prefix"`
+		ID           string            `json:"id"`
+		Address      string            `json:"address"`
+		Port         int               `json:"port"`
+		Tags         map[string]string `json:"tags"`
+		PathPrefix   string            `json:"path_prefix"`
+		GatewayToken string            `json:"gateway_token"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.ID == "" {
 		jsonResponse(w, 400, map[string]string{"error": "invalid request"})
@@ -1126,6 +1146,10 @@ func (api *ManagementAPI) handleRegister(w http.ResponseWriter, r *http.Request)
 	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags, req.PathPrefix); err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	// 设置 gateway_token（如果提供）
+	if req.GatewayToken != "" {
+		api.pool.SetGatewayToken(req.ID, req.GatewayToken)
 	}
 	// BUG-005 fix: force metrics gauge update after registration
 	if api.metrics != nil {
@@ -1188,6 +1212,7 @@ func (api *ManagementAPI) handleListUpstreams(w http.ResponseWriter, r *http.Req
 			"healthy": up.Healthy, "user_count": up.UserCount, "static": up.Static,
 			"last_heartbeat": up.LastHeartbeat.Format(time.RFC3339),
 			"tags": up.Tags, "load": up.Load,
+			"gateway_token_configured": up.GatewayToken != "",
 		})
 	}
 	jsonResponse(w, 200, map[string]interface{}{
@@ -1203,11 +1228,12 @@ func (api *ManagementAPI) handleListUpstreams(w http.ResponseWriter, r *http.Req
 // handleCreateUpstream POST /api/v1/upstreams — 创建上游（RESTful 等价于 register）
 func (api *ManagementAPI) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID         string            `json:"id"`
-		Address    string            `json:"address"`
-		Port       int               `json:"port"`
-		Tags       map[string]string `json:"tags"`
-		PathPrefix string            `json:"path_prefix"`
+		ID           string            `json:"id"`
+		Address      string            `json:"address"`
+		Port         int               `json:"port"`
+		Tags         map[string]string `json:"tags"`
+		PathPrefix   string            `json:"path_prefix"`
+		GatewayToken string            `json:"gateway_token"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.ID == "" || req.Address == "" || req.Port <= 0 {
 		jsonResponse(w, 400, map[string]string{"error": "id, address, port 均为必填"})
@@ -1216,6 +1242,10 @@ func (api *ManagementAPI) handleCreateUpstream(w http.ResponseWriter, r *http.Re
 	if err := api.pool.Register(req.ID, req.Address, req.Port, req.Tags, req.PathPrefix); err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	// 设置 gateway_token（如果提供）
+	if req.GatewayToken != "" {
+		api.pool.SetGatewayToken(req.ID, req.GatewayToken)
 	}
 	log.Printf("[上游CRUD] 创建上游: %s -> %s:%d", req.ID, req.Address, req.Port)
 	jsonResponse(w, 200, map[string]interface{}{
@@ -1244,6 +1274,7 @@ func (api *ManagementAPI) handleGetUpstream(w http.ResponseWriter, r *http.Reque
 		"registered_at":  up.RegisteredAt.Format(time.RFC3339),
 		"last_heartbeat": up.LastHeartbeat.Format(time.RFC3339),
 		"tags": up.Tags, "load": up.Load,
+		"gateway_token_configured": up.GatewayToken != "",
 	})
 }
 
@@ -1255,10 +1286,11 @@ func (api *ManagementAPI) handleUpdateUpstream(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var req struct {
-		Address    string            `json:"address"`
-		Port       int               `json:"port"`
-		Tags       map[string]string `json:"tags"`
-		PathPrefix string            `json:"path_prefix"`
+		Address      string            `json:"address"`
+		Port         int               `json:"port"`
+		Tags         map[string]string `json:"tags"`
+		PathPrefix   string            `json:"path_prefix"`
+		GatewayToken *string           `json:"gateway_token"` // 指针类型，区分未传和空字符串
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
@@ -1267,6 +1299,10 @@ func (api *ManagementAPI) handleUpdateUpstream(w http.ResponseWriter, r *http.Re
 	if err := api.pool.Update(id, req.Address, req.Port, req.Tags, req.PathPrefix); err != nil {
 		jsonResponse(w, 404, map[string]string{"error": err.Error()})
 		return
+	}
+	// 更新 gateway_token（如果提供）
+	if req.GatewayToken != nil {
+		api.pool.SetGatewayToken(id, *req.GatewayToken)
 	}
 	log.Printf("[上游CRUD] 更新上游: %s", id)
 	jsonResponse(w, 200, map[string]interface{}{

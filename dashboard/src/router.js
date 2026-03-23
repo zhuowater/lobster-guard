@@ -41,6 +41,7 @@ const routes = [
   { path: '/taint', name: 'taint', component: () => import('./views/TaintTracker.vue'), meta: { title: '污染追踪', icon: 'biohazard', group: 'threat' } },
   { path: '/cache', name: 'cache', component: () => import('./views/LLMCache.vue'), meta: { title: '响应缓存', icon: 'save', group: 'llm' } },
   { path: '/gateway', name: 'gateway', component: () => import('./views/APIGateway.vue'), meta: { title: 'API 网关', icon: 'door', group: 'system' } },
+  { path: '/gateway-monitor', name: 'gateway-monitor', component: () => import('./views/GatewayMonitor.vue'), meta: { title: 'Gateway 监控', icon: 'activity', group: 'system' } },
   { path: '/bigscreen', name: 'bigscreen', component: () => import('./views/BigScreen.vue'), meta: { title: '态势大屏', icon: 'layout', public: true, bigscreen: true } },
 ]
 

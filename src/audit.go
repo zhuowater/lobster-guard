@@ -623,6 +623,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 	// v20.8: upstreams 增加 path_prefix 列（兼容旧库）
 	db.Exec(`ALTER TABLE upstreams ADD COLUMN path_prefix TEXT DEFAULT ''`)
 
+	// v22.0: upstreams 增加 gateway_token 列（Gateway 监控中心）
+	db.Exec(`ALTER TABLE upstreams ADD COLUMN gateway_token TEXT DEFAULT ''`)
+
 	// v14.0: tenant_id 列（在 TenantManager.initSchema 中也会添加，这里确保测试也有）
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id)`)
