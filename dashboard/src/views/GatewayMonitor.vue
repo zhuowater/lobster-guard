@@ -166,8 +166,8 @@
                       <button v-if="!up.token_configured" class="btn btn-xs btn-primary" @click="openTokenModal(up)">配置 Token</button>
                       <button v-else-if="up.gateway_status === 'auth_failed'" class="btn btn-xs btn-warn" @click="openTokenModal(up)">重新配置</button>
                       <template v-else>
-                        <button class="btn btn-xs btn-ghost" @click="quickPing(up)" title="Ping" :disabled="up._pinging">⚡</button>
-                        <button class="btn btn-xs btn-ghost" @click="openTokenModal(up)" title="Token">⚙️</button>
+                        <button class="btn btn-xs btn-ghost" @click="quickPing(up)" title="Ping" :disabled="up._pinging"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22"/></svg></button>
+                        <button class="btn btn-xs btn-ghost" @click="openTokenModal(up)" title="Token"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
                       </template>
                     </div>
                   </td>
@@ -177,7 +177,7 @@
                   <td colspan="8">
                     <div class="detail-panel" :key="'detail-'+up.id">
                       <div class="dtabs">
-                        <button v-for="t in tabs" :key="t.key" class="dtab" :class="{ active: activeTab === t.key }" @click="switchTab(t.key, up.id)" v-show="t.key !== 'agent' || up.gateway_status === 'connected'">{{ t.icon }} {{ t.label }}</button>
+                        <button v-for="t in tabs" :key="t.key" class="dtab" :class="{ active: activeTab === t.key }" @click="switchTab(t.key, up.id)" v-show="t.key !== 'agent' || up.gateway_status === 'connected'"><span class="dtab-icon" v-html="t.icon"></span> {{ t.label }}</button>
                       </div>
                       <!-- Sessions -->
                       <div v-if="activeTab === 'sessions'" class="dtab-body">
@@ -217,7 +217,7 @@
                       <div v-if="activeTab === 'diag'" class="dtab-body diag-body">
                         <div class="diag-card">
                           <h4>三步快速诊断</h4>
-                          <button class="btn btn-sm btn-primary" @click="runDiag(up)" :disabled="diagRunning">{{ diagRunning ? '诊断中...' : '🔍 开始诊断' }}</button>
+                          <button class="btn btn-sm btn-primary" @click="runDiag(up)" :disabled="diagRunning">{{ diagRunning ? '诊断中...' : '' }}<svg v-if="!diagRunning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>{{ diagRunning ? '' : ' 开始诊断' }}</button>
                           <div v-if="diagResult" class="diag-steps">
                             <div class="diag-step" :class="diagResult.reach ? 'ds-ok' : 'ds-fail'">
                               <span class="ds-icon">{{ diagResult.reach ? '✅' : '❌' }}</span>
@@ -253,11 +253,11 @@
                             Agent 运营中心 <span class="badge-count">{{ expandedAgents.length }}</span>
                           </h3>
                           <div class="aoc-view-toggle">
-                            <button class="aoc-vbtn" :class="{ active: aocView === 'dashboard' }" @click="aocView='dashboard'" title="仪表盘">📊</button>
-                            <button class="aoc-vbtn" :class="{ active: aocView === 'cards' }" @click="aocView='cards'" title="详情卡片">🃏</button>
-                            <button class="aoc-vbtn" :class="{ active: aocView === 'collab' }" @click="aocView='collab'" title="协作视图">🌳</button>
-                            <button class="aoc-vbtn" :class="{ active: aocView === 'users' }" @click="aocView='users'" title="用户归因">👥</button>
-                            <button class="aoc-vbtn" :class="{ active: aocView === 'skills' }" @click="switchToSkills" title="Skill 目录">🧩</button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'dashboard' }" @click="aocView='dashboard'" title="仪表盘"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'cards' }" @click="aocView='cards'" title="详情卡片"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'collab' }" @click="aocView='collab'" title="协作视图"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'users' }" @click="aocView='users'" title="用户归因"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'skills' }" @click="switchToSkills" title="Skill 目录"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></button>
                           </div>
                         </div>
 
@@ -381,7 +381,7 @@
                               <div class="aoc-card-footer">
                                 <div class="aoc-footer-item" :title="'通信渠道: ' + ag.channels.join(', ')">
                                   <span class="aoc-channel-icons">
-                                    <span v-for="ch in ag.channels" :key="ch" class="aoc-ch-icon" :title="ch">{{ channelIcon(ch) }}</span>
+                                    <span v-for="ch in ag.channels" :key="ch" class="aoc-ch-icon" :title="ch" v-html="channelIcon(ch)"></span>
                                   </span>
                                 </div>
                                 <div class="aoc-footer-item" v-if="ag.users.length > 0" :title="'用户: ' + ag.users.join(', ')">
@@ -413,7 +413,7 @@
                               </div>
                               <div class="aoc-collab-sessions">
                                 <div v-for="sess in agent.sessions" :key="sess.key" class="aoc-collab-sess" :class="'acs-' + sess.kind">
-                                  <span class="aoc-collab-sess-icon">{{ sessionKindIcon(sess.kind) }}</span>
+                                  <span class="aoc-collab-sess-icon" v-html="sessionKindIcon(sess.kind)"></span>
                                   <span class="aoc-collab-sess-type">{{ sess.kind }}</span>
                                   <span class="aoc-collab-sess-ch">{{ sess.channel || '—' }}</span>
                                   <span class="aoc-collab-sess-model">{{ sess.model || '—' }}</span>
@@ -423,7 +423,7 @@
                               </div>
                             </div>
                             <div v-if="gw.cronJobs && gw.cronJobs.length > 0" class="aoc-collab-cron">
-                              <div class="aoc-collab-cron-title">⏰ 定时任务</div>
+                              <div class="aoc-collab-cron-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 定时任务</div>
                               <div v-for="cj in gw.cronJobs" :key="cj.id || cj.name" class="aoc-collab-cron-item">
                                 <span class="aoc-cron-name">{{ cj.name || cj.id }}</span>
                                 <span class="gw-badge" :class="cj.enabled !== false ? 'gw-connected' : 'gw-not_configured'">{{ cj.enabled !== false ? '启用' : '禁用' }}</span>
@@ -487,13 +487,13 @@
                           <template v-else>
                             <div v-for="group in groupedSkills" :key="group.category" class="skill-group">
                               <div class="skill-group-header" @click="group.expanded = !group.expanded">
-                                <span class="skill-cat-tag" :class="'scat-' + group.catKey">{{ group.label }}</span>
+                                <span class="skill-cat-tag" :class="'scat-' + group.catKey" v-html="group.label"></span>
                                 <span class="skill-group-count">{{ group.skills.length }}</span>
                                 <svg :class="{ 'expand-chevron': true, open: group.expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                               </div>
                               <div v-if="group.expanded" class="skill-group-body">
                                 <div v-for="sk in group.skills" :key="sk.name + sk.category" class="skill-item">
-                                  <div class="skill-icon">🧩</div>
+                                  <div class="skill-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div>
                                   <div class="skill-info">
                                     <div class="skill-name">{{ sk.name }}</div>
                                     <div class="skill-desc" v-if="sk.description">{{ sk.description }}</div>
@@ -533,7 +533,7 @@
             <label class="form-label">Token</label>
             <div class="input-wrap">
               <input :type="tokenModal.showPwd ? 'text' : 'password'" v-model="tokenModal.token" class="form-input" placeholder="粘贴 Gateway Auth Token" autocomplete="off" @keydown.enter="saveToken" />
-              <button class="eye-btn" @click="tokenModal.showPwd = !tokenModal.showPwd">{{ tokenModal.showPwd ? '🙈' : '👁️' }}</button>
+              <button class="eye-btn" @click="tokenModal.showPwd = !tokenModal.showPwd"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><template v-if="tokenModal.showPwd"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></template><template v-else><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></template></svg></button>
             </div>
             <div v-if="tokenModal.testResult" class="test-result" :class="tokenModal.testResult.ok ? 'tr-ok' : 'tr-err'">
               {{ tokenModal.testResult.ok ? `✅ 连接成功 · ${tokenModal.testResult.latency}ms` : `❌ ${tokenModal.testResult.msg}` }}
@@ -584,11 +584,14 @@ let toastTimer = null
 
 const tokenModal = reactive({ show: false, data: null, token: '', showPwd: false, testing: false, saving: false, testResult: null })
 
+const SVG_ATTRS = 'width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
+const svgIcon = (inner) => `<svg ${SVG_ATTRS}>${inner}</svg>`
+
 const tabs = [
-  { key: 'sessions', icon: '💬', label: '会话' },
-  { key: 'cron', icon: '⏰', label: '定时任务' },
-  { key: 'diag', icon: '🔍', label: '诊断' },
-  { key: 'agent', icon: '👥', label: 'Agent' },
+  { key: 'sessions', icon: svgIcon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'), label: '会话' },
+  { key: 'cron', icon: svgIcon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'), label: '定时任务' },
+  { key: 'diag', icon: svgIcon('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'), label: '诊断' },
+  { key: 'agent', icon: svgIcon('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'), label: 'Agent' },
 ]
 
 // === Computed ===
@@ -647,7 +650,11 @@ const groupedSkills = computed(() => {
   for (const sk of filteredSkills.value) {
     const catKey = sk.category.startsWith('workspace:') ? 'workspace' : sk.category
     if (!groups[catKey]) {
-      const label = catKey === 'global' ? '🌐 全局 Skills' : catKey === 'user' ? '👤 用户 Skills' : '📁 Workspace Skills'
+      const label = catKey === 'global'
+        ? svgIcon('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>') + ' 全局 Skills'
+        : catKey === 'user'
+        ? svgIcon('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>') + ' 用户 Skills'
+        : svgIcon('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>') + ' Workspace Skills'
       groups[catKey] = { category: sk.category, catKey, label, skills: [], expanded: skillGroupExpanded[catKey] !== false }
     }
     groups[catKey].skills.push(sk)
@@ -1026,12 +1033,29 @@ function contextBarColor(pct) {
   return '#22c55e'
 }
 function channelIcon(ch) {
-  const map = { lanxin: '📱', telegram: '✈️', discord: '🎮', whatsapp: '📞', slack: '💼', web: '🌐', api: '⚡' }
-  return map[ch] || '💬'
+  const s = (inner) => `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`
+  const svgs = {
+    lanxin: s('<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>'),
+    telegram: s('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>'),
+    discord: s('<path d="M18 8a7.5 7.5 0 0 0-12 0"/><circle cx="9" cy="15" r="1"/><circle cx="15" cy="15" r="1"/><path d="M7 21c2-1 3-2 5-2s3 1 5 2"/>'),
+    whatsapp: s('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>'),
+    slack: s('<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>'),
+    web: s('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'),
+    api: s('<polyline points="13 2 3 14 12 14 11 22"/>')
+  }
+  return svgs[ch] || s('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>')
 }
 function sessionKindIcon(kind) {
-  const map = { main: '🏠', direct: '🏠', isolated: '🔒', sub: '🔗', subagent: '🔗', other: '📄' }
-  return map[kind] || '📄'
+  const s = (inner) => `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`
+  const svgs = {
+    main: s('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'),
+    direct: s('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'),
+    isolated: s('<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+    sub: s('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    subagent: s('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    other: s('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>')
+  }
+  return svgs[kind] || svgs.other
 }
 function gatewayColor(gw) {
   let h = 0
@@ -1540,5 +1564,16 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .sb-ok { background:rgba(34,197,94,.1); color:#4ade80; }
 .sb-ws { background:rgba(245,158,11,.1); color:#fbbf24; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ams-amber { color:#fbbf24; }
+
+/* SVG icon alignment */
+.dtab-icon { display:inline-flex; vertical-align:-2px; }
+.dtab-icon svg { width:14px; height:14px; }
+.aoc-vbtn svg { width:14px; height:14px; vertical-align:-2px; }
+.aoc-ch-icon svg { width:12px; height:12px; vertical-align:-1px; }
+.aoc-collab-sess-icon { display:inline-flex; align-items:center; }
+.aoc-collab-sess-icon svg { width:12px; height:12px; }
+.skill-icon svg { width:16px; height:16px; }
+.skill-cat-tag svg { width:12px; height:12px; vertical-align:-2px; }
+.eye-btn svg { vertical-align:middle; }
 
 </style>
