@@ -1,6 +1,6 @@
-# 🦞 Lobster Guard — 龙虾卫士 v17.1 智能管控
+# 🦞 Lobster Guard — 龙虾卫士 v22.4 智能管控
 
-AI Agent 安全网关的自然语言管控入口。通过子技能分域管理 ~227 个 API 端点。
+AI Agent 安全网关的自然语言管控入口。通过子技能分域管理 ~290+ 个 API 端点。
 
 ## 连接配置
 
@@ -31,6 +31,28 @@ LOBSTER_GUARD_TOKEN="test-token-2026"           # Bearer Token 或 JWT
 | 租户、报告、排行榜、SLA、蜜罐、A/B测试、会话回放、Prompt追踪 | **安全治理** | `governance/SKILL.md` |
 | 备份、恢复、诊断、配置、严格模式、大屏、布局、通知、模拟、演示 | **系统运维** | `ops/SKILL.md` |
 
+## v22.x 新功能
+
+- **Gateway Monitor** — 通过 `POST /tools/invoke` 协议监控上游 OpenClaw Gateway 实例
+- **Agent Operations Center (AOC)** — 5 视图：Dashboard/Cards/Collab/Users/Skills
+- **Per-Upstream AOC** — 每个上游 Gateway 在展开行中有独立的 Agent 标签页
+- **Skill Directory** — 从 OpenClaw 文件系统扫描并展示已安装技能
+- **SVG Icon System** — 全部 emoji 替换为 feather-style SVG 图标
+- **Threat Map Fix** — AI 响应路径修正为经 LLM Detection 再到 OpenClaw
+- **Gateway Token Config** — 在上游管理页面配置 Token
+
+## 统计数据 (v22.4)
+
+| 指标 | 值 |
+|------|-----|
+| Go 源文件 | 71 个，~76,400 行 |
+| Vue 文件 | 61 个，~25,500 行 |
+| 测试函数 | 1006 个 |
+| API 端点 | ~290+ |
+| Dashboard 页面 | 39 页，3 模式（Classic/Narrative/Threat Map） |
+| 依赖 | 4（sqlite3 + yaml.v3 + gorilla/websocket + x/crypto） |
+| Commits | 212 |
+
 ## 调用流程
 
 1. 识别用户意图 → 匹配上表关键词
@@ -40,7 +62,7 @@ LOBSTER_GUARD_TOKEN="test-token-2026"           # Bearer Token 或 JWT
 
 ## CLI 工具
 
-`lobster-cli.sh` 提供命令行快捷方式，覆盖常用操作：
+`lobster-cli.sh` 提供命令行快捷方式，覆盖常用操作（v22.4）：
 
 ```bash
 ./lobster-cli.sh help          # 查看所有命令

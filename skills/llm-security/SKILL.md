@@ -1,4 +1,4 @@
-# 🦞 龙虾卫士 · LLM 安全域 — v17.1
+# 🦞 龙虾卫士 · LLM 安全域 — v22.4
 
 LLM 反向代理的安全管理技能。覆盖 LLM 代理状态监控、安全规则引擎、Canary Token 泄露检测、预算管控、OWASP LLM Top10 合规矩阵及审计导出。
 所有 API 调用需带 `Authorization: Bearer <token>` 头，基础 URL 为 `http://10.44.96.142:9090`。
