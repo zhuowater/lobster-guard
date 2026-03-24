@@ -1,10 +1,10 @@
 # lobster-guard Dockerfile — 多阶段构建
-# v20.7 全功能版本（分层配置 + K8s 服务发现 + Dashboard 企业级打磨）
+# v22.4 全功能版本（分层配置 + K8s 服务发现 + Dashboard 企业级打磨）
 #
-# 构建: docker build -t lobster-guard:v20.7 .
+# 构建: docker build -t lobster-guard:v22.4 .
 # 运行: docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
 #          -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-#          lobster-guard:v20.7
+#          lobster-guard:v22.4
 
 # ── Stage 1: Build Vue Dashboard ──
 FROM node:22-alpine AS frontend

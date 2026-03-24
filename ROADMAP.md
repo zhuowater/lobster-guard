@@ -1,8 +1,8 @@
 # lobster-guard Roadmap
 
-> **当前版本：v20.8.0** · 181 commits · Go ~71,900 行 · Vue ~23,700 行 · 950 测试 · 275+ API · 38 页面 · 4 依赖 · 19 篇文档
+> **当前版本：v22.4** · 212 commits · Go ~76,400 行 · Vue ~25,500 行 · 1006 测试 · 290+ API · 39 页面 · 61 Vue 组件 · 4 依赖
 >
-> 更新时间：2026-03-22
+> 更新时间：2026-03-24
 
 ---
 
@@ -294,7 +294,7 @@
 - [x] v20.5 **K8s 服务发现 + 上游管理**（零依赖 InCluster/Kubeconfig · 上游 CRUD API · 登录页粒子光影 · 威胁地图环形拓扑 · 侧边栏子分组 · emoji→SVG 全站清理）
 - [x] v20.6 **分层配置 + 容器化部署**（config.yaml 776→70 行 · conf.d/ 10 模块 · Dockerfile 多阶段 · K8s 部署清单 4 文件 · docker-compose 健康检查）
 - [x] v20.7 **Dashboard 企业级打磨** 🏢（38 页面全部重构 · 完整 CRUD 闭环 · 配置页面化+YAML 回写 · 搜索过滤 · 批量操作 · 表单验证 · Toast/ConfirmModal · 14 个新 API · DB 迁移 · Vue 前端 +3,300 行）
-- [x] v20.8 **安全加固 + 规则模板**（8 漏洞修复：默认密码→随机生成/URL Token→Cookie/WS CORS/密码长度 · 64 条内置规则模板：通用/金融/医疗/政务各16条 · 上游 path_prefix DB持久化+UI · main 分支保护 · PR #3-#7 合并）← **当前版本**
+- [x] v20.8 **安全加固 + 规则模板**（8 漏洞修复：默认密码→随机生成/URL Token→Cookie/WS CORS/密码长度 · 64 条内置规则模板：通用/金融/医疗/政务各16条 · 上游 path_prefix DB持久化+UI · main 分支保护 · PR #3-#7 合并）
 
 ### Dashboard 前端补齐 ✅
 > v18-v20 所有功能的 Dashboard 页面，前后端功能闭环
@@ -351,47 +351,56 @@
   - 灵感来源：Telos Intent Declaration · Kvlar Policy-as-Code · AvaKill YAML Policy
   - 理论基础：停机问题/Rice 定理（完美检测不可能 → 白名单优于黑名单）
 
-### v22.x — 跨 Agent 安全 · 蠕虫检测 🔥🔥
+### v22.x — Gateway 监控 · Agent 运营中心 · SVG 统一 
+> 从安全网关升级为运维中枢 | 实时监控上游 OpenClaw Gateway 实例
+
+- [x] v22.0 **Gateway 监控中心基础**（拓扑视图 · 上游管理 · Token 配置 · 三步诊断 · 7 个 Gateway 监控 API）
+- [x] v22.1 **tools/invoke 协议重构**（发现 OpenClaw `POST /tools/invoke` 是唯一 HTTP API · `gatewayToolsInvoke` 替换 GET 假接口 · 6 个 tool 验证 · HTML 响应检测 · `/gateway/agents` API · 上游 Token 配置集成）
+- [x] v22.2 **Agent 运营中心 5 视图**（📊 仪表盘：Token 饼图+上下文使用率+运维信息 · 🃏 详情卡片：模型/进度条/会话分类/渠道 · 🌳 协作视图：Gateway→Agent→Session 树+Cron 关联 · 👥 用户归因：SVG 环形图 Token/用户 · 🧩 Skill 目录：文件系统扫描 54 skills+分类+搜索）
+- [x] v22.3 **Per-Upstream AOC + 威胁地图修复**（AOC 从全局底部移入上游展开行第 4 tab · 每个上游独立 Agent/Token/Skill 数据 · 威胁地图回连路径修复：Claude→LLM 检测→OpenClaw）
+- [x] v22.4 **emoji→SVG 全站图标统一**（9 处替换：tab/AOC 视图/操作/诊断/渠道/会话类型/Cron/Skill/分类 · feather-icon 风格 · 视觉一致性）
+
+### v23.x — 跨 Agent 安全 · 蠕虫检测 🔥🔥
 > 当有了 Agent 身份，才能做跨 Agent 分析 | 理论基础：洞见 #33/#35（蠕虫化 + 涌现安全）
 > 依赖：🔧 需要 v21 的 Agent 身份识别 + MCP Proxy
 
-- [ ] v22.0 **跨 Agent 污染传播检测**
+- [ ] v23.0 **跨 Agent 污染传播检测**
   - Agent A 的敏感输出 → 成了 Agent B 的输入 → 污染标签跨 Agent 传播
   - 需要 Agent 身份才能区分"A 发出的"和"B 收到的"
-  - 与 v20.1 的 trace 级污染追踪互补：v20.1 追踪单次会话内，v22.0 追踪跨 Agent 间
-- [ ] v22.1 **跨 Agent 蠕虫检测**
+  - 与 v20.1 的 trace 级污染追踪互补：v20.1 追踪单次会话内，v23.0 追踪跨 Agent 间
+- [ ] v23.1 **跨 Agent 蠕虫检测**
   - 检测 Agent→Agent 感染链模式（洞见 #33 第四跳蠕虫化）
   - 感染拓扑图可视化（传播路径、感染时间线）
   - 自动隔离已感染 Agent（切断路由、标记污染）
 
-### v23.x — AI 安全助手 · 生态平台 🔥
+### v24.x — AI 安全助手 · 生态平台 🔥
 > 安全运营副驾驶 + 社区生态 | 理论基础：Nash 均衡（安全均衡需要被设计）+ 涌现安全
 > 依赖：🔧 需要调用外部 LLM API（安全助手推理）+ 插件生态
 
-- [ ] v23.0 **AI 安全运营副驾驶**
+- [ ] v24.0 **AI 安全运营副驾驶**
   - 自然语言查询安全态势："过去 24 小时有什么异常？""这个用户为什么风险分飙升了？"
   - 攻击链智能分析："这 5 个事件之间有什么关联？""下一步攻击者可能做什么？"
   - 自动生成安全建议："建议启用严格模式""这条规则应该从 warn 改为 block"
   - 元认知安全框架（Reflexive-Core 启发）：预检→安全分析→受控执行→合规验证
   - 灵感来源：NGSOC 安全运营副驾驶 · Reflexive-Core 元认知安全
-- [ ] v23.1 **Guardrail 市场**
+- [ ] v24.1 **Guardrail 市场**
   - 社区贡献规则包（行业模板：金融 / 医疗 / 政务 / 教育）
   - 第三方检测器插件（基于 v19.2 SDK）
   - 通道插件市场 · 安装 / 更新 / 评分 / 审计机制
   - 灵感来源：Guardrails Hub（吸取洞见 #18 供应链攻击教训，所有插件必须安全审计）
-- [ ] v23.2 **OpenTelemetry 接入**
+- [ ] v24.2 **OpenTelemetry 接入**
   - 导出 traces 到 Jaeger / Grafana Tempo / Datadog
   - 安全事件作为 span 嵌入业务 trace
 
-### v24.x — 分布式部署 · 企业级
+### v25.x — 分布式部署 · 企业级
 > 水平扩展 · 高可用 | 理论基础：CAP 定理（分布式安全的权衡选择）
 > 依赖：🔧 需要 PostgreSQL + 多实例协调
 
-- [ ] v24.0 **PostgresStore + 多实例**
+- [ ] v25.0 **PostgresStore + 多实例**
   - SQLite → PostgreSQL 存储后端（保持 SQLite 兼容用于单机模式）
   - 多实例部署：Leader 选举 · 路由状态同步 · 读写分离
   - 执行信封跨节点验证链（v18 延伸：分布式证据链完整性验证）
-- [ ] v24.1 **弹性伸缩 + 零停机升级**
+- [ ] v25.1 **弹性伸缩 + 零停机升级**
   - 滚动更新：新旧版本共存期间路由无感知切换
   - 配置热同步：修改一个节点的配置自动同步到集群
 
@@ -612,7 +621,7 @@ Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
   v18:     密码学信任根 + 事件总线 + 工程化 (Docker/CI/OpenAPI)
   v19:     对抗性自进化 + 语义检测模型 + 插件 SDK
   v20:     LLM tool_calls 深度分析 + 信息流污染追踪 + 响应缓存 + API Gateway
-------- v20.8 当前版本 · 以下为规划 -------
+------- v22.4 当前版本 · 以下为规划 -------
 Phase 1 收尾:
   v18.3:   智能决策 + 奇点蜜罐
   v19.3:   多语言检测 + 插件 SDK（降优先级）

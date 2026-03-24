@@ -72,7 +72,8 @@ static_upstreams:
   - id: "openclaw-local"
     address: "127.0.0.1"
     port: 18790
-    # path_prefix: "/api/v1"  # 可选：上游服务的路径前缀
+    # path_prefix: "/api/v1"      # 可选：上游服务的路径前缀
+    # gateway_token: "your-token"  # 可选：OpenClaw Gateway Auth Token（用于 Agent 运营中心）
 
 # --- WebSocket 安全 ---
 # ws_allowed_origins:        # WebSocket Origin 白名单（空则允许全部）

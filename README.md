@@ -7,18 +7,18 @@
 <h1 align="center">lobster-guard（龙虾卫士）</h1>
 
 <p align="center">
-  <strong>AI Agent 安全网关 · 双安全域 · 密码学审计链 · 对抗性自进化 · 语义检测 · 污染追踪 · LLM缓存 · API网关</strong>
+  <strong>AI Agent 安全网关 · 双安全域 · 密码学审计链 · 对抗性自进化 · 语义检测 · 污染追踪 · LLM缓存 · API网关 · Gateway监控</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20.8.1-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v22.4-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-1112_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-280+_routes-purple?style=flat-square" alt="API Routes">
-  <img src="https://img.shields.io/badge/dashboard-38_pages-orange?style=flat-square" alt="Dashboard">
+  <img src="https://img.shields.io/badge/tests-1006_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-290+_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/dashboard-39_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
 
@@ -169,11 +169,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v20.8.1 .
+docker build -t lobster-guard:v22.4 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v20.8.1
+  lobster-guard:v22.4
 ```
 
 ### 6. Kubernetes 部署
@@ -318,9 +318,14 @@ lobster-guard/
 | **v18** | 密码学审计链（执行信封）+ 事件总线 + 奇点蜜罐 + 自适应决策 |
 | **v19** | 对抗性自进化 + 语义检测引擎 + 蜜罐深度交互 |
 | **v20** | 工具策略引擎 + 污染追踪/逆转 + LLM 响应缓存 + API 网关 |
-| **v20.8.1** | ☣️ **Taint 全链路闭环 + 设计级修复** — IM↔LLM trace 关联 · SSE 流式逆转 · strip_prefix 路由 · 9 设计问题修复 · E2E 全链路验证 · 1112 测试 |
+| **v20.8.1** | ☣️ **Taint 全链路闭环 + 设计级修复** — IM↔LLM trace 关联 · SSE 流式逆转 · strip_prefix 路由 · 9 设计问题修复 · E2E 全链路验证 |
 | **v20.8** | 🔒 **安全加固 + 规则模板** — 8 漏洞修复(默认密码/URL Token/WS CORS/密码长度) · 64 条内置规则(通用/金融/医疗/政务) · 上游 path_prefix(DB 持久化+Dashboard UI) · 分支保护 |
 | **v20.7** | 🏢 **Dashboard 企业级打磨** — 38 页面全部重构：完整 CRUD 闭环 · 配置页面化(YAML 回写) · 搜索过滤 · 批量操作 · 表单验证 · Toast/ConfirmModal · 统一 Indigo 配色 · 响应式布局 |
+| **v22.0** | 🔭 **Gateway 监控中心** — OpenClaw 上游实例监控 · `POST /tools/invoke` 真实数据 · 拓扑图 · Token 配置 · 三步诊断 |
+| **v22.1** | 📡 **tools/invoke 协议** — `gatewayToolsInvoke` 替换 GET 假接口 · 6 个 tool 验证 · HTML 响应检测 · `/gateway/agents` API |
+| **v22.2** | 👥 **Agent 运营中心** — 5 视图(仪表盘/卡片/协作/用户/Skill) · Token 饼图 · 上下文使用率 · Skill 目录扫描(54 skills) |
+| **v22.3** | 🎯 **Per-Upstream AOC** — AOC 从全局移入上游展开行 · 威胁地图回连路径修复(Claude→LLM检测→OpenClaw) |
+| **v22.4** | 🎨 **SVG 图标统一** — 9 处 emoji→feather SVG · tab/AOC/操作/渠道/会话/Skill 全覆盖 |
 
 详细版本历史参见 [ROADMAP.md](ROADMAP.md)。
 
@@ -333,5 +338,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v20.8.1 · 125 source files · 75K lines · 1112 tests · 280+ APIs</sub>
+  <sub>🦞 Built with Go, secured with care. v22.4 · 71 Go files · 76K lines · 1006 tests · 290+ APIs · 61 Vue components</sub>
 </p>

@@ -1,5 +1,36 @@
 # Changelog
 
+## v22.4 (2026-03-24) — Gateway 监控 + Agent 运营中心 + SVG 统一
+
+> 71 Go 源文件 · 61 Vue 文件 · ~76,400 行 Go · ~25,500 行 Vue · 1006 测试全部通过 · 212 commits
+
+### 🔭 Gateway 监控中心 (v22.0-v22.1)
+
+- **`POST /tools/invoke` 协议发现** — OpenClaw Gateway 唯一 HTTP API，所有 GET 请求返回 SPA HTML 回退
+- **`gatewayToolsInvoke()` 函数** — 替换无效的 `gatewayProxyRequest()`，支持 6 个 tool (sessions_list/session_status/cron/agents_list/sessions_history/memory_search)
+- **HTML 响应检测** — `isHTMLResponse()` 防止 SPA 回退误判为真实数据
+- **7 个 Gateway 监控 API** — ping/status/sessions/agents/cron/overview/skills
+- **上游 Token 配置** — add/edit modal 集成 Gateway Token 字段，API 支持 `gateway_token` 参数
+
+### 👥 Agent 运营中心 (v22.2-v22.3)
+
+- **5 视图体系** — 仪表盘(Token 饼图+上下文使用率) · 详情卡片(模型/进度条/会话分类) · 协作视图(Gateway→Agent→Session 树) · 用户归因(SVG 环形图) · Skill 目录(54 skills 扫描)
+- **Per-Upstream 架构** — AOC 从全局底部移入上游展开行第 4 tab，每个上游独立数据
+- **Skill 目录后端** — `handleGatewaySkills` 扫描 3 目录，提取 SKILL.md 描述，分类返回
+
+### 🎨 视觉统一 (v22.4)
+
+- **emoji→SVG 替换** — 9 处共 20+ 种图标全部换为 feather-style SVG (14x14, stroke-based)
+- **覆盖范围** — tab 图标/AOC 视图切换/操作按钮/诊断/渠道/会话类型/Cron/Skill/分类标签/Modal 眼睛
+
+### 🎯 威胁地图修复 (v22.3)
+
+- **回连路径修复** — Claude API → LLM 检测 → OpenClaw（原来跳过了 LLM 检测）
+- **粒子动画** — `claude-oc` 拆为 `claude-llm` + `llm-oc` 两段
+- **标注更新** — "⑤ LLM响应检测" + "⑤b 安全回传"
+
+---
+
 ## v20.8.1 (2026-03-23) — Taint 全链路闭环 + 设计级修复 + E2E 验证
 
 > 125 Go 源文件 · 55 测试文件 · ~75,000 行 · 1112 测试全部通过 · 197 commits

@@ -3,7 +3,7 @@ version: "3.8"
 services:
   lobster-guard:
     build: .
-    image: lobster-guard:v20.7
+    image: lobster-guard:v22.4
     container_name: lobster-guard
     ports:
       - "18443:18443"   # 入站代理（IM → Agent）
