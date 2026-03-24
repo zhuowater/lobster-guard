@@ -117,15 +117,29 @@
             </template>
             <!-- LLM Call -->
             <template v-else-if="ev.type==='llm_call'">
-              <div class="sys-event se-llm">
+              <div class="sys-event se-llm" :class="{'se-expanded': ev._expanded}">
                 <div class="se-dot"><span>◆</span></div>
                 <div class="se-body">
-                  <div class="se-head"><span class="se-label">LLM 调用</span><span class="mono se-time">{{ fmtTF(ev.timestamp) }}</span></div>
+                  <div class="se-head se-head-click" @click="ev._expanded = !ev._expanded">
+                    <span class="se-label">LLM 调用</span><span class="mono se-time">{{ fmtTF(ev.timestamp) }}</span>
+                    <span class="se-expand-icon">{{ ev._expanded ? '▾' : '▸' }}</span>
+                  </div>
                   <div class="se-detail">
                     <span v-if="ev.model" class="se-model">{{ ev.model }}</span>
                     <span class="se-metric">tokens: {{ fmtN(ev.tokens) }}</span>
                     <span class="se-metric">{{ Math.round(ev.latency_ms||0) }}ms</span>
                     <span v-if="ev.status_code&&ev.status_code>=400" class="se-err">HTTP {{ ev.status_code }}</span>
+                  </div>
+                  <div v-if="ev._expanded" class="llm-content">
+                    <div v-if="ev.request_preview" class="llm-block llm-req">
+                      <div class="llm-block-label">Request</div>
+                      <pre class="llm-block-body">{{ ev.request_preview }}</pre>
+                    </div>
+                    <div v-if="ev.response_preview" class="llm-block llm-resp">
+                      <div class="llm-block-label">Response</div>
+                      <pre class="llm-block-body">{{ ev.response_preview }}</pre>
+                    </div>
+                    <div v-if="!ev.request_preview && !ev.response_preview" class="llm-no-content">内容未记录（旧数据）</div>
                   </div>
                   <div class="se-alert ca" v-if="ev.canary_leaked">🔴 Canary Token 泄露！</div>
                   <div class="se-alert ba2" v-if="ev.budget_exceeded">⚠️ 响应预算超限</div>
@@ -274,7 +288,7 @@ async function loadTimeline() {
   loading.value = true
   try {
     const d = await api('/api/v1/sessions/replay/' + encodeURIComponent(traceId))
-    if (d.events) d.events.forEach(ev => { ev._showTag = false; ev._tagText = '' })
+    if (d.events) d.events.forEach(ev => { ev._showTag = false; ev._tagText = ''; ev._expanded = false })
     timeline.value = d
     await nextTick()
     if (chatArea.value) chatArea.value.scrollTop = 0
@@ -415,6 +429,16 @@ onMounted(() => { loadTimeline(); loadSessionTags(); loadNotes() })
 .tr-critical{background:rgba(239,68,68,.15);color:#EF4444}
 .tool-flag{font-size:10px;color:#EF4444;font-weight:700}
 .se-code{margin:4px 0}
+.se-head-click{cursor:pointer;display:flex;align-items:center;gap:6px}
+.se-head-click:hover{opacity:.8}
+.se-expand-icon{font-size:10px;color:var(--text-tertiary);margin-left:auto}
+.llm-content{margin-top:8px}
+.llm-block{margin-bottom:8px;border-radius:6px;overflow:hidden}
+.llm-block-label{font-size:11px;font-weight:600;padding:4px 10px;text-transform:uppercase;letter-spacing:.03em}
+.llm-req .llm-block-label{background:rgba(99,102,241,.15);color:#818cf8}
+.llm-resp .llm-block-label{background:rgba(34,197,94,.1);color:#4ade80}
+.llm-block-body{font-size:12px;padding:8px 10px;margin:0;background:rgba(15,23,42,.5);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;line-height:1.5}
+.llm-no-content{font-size:12px;color:var(--text-tertiary);font-style:italic;padding:8px}
 .code-lbl{font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
 .code-blk{background:var(--bg-base);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);overflow-x:auto;max-height:120px;white-space:pre-wrap;word-break:break-all;margin:0}
 .se-flag-reason{font-size:11px;color:#EF4444;font-weight:600;margin-top:4px}
