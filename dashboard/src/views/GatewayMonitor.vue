@@ -184,15 +184,15 @@
                         <div v-if="detailLoading" class="skel-lines"><div class="skel-line" v-for="i in 4" :key="i"></div></div>
                         <div v-else-if="sessions.length === 0" class="dtab-empty">暂无会话</div>
                         <table v-else class="inner-table">
-                          <thead><tr><th>Key</th><th>Agent</th><th>状态</th><th>Model</th><th>Token</th><th>最后活跃</th></tr></thead>
+                          <thead><tr><th>Key</th><th>Channel</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th></tr></thead>
                           <tbody>
-                            <tr v-for="s in sessions" :key="s.key||s.session_id">
-                              <td><code class="mono-sm">{{ truncKey(s.key||s.session_id||s.id) }}</code></td>
-                              <td>{{ s.agent_id||s.agentId||'—' }}</td>
-                              <td><span class="ss" :class="isActive(s.state)?'ss-on':'ss-off'">{{ s.state||'unknown' }}</span></td>
+                            <tr v-for="s in sessions" :key="s.key||s.sessionId">
+                              <td><code class="mono-sm">{{ truncKey(s.key||s.sessionId) }}</code></td>
+                              <td>{{ s.channel||s.lastChannel||'—' }}</td>
                               <td class="text-dim">{{ s.model||'—' }}</td>
                               <td>{{ fmtTokens(s) }}</td>
-                              <td>{{ fmtTime(s.last_active||s.lastActive||s.updated_at) }}</td>
+                              <td>{{ fmtContext(s) }}</td>
+                              <td>{{ fmtTime(s.updatedAt||s.updated_at) }}</td>
                             </tr>
                           </tbody>
                         </table>
@@ -355,15 +355,27 @@ const connectedUpstreams = computed(() => allUpstreams.value.filter(u => u.gatew
 const allAgents = computed(() => {
   const agents = []
   for (const up of allUpstreams.value) {
-    if (up.sessions && Array.isArray(up.sessions)) {
-      // overview 返回的嵌套 sessions
+    // 优先从 overview 返回的 agents 列表
+    if (up.gateway_status === 'connected' && up._agents && up._agents.length > 0) {
+      for (const ag of up._agents) {
+        const aid = ag.id || ag.agentId
+        if (aid && !agents.find(a => a.id === aid && a.gateway === up.id)) {
+          agents.push({ id: aid, gateway: up.id, model: null, active: !!ag.configured, configured: !!ag.configured })
+        }
+      }
     }
-    // 从 overview 的 sessions 数据提取
+    // 补充从 sessions 提取的 agent + model 信息
     if (up.gateway_status === 'connected' && up._sessions) {
       for (const s of up._sessions) {
-        const aid = s.agent_id || s.agentId
-        if (aid && !agents.find(a => a.id === aid && a.gateway === up.id)) {
-          agents.push({ id: aid, gateway: up.id, model: s.model, active: isActive(s.state), state: s.state })
+        // OpenClaw sessions 用 key 格式 "agent:<agentId>:<sessionType>"
+        const aid = extractAgentFromKey(s.key) || s.agentId || s.agent_id
+        if (!aid) continue
+        const existing = agents.find(a => a.id === aid && a.gateway === up.id)
+        if (existing) {
+          if (!existing.model && s.model) existing.model = s.model
+          if (s.totalTokens > 0 || s.total_tokens > 0) existing.active = true
+        } else {
+          agents.push({ id: aid, gateway: up.id, model: s.model, active: true, configured: true })
         }
       }
     }
@@ -382,6 +394,7 @@ async function refresh() {
       gateway_status: u.gateway_status || 'unknown',
       _pinging: false,
       _sessions: extractSessions(u),
+      _agents: u.agents || [],
     }))
     lastRefreshTime.value = new Date().toLocaleTimeString('zh-CN')
     updateRefreshDisplay()
@@ -409,28 +422,38 @@ async function switchTab(tab, id) { activeTab.value = tab; if (tab !== 'diag') a
 async function loadTabData(id, tab) {
   detailLoading.value = true
   try {
-    if (tab === 'sessions') { const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/sessions`); sessions.value = d.error ? [] : (Array.isArray(d.sessions) ? d.sessions : Array.isArray(d) ? d : []) }
-    else if (tab === 'cron') { const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/cron`); cronJobs.value = d.error ? [] : (d.jobs || d.crons || (Array.isArray(d) ? d : [])) }
+    if (tab === 'sessions') {
+      const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/sessions`)
+      sessions.value = d.error ? [] : (Array.isArray(d.sessions) ? d.sessions : [])
+    } else if (tab === 'cron') {
+      const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/cron`)
+      cronJobs.value = d.error ? [] : (Array.isArray(d.jobs) ? d.jobs : [])
+    }
   } catch { sessions.value = []; cronJobs.value = [] } finally { detailLoading.value = false }
 }
 async function runDiag(up) {
   diagRunning.value = true; diagResult.value = null
   try {
     const p = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/ping`)
-    let apiOk = false, sc = 0
-    if (p.authenticated) { try { const sd = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/sessions`); if (!sd.error) { apiOk = true; sc = (sd.sessions||sd||[]).length } } catch {} }
-    diagResult.value = { reach: !!p.reachable, auth: !!p.authenticated, api: apiOk, latency: p.latency_ms, sessions: sc, err: p.message }
+    let apiOk = !!p.api_ok, sc = 0
+    if (apiOk) {
+      try {
+        const sd = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/sessions`)
+        if (!sd.error && sd.sessions) { sc = sd.sessions.length }
+      } catch {}
+    }
+    diagResult.value = { reach: !!p.reachable, auth: !!p.authenticated, api: apiOk, latency: p.latency_ms, sessions: sc, err: p.message, statusText: p.status_text }
   } catch (e) { diagResult.value = { reach:false, auth:false, api:false, err:e.message } } finally { diagRunning.value = false }
 }
 async function quickPing(up) {
   up._pinging = true
-  try { const r = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/ping`); showToast(r.authenticated ? `${up.id}: ✅ ${r.latency_ms}ms` : `${up.id}: ❌ ${r.message||'认证失败'}`, r.authenticated?'success':'error') }
+  try { const r = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/ping`); showToast(r.api_ok ? `${up.id}: ✅ ${r.latency_ms}ms` : `${up.id}: ❌ ${r.message||'连接失败'}`, r.api_ok?'success':'error') }
   catch (e) { showToast(`${up.id}: ❌ ${e.message}`, 'error') } finally { up._pinging = false }
 }
 function openTokenModal(up) { tokenModal.data=up; tokenModal.token=''; tokenModal.showPwd=false; tokenModal.testing=false; tokenModal.saving=false; tokenModal.testResult=null; tokenModal.show=true }
 async function testInModal() {
   if (!tokenModal.token||!tokenModal.data) return; tokenModal.testing=true; tokenModal.testResult=null
-  try { await apiPut(`/api/v1/upstreams/${encodeURIComponent(tokenModal.data.id)}/gateway-token`,{token:tokenModal.token}); const r=await api(`/api/v1/upstreams/${encodeURIComponent(tokenModal.data.id)}/gateway/ping`); tokenModal.testResult={ok:!!r.authenticated,latency:r.latency_ms,msg:r.message||'认证失败'} }
+  try { await apiPut(`/api/v1/upstreams/${encodeURIComponent(tokenModal.data.id)}/gateway-token`,{token:tokenModal.token}); const r=await api(`/api/v1/upstreams/${encodeURIComponent(tokenModal.data.id)}/gateway/ping`); tokenModal.testResult={ok:!!r.api_ok,latency:r.latency_ms,msg:r.message||'连接失败'} }
   catch (e) { tokenModal.testResult={ok:false,msg:e.message} } finally { tokenModal.testing=false }
 }
 async function saveToken() {
@@ -447,7 +470,9 @@ function statusLabel(s) { return {connected:'已连接',not_configured:'未配�
 function isActive(s) { return ['running','active','busy','working','in_progress','processing','streaming'].includes(s) }
 function latencyClass(ms) { return ms<100?'lat-fast':ms<500?'lat-mid':'lat-slow' }
 function truncKey(k) { return k&&k.length>32?k.slice(0,14)+'…'+k.slice(-14):(k||'—') }
-function fmtTokens(s) { const t=s.total_tokens||s.totalTokens||0; return !t?'—':t>1e6?(t/1e6).toFixed(1)+'M':t>1e3?(t/1e3).toFixed(1)+'K':String(t) }
+function fmtTokens(s) { const t=s.totalTokens||s.total_tokens||0; return !t?'—':t>1e6?(t/1e6).toFixed(1)+'M':t>1e3?(t/1e3).toFixed(1)+'K':String(t) }
+function fmtContext(s) { const ctx=s.contextTokens||0; const total=s.totalTokens||s.total_tokens||0; if(!ctx) return '—'; const pct=total>0?Math.round(total/ctx*100):0; return `${fmtTokens({totalTokens:total})}/${fmtTokens({totalTokens:ctx})} (${pct}%)` }
+function extractAgentFromKey(key) { if(!key) return null; const m=/^agent:([^:]+):/.exec(key); return m?m[1]:null }
 function fmtTime(ts) { if(!ts) return '—'; const d=new Date(typeof ts==='number'&&ts<1e12?ts*1000:ts); if(isNaN(d)) return '—'; const s=(Date.now()-d)/1000; if(s<60) return '刚刚'; if(s<3600) return Math.floor(s/60)+'分钟前'; if(s<86400) return Math.floor(s/3600)+'小时前'; return d.toLocaleDateString('zh-CN')+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) }
 function nodeX(i,n,w) { return w/2+(w*0.38)*Math.cos(2*Math.PI*i/Math.max(n,1)-Math.PI/2) }
 function nodeY(i,n,w,h) { return h/2+(h*0.38)*Math.sin(2*Math.PI*i/Math.max(n,1)-Math.PI/2) }

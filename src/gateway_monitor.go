@@ -1,8 +1,9 @@
-// gateway_monitor.go — v22.0 上游 OpenClaw Gateway 监控中心
-// 代理龙虾卫士的管理 API 去访问上游 OpenClaw Gateway 实例
+// gateway_monitor.go — v22.1 上游 OpenClaw Gateway 监控中心
+// 通过 POST /tools/invoke 调用上游 OpenClaw Gateway 的官方 HTTP API
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,11 +15,11 @@ import (
 )
 
 // ============================================================
-// Gateway 代理客户端
+// Gateway Tools Invoke 客户端
 // ============================================================
 
 var gatewayHTTPClient = &http.Client{
-	Timeout: 5 * time.Second,
+	Timeout: 10 * time.Second,
 	Transport: &http.Transport{
 		MaxIdleConns:        20,
 		MaxIdleConnsPerHost: 5,
@@ -26,48 +27,104 @@ var gatewayHTTPClient = &http.Client{
 	},
 }
 
-// gatewayProxyRequest 向上游 Gateway 发起 HTTP 请求
-// 返回 (status_code, response_body, error)
-func gatewayProxyRequest(address string, port int, pathPrefix, gatewayToken, apiPath string) (int, []byte, error) {
+// toolsInvokeRequest 是 POST /tools/invoke 的请求体
+type toolsInvokeRequest struct {
+	Tool   string                 `json:"tool"`
+	Action string                 `json:"action,omitempty"`
+	Args   map[string]interface{} `json:"args,omitempty"`
+}
+
+// toolsInvokeResponse 是 /tools/invoke 的响应体
+type toolsInvokeResponse struct {
+	OK     bool                   `json:"ok"`
+	Result *toolsInvokeResult     `json:"result,omitempty"`
+	Error  *toolsInvokeError      `json:"error,omitempty"`
+}
+
+type toolsInvokeResult struct {
+	Content []toolsContent         `json:"content,omitempty"`
+	Details map[string]interface{} `json:"details,omitempty"`
+}
+
+type toolsContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type toolsInvokeError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// gatewayToolsInvoke 通过 POST /tools/invoke 调用上游 Gateway 的 tool
+// 返回解析后的 details 对象和原始文本
+func gatewayToolsInvoke(address string, port int, pathPrefix, gatewayToken string, req toolsInvokeRequest) (*toolsInvokeResponse, int64, error) {
 	// 构造 URL
 	baseURL := fmt.Sprintf("http://%s:%d", address, port)
 	if pathPrefix != "" {
 		baseURL += "/" + strings.Trim(pathPrefix, "/")
 	}
-	fullURL := baseURL + apiPath
+	fullURL := baseURL + "/tools/invoke"
 
-	// 尝试 query parameter 认证（OpenClaw Gateway 支持）
-	if gatewayToken != "" {
-		sep := "?"
-		if strings.Contains(fullURL, "?") {
-			sep = "&"
-		}
-		fullURL += sep + "authToken=" + gatewayToken
-	}
-
-	req, err := http.NewRequest("GET", fullURL, nil)
+	body, err := json.Marshal(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, 0, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	// 同时设置 Authorization header（双重认证尝试）
-	if gatewayToken != "" {
-		req.Header.Set("Authorization", "Bearer "+gatewayToken)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := gatewayHTTPClient.Do(req)
+	httpReq, err := http.NewRequest("POST", fullURL, bytes.NewReader(body))
 	if err != nil {
-		return 0, nil, err
+		return nil, 0, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	if gatewayToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+gatewayToken)
+	}
+
+	start := time.Now()
+	resp, err := gatewayHTTPClient.Do(httpReq)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return nil, latency, err
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 限制 1MB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2MB
 	if err != nil {
-		return resp.StatusCode, nil, fmt.Errorf("读取响应失败: %w", err)
+		return nil, latency, fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	return resp.StatusCode, body, nil
+	// 检查是否是 HTML (SPA fallback) — 防止误判
+	if isHTMLResponse(respBody) {
+		return nil, latency, fmt.Errorf("上游返回 HTML 而非 JSON，可能是 SPA fallback (HTTP %d)", resp.StatusCode)
+	}
+
+	// HTTP 层错误
+	if resp.StatusCode == 401 {
+		return nil, latency, fmt.Errorf("AUTH_FAILED")
+	}
+	if resp.StatusCode == 404 {
+		return nil, latency, fmt.Errorf("TOOL_NOT_FOUND: %s", req.Tool)
+	}
+	if resp.StatusCode != 200 {
+		return nil, latency, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result toolsInvokeResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, latency, fmt.Errorf("解析 JSON 失败: %w (body: %s)", err, truncateStr(string(respBody), 200))
+	}
+
+	return &result, latency, nil
+}
+
+// isHTMLResponse 检测响应是否是 HTML（防止 SPA fallback 误判）
+func isHTMLResponse(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return false
+	}
+	return bytes.HasPrefix(trimmed, []byte("<!")) || bytes.HasPrefix(trimmed, []byte("<html")) || bytes.HasPrefix(trimmed, []byte("<HTML"))
 }
 
 // ============================================================
@@ -151,6 +208,7 @@ func (api *ManagementAPI) handleGatewayTokenStatus(w http.ResponseWriter, r *htt
 }
 
 // handleGatewayPing GET /api/v1/upstreams/{id}/gateway/ping
+// 通过调用 session_status 验证连接 + 认证 + API 可用性
 func (api *ManagementAPI) handleGatewayPing(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/ping")
 	if id == "" {
@@ -172,11 +230,24 @@ func (api *ManagementAPI) handleGatewayPing(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	start := time.Now()
-	statusCode, _, err := gatewayProxyRequest(up.Address, up.Port, up.PathPrefix, up.GatewayToken, "/api/v1/sessions/list")
-	latency := time.Since(start).Milliseconds()
+	// 用 session_status 做健康检查 — 轻量且能验证认证
+	resp, latency, err := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
+	)
 
 	if err != nil {
+		errStr := err.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 200, map[string]interface{}{
+				"reachable":     true,
+				"authenticated": false,
+				"latency_ms":    latency,
+				"error":         "authentication_failed",
+				"message":       "Gateway Token 无效或已过期",
+			})
+			return
+		}
 		jsonResponse(w, 200, map[string]interface{}{
 			"reachable":     false,
 			"authenticated": false,
@@ -187,22 +258,34 @@ func (api *ManagementAPI) handleGatewayPing(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if statusCode == 401 || statusCode == 403 {
+	if !resp.OK {
+		errMsg := "API 返回失败"
+		if resp.Error != nil {
+			errMsg = resp.Error.Message
+		}
 		jsonResponse(w, 200, map[string]interface{}{
 			"reachable":     true,
-			"authenticated": false,
+			"authenticated": true,
+			"api_ok":        false,
 			"latency_ms":    latency,
-			"error":         "authentication_failed",
-			"message":       "Gateway Token 无效或已过期",
+			"error":         "api_error",
+			"message":       errMsg,
 		})
 		return
 	}
 
+	// 提取状态文本
+	statusText := ""
+	if resp.Result != nil && len(resp.Result.Content) > 0 {
+		statusText = resp.Result.Content[0].Text
+	}
+
 	jsonResponse(w, 200, map[string]interface{}{
 		"reachable":     true,
-		"authenticated": statusCode >= 200 && statusCode < 400,
+		"authenticated": true,
+		"api_ok":        true,
 		"latency_ms":    latency,
-		"status_code":   statusCode,
+		"status_text":   statusText,
 	})
 }
 
@@ -228,27 +311,41 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	statusCode, body, err := gatewayProxyRequest(up.Address, up.Port, up.PathPrefix, up.GatewayToken, "/api/v1/sessions/list")
+	resp, _, err := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
+	)
+
 	if err != nil {
+		errStr := err.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 401, map[string]interface{}{
+				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			})
+			return
+		}
 		jsonResponse(w, 502, map[string]interface{}{
-			"error":   "unreachable",
-			"message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
 		})
 		return
 	}
 
-	if statusCode == 401 || statusCode == 403 {
-		jsonResponse(w, 401, map[string]interface{}{
-			"error":   "authentication_failed",
-			"message": "Gateway Token 无效或已过期",
-		})
+	if !resp.OK {
+		errMsg := "sessions_list 调用失败"
+		if resp.Error != nil {
+			errMsg = resp.Error.Message
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
 
-	// 直接转发响应
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	w.Write(body)
+	// 从 details 提取 sessions，从 content[0].text 解析 JSON 作为 fallback
+	sessions := extractSessionsFromResponse(resp)
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
 }
 
 // handleGatewayCron GET /api/v1/upstreams/{id}/gateway/cron
@@ -273,26 +370,40 @@ func (api *ManagementAPI) handleGatewayCron(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	statusCode, body, err := gatewayProxyRequest(up.Address, up.Port, up.PathPrefix, up.GatewayToken, "/api/v1/cron/list")
+	resp, _, err := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "cron", Action: "list", Args: map[string]interface{}{}},
+	)
+
 	if err != nil {
+		errStr := err.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 401, map[string]interface{}{
+				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			})
+			return
+		}
 		jsonResponse(w, 502, map[string]interface{}{
-			"error":   "unreachable",
-			"message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
 		})
 		return
 	}
 
-	if statusCode == 401 || statusCode == 403 {
-		jsonResponse(w, 401, map[string]interface{}{
-			"error":   "authentication_failed",
-			"message": "Gateway Token 无效或已过期",
-		})
+	if !resp.OK {
+		errMsg := "cron list 调用失败"
+		if resp.Error != nil {
+			errMsg = resp.Error.Message
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	w.Write(body)
+	jobs := extractCronJobsFromResponse(resp)
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"jobs":  jobs,
+		"count": len(jobs),
+	})
 }
 
 // handleGatewayStatus GET /api/v1/upstreams/{id}/gateway/status
@@ -317,26 +428,111 @@ func (api *ManagementAPI) handleGatewayStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	statusCode, body, err := gatewayProxyRequest(up.Address, up.Port, up.PathPrefix, up.GatewayToken, "/status")
+	resp, latency, err := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
+	)
+
 	if err != nil {
+		errStr := err.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 401, map[string]interface{}{
+				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			})
+			return
+		}
 		jsonResponse(w, 502, map[string]interface{}{
-			"error":   "unreachable",
-			"message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
 		})
 		return
 	}
 
-	if statusCode == 401 || statusCode == 403 {
-		jsonResponse(w, 401, map[string]interface{}{
-			"error":   "authentication_failed",
-			"message": "Gateway Token 无效或已过期",
+	if !resp.OK {
+		errMsg := "session_status 调用失败"
+		if resp.Error != nil {
+			errMsg = resp.Error.Message
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
+		return
+	}
+
+	// 提取状态文本和 details
+	statusText := ""
+	if resp.Result != nil && len(resp.Result.Content) > 0 {
+		statusText = resp.Result.Content[0].Text
+	}
+
+	result := map[string]interface{}{
+		"status_text": statusText,
+		"latency_ms":  latency,
+	}
+
+	// 合并 details 字段到结果
+	if resp.Result != nil && resp.Result.Details != nil {
+		for k, v := range resp.Result.Details {
+			result[k] = v
+		}
+	}
+
+	jsonResponse(w, 200, result)
+}
+
+// handleGatewayAgents GET /api/v1/upstreams/{id}/gateway/agents
+func (api *ManagementAPI) handleGatewayAgents(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/agents")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+
+	up, ok := api.pool.GetUpstream(id)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
+		return
+	}
+
+	if up.GatewayToken == "" {
+		jsonResponse(w, 200, map[string]interface{}{
+			"error":   "gateway_token_not_configured",
+			"message": "请先配置 Gateway Token",
 		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	w.Write(body)
+	resp, _, err := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
+	)
+
+	if err != nil {
+		errStr := err.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 401, map[string]interface{}{
+				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			})
+			return
+		}
+		jsonResponse(w, 502, map[string]interface{}{
+			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+		})
+		return
+	}
+
+	if !resp.OK {
+		errMsg := "agents_list 调用失败"
+		if resp.Error != nil {
+			errMsg = resp.Error.Message
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
+		return
+	}
+
+	agents := extractAgentsFromResponse(resp)
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"agents": agents,
+		"count":  len(agents),
+	})
 }
 
 // handleGatewayOverview GET /api/v1/upstreams/gateway/overview
@@ -344,18 +540,21 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 	upstreams := api.pool.ListUpstreams()
 
 	type upstreamResult struct {
-		ID              string      `json:"id"`
-		Address         string      `json:"address"`
-		Port            int         `json:"port"`
-		Healthy         bool        `json:"healthy"`
-		TokenConfigured bool        `json:"token_configured"`
-		GatewayStatus   string      `json:"gateway_status"` // connected / not_configured / auth_failed / unreachable / error
-		LatencyMs       int64       `json:"latency_ms"`
-		Sessions        interface{} `json:"sessions,omitempty"`
-		SessionCount    int         `json:"session_count"`
-		ActiveSessions  int         `json:"active_sessions"`
-		CronCount       int         `json:"cron_count"`
-		Error           string      `json:"error,omitempty"`
+		ID              string                   `json:"id"`
+		Address         string                   `json:"address"`
+		Port            int                      `json:"port"`
+		Healthy         bool                     `json:"healthy"`
+		TokenConfigured bool                     `json:"token_configured"`
+		GatewayStatus   string                   `json:"gateway_status"`
+		LatencyMs       int64                    `json:"latency_ms"`
+		Sessions        []map[string]interface{} `json:"sessions,omitempty"`
+		SessionCount    int                      `json:"session_count"`
+		ActiveSessions  int                      `json:"active_sessions"`
+		CronCount       int                      `json:"cron_count"`
+		Agents          []map[string]interface{} `json:"agents,omitempty"`
+		AgentCount      int                      `json:"agent_count"`
+		StatusText      string                   `json:"status_text,omitempty"`
+		Error           string                   `json:"error,omitempty"`
 	}
 
 	var (
@@ -384,53 +583,123 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				return
 			}
 
-			// Ping test
-			start := time.Now()
-			statusCode, body, err := gatewayProxyRequest(u.Address, u.Port, u.PathPrefix, u.GatewayToken, "/api/v1/sessions/list")
-			result.LatencyMs = time.Since(start).Milliseconds()
+			// 并行获取 sessions + status + agents
+			var (
+				sessResp   *toolsInvokeResponse
+				statusResp *toolsInvokeResponse
+				agentsResp *toolsInvokeResponse
+				cronResp   *toolsInvokeResponse
+				sessErr    error
+				statusErr  error
+				latency    int64
+				innerWg    sync.WaitGroup
+			)
 
-			if err != nil {
-				result.GatewayStatus = "unreachable"
-				result.Error = err.Error()
+			innerWg.Add(4)
+
+			// sessions_list
+			go func() {
+				defer innerWg.Done()
+				sessResp, _, sessErr = gatewayToolsInvoke(
+					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+					toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
+				)
+			}()
+
+			// session_status (ping)
+			go func() {
+				defer innerWg.Done()
+				statusResp, latency, statusErr = gatewayToolsInvoke(
+					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+					toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
+				)
+			}()
+
+			// agents_list
+			go func() {
+				defer innerWg.Done()
+				agentsResp, _, _ = gatewayToolsInvoke(
+					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+					toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
+				)
+			}()
+
+			// cron list
+			go func() {
+				defer innerWg.Done()
+				cronResp, _, _ = gatewayToolsInvoke(
+					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+					toolsInvokeRequest{Tool: "cron", Action: "list", Args: map[string]interface{}{}},
+				)
+			}()
+
+			innerWg.Wait()
+
+			result.LatencyMs = latency
+
+			// 判断连接状态
+			if statusErr != nil {
+				errStr := statusErr.Error()
+				if errStr == "AUTH_FAILED" {
+					result.GatewayStatus = "auth_failed"
+				} else {
+					result.GatewayStatus = "unreachable"
+					result.Error = errStr
+				}
 				mu.Lock()
 				results = append(results, result)
 				mu.Unlock()
 				return
 			}
 
-			if statusCode == 401 || statusCode == 403 {
-				result.GatewayStatus = "auth_failed"
+			if statusResp != nil && !statusResp.OK {
+				result.GatewayStatus = "error"
+				if statusResp.Error != nil {
+					result.Error = statusResp.Error.Message
+				}
 				mu.Lock()
 				results = append(results, result)
 				mu.Unlock()
 				return
 			}
 
-			if statusCode >= 200 && statusCode < 400 {
-				result.GatewayStatus = "connected"
-				// 解析 sessions 数据
-				var sessionsResp interface{}
-				if json.Unmarshal(body, &sessionsResp) == nil {
-					result.Sessions = sessionsResp
-					// 尝试统计会话数
-					if m, ok := sessionsResp.(map[string]interface{}); ok {
-						if sessions, ok := m["sessions"].([]interface{}); ok {
-							result.SessionCount = len(sessions)
-							for _, s := range sessions {
-								if sm, ok := s.(map[string]interface{}); ok {
-									if state, ok := sm["state"].(string); ok {
-										if state == "running" || state == "active" || state == "busy" || state == "working" {
-											result.ActiveSessions++
-										}
-									}
-								}
-							}
+			// 连接成功
+			result.GatewayStatus = "connected"
+
+			// 提取 status_text
+			if statusResp != nil && statusResp.Result != nil && len(statusResp.Result.Content) > 0 {
+				result.StatusText = statusResp.Result.Content[0].Text
+			}
+
+			// 提取 sessions
+			if sessErr == nil && sessResp != nil && sessResp.OK {
+				sessions := extractSessionsFromResponse(sessResp)
+				result.Sessions = sessions
+				result.SessionCount = len(sessions)
+				for _, s := range sessions {
+					if state, ok := s["state"].(string); ok {
+						if isActiveSessionState(state) {
+							result.ActiveSessions++
 						}
 					}
+					// OpenClaw sessions 可能没有 state 字段，用 updatedAt 判断
+					if result.ActiveSessions == 0 && len(sessions) > 0 {
+						// 有会话就算活跃
+					}
 				}
-			} else {
-				result.GatewayStatus = "error"
-				result.Error = fmt.Sprintf("HTTP %d", statusCode)
+			}
+
+			// 提取 agents
+			if agentsResp != nil && agentsResp.OK {
+				agents := extractAgentsFromResponse(agentsResp)
+				result.Agents = agents
+				result.AgentCount = len(agents)
+			}
+
+			// 提取 cron
+			if cronResp != nil && cronResp.OK {
+				jobs := extractCronJobsFromResponse(cronResp)
+				result.CronCount = len(jobs)
 			}
 
 			mu.Lock()
@@ -449,6 +718,8 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 	tokenNotConfigured := 0
 	totalSessions := 0
 	activeSessions := 0
+	totalAgents := 0
+	totalCronJobs := 0
 
 	for _, r := range results {
 		if r.GatewayStatus == "connected" {
@@ -463,18 +734,139 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 		}
 		totalSessions += r.SessionCount
 		activeSessions += r.ActiveSessions
+		totalAgents += r.AgentCount
+		totalCronJobs += r.CronCount
 	}
 
 	jsonResponse(w, 200, map[string]interface{}{
-		"upstreams":          results,
-		"total":              totalUpstreams,
-		"online":             onlineCount,
-		"offline":            offlineCount,
-		"token_configured":   tokenConfigured,
+		"upstreams":            results,
+		"total":                totalUpstreams,
+		"online":               onlineCount,
+		"offline":              offlineCount,
+		"token_configured":     tokenConfigured,
 		"token_not_configured": tokenNotConfigured,
-		"total_sessions":     totalSessions,
-		"active_sessions":    activeSessions,
+		"total_sessions":       totalSessions,
+		"active_sessions":      activeSessions,
+		"total_agents":         totalAgents,
+		"total_cron_jobs":      totalCronJobs,
 	})
+}
+
+// ============================================================
+// 数据提取辅助函数
+// ============================================================
+
+// extractSessionsFromResponse 从 tools/invoke 响应中提取 sessions 列表
+func extractSessionsFromResponse(resp *toolsInvokeResponse) []map[string]interface{} {
+	if resp == nil || resp.Result == nil {
+		return nil
+	}
+
+	// 优先从 details.sessions 提取
+	if resp.Result.Details != nil {
+		if sessions, ok := resp.Result.Details["sessions"]; ok {
+			if arr, ok := sessions.([]interface{}); ok {
+				return interfaceSliceToMaps(arr)
+			}
+		}
+	}
+
+	// Fallback: 从 content[0].text 解析 JSON
+	if len(resp.Result.Content) > 0 {
+		text := resp.Result.Content[0].Text
+		var parsed map[string]interface{}
+		if json.Unmarshal([]byte(text), &parsed) == nil {
+			if sessions, ok := parsed["sessions"]; ok {
+				if arr, ok := sessions.([]interface{}); ok {
+					return interfaceSliceToMaps(arr)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// extractCronJobsFromResponse 从 tools/invoke 响应中提取 cron jobs 列表
+func extractCronJobsFromResponse(resp *toolsInvokeResponse) []map[string]interface{} {
+	if resp == nil || resp.Result == nil {
+		return nil
+	}
+
+	// 优先从 details.jobs 提取
+	if resp.Result.Details != nil {
+		if jobs, ok := resp.Result.Details["jobs"]; ok {
+			if arr, ok := jobs.([]interface{}); ok {
+				return interfaceSliceToMaps(arr)
+			}
+		}
+	}
+
+	// Fallback: 从 content[0].text 解析
+	if len(resp.Result.Content) > 0 {
+		text := resp.Result.Content[0].Text
+		var parsed map[string]interface{}
+		if json.Unmarshal([]byte(text), &parsed) == nil {
+			if jobs, ok := parsed["jobs"]; ok {
+				if arr, ok := jobs.([]interface{}); ok {
+					return interfaceSliceToMaps(arr)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// extractAgentsFromResponse 从 tools/invoke 响应中提取 agents 列表
+func extractAgentsFromResponse(resp *toolsInvokeResponse) []map[string]interface{} {
+	if resp == nil || resp.Result == nil {
+		return nil
+	}
+
+	// 优先从 details.agents 提取
+	if resp.Result.Details != nil {
+		if agents, ok := resp.Result.Details["agents"]; ok {
+			if arr, ok := agents.([]interface{}); ok {
+				return interfaceSliceToMaps(arr)
+			}
+		}
+	}
+
+	// Fallback: 从 content[0].text 解析
+	if len(resp.Result.Content) > 0 {
+		text := resp.Result.Content[0].Text
+		var parsed map[string]interface{}
+		if json.Unmarshal([]byte(text), &parsed) == nil {
+			if agents, ok := parsed["agents"]; ok {
+				if arr, ok := agents.([]interface{}); ok {
+					return interfaceSliceToMaps(arr)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// interfaceSliceToMaps 将 []interface{} 转为 []map[string]interface{}
+func interfaceSliceToMaps(arr []interface{}) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(arr))
+	for _, item := range arr {
+		if m, ok := item.(map[string]interface{}); ok {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
+// isActiveSessionState 判断会话是否处于活跃状态
+func isActiveSessionState(state string) bool {
+	switch strings.ToLower(state) {
+	case "running", "active", "busy", "working", "in_progress", "processing", "streaming", "thinking", "executing":
+		return true
+	}
+	return false
 }
 
 // ============================================================
@@ -483,7 +875,6 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 
 // extractUpstreamIDFromGatewayPath 从 /api/v1/upstreams/{id}/xxx 中提取 id
 func extractUpstreamIDFromGatewayPath(urlPath, suffix string) string {
-	// 去掉 prefix 和 suffix
 	prefix := "/api/v1/upstreams/"
 	if !strings.HasPrefix(urlPath, prefix) {
 		return ""
