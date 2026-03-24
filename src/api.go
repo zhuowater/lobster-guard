@@ -1212,6 +1212,7 @@ func (api *ManagementAPI) handleListUpstreams(w http.ResponseWriter, r *http.Req
 		list = append(list, map[string]interface{}{
 			"id": up.ID, "address": up.Address, "port": up.Port,
 			"healthy": up.Healthy, "user_count": up.UserCount, "static": up.Static,
+			"path_prefix": up.PathPrefix,
 			"last_heartbeat": up.LastHeartbeat.Format(time.RFC3339),
 			"tags": up.Tags, "load": up.Load,
 			"gateway_token_configured": up.GatewayToken != "",

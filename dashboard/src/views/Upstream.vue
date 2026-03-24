@@ -115,6 +115,7 @@
             <div><span class="detail-label">路径前缀</span><span class="detail-value mono">{{ row.path_prefix || '(无)' }}</span></div>
             <div><span class="detail-label">静态</span><span class="detail-value">{{ row.static ? '是' : '否' }}</span></div>
             <div><span class="detail-label">用户数</span><span class="detail-value" style="color:var(--color-primary)">{{ row.user_count || 0 }}</span></div>
+            <div><span class="detail-label">Gateway Token</span><span class="detail-value"><span :class="row.gateway_token_configured ? 'token-ok' : 'token-none'">{{ row.gateway_token_configured ? '✅ 已配置' : '未配置' }}</span></span></div>
             <div v-if="row.tags"><span class="detail-label">Tags</span><span class="detail-value mono">{{ JSON.stringify(row.tags) }}</span></div>
             <div v-if="row.load"><span class="detail-label">负载</span><span class="detail-value mono">{{ JSON.stringify(row.load) }}</span></div>
             <div><span class="detail-label">最后心跳</span><span class="detail-value">{{ fmtTime(row.last_heartbeat) }}</span></div>
@@ -151,6 +152,24 @@
           <div class="form-group">
             <label>路径前缀 <span class="label-hint">(可选，如 /api/v1)</span></label>
             <input v-model="form.path_prefix" placeholder="例如: /api/v1" />
+          </div>
+          <div class="form-group">
+            <label>Gateway Token <span class="label-hint">(可选，OpenClaw Gateway 认证令牌)</span></label>
+            <div class="token-input-wrap">
+              <input
+                :type="showToken ? 'text' : 'password'"
+                v-model="form.gateway_token"
+                placeholder="粘贴 Gateway Auth Token"
+                autocomplete="off"
+                class="token-input"
+              />
+              <button class="btn btn-ghost btn-xs token-eye" @click="showToken = !showToken" type="button">
+                {{ showToken ? '🙈' : '👁️' }}
+              </button>
+            </div>
+            <div v-if="modalMode === 'edit' && form._token_configured && !form.gateway_token" class="token-hint">
+              ✅ 已配置（留空则保持不变）
+            </div>
           </div>
           <div class="form-group">
             <label>Tags</label>
@@ -228,8 +247,11 @@ const form = reactive({
   address: '',
   port: 18789,
   path_prefix: '',
+  gateway_token: '',
+  _token_configured: false,
   tags: [] // [{key, value}]
 })
+const showToken = ref(false)
 
 // Delete confirm
 const deleteConfirmVisible = ref(false)
@@ -313,7 +335,10 @@ function openAddModal() {
   form.address = ''
   form.port = 18789
   form.path_prefix = ''
+  form.gateway_token = ''
+  form._token_configured = false
   form.tags = []
+  showToken.value = false
   modalVisible.value = true
 }
 
@@ -323,6 +348,9 @@ function openEditModal(row) {
   form.address = row.address || row.addr || row.host || ''
   form.port = row.port || 18789
   form.path_prefix = row.path_prefix || ''
+  form.gateway_token = ''
+  form._token_configured = !!row.gateway_token_configured
+  showToken.value = false
   // Convert tags object to array
   form.tags = []
   if (row.tags && typeof row.tags === 'object') {
@@ -359,21 +387,30 @@ async function saveUpstream() {
   saving.value = true
   try {
     if (modalMode.value === 'add') {
-      await apiPost('/api/v1/upstreams', {
+      const payload = {
         id: form.id.trim(),
         address: form.address.trim(),
         port: form.port,
         path_prefix: form.path_prefix.trim(),
         tags
-      })
+      }
+      if (form.gateway_token.trim()) {
+        payload.gateway_token = form.gateway_token.trim()
+      }
+      await apiPost('/api/v1/upstreams', payload)
       showToast('上游添加成功', 'success')
     } else {
-      await apiPut('/api/v1/upstreams/' + encodeURIComponent(form.id), {
+      const payload = {
         address: form.address.trim(),
         port: form.port,
         path_prefix: form.path_prefix.trim(),
         tags
-      })
+      }
+      // 编辑时只在用户填了 token 才发送（留空=保持不变）
+      if (form.gateway_token.trim()) {
+        payload.gateway_token = form.gateway_token.trim()
+      }
+      await apiPut('/api/v1/upstreams/' + encodeURIComponent(form.id), payload)
       showToast('上游更新成功', 'success')
     }
     closeModal()
@@ -831,6 +868,46 @@ onMounted(() => {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* === Token Input === */
+.token-input-wrap {
+  position: relative;
+}
+.token-input {
+  width: 100%;
+  padding: 8px 40px 8px 12px;
+  background: var(--bg-inset, rgba(0,0,0,0.2));
+  border: 1px solid var(--border-default, rgba(255,255,255,0.1));
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.token-input:focus {
+  border-color: var(--color-primary);
+}
+.token-eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  padding: 2px 4px;
+}
+.token-hint {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-success, #22c55e);
+}
+.token-ok {
+  color: var(--color-success, #22c55e);
+}
+.token-none {
+  color: var(--text-tertiary);
 }
 
 /* === Responsive === */
