@@ -1189,7 +1189,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latMs := float64(time.Since(start).Microseconds()) / 1000.0
 			upstreamID := r.Header.Get("X-Upstream-Id")
 			detonationReason := "honeypot_detonation:" + strings.Join(detonatedWatermarks, ",")
-			pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
+			pv := text; if rs := []rune(pv); len(rs) > 2000 { pv = string(rs[:2000]) + "..." }
 			op.logger.LogWithTrace("outbound", recipient, "honeypot_detonation", detonationReason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 			log.Printf("[出站] 💣 蜜罐引爆检测 path=%s watermarks=%v", r.URL.Path, detonatedWatermarks)
 			// v18.1: 事件总线
@@ -1220,7 +1220,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latMs := float64(time.Since(start).Microseconds()) / 1000.0
 			upstreamID := r.Header.Get("X-Upstream-Id")
 			taintReason := fmt.Sprintf("taint_%s: labels=%v %s", taintDecision.Action, taintDecision.Labels, taintDecision.Reason)
-			pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
+			pv := text; if rs := []rune(pv); len(rs) > 2000 { pv = string(rs[:2000]) + "..." }
 			op.logger.LogWithTrace("outbound", recipient, "taint_"+taintDecision.Action, taintReason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
 			if taintDecision.Action == "block" {
 				log.Printf("[出站] 🔒 污染阻断 trace=%s labels=%v", outTraceID, taintDecision.Labels)
@@ -1256,7 +1256,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	pv := text; if rs := []rune(pv); len(rs) > 500 { pv = string(rs[:500]) + "..." }
+	pv := text; if rs := []rune(pv); len(rs) > 2000 { pv = string(rs[:2000]) + "..." }
 
 	// v3.6 规则命中统计
 	if op.ruleHits != nil && result.RuleName != "" {

@@ -53,7 +53,7 @@ func (al *AuditLogger) LogWithTrace(dir, sender, action, reason, preview, hash s
 	go func() {
 		defer func() { recover() }()
 		al.mu.Lock(); defer al.mu.Unlock()
-		if rs := []rune(preview); len(rs) > 200 { preview = string(rs[:200]) + "..." }
+		if rs := []rune(preview); len(rs) > 2000 { preview = string(rs[:2000]) + "..." }
 		// v14.0: 自动解析租户
 		if al.tenantMgr != nil && al.stmtT != nil {
 			tenantID := al.tenantMgr.ResolveTenant(sender, appID)
