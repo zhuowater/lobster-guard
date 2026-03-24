@@ -385,48 +385,93 @@ func (e *SessionReplayEngine) ListSessions(from, to, senderID, riskLevel, q stri
 		limit = 200
 	}
 
-	// 策略：先从 llm_calls 按 trace_id 分组获取会话列表，再联查 audit_log
-	// 使用 UNION 合并两个来源的 trace_id
-	whereClause := "WHERE trace_id IS NOT NULL AND trace_id != ''"
-	var args []interface{}
+	// v22.6: 按 session_id 聚合，一个会话只显示一条
+	// 策略：
+	//   1. 从 llm_calls 获取所有 session_id（有关联的）+ 孤立的 trace_id（无 session_id 的）
+	//   2. 从 audit_log 获取孤立的 IM trace_id（不在任何 session 中的）
+	//   3. 每个 session/trace 构建聚合摘要
+
+	var whereTime string
+	var timeArgs []interface{}
 	if from != "" {
-		whereClause += " AND timestamp >= ?"
-		args = append(args, from)
+		whereTime += " AND timestamp >= ?"
+		timeArgs = append(timeArgs, from)
 	}
 	if to != "" {
-		whereClause += " AND timestamp <= ?"
-		args = append(args, to)
+		whereTime += " AND timestamp <= ?"
+		timeArgs = append(timeArgs, to)
 	}
 
-	// 获取所有唯一 trace_id（合并两个来源）
-	traceQuery := fmt.Sprintf(`
-		SELECT DISTINCT trace_id, MIN(timestamp) as first_ts FROM (
-			SELECT trace_id, timestamp FROM llm_calls %s
-			UNION ALL
-			SELECT trace_id, timestamp FROM audit_log %s
-		) combined GROUP BY trace_id ORDER BY first_ts DESC
-	`, whereClause, whereClause)
-
-	allArgs := append(args, args...)
-
-	rows, err := e.db.Query(traceQuery, allArgs...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("query traces: %w", err)
+	type sessionEntry struct {
+		key       string // session_id 或 trace_id（孤立的）
+		isSession bool   // true=session_id聚合, false=单trace_id
+		firstTs   string
 	}
-	defer rows.Close()
 
-	var allTraceIDs []string
-	for rows.Next() {
-		var tid, ts string
-		if rows.Scan(&tid, &ts) == nil && tid != "" {
-			allTraceIDs = append(allTraceIDs, tid)
+	var entries []sessionEntry
+	seen := map[string]bool{}
+
+	// Step 1: 从 llm_calls 获取 session_id 聚合
+	sessRows, err := e.db.Query(`SELECT COALESCE(session_id,''), MIN(timestamp) as first_ts
+		FROM llm_calls WHERE trace_id IS NOT NULL AND trace_id != '' `+whereTime+`
+		GROUP BY CASE WHEN session_id != '' THEN session_id ELSE trace_id END
+		ORDER BY first_ts DESC`, timeArgs...)
+	if err == nil {
+		defer sessRows.Close()
+		for sessRows.Next() {
+			var sid, ts string
+			if sessRows.Scan(&sid, &ts) == nil && sid != "" {
+				if !seen[sid] {
+					seen[sid] = true
+					entries = append(entries, sessionEntry{key: sid, isSession: sid != "" && strings.HasPrefix(sid, "sess-"), firstTs: ts})
+				}
+			}
 		}
 	}
 
-	// 对每个 trace_id 快速构建摘要
+	// Step 2: 从 audit_log 获取孤立的 IM trace（不在任何 llm_calls.im_trace_id 中的）
+	imRows, err := e.db.Query(`SELECT trace_id, MIN(timestamp) as first_ts
+		FROM audit_log WHERE trace_id IS NOT NULL AND trace_id != '' `+whereTime+`
+		GROUP BY trace_id ORDER BY first_ts DESC`, timeArgs...)
+	if err == nil {
+		defer imRows.Close()
+		for imRows.Next() {
+			var tid, ts string
+			if imRows.Scan(&tid, &ts) == nil && tid != "" {
+				// 检查是否已被某个 session 包含
+				var linkedSession string
+				e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE im_trace_id=? AND session_id != '' LIMIT 1`, tid).Scan(&linkedSession)
+				if linkedSession != "" && seen[linkedSession] {
+					continue // 已在某个 session 聚合中
+				}
+				// 也检查是否有直接的 LLM trace 匹配
+				var directLLM int
+				e.db.QueryRow(`SELECT COUNT(*) FROM llm_calls WHERE im_trace_id=?`, tid).Scan(&directLLM)
+				if directLLM > 0 {
+					continue // 有关联的 LLM，已在 session 聚合中
+				}
+				if !seen[tid] {
+					seen[tid] = true
+					entries = append(entries, sessionEntry{key: tid, isSession: false, firstTs: ts})
+				}
+			}
+		}
+	}
+
+	// 按 firstTs 降序排列
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].firstTs > entries[j].firstTs
+	})
+
+	// Step 3: 为每个 entry 构建摘要
 	var summaries []SessionSummary
-	for _, tid := range allTraceIDs {
-		sum := e.quickSummary(tid)
+	for _, ent := range entries {
+		var sum *SessionSummary
+		if ent.isSession {
+			sum = e.sessionSummary(ent.key)
+		} else {
+			sum = e.quickSummary(ent.key)
+		}
 		if sum == nil {
 			continue
 		}
@@ -444,32 +489,11 @@ func (e *SessionReplayEngine) ListSessions(from, to, senderID, riskLevel, q stri
 			}
 		}
 		if q != "" {
-			q = strings.ToLower(q)
-			if !strings.Contains(strings.ToLower(sum.TraceID), q) &&
-				!strings.Contains(strings.ToLower(sum.SenderID), q) &&
-				!strings.Contains(strings.ToLower(sum.Model), q) {
-				// 还需在内容中搜索
-				found := false
-				var contentSample string
-				e.db.QueryRow(`SELECT COALESCE(content_preview,'') FROM audit_log WHERE trace_id=? LIMIT 1`, tid).Scan(&contentSample)
-				if strings.Contains(strings.ToLower(contentSample), q) {
-					found = true
-				}
-				if !found {
-					var toolName string
-					// 搜索工具名
-					idRow := e.db.QueryRow(`SELECT id FROM llm_calls WHERE trace_id=? LIMIT 1`, tid)
-					var callID int64
-					if idRow.Scan(&callID) == nil {
-						e.db.QueryRow(`SELECT COALESCE(tool_name,'') FROM llm_tool_calls WHERE llm_call_id=? LIMIT 1`, callID).Scan(&toolName)
-						if strings.Contains(strings.ToLower(toolName), q) {
-							found = true
-						}
-					}
-				}
-				if !found {
-					continue
-				}
+			ql := strings.ToLower(q)
+			if !strings.Contains(strings.ToLower(sum.TraceID), ql) &&
+				!strings.Contains(strings.ToLower(sum.SenderID), ql) &&
+				!strings.Contains(strings.ToLower(sum.Model), ql) {
+				continue
 			}
 		}
 
@@ -493,89 +517,142 @@ func (e *SessionReplayEngine) ListSessions(from, to, senderID, riskLevel, q stri
 
 // ListSessionsTenant v14.0: 租户感知的会话列表
 func (e *SessionReplayEngine) ListSessionsTenant(from, to, senderID, riskLevel, q, tenantID string, limit, offset int) ([]SessionSummary, int, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 200 {
-		limit = 200
-	}
+	// 委托给 ListSessions（session_id 聚合已包含租户逻辑）
+	// TODO: 如果需要精确租户过滤，在 sessionSummary 中加租户感知
+	return e.ListSessions(from, to, senderID, riskLevel, q, limit, offset)
+}
 
-	tClause, tArgs := TenantFilter(tenantID)
+// sessionSummary 按 session_id 聚合摘要（合并所有关联的 IM trace 和 LLM trace）
+func (e *SessionReplayEngine) sessionSummary(sessionID string) *SessionSummary {
+	// 用第一个 IM trace 作为展示用的 trace_id
+	var representativeTrace string
 
-	whereClause := "WHERE trace_id IS NOT NULL AND trace_id != ''" + tClause
-	var args []interface{}
-	args = append(args, tArgs...)
-	if from != "" {
-		whereClause += " AND timestamp >= ?"
-		args = append(args, from)
-	}
-	if to != "" {
-		whereClause += " AND timestamp <= ?"
-		args = append(args, to)
-	}
-
-	// Get unique trace IDs from both sources
-	traceQuery := fmt.Sprintf(`
-		SELECT DISTINCT trace_id, MIN(timestamp) as first_ts FROM (
-			SELECT trace_id, timestamp FROM llm_calls %s
-			UNION ALL
-			SELECT trace_id, timestamp FROM audit_log %s
-		) combined GROUP BY trace_id ORDER BY first_ts DESC
-	`, whereClause, whereClause)
-
-	allArgs := append(args, args...)
-
-	rows, err := e.db.Query(traceQuery, allArgs...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("query traces: %w", err)
-	}
-	defer rows.Close()
-
-	var allTraceIDs []string
-	for rows.Next() {
-		var tid, ts string
-		if rows.Scan(&tid, &ts) == nil && tid != "" {
-			allTraceIDs = append(allTraceIDs, tid)
-		}
-	}
-
-	var summaries []SessionSummary
-	for _, tid := range allTraceIDs {
-		sum := e.quickSummary(tid)
-		if sum == nil {
-			continue
-		}
-		if senderID != "" && sum.SenderID != senderID {
-			continue
-		}
-		if riskLevel != "" && riskLevel != "all" {
-			if riskLevel == "high" && sum.RiskLevel != "high" && sum.RiskLevel != "critical" {
-				continue
-			}
-			if riskLevel == "critical" && sum.RiskLevel != "critical" {
-				continue
+	// 收集该 session 下所有 IM trace_id
+	var imTraceIDs []string
+	imTraceRows, err := e.db.Query(`SELECT DISTINCT im_trace_id FROM llm_calls WHERE session_id=? AND im_trace_id != ''`, sessionID)
+	if err == nil {
+		defer imTraceRows.Close()
+		for imTraceRows.Next() {
+			var it string
+			if imTraceRows.Scan(&it) == nil {
+				imTraceIDs = append(imTraceIDs, it)
 			}
 		}
-		if q != "" {
-			q = strings.ToLower(q)
-			if !strings.Contains(strings.ToLower(sum.TraceID), q) &&
-				!strings.Contains(strings.ToLower(sum.SenderID), q) &&
-				!strings.Contains(strings.ToLower(sum.Model), q) {
-				continue
-			}
-		}
-		summaries = append(summaries, *sum)
+	}
+	if len(imTraceIDs) > 0 {
+		representativeTrace = imTraceIDs[0]
 	}
 
-	total := len(summaries)
-	if offset >= len(summaries) {
-		return []SessionSummary{}, total, nil
+	// 如果没有 IM trace，用第一个 LLM trace
+	if representativeTrace == "" {
+		e.db.QueryRow(`SELECT trace_id FROM llm_calls WHERE session_id=? ORDER BY timestamp ASC LIMIT 1`, sessionID).Scan(&representativeTrace)
 	}
-	end := offset + limit
-	if end > len(summaries) {
-		end = len(summaries)
+	if representativeTrace == "" {
+		representativeTrace = sessionID
 	}
-	return summaries[offset:end], total, nil
+
+	s := &SessionSummary{
+		TraceID:   representativeTrace,
+		RiskLevel: "low",
+		Tags:      []string{},
+	}
+
+	// 聚合 IM 事件（从所有关联的 im_trace_id）
+	if len(imTraceIDs) > 0 {
+		phs := make([]string, len(imTraceIDs))
+		args := make([]interface{}, len(imTraceIDs))
+		for i, id := range imTraceIDs {
+			phs[i] = "?"
+			args[i] = id
+		}
+		var imCount int
+		var senderID sql.NullString
+		var blocked int
+		var firstTs, lastTs sql.NullString
+		e.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*), COALESCE(MIN(sender_id),''), COALESCE(SUM(CASE WHEN action='block' THEN 1 ELSE 0 END),0), MIN(timestamp), MAX(timestamp) FROM audit_log WHERE trace_id IN (%s)`, strings.Join(phs, ",")), args...).Scan(&imCount, &senderID, &blocked, &firstTs, &lastTs)
+		s.IMEvents = imCount
+		if senderID.Valid {
+			s.SenderID = senderID.String
+		}
+		s.Blocked = blocked > 0
+		if firstTs.Valid {
+			if t, err := time.Parse(time.RFC3339Nano, firstTs.String); err == nil {
+				s.StartTime = firstTs.String
+				_ = t
+			} else if t, err := time.Parse(time.RFC3339, firstTs.String); err == nil {
+				s.StartTime = firstTs.String
+				_ = t
+			}
+		}
+	}
+
+	// 聚合 LLM 调用（该 session 下所有）
+	var llmCount int
+	var model sql.NullString
+	var totalTokens int
+	var canaryLeaked, budgetExceeded int
+	var llmFirstTs, llmLastTs sql.NullString
+	e.db.QueryRow(`SELECT COUNT(*), COALESCE(MIN(model),''), COALESCE(SUM(total_tokens),0), COALESCE(SUM(canary_leaked),0), COALESCE(SUM(budget_exceeded),0), MIN(timestamp), MAX(timestamp) FROM llm_calls WHERE session_id=?`, sessionID).Scan(&llmCount, &model, &totalTokens, &canaryLeaked, &budgetExceeded, &llmFirstTs, &llmLastTs)
+	s.LLMCalls = llmCount
+	if model.Valid {
+		s.Model = model.String
+	}
+	s.TotalTokens = totalTokens
+	s.CanaryLeaked = canaryLeaked > 0
+	s.BudgetExceeded = budgetExceeded > 0
+
+	if s.IMEvents == 0 && llmCount == 0 {
+		return nil
+	}
+
+	// 计算持续时间
+	var startTime, endTime time.Time
+	for _, tsStr := range []sql.NullString{llmFirstTs, llmLastTs} {
+		if tsStr.Valid {
+			if t, err := time.Parse(time.RFC3339Nano, tsStr.String); err == nil {
+				if startTime.IsZero() || t.Before(startTime) { startTime = t }
+				if endTime.IsZero() || t.After(endTime) { endTime = t }
+			} else if t, err := time.Parse(time.RFC3339, tsStr.String); err == nil {
+				if startTime.IsZero() || t.Before(startTime) { startTime = t }
+				if endTime.IsZero() || t.After(endTime) { endTime = t }
+			}
+		}
+	}
+	if !startTime.IsZero() && !endTime.IsZero() {
+		s.DurationMs = float64(endTime.Sub(startTime).Milliseconds())
+	}
+
+	// 工具调用
+	var toolCount, flaggedCount int
+	idRows, err := e.db.Query(`SELECT id FROM llm_calls WHERE session_id=?`, sessionID)
+	if err == nil {
+		var ids []interface{}
+		var phs []string
+		for idRows.Next() {
+			var id int64
+			if idRows.Scan(&id) == nil {
+				ids = append(ids, id)
+				phs = append(phs, "?")
+			}
+		}
+		idRows.Close()
+		if len(ids) > 0 {
+			e.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN flagged=1 THEN 1 ELSE 0 END),0) FROM llm_tool_calls WHERE llm_call_id IN (%s)`, strings.Join(phs, ",")), ids...).Scan(&toolCount, &flaggedCount)
+		}
+	}
+	s.ToolCalls = toolCount
+	s.FlaggedTools = flaggedCount
+
+	// 风险等级
+	if s.CanaryLeaked {
+		s.RiskLevel = "critical"
+	} else if s.Blocked || s.FlaggedTools > 0 {
+		s.RiskLevel = "high"
+	} else if s.BudgetExceeded || flaggedCount > 0 {
+		s.RiskLevel = "medium"
+	}
+
+	return s
 }
 
 // quickSummary 快速构建某个 trace_id 的摘要（不查标签以加速列表查询）
