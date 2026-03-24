@@ -157,6 +157,7 @@ const allNavItems = {
   // 策略引擎
   'rules':             { path: '/rules',          label: '入站规则',       icon: 'shield' },
   'llm-rules':         { path: '/llm-rules',      label: 'LLM 规则',      icon: 'shield-check' },
+  'llm-targets':       { path: '/llm-targets',    label: 'LLM 目标',      icon: 'globe' },
   'tools':             { path: '/tools',          label: '工具策略',       icon: 'wrench' },
   'evolution':         { path: '/evolution',      label: '自进化',         icon: 'dna' },
   'cache':             { path: '/cache',          label: '响应缓存',       icon: 'save' },

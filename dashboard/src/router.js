@@ -15,6 +15,7 @@ const routes = [
   { path: '/user-profiles/:id', name: 'user-detail', component: () => import('./views/UserDetail.vue'), meta: { title: '用户详情', icon: 'user-scan', group: 'threat' } },
   { path: '/llm', name: 'llm', component: () => import('./views/LLMOverview.vue'), meta: { title: 'LLM 概览', icon: 'brain', group: 'llm' } },
   { path: '/llm-rules', name: 'llm-rules', component: () => import('./views/LLMRules.vue'), meta: { title: 'LLM 规则', icon: 'shield', group: 'llm' } },
+  { path: '/llm-targets', name: 'llm-targets', component: () => import('./views/LLMTargets.vue'), meta: { title: 'LLM 目标', icon: 'globe', group: 'llm' } },
   { path: '/agent', name: 'agent', component: () => import('./views/AgentBehavior.vue'), meta: { title: 'Agent 行为', icon: 'bot', group: 'llm' } },
   { path: '/behavior', name: 'behavior', component: () => import('./views/BehaviorProfile.vue'), meta: { title: '行为画像', icon: 'behavior', group: 'threat' } },
   { path: '/sessions', name: 'sessions', component: () => import('./views/SessionReplay.vue'), meta: { title: '会话回放', icon: 'film', group: 'llm' } },

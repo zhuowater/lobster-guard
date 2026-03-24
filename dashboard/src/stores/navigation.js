@@ -20,7 +20,7 @@ const TABS = {
     icon: 'settings',
     groups: [
       { label: 'IM 策略', routes: ['rules', 'routes', 'upstream'] },
-      { label: 'LLM 策略', routes: ['llm-rules', 'tools', 'cache', 'gateway'] },
+      { label: 'LLM 策略', routes: ['llm-rules', 'llm-targets', 'tools', 'cache', 'gateway'] },
       { label: '系统策略', routes: ['evolution', 'envelopes', 'events', 'ab-testing'] }
     ]
   },

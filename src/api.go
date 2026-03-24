@@ -656,6 +656,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			api.handleLLMConfigGet(w, r)
 		case path == "/api/v1/llm/config" && method == "PUT":
 			api.handleLLMConfigPut(w, r)
+		// v10.2: LLM Targets CRUD API（不需要 llmAuditor）
+		case path == "/api/v1/llm/targets" && method == "GET":
+			api.handleLLMTargetsList(w, r)
+		case path == "/api/v1/llm/targets" && method == "POST":
+			api.handleLLMTargetsCreate(w, r)
+		case strings.HasPrefix(path, "/api/v1/llm/targets/") && method == "PUT":
+			api.handleLLMTargetsUpdate(w, r)
+		case strings.HasPrefix(path, "/api/v1/llm/targets/") && method == "DELETE":
+			api.handleLLMTargetsDelete(w, r)
 		// v10.0: LLM 规则 API（不需要 llmAuditor）
 		case path == "/api/v1/llm/rules" && method == "GET":
 			api.handleLLMRulesList(w, r)
@@ -5397,6 +5406,7 @@ func (api *ManagementAPI) saveLLMConfig() error {
 			"name":           t.Name,
 			"upstream":       t.Upstream,
 			"path_prefix":    t.PathPrefix,
+			"strip_prefix":   t.StripPrefix,
 			"api_key_header": t.APIKeyHeader,
 		}
 	}
@@ -5488,6 +5498,170 @@ func (api *ManagementAPI) saveLLMConfig() error {
 // ============================================================
 // v10.0 LLM 规则 CRUD API
 // ============================================================
+
+// ─── LLM Targets CRUD ────────────────────────────────────────────────────────
+
+// handleLLMTargetsList GET /api/v1/llm/targets — LLM 上游目标列表
+func (api *ManagementAPI) handleLLMTargetsList(w http.ResponseWriter, r *http.Request) {
+	targets := api.cfg.LLMProxy.Targets
+	if targets == nil {
+		targets = []LLMTargetConfig{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"targets": targets,
+		"total":   len(targets),
+	})
+}
+
+// handleLLMTargetsCreate POST /api/v1/llm/targets — 新建上游目标
+func (api *ManagementAPI) handleLLMTargetsCreate(w http.ResponseWriter, r *http.Request) {
+	var req LLMTargetConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	if req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "name is required"})
+		return
+	}
+	if req.Upstream == "" {
+		jsonResponse(w, 400, map[string]string{"error": "upstream is required"})
+		return
+	}
+	// 检查名称重复
+	for _, t := range api.cfg.LLMProxy.Targets {
+		if t.Name == req.Name {
+			jsonResponse(w, 409, map[string]string{"error": "target with name '" + req.Name + "' already exists"})
+			return
+		}
+	}
+
+	api.cfg.LLMProxy.Targets = append(api.cfg.LLMProxy.Targets, req)
+
+	// 热更新 LLM 代理的目标列表
+	if api.llmProxy != nil {
+		api.llmProxy.cfg.Targets = api.cfg.LLMProxy.Targets
+	}
+
+	if err := api.saveLLMConfig(); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("[LLM目标] 新建目标: %s → %s (prefix=%s)", req.Name, req.Upstream, req.PathPrefix)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "created",
+		"target": req,
+		"total":  len(api.cfg.LLMProxy.Targets),
+	})
+}
+
+// handleLLMTargetsUpdate PUT /api/v1/llm/targets/:name — 编辑上游目标（部分更新）
+func (api *ManagementAPI) handleLLMTargetsUpdate(w http.ResponseWriter, r *http.Request) {
+	targetName := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/targets/")
+	if targetName == "" {
+		jsonResponse(w, 400, map[string]string{"error": "target name required"})
+		return
+	}
+
+	// 使用 raw JSON 解析以区分"未传"和"传了零值"
+	bodyBytes, _ := io.ReadAll(r.Body)
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &rawFields); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	found := false
+	var updated LLMTargetConfig
+	for i, existing := range api.cfg.LLMProxy.Targets {
+		if existing.Name == targetName {
+			updated = existing
+			if v, ok := rawFields["upstream"]; ok {
+				json.Unmarshal(v, &updated.Upstream)
+			}
+			if v, ok := rawFields["path_prefix"]; ok {
+				json.Unmarshal(v, &updated.PathPrefix)
+			}
+			if v, ok := rawFields["strip_prefix"]; ok {
+				json.Unmarshal(v, &updated.StripPrefix)
+			}
+			if v, ok := rawFields["api_key_header"]; ok {
+				json.Unmarshal(v, &updated.APIKeyHeader)
+			}
+			api.cfg.LLMProxy.Targets[i] = updated
+			found = true
+			break
+		}
+	}
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "target not found: " + targetName})
+		return
+	}
+
+	// 热更新 LLM 代理的目标列表
+	if api.llmProxy != nil {
+		api.llmProxy.cfg.Targets = api.cfg.LLMProxy.Targets
+	}
+
+	if err := api.saveLLMConfig(); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("[LLM目标] 更新目标: %s", targetName)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "updated",
+		"target": updated,
+	})
+}
+
+// handleLLMTargetsDelete DELETE /api/v1/llm/targets/:name — 删除上游目标
+func (api *ManagementAPI) handleLLMTargetsDelete(w http.ResponseWriter, r *http.Request) {
+	targetName := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/targets/")
+	if targetName == "" {
+		jsonResponse(w, 400, map[string]string{"error": "target name required"})
+		return
+	}
+
+	found := false
+	var newTargets []LLMTargetConfig
+	for _, existing := range api.cfg.LLMProxy.Targets {
+		if existing.Name == targetName {
+			found = true
+			continue
+		}
+		newTargets = append(newTargets, existing)
+	}
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "target not found: " + targetName})
+		return
+	}
+
+	if newTargets == nil {
+		newTargets = []LLMTargetConfig{}
+	}
+	api.cfg.LLMProxy.Targets = newTargets
+
+	// 热更新 LLM 代理的目标列表
+	if api.llmProxy != nil {
+		api.llmProxy.cfg.Targets = api.cfg.LLMProxy.Targets
+	}
+
+	if err := api.saveLLMConfig(); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("[LLM目标] 删除目标: %s", targetName)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":      "deleted",
+		"target_name": targetName,
+		"total":       len(newTargets),
+	})
+}
+
+// ─── LLM Rules CRUD ─────────────────────────────────────────────────────────
 
 // handleLLMRulesList GET /api/v1/llm/rules — LLM 规则列表
 func (api *ManagementAPI) handleLLMRulesList(w http.ResponseWriter, r *http.Request) {
