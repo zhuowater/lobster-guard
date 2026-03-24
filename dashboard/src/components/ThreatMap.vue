@@ -21,7 +21,8 @@
         <path id="path-inbound-oc" :d="bezierH(gInbound.x+gInbound.r, gInbound.y, ocNode.x-ocNode.r, ocNode.y)" fill="none"/>
         <path id="path-oc-llmproxy" :d="bezierDown(ocNode.x, ocNode.y+ocNode.r, gLLM.x, gLLM.y-gLLM.r)" fill="none"/>
         <path id="path-llmproxy-claude" :d="bezierH(gLLM.x+gLLM.r, gLLM.y, claudeNode.x-claudeNode.r, claudeNode.y)" fill="none"/>
-        <path id="path-claude-oc" :d="returnArc(claudeNode.x-claudeNode.r, claudeNode.y, ocNode.x+ocNode.r, ocNode.y, 65)" fill="none"/>
+        <path id="path-claude-llm" :d="bezierH(claudeNode.x-claudeNode.r, claudeNode.y, gLLM.x+gLLM.r, gLLM.y)" fill="none"/>
+        <path id="path-llm-oc" :d="returnArc(gLLM.x-gLLM.r, gLLM.y, ocNode.x+ocNode.r/2, ocNode.y+ocNode.r, 40)" fill="none"/>
         <path id="path-oc-outbound" :d="bezierDown(ocNode.x, ocNode.y+ocNode.r, gOutbound.x, gOutbound.y-gOutbound.r)" fill="none"/>
         <path v-for="s in imNodes" :key="'p-out-im-'+s.id" :id="'path-outbound-im-'+s.id" :d="returnArcH(gOutbound.x-gOutbound.r, gOutbound.y, s.x+s.r, s.y, 25)" fill="none"/>
       </defs>
@@ -36,14 +37,16 @@
       <path :d="bezierH(gInbound.x+gInbound.r, gInbound.y, ocNode.x-ocNode.r, ocNode.y)" fill="none" stroke="rgba(59,130,246,0.20)" stroke-width="1.5" stroke-dasharray="6 4" class="tm-flow-line"/>
       <path :d="bezierDown(ocNode.x, ocNode.y+ocNode.r, gLLM.x, gLLM.y-gLLM.r)" fill="none" stroke="rgba(139,92,246,0.20)" stroke-width="1.5" stroke-dasharray="6 4" class="tm-flow-line"/>
       <path :d="bezierH(gLLM.x+gLLM.r, gLLM.y, claudeNode.x-claudeNode.r, claudeNode.y)" fill="none" stroke="rgba(139,92,246,0.20)" stroke-width="1.5" stroke-dasharray="6 4" class="tm-flow-line"/>
-      <path :d="returnArc(claudeNode.x-claudeNode.r, claudeNode.y, ocNode.x+ocNode.r, ocNode.y, 65)" fill="none" stroke="rgba(168,85,247,0.15)" stroke-width="1" stroke-dasharray="4 6" class="tm-flow-line-rev"/>
+      <path :d="bezierH(claudeNode.x-claudeNode.r, claudeNode.y, gLLM.x+gLLM.r, gLLM.y)" fill="none" stroke="rgba(168,85,247,0.15)" stroke-width="1" stroke-dasharray="4 6" class="tm-flow-line-rev"/>
+      <path :d="returnArc(gLLM.x-gLLM.r, gLLM.y, ocNode.x+ocNode.r/2, ocNode.y+ocNode.r, 40)" fill="none" stroke="rgba(99,102,241,0.15)" stroke-width="1" stroke-dasharray="4 6" class="tm-flow-line-rev"/>
       <path :d="bezierDown(ocNode.x, ocNode.y+ocNode.r, gOutbound.x, gOutbound.y-gOutbound.r)" fill="none" stroke="rgba(245,158,11,0.20)" stroke-width="1.5" stroke-dasharray="6 4" class="tm-flow-line"/>
       <g v-for="s in imNodes" :key="'cl-out-'+s.id"><path :d="returnArcH(gOutbound.x-gOutbound.r, gOutbound.y, s.x+s.r, s.y, 25)" fill="none" stroke="rgba(245,158,11,0.12)" stroke-width="1" stroke-dasharray="4 6" class="tm-flow-line-rev"/></g>
       <text :x="(colIM+colGuard)/2" :y="gInbound.y-22" text-anchor="middle" font-size="10" fill="rgba(34,197,94,0.55)" font-weight="600">① 用户消息</text>
       <text :x="(colGuard+colOC)/2" :y="gInbound.y-12" text-anchor="middle" font-size="10" fill="rgba(59,130,246,0.55)" font-weight="600">② 检测通过</text>
       <text :x="colGuard+160" :y="(ocNode.y+gLLM.y)/2-5" text-anchor="middle" font-size="10" fill="rgba(139,92,246,0.55)" font-weight="600">③ LLM调用</text>
       <text :x="(gLLM.x+claudeNode.x)/2" :y="gLLM.y-18" text-anchor="middle" font-size="10" fill="rgba(139,92,246,0.5)" font-weight="600">④ API请求</text>
-      <text :x="(colOC+colLLM)/2" :y="claudeNode.y+55" text-anchor="middle" font-size="10" fill="rgba(168,85,247,0.5)" font-weight="600">⑤ LLM响应</text>
+      <text :x="(gLLM.x+claudeNode.x)/2" :y="claudeNode.y+55" text-anchor="middle" font-size="10" fill="rgba(168,85,247,0.5)" font-weight="600">⑤ LLM响应检测</text>
+      <text :x="colGuard-40" :y="gLLM.y+gLLM.r+32" text-anchor="middle" font-size="10" fill="rgba(99,102,241,0.5)" font-weight="600">⑤b 安全回传</text>
       <text :x="colGuard+160" :y="(ocNode.y+gOutbound.y)/2+18" text-anchor="middle" font-size="10" fill="rgba(245,158,11,0.55)" font-weight="600">⑥ Agent回复</text>
       <text :x="(colIM+colGuard)/2" :y="gOutbound.y+28" text-anchor="middle" font-size="10" fill="rgba(245,158,11,0.50)" font-weight="600">⑦ 消息送达</text>
       <template v-for="p in particles" :key="p.id">
@@ -51,7 +54,8 @@
         <circle v-if="p.seg==='inbound-oc'" :r="p.r||3.5" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-inbound-oc"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
         <circle v-if="p.seg==='oc-llmproxy'" :r="p.r||3.5" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-oc-llmproxy"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
         <circle v-if="p.seg==='llmproxy-claude'" :r="p.r||3.5" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-llmproxy-claude"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
-        <circle v-if="p.seg==='claude-oc'" :r="p.r||3" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-claude-oc"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
+        <circle v-if="p.seg==='claude-llm'" :r="p.r||3" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-claude-llm"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
+        <circle v-if="p.seg==='llm-oc'" :r="p.r||3" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-llm-oc"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
         <circle v-if="p.seg==='oc-outbound'" :r="p.r||3.5" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath href="#path-oc-outbound"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
         <circle v-if="p.seg==='outbound-im'" :r="p.r||3" :fill="p.color" opacity="0" :filter="p.filter"><animateMotion :dur="p.dur+'s'" fill="freeze" repeatCount="1" :begin="p.begin+'s'"><mpath :href="'#path-outbound-im-'+p.nodeId"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" :dur="p.dur+'s'" :begin="p.begin+'s'" fill="freeze"/></circle>
         <circle v-if="p.seg==='block-inbound'" :cx="gInbound.x" :cy="gInbound.y" r="0" fill="none" stroke="#ef4444" stroke-width="2.5" opacity="0"><animate attributeName="r" values="0;36" dur="0.7s" :begin="p.begin+'s'" fill="freeze"/><animate attributeName="opacity" values="0.9;0" dur="0.7s" :begin="p.begin+'s'" fill="freeze"/></circle>
@@ -354,12 +358,14 @@ function spawnAmbient() {
     np.push({ id: ++pid, seg: 'oc-llmproxy', color: '#8b5cf6', filter: 'url(#glow-purple)', dur: 1.2, begin: d + 3.2, r: 3.5 })
     // LLM Proxy -> Claude (purple)
     np.push({ id: ++pid, seg: 'llmproxy-claude', color: '#a78bfa', filter: 'url(#glow-purple)', dur: 1.5, begin: d + 4.7, r: 3.5 })
-    // Claude -> OC (return, light purple)
-    np.push({ id: ++pid, seg: 'claude-oc', color: '#c4b5fd', filter: 'url(#glow-purple)', dur: 1.5, begin: d + 6.5, r: 3 })
+    // Claude -> LLM 检测 (return, light purple)
+    np.push({ id: ++pid, seg: 'claude-llm', color: '#c4b5fd', filter: 'url(#glow-purple)', dur: 1.2, begin: d + 6.5, r: 3 })
+    // LLM 检测 -> OC (return, indigo)
+    np.push({ id: ++pid, seg: 'llm-oc', color: '#a5b4fc', filter: 'url(#glow-blue)', dur: 1.0, begin: d + 7.9, r: 3 })
     // OC -> Outbound (orange)
-    np.push({ id: ++pid, seg: 'oc-outbound', color: '#f59e0b', filter: 'url(#glow-orange)', dur: 1.2, begin: d + 8.3, r: 3.5 })
+    np.push({ id: ++pid, seg: 'oc-outbound', color: '#f59e0b', filter: 'url(#glow-orange)', dur: 1.2, begin: d + 9.2, r: 3.5 })
     // Outbound -> IM (return, green)
-    np.push({ id: ++pid, seg: 'outbound-im', nodeId: si, color: '#22c55e', filter: 'url(#glow-green)', dur: 1.8, begin: d + 9.8, r: 3 })
+    np.push({ id: ++pid, seg: 'outbound-im', nodeId: si, color: '#22c55e', filter: 'url(#glow-green)', dur: 1.8, begin: d + 10.7, r: 3 })
   }
 
   const cut = now - 25

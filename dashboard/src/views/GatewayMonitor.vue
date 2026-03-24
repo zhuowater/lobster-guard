@@ -177,7 +177,7 @@
                   <td colspan="8">
                     <div class="detail-panel" :key="'detail-'+up.id">
                       <div class="dtabs">
-                        <button v-for="t in tabs" :key="t.key" class="dtab" :class="{ active: activeTab === t.key }" @click="switchTab(t.key, up.id)">{{ t.icon }} {{ t.label }}</button>
+                        <button v-for="t in tabs" :key="t.key" class="dtab" :class="{ active: activeTab === t.key }" @click="switchTab(t.key, up.id)" v-show="t.key !== 'agent' || up.gateway_status === 'connected'">{{ t.icon }} {{ t.label }}</button>
                       </div>
                       <!-- Sessions -->
                       <div v-if="activeTab === 'sessions'" class="dtab-body">
@@ -245,6 +245,270 @@
                           </div>
                         </div>
                       </div>
+                      <!-- Agent Tab (AOC per-upstream) -->
+                      <div v-if="activeTab === 'agent'" class="dtab-body aoc-section aoc-inline">
+                        <div class="section-header">
+                          <h3 class="section-title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            Agent 运营中心 <span class="badge-count">{{ expandedAgents.length }}</span>
+                          </h3>
+                          <div class="aoc-view-toggle">
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'dashboard' }" @click="aocView='dashboard'" title="仪表盘">📊</button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'cards' }" @click="aocView='cards'" title="详情卡片">🃏</button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'collab' }" @click="aocView='collab'" title="协作视图">🌳</button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'users' }" @click="aocView='users'" title="用户归因">👥</button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'skills' }" @click="switchToSkills" title="Skill 目录">🧩</button>
+                          </div>
+                        </div>
+
+                        <!-- ===== 1. 总览仪表盘 ===== -->
+                        <div v-if="aocView === 'dashboard'" class="aoc-dashboard">
+                          <div class="aoc-stat-strip">
+                            <div class="aoc-mini-stat">
+                              <div class="ams-value">{{ expandedAgentStats.total }}</div>
+                              <div class="ams-label">Agent 总数</div>
+                            </div>
+                            <div class="aoc-mini-stat">
+                              <div class="ams-value ams-green">{{ expandedAgentStats.active }}</div>
+                              <div class="ams-label">活跃 Agent</div>
+                            </div>
+                            <div class="aoc-mini-stat">
+                              <div class="ams-value ams-cyan">{{ fmtTokensShort(expandedAgentStats.totalTokens) }}</div>
+                              <div class="ams-label">总 Token 消耗</div>
+                            </div>
+                            <div class="aoc-mini-stat">
+                              <div class="ams-value ams-indigo">{{ expandedAgentStats.totalSessions }}</div>
+                              <div class="ams-label">总会话数</div>
+                            </div>
+                            <div class="aoc-mini-stat">
+                              <div class="ams-value" :class="expandedAgentStats.abortedCount > 0 ? 'ams-red' : 'ams-green'">{{ expandedAgentStats.abortedCount }}</div>
+                              <div class="ams-label">异常中断</div>
+                            </div>
+                          </div>
+
+                          <div class="aoc-charts-row">
+                            <div class="aoc-chart-card">
+                              <h4 class="aoc-chart-title">Token 消耗分布</h4>
+                              <div class="aoc-pie-wrap">
+                                <svg viewBox="0 0 120 120" class="aoc-pie-svg">
+                                  <circle v-for="(seg, idx) in expandedTokenPieSegments" :key="idx"
+                                    cx="60" cy="60" r="48" fill="none"
+                                    :stroke="seg.color" stroke-width="22"
+                                    :stroke-dasharray="seg.dash" :stroke-dashoffset="seg.offset"
+                                    :transform="'rotate(-90 60 60)'" />
+                                  <text x="60" y="56" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="700">{{ fmtTokensShort(expandedAgentStats.totalTokens) }}</text>
+                                  <text x="60" y="70" text-anchor="middle" fill="#64748b" font-size="8">总 Token</text>
+                                </svg>
+                                <div class="aoc-pie-legend">
+                                  <div v-for="(seg, idx) in expandedTokenPieSegments" :key="idx" class="aoc-legend-row">
+                                    <span class="aoc-legend-dot" :style="{ background: seg.color }"></span>
+                                    <span class="aoc-legend-name">{{ seg.name }}</span>
+                                    <span class="aoc-legend-val">{{ seg.pctLabel }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div class="aoc-chart-card">
+                              <h4 class="aoc-chart-title">上下文使用率</h4>
+                              <div class="aoc-bars-wrap">
+                                <div v-for="ag in expandedAgents" :key="'bar-'+ag.id" class="aoc-bar-row">
+                                  <div class="aoc-bar-label" :title="ag.id">{{ agentShortId(ag.id) }}</div>
+                                  <div class="aoc-bar-track">
+                                    <div class="aoc-bar-fill" :style="{ width: ag.contextPct + '%', background: contextBarColor(ag.contextPct) }"></div>
+                                  </div>
+                                  <div class="aoc-bar-pct" :style="{ color: contextBarColor(ag.contextPct) }">{{ ag.contextPct }}%</div>
+                                </div>
+                                <div v-if="expandedAgents.length === 0" class="dtab-empty" style="padding:16px 0">暂无数据</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="aoc-ops-strip">
+                            <div class="aoc-ops-item" v-for="gw in expandedGatewayOpsInfo" :key="gw.id">
+                              <div class="aoc-ops-head">
+                                <span class="aoc-ops-gw">{{ gw.id }}</span>
+                                <span v-if="gw.version" class="aoc-ops-ver">v{{ gw.version }}</span>
+                              </div>
+                              <div class="aoc-ops-tags">
+                                <span v-if="gw.mode" class="aoc-ops-tag" :class="'aot-' + gw.mode">{{ gw.mode }}</span>
+                                <span v-if="gw.elevated" class="aoc-ops-tag aot-warn">elevated</span>
+                                <span v-if="gw.compactions > 0" class="aoc-ops-tag aot-info">{{ gw.compactions }} 次压缩</span>
+                                <span v-if="gw.queueDepth > 0" class="aoc-ops-tag aot-warn">队列 {{ gw.queueDepth }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- ===== 2. Agent 详情卡片 ===== -->
+                        <div v-if="aocView === 'cards'" class="aoc-cards-view">
+                          <div class="aoc-agent-grid">
+                            <div v-for="ag in expandedAgents" :key="ag.id + ag.gateway" class="aoc-agent-card" :class="{ 'aoc-card-active': ag.isActive, 'aoc-card-error': ag.hasError }">
+                              <div class="aoc-card-top">
+                                <div class="aoc-card-avatar" :style="{ background: agentColor(ag.id) }">
+                                  {{ agentInitial(ag.id) }}
+                                  <span class="aoc-status-dot" :class="ag.isActive ? 'asd-active' : (ag.hasError ? 'asd-error' : 'asd-idle')"></span>
+                                </div>
+                                <div class="aoc-card-ids">
+                                  <div class="aoc-card-name" :title="ag.id">{{ agentShortId(ag.id) }}</div>
+                                  <div class="aoc-card-gw">{{ ag.gateway }}</div>
+                                </div>
+                                <div class="aoc-card-status-badge" :class="ag.isActive ? 'acsb-active' : (ag.hasError ? 'acsb-error' : 'acsb-idle')">
+                                  {{ ag.isActive ? '活跃' : (ag.hasError ? '异常' : '空闲') }}
+                                </div>
+                              </div>
+                              <div class="aoc-card-model" v-if="ag.model">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                                <span>{{ ag.model }}</span>
+                                <span v-if="ag.provider" class="aoc-provider-tag">{{ ag.provider }}</span>
+                              </div>
+                              <div class="aoc-card-token">
+                                <div class="aoc-token-head">
+                                  <span class="aoc-token-label">Token</span>
+                                  <span class="aoc-token-nums">{{ fmtTokensShort(ag.totalTokens) }} / {{ fmtTokensShort(ag.contextTokens) }}</span>
+                                </div>
+                                <div class="aoc-token-bar">
+                                  <div class="aoc-token-fill" :style="{ width: Math.min(ag.contextPct, 100) + '%', background: contextBarColor(ag.contextPct) }"></div>
+                                </div>
+                                <div class="aoc-token-pct" :style="{ color: contextBarColor(ag.contextPct) }">{{ ag.contextPct }}%</div>
+                              </div>
+                              <div class="aoc-card-sessions">
+                                <span class="aoc-sess-tag" v-if="ag.sessionBreakdown.main > 0">main ×{{ ag.sessionBreakdown.main }}</span>
+                                <span class="aoc-sess-tag aoc-sess-iso" v-if="ag.sessionBreakdown.isolated > 0">isolated ×{{ ag.sessionBreakdown.isolated }}</span>
+                                <span class="aoc-sess-tag aoc-sess-sub" v-if="ag.sessionBreakdown.sub > 0">sub ×{{ ag.sessionBreakdown.sub }}</span>
+                                <span class="aoc-sess-tag aoc-sess-other" v-if="ag.sessionBreakdown.other > 0">other ×{{ ag.sessionBreakdown.other }}</span>
+                              </div>
+                              <div class="aoc-card-footer">
+                                <div class="aoc-footer-item" :title="'通信渠道: ' + ag.channels.join(', ')">
+                                  <span class="aoc-channel-icons">
+                                    <span v-for="ch in ag.channels" :key="ch" class="aoc-ch-icon" :title="ch">{{ channelIcon(ch) }}</span>
+                                  </span>
+                                </div>
+                                <div class="aoc-footer-item" v-if="ag.users.length > 0" :title="'用户: ' + ag.users.join(', ')">
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                  <span>{{ ag.users.length }}</span>
+                                </div>
+                                <div class="aoc-footer-item aoc-footer-time" :title="'最后活跃: ' + new Date(ag.lastActive).toLocaleString()">{{ fmtTime(ag.lastActive) }}</div>
+                              </div>
+                              <div v-if="ag.hasError" class="aoc-card-warn">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                abortedLastRun
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- ===== 3. 协作视图 ===== -->
+                        <div v-if="aocView === 'collab'" class="aoc-collab-view">
+                          <div v-for="gw in expandedCollabTree" :key="gw.gateway" class="aoc-collab-gw">
+                            <div class="aoc-collab-gw-head" :style="{ borderLeftColor: gatewayColor(gw.gateway) }">
+                              <span class="aoc-collab-gw-name">{{ gw.gateway }}</span>
+                              <span class="aoc-collab-gw-count">{{ gw.agents.length }} agent{{ gw.agents.length > 1 ? 's' : '' }}</span>
+                            </div>
+                            <div v-for="agent in gw.agents" :key="agent.id" class="aoc-collab-agent">
+                              <div class="aoc-collab-agent-head">
+                                <div class="aoc-collab-avatar" :style="{ background: agentColor(agent.id) }">{{ agentInitial(agent.id) }}</div>
+                                <span class="aoc-collab-agent-name">{{ agentShortId(agent.id) }}</span>
+                                <span class="aoc-collab-model" v-if="agent.model">{{ agent.model }}</span>
+                              </div>
+                              <div class="aoc-collab-sessions">
+                                <div v-for="sess in agent.sessions" :key="sess.key" class="aoc-collab-sess" :class="'acs-' + sess.kind">
+                                  <span class="aoc-collab-sess-icon">{{ sessionKindIcon(sess.kind) }}</span>
+                                  <span class="aoc-collab-sess-type">{{ sess.kind }}</span>
+                                  <span class="aoc-collab-sess-ch">{{ sess.channel || '—' }}</span>
+                                  <span class="aoc-collab-sess-model">{{ sess.model || '—' }}</span>
+                                  <span class="aoc-collab-sess-tokens">{{ fmtTokensShort(sess.totalTokens || 0) }}</span>
+                                  <span class="aoc-collab-sess-time">{{ fmtTime(sess.updatedAt) }}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-if="gw.cronJobs && gw.cronJobs.length > 0" class="aoc-collab-cron">
+                              <div class="aoc-collab-cron-title">⏰ 定时任务</div>
+                              <div v-for="cj in gw.cronJobs" :key="cj.id || cj.name" class="aoc-collab-cron-item">
+                                <span class="aoc-cron-name">{{ cj.name || cj.id }}</span>
+                                <span class="gw-badge" :class="cj.enabled !== false ? 'gw-connected' : 'gw-not_configured'">{{ cj.enabled !== false ? '启用' : '禁用' }}</span>
+                                <code class="mono-sm">{{ cj.schedule || cj.cron || '—' }}</code>
+                              </div>
+                            </div>
+                          </div>
+                          <div v-if="expandedCollabTree.length === 0" class="dtab-empty">暂无协作数据</div>
+                        </div>
+
+                        <!-- ===== 4. 用户归因视图 ===== -->
+                        <div v-if="aocView === 'users'" class="aoc-users-view">
+                          <div class="aoc-users-grid">
+                            <div v-for="user in expandedUserAttribution" :key="user.id" class="aoc-user-card">
+                              <div class="aoc-user-top">
+                                <div class="aoc-user-avatar" :style="{ background: agentColor(user.id) }">{{ (user.displayName || user.id).charAt(0).toUpperCase() }}</div>
+                                <div class="aoc-user-info">
+                                  <div class="aoc-user-name">{{ user.displayName || user.id }}</div>
+                                  <div class="aoc-user-channel">{{ user.channels.join(', ') }}</div>
+                                </div>
+                              </div>
+                              <div class="aoc-user-ring-row">
+                                <svg viewBox="0 0 80 80" class="aoc-user-ring-svg">
+                                  <circle cx="40" cy="40" r="32" fill="none" stroke="#1e293b" stroke-width="6" />
+                                  <circle cx="40" cy="40" r="32" fill="none" :stroke="contextBarColor(user.tokenPct)" stroke-width="6"
+                                    :stroke-dasharray="(user.tokenPct / 100 * 201.06) + ' ' + (201.06 - user.tokenPct / 100 * 201.06)"
+                                    stroke-dashoffset="0" transform="rotate(-90 40 40)" stroke-linecap="round" />
+                                  <text x="40" y="38" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">{{ user.tokenPct }}%</text>
+                                  <text x="40" y="50" text-anchor="middle" fill="#64748b" font-size="7">{{ fmtTokensShort(user.totalTokens) }}</text>
+                                </svg>
+                                <div class="aoc-user-ring-detail">
+                                  <div class="aoc-urd-row"><span class="aoc-urd-label">会话</span><span class="aoc-urd-val">{{ user.sessionCount }}</span></div>
+                                  <div class="aoc-urd-row"><span class="aoc-urd-label">Agent</span><span class="aoc-urd-val">{{ user.agentIds.length }}</span></div>
+                                  <div class="aoc-urd-row"><span class="aoc-urd-label">最后活跃</span><span class="aoc-urd-val">{{ fmtTime(user.lastActive) }}</span></div>
+                                </div>
+                              </div>
+                              <div class="aoc-user-agents">
+                                <div v-for="aid in user.agentIds" :key="aid" class="aoc-user-agent-tag">
+                                  <span class="aoc-ua-dot" :style="{ background: agentColor(aid) }"></span>
+                                  {{ agentShortId(aid) }}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div v-if="expandedUserAttribution.length === 0" class="dtab-empty">暂无用户数据</div>
+                        </div>
+
+                        <!-- ===== 5. Skills 视图 ===== -->
+                        <div v-if="aocView === 'skills'" class="aoc-skills-view">
+                          <div class="skills-stat-strip">
+                            <div class="ams-item"><div class="ams-value ams-indigo">{{ skillData.count }}</div><div class="ams-label">总 Skills</div></div>
+                            <div class="ams-item"><div class="ams-value ams-cyan">{{ skillData.summary.global }}</div><div class="ams-label">全局</div></div>
+                            <div class="ams-item"><div class="ams-value ams-green">{{ skillData.summary.user }}</div><div class="ams-label">用户</div></div>
+                            <div class="ams-item"><div class="ams-value" :class="skillData.summary.workspace > 0 ? 'ams-amber' : ''">{{ skillData.summary.workspace }}</div><div class="ams-label">Workspace</div></div>
+                          </div>
+                          <div class="skills-search">
+                            <input v-model="skillSearch" placeholder="搜索 skill 名称或描述..." class="skills-search-input" />
+                            <span class="skills-search-count" v-if="skillSearch">{{ filteredSkills.length }} / {{ skillData.skills.length }}</span>
+                          </div>
+                          <div v-if="skillsLoading" class="skel-lines"><div class="skel-line" v-for="i in 6" :key="i"></div></div>
+                          <template v-else>
+                            <div v-for="group in groupedSkills" :key="group.category" class="skill-group">
+                              <div class="skill-group-header" @click="group.expanded = !group.expanded">
+                                <span class="skill-cat-tag" :class="'scat-' + group.catKey">{{ group.label }}</span>
+                                <span class="skill-group-count">{{ group.skills.length }}</span>
+                                <svg :class="{ 'expand-chevron': true, open: group.expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                              </div>
+                              <div v-if="group.expanded" class="skill-group-body">
+                                <div v-for="sk in group.skills" :key="sk.name + sk.category" class="skill-item">
+                                  <div class="skill-icon">🧩</div>
+                                  <div class="skill-info">
+                                    <div class="skill-name">{{ sk.name }}</div>
+                                    <div class="skill-desc" v-if="sk.description">{{ sk.description }}</div>
+                                  </div>
+                                  <div class="skill-badges">
+                                    <span v-if="sk.has_skill_md" class="skill-badge sb-ok">SKILL.md</span>
+                                    <span v-if="sk.workspace" class="skill-badge sb-ws" :title="sk.workspace">{{ sk.workspace.substring(0, 12) }}...</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-if="filteredSkills.length === 0 && !skillsLoading" class="dtab-empty">{{ skillSearch ? '无匹配 skill' : '暂无 skill 数据' }}</div>
+                          </template>
+                        </div>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -254,299 +518,6 @@
         </div>
       </div>
 
-      <!-- ====== Agent 运营中心 ====== -->
-      <div v-if="enrichedAgents.length > 0 || allCronJobs.length > 0" class="agents-section aoc-section">
-        <div class="section-header">
-          <h3 class="section-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            Agent 运营中心 <span class="badge-count">{{ enrichedAgents.length }}</span>
-          </h3>
-          <div class="aoc-view-toggle">
-            <button class="aoc-vbtn" :class="{ active: aocView === 'dashboard' }" @click="aocView='dashboard'" title="仪表盘">📊</button>
-            <button class="aoc-vbtn" :class="{ active: aocView === 'cards' }" @click="aocView='cards'" title="详情卡片">🃏</button>
-            <button class="aoc-vbtn" :class="{ active: aocView === 'collab' }" @click="aocView='collab'" title="协作视图">🌳</button>
-            <button class="aoc-vbtn" :class="{ active: aocView === 'users' }" @click="aocView='users'" title="用户归因">👥</button>
-            <button class="aoc-vbtn" :class="{ active: aocView === 'skills' }" @click="switchToSkills" title="Skill 目录">🧩</button>
-          </div>
-        </div>
-
-        <!-- ===== 1. 总览仪表盘 ===== -->
-        <div v-if="aocView === 'dashboard'" class="aoc-dashboard">
-          <!-- 统计条 -->
-          <div class="aoc-stat-strip">
-            <div class="aoc-mini-stat">
-              <div class="ams-value">{{ agentStats.total }}</div>
-              <div class="ams-label">Agent 总数</div>
-            </div>
-            <div class="aoc-mini-stat">
-              <div class="ams-value ams-green">{{ agentStats.active }}</div>
-              <div class="ams-label">活跃 Agent</div>
-            </div>
-            <div class="aoc-mini-stat">
-              <div class="ams-value ams-cyan">{{ fmtTokensShort(agentStats.totalTokens) }}</div>
-              <div class="ams-label">总 Token 消耗</div>
-            </div>
-            <div class="aoc-mini-stat">
-              <div class="ams-value ams-indigo">{{ agentStats.totalSessions }}</div>
-              <div class="ams-label">总会话数</div>
-            </div>
-            <div class="aoc-mini-stat">
-              <div class="ams-value" :class="agentStats.abortedCount > 0 ? 'ams-red' : 'ams-green'">{{ agentStats.abortedCount }}</div>
-              <div class="ams-label">异常中断</div>
-            </div>
-          </div>
-
-          <!-- 图表区：饼图 + 上下文条形图 -->
-          <div class="aoc-charts-row">
-            <!-- Token 分布饼图 -->
-            <div class="aoc-chart-card">
-              <h4 class="aoc-chart-title">Token 消耗分布</h4>
-              <div class="aoc-pie-wrap">
-                <svg viewBox="0 0 120 120" class="aoc-pie-svg">
-                  <circle v-for="(seg, idx) in tokenPieSegments" :key="idx"
-                    cx="60" cy="60" r="48" fill="none"
-                    :stroke="seg.color" stroke-width="22"
-                    :stroke-dasharray="seg.dash" :stroke-dashoffset="seg.offset"
-                    :transform="'rotate(-90 60 60)'" />
-                  <!-- 中心文字 -->
-                  <text x="60" y="56" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="700">{{ fmtTokensShort(agentStats.totalTokens) }}</text>
-                  <text x="60" y="70" text-anchor="middle" fill="#64748b" font-size="8">总 Token</text>
-                </svg>
-                <div class="aoc-pie-legend">
-                  <div v-for="(seg, idx) in tokenPieSegments" :key="idx" class="aoc-legend-row">
-                    <span class="aoc-legend-dot" :style="{ background: seg.color }"></span>
-                    <span class="aoc-legend-name">{{ seg.name }}</span>
-                    <span class="aoc-legend-val">{{ seg.pctLabel }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 上下文使用率条形图 -->
-            <div class="aoc-chart-card">
-              <h4 class="aoc-chart-title">上下文使用率</h4>
-              <div class="aoc-bars-wrap">
-                <div v-for="ag in enrichedAgents" :key="'bar-'+ag.id" class="aoc-bar-row">
-                  <div class="aoc-bar-label" :title="ag.id">{{ agentShortId(ag.id) }}</div>
-                  <div class="aoc-bar-track">
-                    <div class="aoc-bar-fill" :style="{ width: ag.contextPct + '%', background: contextBarColor(ag.contextPct) }"></div>
-                  </div>
-                  <div class="aoc-bar-pct" :style="{ color: contextBarColor(ag.contextPct) }">{{ ag.contextPct }}%</div>
-                </div>
-                <div v-if="enrichedAgents.length === 0" class="dtab-empty" style="padding:16px 0">暂无数据</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 安全与运维概览 -->
-          <div class="aoc-ops-strip">
-            <div class="aoc-ops-item" v-for="gw in gatewayOpsInfo" :key="gw.id">
-              <div class="aoc-ops-head">
-                <span class="aoc-ops-gw">{{ gw.id }}</span>
-                <span v-if="gw.version" class="aoc-ops-ver">v{{ gw.version }}</span>
-              </div>
-              <div class="aoc-ops-tags">
-                <span v-if="gw.mode" class="aoc-ops-tag" :class="'aot-' + gw.mode">{{ gw.mode }}</span>
-                <span v-if="gw.elevated" class="aoc-ops-tag aot-warn">elevated</span>
-                <span v-if="gw.compactions > 0" class="aoc-ops-tag aot-info">{{ gw.compactions }} 次压缩</span>
-                <span v-if="gw.queueDepth > 0" class="aoc-ops-tag aot-warn">队列 {{ gw.queueDepth }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ===== 2. Agent 详情卡片 ===== -->
-        <div v-if="aocView === 'cards'" class="aoc-cards-view">
-          <div class="aoc-agent-grid">
-            <div v-for="ag in enrichedAgents" :key="ag.id + ag.gateway" class="aoc-agent-card" :class="{ 'aoc-card-active': ag.isActive, 'aoc-card-error': ag.hasError }">
-              <!-- 顶栏：头像 + 状态 -->
-              <div class="aoc-card-top">
-                <div class="aoc-card-avatar" :style="{ background: agentColor(ag.id) }">
-                  {{ agentInitial(ag.id) }}
-                  <span class="aoc-status-dot" :class="ag.isActive ? 'asd-active' : (ag.hasError ? 'asd-error' : 'asd-idle')"></span>
-                </div>
-                <div class="aoc-card-ids">
-                  <div class="aoc-card-name" :title="ag.id">{{ agentShortId(ag.id) }}</div>
-                  <div class="aoc-card-gw">{{ ag.gateway }}</div>
-                </div>
-                <div class="aoc-card-status-badge" :class="ag.isActive ? 'acsb-active' : (ag.hasError ? 'acsb-error' : 'acsb-idle')">
-                  {{ ag.isActive ? '活跃' : (ag.hasError ? '异常' : '空闲') }}
-                </div>
-              </div>
-
-              <!-- 模型 + Provider -->
-              <div class="aoc-card-model" v-if="ag.model">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-                <span>{{ ag.model }}</span>
-                <span v-if="ag.provider" class="aoc-provider-tag">{{ ag.provider }}</span>
-              </div>
-
-              <!-- Token 进度条 -->
-              <div class="aoc-card-token">
-                <div class="aoc-token-head">
-                  <span class="aoc-token-label">Token</span>
-                  <span class="aoc-token-nums">{{ fmtTokensShort(ag.totalTokens) }} / {{ fmtTokensShort(ag.contextTokens) }}</span>
-                </div>
-                <div class="aoc-token-bar">
-                  <div class="aoc-token-fill" :style="{ width: Math.min(ag.contextPct, 100) + '%', background: contextBarColor(ag.contextPct) }"></div>
-                </div>
-                <div class="aoc-token-pct" :style="{ color: contextBarColor(ag.contextPct) }">{{ ag.contextPct }}%</div>
-              </div>
-
-              <!-- 会话分类 -->
-              <div class="aoc-card-sessions">
-                <span class="aoc-sess-tag" v-if="ag.sessionBreakdown.main > 0">main ×{{ ag.sessionBreakdown.main }}</span>
-                <span class="aoc-sess-tag aoc-sess-iso" v-if="ag.sessionBreakdown.isolated > 0">isolated ×{{ ag.sessionBreakdown.isolated }}</span>
-                <span class="aoc-sess-tag aoc-sess-sub" v-if="ag.sessionBreakdown.sub > 0">sub ×{{ ag.sessionBreakdown.sub }}</span>
-                <span class="aoc-sess-tag aoc-sess-other" v-if="ag.sessionBreakdown.other > 0">other ×{{ ag.sessionBreakdown.other }}</span>
-              </div>
-
-              <!-- 底部元信息 -->
-              <div class="aoc-card-footer">
-                <div class="aoc-footer-item" :title="'通信渠道: ' + ag.channels.join(', ')">
-                  <span class="aoc-channel-icons">
-                    <span v-for="ch in ag.channels" :key="ch" class="aoc-ch-icon" :title="ch">{{ channelIcon(ch) }}</span>
-                  </span>
-                </div>
-                <div class="aoc-footer-item" v-if="ag.users.length > 0" :title="'用户: ' + ag.users.join(', ')">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                  <span>{{ ag.users.length }}</span>
-                </div>
-                <div class="aoc-footer-item aoc-footer-time" :title="'最后活跃: ' + new Date(ag.lastActive).toLocaleString()">{{ fmtTime(ag.lastActive) }}</div>
-              </div>
-
-              <!-- 异常警告 -->
-              <div v-if="ag.hasError" class="aoc-card-warn">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                abortedLastRun
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ===== 3. 协作视图 ===== -->
-        <div v-if="aocView === 'collab'" class="aoc-collab-view">
-          <div v-for="gw in collabTree" :key="gw.gateway" class="aoc-collab-gw">
-            <div class="aoc-collab-gw-head" :style="{ borderLeftColor: gatewayColor(gw.gateway) }">
-              <span class="aoc-collab-gw-name">{{ gw.gateway }}</span>
-              <span class="aoc-collab-gw-count">{{ gw.agents.length }} agent{{ gw.agents.length > 1 ? 's' : '' }}</span>
-            </div>
-            <div v-for="agent in gw.agents" :key="agent.id" class="aoc-collab-agent">
-              <div class="aoc-collab-agent-head">
-                <div class="aoc-collab-avatar" :style="{ background: agentColor(agent.id) }">{{ agentInitial(agent.id) }}</div>
-                <span class="aoc-collab-agent-name">{{ agentShortId(agent.id) }}</span>
-                <span class="aoc-collab-model" v-if="agent.model">{{ agent.model }}</span>
-              </div>
-              <!-- Session 树 -->
-              <div class="aoc-collab-sessions">
-                <div v-for="sess in agent.sessions" :key="sess.key" class="aoc-collab-sess" :class="'acs-' + sess.kind">
-                  <span class="aoc-collab-sess-icon">{{ sessionKindIcon(sess.kind) }}</span>
-                  <span class="aoc-collab-sess-type">{{ sess.kind }}</span>
-                  <span class="aoc-collab-sess-ch">{{ sess.channel || '—' }}</span>
-                  <span class="aoc-collab-sess-model">{{ sess.model || '—' }}</span>
-                  <span class="aoc-collab-sess-tokens">{{ fmtTokensShort(sess.totalTokens || 0) }}</span>
-                  <span class="aoc-collab-sess-time">{{ fmtTime(sess.updatedAt) }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 关联定时任务 -->
-            <div v-if="gw.cronJobs && gw.cronJobs.length > 0" class="aoc-collab-cron">
-              <div class="aoc-collab-cron-title">⏰ 定时任务</div>
-              <div v-for="cj in gw.cronJobs" :key="cj.id || cj.name" class="aoc-collab-cron-item">
-                <span class="aoc-cron-name">{{ cj.name || cj.id }}</span>
-                <span class="gw-badge" :class="cj.enabled !== false ? 'gw-connected' : 'gw-not_configured'">{{ cj.enabled !== false ? '启用' : '禁用' }}</span>
-                <code class="mono-sm">{{ cj.schedule || cj.cron || '—' }}</code>
-              </div>
-            </div>
-          </div>
-          <div v-if="collabTree.length === 0" class="dtab-empty">暂无协作数据</div>
-        </div>
-
-        <!-- ===== 4. 用户归因视图 ===== -->
-        <div v-if="aocView === 'users'" class="aoc-users-view">
-          <div class="aoc-users-grid">
-            <div v-for="user in userAttribution" :key="user.id" class="aoc-user-card">
-              <div class="aoc-user-top">
-                <div class="aoc-user-avatar" :style="{ background: agentColor(user.id) }">{{ (user.displayName || user.id).charAt(0).toUpperCase() }}</div>
-                <div class="aoc-user-info">
-                  <div class="aoc-user-name">{{ user.displayName || user.id }}</div>
-                  <div class="aoc-user-channel">{{ user.channels.join(', ') }}</div>
-                </div>
-              </div>
-              <!-- Token 环形图 -->
-              <div class="aoc-user-ring-row">
-                <svg viewBox="0 0 80 80" class="aoc-user-ring-svg">
-                  <circle cx="40" cy="40" r="32" fill="none" stroke="#1e293b" stroke-width="6" />
-                  <circle cx="40" cy="40" r="32" fill="none" :stroke="contextBarColor(user.tokenPct)" stroke-width="6"
-                    :stroke-dasharray="(user.tokenPct / 100 * 201.06) + ' ' + (201.06 - user.tokenPct / 100 * 201.06)"
-                    stroke-dashoffset="0" transform="rotate(-90 40 40)" stroke-linecap="round" />
-                  <text x="40" y="38" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">{{ user.tokenPct }}%</text>
-                  <text x="40" y="50" text-anchor="middle" fill="#64748b" font-size="7">{{ fmtTokensShort(user.totalTokens) }}</text>
-                </svg>
-                <div class="aoc-user-ring-detail">
-                  <div class="aoc-urd-row"><span class="aoc-urd-label">会话</span><span class="aoc-urd-val">{{ user.sessionCount }}</span></div>
-                  <div class="aoc-urd-row"><span class="aoc-urd-label">Agent</span><span class="aoc-urd-val">{{ user.agentIds.length }}</span></div>
-                  <div class="aoc-urd-row"><span class="aoc-urd-label">最后活跃</span><span class="aoc-urd-val">{{ fmtTime(user.lastActive) }}</span></div>
-                </div>
-              </div>
-              <!-- 关联的 Agent 列表 -->
-              <div class="aoc-user-agents">
-                <div v-for="aid in user.agentIds" :key="aid" class="aoc-user-agent-tag">
-                  <span class="aoc-ua-dot" :style="{ background: agentColor(aid) }"></span>
-                  {{ agentShortId(aid) }}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div v-if="userAttribution.length === 0" class="dtab-empty">暂无用户数据</div>
-        </div>
-
-        <!-- ===== Skills 视图 ===== -->
-        <div v-if="aocView === 'skills'" class="aoc-skills-view">
-          <!-- Skill 统计条 -->
-          <div class="skills-stat-strip">
-            <div class="ams-item"><div class="ams-value ams-indigo">{{ skillData.count }}</div><div class="ams-label">总 Skills</div></div>
-            <div class="ams-item"><div class="ams-value ams-cyan">{{ skillData.summary.global }}</div><div class="ams-label">全局</div></div>
-            <div class="ams-item"><div class="ams-value ams-green">{{ skillData.summary.user }}</div><div class="ams-label">用户</div></div>
-            <div class="ams-item"><div class="ams-value" :class="skillData.summary.workspace > 0 ? 'ams-amber' : ''">{{ skillData.summary.workspace }}</div><div class="ams-label">Workspace</div></div>
-          </div>
-
-          <!-- 搜索 -->
-          <div class="skills-search">
-            <input v-model="skillSearch" placeholder="搜索 skill 名称或描述..." class="skills-search-input" />
-            <span class="skills-search-count" v-if="skillSearch">{{ filteredSkills.length }} / {{ skillData.skills.length }}</span>
-          </div>
-
-          <!-- 加载中 -->
-          <div v-if="skillsLoading" class="skel-lines"><div class="skel-line" v-for="i in 6" :key="i"></div></div>
-
-          <!-- Skill 列表（按 category 分组） -->
-          <template v-else>
-            <div v-for="group in groupedSkills" :key="group.category" class="skill-group">
-              <div class="skill-group-header" @click="group.expanded = !group.expanded">
-                <span class="skill-cat-tag" :class="'scat-' + group.catKey">{{ group.label }}</span>
-                <span class="skill-group-count">{{ group.skills.length }}</span>
-                <svg :class="{ 'expand-chevron': true, open: group.expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-              </div>
-              <div v-if="group.expanded" class="skill-group-body">
-                <div v-for="sk in group.skills" :key="sk.name + sk.category" class="skill-item">
-                  <div class="skill-icon">🧩</div>
-                  <div class="skill-info">
-                    <div class="skill-name">{{ sk.name }}</div>
-                    <div class="skill-desc" v-if="sk.description">{{ sk.description }}</div>
-                  </div>
-                  <div class="skill-badges">
-                    <span v-if="sk.has_skill_md" class="skill-badge sb-ok">SKILL.md</span>
-                    <span v-if="sk.workspace" class="skill-badge sb-ws" :title="sk.workspace">{{ sk.workspace.substring(0, 12) }}...</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-if="filteredSkills.length === 0 && !skillsLoading" class="dtab-empty">{{ skillSearch ? '无匹配 skill' : '暂无 skill 数据' }}</div>
-          </template>
-        </div>
-      </div>
     </template>
 
     <!-- Token 配置弹窗 -->
@@ -617,6 +588,7 @@ const tabs = [
   { key: 'sessions', icon: '💬', label: '会话' },
   { key: 'cron', icon: '⏰', label: '定时任务' },
   { key: 'diag', icon: '🔍', label: '诊断' },
+  { key: 'agent', icon: '👥', label: 'Agent' },
 ]
 
 // === Computed ===
@@ -687,10 +659,10 @@ const groupedSkills = computed(() => {
 })
 
 async function loadSkills() {
-  if (connectedUpstreams.value.length === 0) return
+  if (!expandedId.value) return
   skillsLoading.value = true
   try {
-    const upId = connectedUpstreams.value[0].id
+    const upId = expandedId.value
     const d = await api(`/api/v1/upstreams/${encodeURIComponent(upId)}/gateway/skills`)
     if (!d.error) {
       skillData.count = d.count || 0
@@ -703,7 +675,7 @@ async function loadSkills() {
 
 function switchToSkills() {
   aocView.value = 'skills'
-  if (skillData.skills.length === 0) loadSkills()
+  loadSkills()
 }
 
 // 加载所有 Gateway 的 cron jobs
@@ -921,6 +893,96 @@ const userAttribution = computed(() => {
   return Array.from(userMap.values()).sort((a, b) => b.totalTokens - a.totalTokens)
 })
 
+// === Per-upstream AOC computed properties ===
+const expandedAgents = computed(() => {
+  if (!expandedId.value) return []
+  return enrichedAgents.value.filter(ag => ag.gateway === expandedId.value)
+})
+
+const expandedAgentStats = computed(() => {
+  const agents = expandedAgents.value
+  return {
+    total: agents.length,
+    active: agents.filter(a => a.isActive).length,
+    totalTokens: agents.reduce((s, a) => s + a.totalTokens, 0),
+    totalSessions: agents.reduce((s, a) => s + a.sessions.length, 0),
+    abortedCount: agents.filter(a => a.hasError).length
+  }
+})
+
+const expandedTokenPieSegments = computed(() => {
+  const agents = expandedAgents.value.filter(a => a.totalTokens > 0)
+  const total = agents.reduce((s, a) => s + a.totalTokens, 0)
+  if (total === 0) return []
+  const circumference = 2 * Math.PI * 48
+  let offset = 0
+  return agents.slice(0, 10).map((ag, i) => {
+    const pct = ag.totalTokens / total
+    const dashLen = pct * circumference
+    const seg = {
+      name: agentShortId(ag.id),
+      color: PIE_COLORS[i % PIE_COLORS.length],
+      dash: dashLen + ' ' + (circumference - dashLen),
+      offset: -offset,
+      pctLabel: Math.round(pct * 100) + '%'
+    }
+    offset += dashLen
+    return seg
+  })
+})
+
+const expandedGatewayOpsInfo = computed(() => {
+  if (!expandedId.value) return []
+  return gatewayOpsInfo.value.filter(gw => gw.id === expandedId.value)
+})
+
+const expandedCollabTree = computed(() => {
+  if (!expandedId.value) return []
+  return collabTree.value.filter(gw => gw.gateway === expandedId.value)
+})
+
+const expandedUserAttribution = computed(() => {
+  if (!expandedId.value) return []
+  const expandedAgentIds = new Set(expandedAgents.value.map(a => a.id))
+  // Rebuild user attribution from only the expanded upstream's agents
+  const userMap = new Map()
+  for (const ag of expandedAgents.value) {
+    for (const s of ag.sessions) {
+      const userId = extractUser(s)
+      if (!userId) continue
+      if (!userMap.has(userId)) {
+        userMap.set(userId, {
+          id: userId,
+          displayName: s.displayName || userId,
+          totalTokens: 0,
+          contextTokens: 0,
+          tokenPct: 0,
+          sessionCount: 0,
+          lastActive: 0,
+          channels: [],
+          agentIds: []
+        })
+      }
+      const u = userMap.get(userId)
+      u.totalTokens += (s.totalTokens || s.total_tokens || 0)
+      const ctx = s.contextTokens || s.context_tokens || 0
+      if (ctx > u.contextTokens) u.contextTokens = ctx
+      u.sessionCount++
+      const ts = s.updatedAt || s.updated_at || 0
+      const normalTs = typeof ts === 'number' && ts < 1e12 ? ts * 1000 : ts
+      if (normalTs > u.lastActive) u.lastActive = normalTs
+      const ch = s.channel || s.lastChannel
+      if (ch && !u.channels.includes(ch)) u.channels.push(ch)
+      if (!u.agentIds.includes(ag.id)) u.agentIds.push(ag.id)
+      if (s.displayName && s.displayName !== userId) u.displayName = s.displayName
+    }
+  }
+  for (const u of userMap.values()) {
+    u.tokenPct = u.contextTokens > 0 ? Math.round(u.totalTokens / u.contextTokens * 100) : 0
+  }
+  return Array.from(userMap.values()).sort((a, b) => b.totalTokens - a.totalTokens)
+})
+
 // AOC 辅助函数
 function extractSessionKind(key) {
   if (!key) return null
@@ -1014,7 +1076,7 @@ async function toggleExpand(up) {
   expandedId.value = up.id; activeTab.value = 'sessions'; diagResult.value = null
   if (up.token_configured && up.gateway_status !== 'not_configured') await loadTabData(up.id, 'sessions')
 }
-async function switchTab(tab, id) { activeTab.value = tab; if (tab !== 'diag') await loadTabData(id, tab) }
+async function switchTab(tab, id) { activeTab.value = tab; if (tab === 'agent') { aocView.value = 'dashboard'; await loadTabData(id, 'cron') } else if (tab !== 'diag') await loadTabData(id, tab) }
 async function loadTabData(id, tab) {
   detailLoading.value = true
   try {
@@ -1281,6 +1343,7 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 
 /* AOC Section */
 .aoc-section { }
+.aoc-inline { background:transparent; border:none; border-radius:0; padding:12px 16px; margin-bottom:0; }
 .aoc-view-toggle { display:flex; gap:2px; background:rgba(15,23,42,.6); border-radius:8px; padding:2px; }
 .aoc-vbtn { padding:4px 10px; border:none; background:transparent; border-radius:6px; font-size:13px; cursor:pointer; transition:all .15s; color:var(--text-tertiary,#64748b); }
 .aoc-vbtn:hover { background:rgba(99,102,241,.1); color:var(--text-secondary,#94a3b8); }
