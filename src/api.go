@@ -356,6 +356,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleGatewayStatus(w, r)
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents") && method == "GET":
 		api.handleGatewayAgents(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/skills") && method == "GET":
+		api.handleGatewaySkills(w, r)
 	// v21.0: 上游 CRUD（带 ID 的路由必须在 health-check 之后匹配）
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/health-check") && method == "POST":
 		api.handleUpstreamHealthCheck(w, r)

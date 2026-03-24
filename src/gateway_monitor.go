@@ -9,10 +9,22 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// skillInfo 表示一个 skill 的基本信息
+type skillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Workspace   string `json:"workspace,omitempty"`
+	HasSkillMD  bool   `json:"has_skill_md"`
+}
 
 // ============================================================
 // Gateway Tools Invoke 客户端
@@ -885,4 +897,183 @@ func extractUpstreamIDFromGatewayPath(urlPath, suffix string) string {
 	}
 	id := strings.TrimSuffix(rest, suffix)
 	return id
+}
+
+// ============================================================
+// Skill 扫描 API
+// ============================================================
+
+// handleGatewaySkills GET /api/v1/upstreams/{id}/gateway/skills
+// 扫描上游 OpenClaw 实例的 skill 目录
+func (api *ManagementAPI) handleGatewaySkills(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/skills")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+
+	_, ok := api.pool.GetUpstream(id)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
+		return
+	}
+
+	// OpenClaw skill 目录约定
+	scanDirs := []struct {
+		Path     string
+		Category string
+	}{
+		{"/root/openclaw/skills", "global"},
+		{"/root/.openclaw/skills", "user"},
+	}
+
+	// 扫描 workspace skills
+	workspaceDirs, _ := filepath.Glob("/root/.openclaw/workspace-*/skills/*")
+	for _, wd := range workspaceDirs {
+		if info, err := os.Stat(wd); err == nil && info.IsDir() {
+			// 检查是否有 SKILL.md
+			if _, err := os.Stat(filepath.Join(wd, "SKILL.md")); err == nil {
+				// 提取 workspace ID
+				parts := strings.Split(wd, "/")
+				wsName := ""
+				for _, p := range parts {
+					if strings.HasPrefix(p, "workspace-") {
+						wsName = strings.TrimPrefix(p, "workspace-")
+						break
+					}
+				}
+				scanDirs = append(scanDirs, struct {
+					Path     string
+					Category string
+				}{filepath.Dir(wd), "workspace:" + wsName})
+			}
+		}
+	}
+
+	seen := make(map[string]bool)
+	var skills []skillInfo
+
+	for _, sd := range scanDirs {
+		entries, err := os.ReadDir(sd.Path)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if name == "." || name == ".." || name == "node_modules" {
+				continue
+			}
+
+			// 去重 key
+			dedup := sd.Category + ":" + name
+			if seen[dedup] {
+				continue
+			}
+			seen[dedup] = true
+
+			skillDir := filepath.Join(sd.Path, name)
+			skillMDPath := filepath.Join(skillDir, "SKILL.md")
+			hasSkillMD := false
+			desc := ""
+
+			if data, err := os.ReadFile(skillMDPath); err == nil {
+				hasSkillMD = true
+				desc = extractSkillDescription(string(data))
+			}
+
+			ws := ""
+			if strings.HasPrefix(sd.Category, "workspace:") {
+				ws = strings.TrimPrefix(sd.Category, "workspace:")
+			}
+
+			skills = append(skills, skillInfo{
+				Name:        name,
+				Description: desc,
+				Category:    sd.Category,
+				Workspace:   ws,
+				HasSkillMD:  hasSkillMD,
+			})
+		}
+	}
+
+	// 按类别排序：global → user → workspace
+	sort.Slice(skills, func(i, j int) bool {
+		ci := categoryOrder(skills[i].Category)
+		cj := categoryOrder(skills[j].Category)
+		if ci != cj {
+			return ci < cj
+		}
+		return skills[i].Name < skills[j].Name
+	})
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+		"summary": map[string]int{
+			"global":    countByCategory(skills, "global"),
+			"user":      countByCategory(skills, "user"),
+			"workspace": countByCategoryPrefix(skills, "workspace:"),
+		},
+	})
+}
+
+// extractSkillDescription 从 SKILL.md 提取 description 字段
+func extractSkillDescription(content string) string {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "description:") {
+			desc := strings.TrimSpace(trimmed[len("description:"):])
+			desc = strings.Trim(desc, "\"'")
+			if len(desc) > 120 {
+				desc = desc[:120] + "..."
+			}
+			return desc
+		}
+	}
+	// fallback: 取第一个非空非标题行
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "---") && !strings.HasPrefix(trimmed, "name:") {
+			if len(trimmed) > 120 {
+				trimmed = trimmed[:120] + "..."
+			}
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func categoryOrder(cat string) int {
+	if cat == "global" {
+		return 0
+	}
+	if cat == "user" {
+		return 1
+	}
+	return 2
+}
+
+func countByCategory(skills []skillInfo, cat string) int {
+	n := 0
+	for _, s := range skills {
+		if s.Category == cat {
+			n++
+		}
+	}
+	return n
+}
+
+func countByCategoryPrefix(skills []skillInfo, prefix string) int {
+	n := 0
+	for _, s := range skills {
+		if strings.HasPrefix(s.Category, prefix) {
+			n++
+		}
+	}
+	return n
 }
