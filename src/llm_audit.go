@@ -430,10 +430,26 @@ func ParseSSEEvents(events []byte) *AnthropicResponseInfo {
 						if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
 							for _, tc := range toolCalls {
 								if tcMap, ok := tc.(map[string]interface{}); ok {
+									idx := -1
+									if idxF, ok := tcMap["index"].(float64); ok {
+										idx = int(idxF)
+									}
 									if fn, ok := tcMap["function"].(map[string]interface{}); ok {
 										if name, ok := fn["name"].(string); ok && name != "" {
 											info.ToolNames = append(info.ToolNames, name)
+											info.ToolInputs = append(info.ToolInputs, "")
 											info.HasToolUse = true
+											info.ToolCount++
+										}
+										// 拼接增量 arguments
+										if args, ok := fn["arguments"].(string); ok && args != "" {
+											targetIdx := idx
+											if targetIdx < 0 {
+												targetIdx = len(info.ToolInputs) - 1
+											}
+											if targetIdx >= 0 && targetIdx < len(info.ToolInputs) {
+												info.ToolInputs[targetIdx] += args
+											}
 										}
 									}
 								}
