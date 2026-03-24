@@ -900,6 +900,126 @@ func extractUpstreamIDFromGatewayPath(urlPath, suffix string) string {
 }
 
 // ============================================================
+// Session History API
+// ============================================================
+
+// handleGatewaySessionHistory GET /api/v1/upstreams/{id}/gateway/session-history?sessionKey=xxx&limit=20
+func (api *ManagementAPI) handleGatewaySessionHistory(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/session-history")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+
+	up, ok := api.pool.GetUpstream(id)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
+		return
+	}
+
+	if up.GatewayToken == "" {
+		jsonResponse(w, 200, map[string]interface{}{
+			"error":   "gateway_token_not_configured",
+			"message": "请先配置 Gateway Token",
+		})
+		return
+	}
+
+	sessionKey := r.URL.Query().Get("sessionKey")
+	if sessionKey == "" {
+		jsonResponse(w, 400, map[string]string{"error": "sessionKey query parameter required"})
+		return
+	}
+
+	limit := 30
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := fmt.Sscanf(l, "%d", &limit); err != nil || n != 1 {
+			limit = 30
+		}
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	resp, _, err := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{
+			Tool: "sessions_history",
+			Args: map[string]interface{}{
+				"sessionKey":   sessionKey,
+				"limit":        limit,
+				"includeTools": false,
+			},
+		},
+	)
+
+	if err != nil {
+		errStr := err.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 401, map[string]interface{}{
+				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			})
+			return
+		}
+		jsonResponse(w, 502, map[string]interface{}{
+			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+		})
+		return
+	}
+
+	if !resp.OK {
+		errMsg := "sessions_history 调用失败"
+		if resp.Error != nil {
+			errMsg = resp.Error.Message
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
+		return
+	}
+
+	// 从 details 提取 messages
+	messages := extractMessagesFromResponse(resp)
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"messages": messages,
+		"count":    len(messages),
+	})
+}
+
+// extractMessagesFromResponse 从 tools/invoke 响应中提取 messages 列表
+func extractMessagesFromResponse(resp *toolsInvokeResponse) []map[string]interface{} {
+	if resp == nil || resp.Result == nil {
+		return nil
+	}
+
+	// 优先从 details.messages 提取
+	if resp.Result.Details != nil {
+		if messages, ok := resp.Result.Details["messages"]; ok {
+			if arr, ok := messages.([]interface{}); ok {
+				return interfaceSliceToMaps(arr)
+			}
+		}
+	}
+
+	// Fallback: 从 content[0].text 解析 JSON
+	if len(resp.Result.Content) > 0 {
+		text := resp.Result.Content[0].Text
+		var parsed map[string]interface{}
+		if json.Unmarshal([]byte(text), &parsed) == nil {
+			if messages, ok := parsed["messages"]; ok {
+				if arr, ok := messages.([]interface{}); ok {
+					return interfaceSliceToMaps(arr)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// ============================================================
 // Skill 扫描 API
 // ============================================================
 

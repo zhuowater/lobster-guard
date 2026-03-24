@@ -48,7 +48,7 @@ type LLMAuditContext struct {
 // NewLLMAuditor 创建 LLM 审计器
 func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LLMAuditor {
 	if cfg.MaxPreviewLen <= 0 {
-		cfg.MaxPreviewLen = 500
+		cfg.MaxPreviewLen = 2000
 	}
 	// 默认启用工具输入/输出记录
 	if !cfg.LogToolInput {
@@ -108,6 +108,10 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
+
+	// v18.0: 请求/响应预览列
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN request_preview TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN response_preview TEXT DEFAULT ''`)
 
 	return &LLMAuditor{
 		db:       db,
@@ -597,6 +601,17 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=?, session_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, ctx.SessionID, callID)
 	}
 
+	// v18.0: 存储请求/响应预览
+	{
+		maxLen := la.cfg.MaxPreviewLen
+		if maxLen <= 0 {
+			maxLen = 2000
+		}
+		reqPreview := truncateRunes(string(ctx.ReqBody), maxLen)
+		respPreview := truncateRunes(string(respBody), maxLen)
+		la.db.Exec(`UPDATE llm_calls SET request_preview=?, response_preview=? WHERE id=?`, reqPreview, respPreview, callID)
+	}
+
 	// 记录工具调用
 	for i, toolName := range info.ToolNames {
 		inputPreview := ""
@@ -670,6 +685,18 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 		la.db.Exec(`UPDATE llm_calls SET im_trace_id=?, sender_id=?, session_id=? WHERE id=?`, ctx.IMTraceID, ctx.SenderID, ctx.SessionID, callID)
 	}
 
+	// v18.0: 存储请求/响应预览（SSE）
+	{
+		maxLen := la.cfg.MaxPreviewLen
+		if maxLen <= 0 {
+			maxLen = 2000
+		}
+		reqPreview := truncateRunes(string(ctx.ReqBody), maxLen)
+		// For SSE, extract accumulated text content rather than raw SSE frames
+		respPreview := truncateRunes(extractSSETextContent(events), maxLen)
+		la.db.Exec(`UPDATE llm_calls SET request_preview=?, response_preview=? WHERE id=?`, reqPreview, respPreview, callID)
+	}
+
 	for i, toolName := range info.ToolNames {
 		inputPreview := ""
 		if i < len(info.ToolInputs) {
@@ -679,6 +706,48 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 			log.Printf("[LLMAudit] 写入 llm_tool_call(SSE) 失败: %v", err)
 		}
 	}
+}
+
+// extractSSETextContent extracts accumulated text from SSE event frames
+func extractSSETextContent(events []byte) string {
+	var textParts []string
+	for _, line := range strings.Split(string(events), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			continue
+		}
+		var ev map[string]interface{}
+		if json.Unmarshal([]byte(data), &ev) != nil {
+			continue
+		}
+		// Anthropic format: content_block_delta with delta.text
+		if delta, ok := ev["delta"].(map[string]interface{}); ok {
+			if text, ok := delta["text"].(string); ok && text != "" {
+				textParts = append(textParts, text)
+			}
+		}
+		// OpenAI format: choices[].delta.content or choices[].delta.reasoning_content
+		if choices, ok := ev["choices"].([]interface{}); ok {
+			for _, c := range choices {
+				if cMap, ok := c.(map[string]interface{}); ok {
+					if delta, ok := cMap["delta"].(map[string]interface{}); ok {
+						if content, ok := delta["content"].(string); ok && content != "" {
+							textParts = append(textParts, content)
+						} else if rc, ok := delta["reasoning_content"].(string); ok && rc != "" {
+							textParts = append(textParts, rc)
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(textParts) == 0 {
+		return ""
+	}
+	return strings.Join(textParts, "")
 }
 
 // ============================================================

@@ -64,37 +64,42 @@ type SessionTimeline struct {
 	Summary SessionSummary  `json:"summary"`
 }
 
-// TimelineEvent 时间线上的一个事件
+	// TimelineEvent 时间线上的一个事件
 type TimelineEvent struct {
-	ID         int64   `json:"id"`
-	Timestamp  string  `json:"timestamp"`
-	Type       string  `json:"type"`
-	Direction  string  `json:"direction,omitempty"`
-	Action     string  `json:"action,omitempty"`
-	Reason     string  `json:"reason,omitempty"`
-	Content    string  `json:"content,omitempty"`
-	SenderID   string  `json:"sender_id,omitempty"`
-	Model      string  `json:"model,omitempty"`
-	Tokens     int     `json:"tokens,omitempty"`
-	LatencyMs  float64 `json:"latency_ms,omitempty"`
-	StatusCode int     `json:"status_code,omitempty"`
-	HasToolUse bool    `json:"has_tool_use,omitempty"`
-	ToolCount  int     `json:"tool_count,omitempty"`
-	ErrorMsg   string  `json:"error_message,omitempty"`
-	CanaryLeak bool    `json:"canary_leaked,omitempty"`
-	BudgetOver bool    `json:"budget_exceeded,omitempty"`
-	ToolName   string  `json:"tool_name,omitempty"`
-	ToolInput  string  `json:"tool_input,omitempty"`
-	ToolResult string  `json:"tool_result,omitempty"`
-	RiskLevel  string  `json:"risk_level,omitempty"`
-	Flagged    bool    `json:"flagged,omitempty"`
-	FlagReason string  `json:"flag_reason,omitempty"`
-	TagText    string  `json:"tag_text,omitempty"`
-	TagAuthor  string  `json:"tag_author,omitempty"`
-	TagID      int64   `json:"tag_id,omitempty"`
+	ID              int64   `json:"id"`
+	Timestamp       string  `json:"timestamp"`
+	Type            string  `json:"type"`
+	Direction       string  `json:"direction,omitempty"`
+	Action          string  `json:"action,omitempty"`
+	Reason          string  `json:"reason,omitempty"`
+	Content         string  `json:"content,omitempty"`
+	SenderID        string  `json:"sender_id,omitempty"`
+	Model           string  `json:"model,omitempty"`
+	Tokens          int     `json:"tokens,omitempty"`
+	LatencyMs       float64 `json:"latency_ms,omitempty"`
+	StatusCode      int     `json:"status_code,omitempty"`
+	HasToolUse      bool    `json:"has_tool_use,omitempty"`
+	ToolCount       int     `json:"tool_count,omitempty"`
+	ErrorMsg        string  `json:"error_message,omitempty"`
+	CanaryLeak      bool    `json:"canary_leaked,omitempty"`
+	BudgetOver      bool    `json:"budget_exceeded,omitempty"`
+	RequestPreview  string  `json:"request_preview,omitempty"`
+	ResponsePreview string  `json:"response_preview,omitempty"`
+	ToolName        string  `json:"tool_name,omitempty"`
+	ToolInput       string  `json:"tool_input,omitempty"`
+	ToolResult      string  `json:"tool_result,omitempty"`
+	RiskLevel       string  `json:"risk_level,omitempty"`
+	Flagged         bool    `json:"flagged,omitempty"`
+	FlagReason      string  `json:"flag_reason,omitempty"`
+	TagText         string  `json:"tag_text,omitempty"`
+	TagAuthor       string  `json:"tag_author,omitempty"`
+	TagID           int64   `json:"tag_id,omitempty"`
 }
 
 // GetTimeline 获取某个 trace_id 的完整时间线
+// 支持 IM↔LLM 双向关联：
+//   - 如果 traceID 是 IM trace → 查关联的 LLM calls（via im_trace_id）
+//   - 如果 traceID 是 LLM trace → 查关联的 IM events（via im_trace_id 反查）
 func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, error) {
 	if traceID == "" {
 		return nil, fmt.Errorf("trace_id is required")
@@ -102,9 +107,72 @@ func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, err
 
 	var events []TimelineEvent
 
-	// 1. 从 audit_log 查 IM 事件
-	rows, err := e.db.Query(`SELECT id, timestamp, direction, COALESCE(sender_id,''), action, COALESCE(reason,''), COALESCE(content_preview,''), COALESCE(latency_ms,0)
-		FROM audit_log WHERE trace_id=? ORDER BY timestamp ASC`, traceID)
+	// 0. 双向关联：收集所有相关的 trace_id
+	imTraceIDs := []string{traceID}  // 用于查 audit_log
+	llmTraceIDs := []string{traceID} // 用于查 llm_calls
+
+	// 如果 traceID 是 LLM trace，查它的 im_trace_id
+	var linkedIMTrace string
+	e.db.QueryRow(`SELECT COALESCE(im_trace_id,'') FROM llm_calls WHERE trace_id=? LIMIT 1`, traceID).Scan(&linkedIMTrace)
+	if linkedIMTrace != "" && linkedIMTrace != traceID {
+		imTraceIDs = append(imTraceIDs, linkedIMTrace)
+	}
+
+	// 如果 traceID 是 IM trace，查所有关联的 LLM trace_id
+	linkedLLMRows, err := e.db.Query(`SELECT DISTINCT trace_id FROM llm_calls WHERE im_trace_id=?`, traceID)
+	if err == nil {
+		defer linkedLLMRows.Close()
+		for linkedLLMRows.Next() {
+			var lt string
+			if linkedLLMRows.Scan(&lt) == nil && lt != traceID {
+				llmTraceIDs = append(llmTraceIDs, lt)
+			}
+		}
+	}
+
+	// 同一个 session_id 下的所有 IM 和 LLM trace 也要关联进来
+	var sessionID string
+	e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE trace_id=? AND session_id != '' LIMIT 1`, traceID).Scan(&sessionID)
+	if sessionID == "" && linkedIMTrace != "" {
+		e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE im_trace_id=? AND session_id != '' LIMIT 1`, linkedIMTrace).Scan(&sessionID)
+	}
+	if sessionID != "" {
+		// 拉同 session 下所有 IM trace 和 LLM trace
+		sessIMRows, err := e.db.Query(`SELECT DISTINCT im_trace_id FROM llm_calls WHERE session_id=? AND im_trace_id != ''`, sessionID)
+		if err == nil {
+			defer sessIMRows.Close()
+			for sessIMRows.Next() {
+				var it string
+				if sessIMRows.Scan(&it) == nil {
+					found := false
+					for _, x := range imTraceIDs { if x == it { found = true; break } }
+					if !found { imTraceIDs = append(imTraceIDs, it) }
+				}
+			}
+		}
+		sessLLMRows, err := e.db.Query(`SELECT DISTINCT trace_id FROM llm_calls WHERE session_id=?`, sessionID)
+		if err == nil {
+			defer sessLLMRows.Close()
+			for sessLLMRows.Next() {
+				var lt string
+				if sessLLMRows.Scan(&lt) == nil {
+					found := false
+					for _, x := range llmTraceIDs { if x == lt { found = true; break } }
+					if !found { llmTraceIDs = append(llmTraceIDs, lt) }
+				}
+			}
+		}
+	}
+
+	// 1. 从 audit_log 查 IM 事件（所有关联的 IM trace_id）
+	imPlaceholders := make([]string, len(imTraceIDs))
+	imArgs := make([]interface{}, len(imTraceIDs))
+	for i, id := range imTraceIDs {
+		imPlaceholders[i] = "?"
+		imArgs[i] = id
+	}
+	rows, err := e.db.Query(fmt.Sprintf(`SELECT id, timestamp, direction, COALESCE(sender_id,''), action, COALESCE(reason,''), COALESCE(content_preview,''), COALESCE(latency_ms,0)
+		FROM audit_log WHERE trace_id IN (%s) ORDER BY timestamp ASC`, strings.Join(imPlaceholders, ",")), imArgs...)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -122,15 +190,28 @@ func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, err
 		}
 	}
 
-	// 2. 从 llm_calls 查 LLM 调用
-	llmRows, err := e.db.Query(`SELECT id, timestamp, COALESCE(model,''), COALESCE(request_tokens,0), COALESCE(response_tokens,0), COALESCE(total_tokens,0), COALESCE(latency_ms,0), COALESCE(status_code,0), COALESCE(has_tool_use,0), COALESCE(tool_count,0), COALESCE(error_message,''), COALESCE(canary_leaked,0), COALESCE(budget_exceeded,0)
-		FROM llm_calls WHERE trace_id=? ORDER BY timestamp ASC`, traceID)
+	// 2. 从 llm_calls 查 LLM 调用（所有关联的 LLM trace_id + im_trace_id 匹配）
+	llmPlaceholders := make([]string, len(llmTraceIDs))
+	llmArgs := make([]interface{}, len(llmTraceIDs))
+	for i, id := range llmTraceIDs {
+		llmPlaceholders[i] = "?"
+		llmArgs[i] = id
+	}
+	// 也通过 im_trace_id 关联查（双向）
+	imPlaceholders2 := make([]string, len(imTraceIDs))
+	for i, id := range imTraceIDs {
+		imPlaceholders2[i] = "?"
+		llmArgs = append(llmArgs, id)
+	}
+	llmRows, err := e.db.Query(fmt.Sprintf(`SELECT DISTINCT id, timestamp, COALESCE(model,''), COALESCE(request_tokens,0), COALESCE(response_tokens,0), COALESCE(total_tokens,0), COALESCE(latency_ms,0), COALESCE(status_code,0), COALESCE(has_tool_use,0), COALESCE(tool_count,0), COALESCE(error_message,''), COALESCE(canary_leaked,0), COALESCE(budget_exceeded,0), COALESCE(request_preview,''), COALESCE(response_preview,'')
+		FROM llm_calls WHERE trace_id IN (%s) OR im_trace_id IN (%s) ORDER BY timestamp ASC`,
+		strings.Join(llmPlaceholders, ","), strings.Join(imPlaceholders2, ",")), llmArgs...)
 	if err == nil {
 		defer llmRows.Close()
 		for llmRows.Next() {
 			var ev TimelineEvent
 			var hasToolUse, canaryLeaked, budgetExceeded int
-			if llmRows.Scan(&ev.ID, &ev.Timestamp, &ev.Model, &ev.Tokens, &ev.StatusCode, &ev.Tokens, &ev.LatencyMs, &ev.StatusCode, &hasToolUse, &ev.ToolCount, &ev.ErrorMsg, &canaryLeaked, &budgetExceeded) == nil {
+			if llmRows.Scan(&ev.ID, &ev.Timestamp, &ev.Model, &ev.Tokens, &ev.StatusCode, &ev.Tokens, &ev.LatencyMs, &ev.StatusCode, &hasToolUse, &ev.ToolCount, &ev.ErrorMsg, &canaryLeaked, &budgetExceeded, &ev.RequestPreview, &ev.ResponsePreview) == nil {
 				ev.Type = "llm_call"
 				ev.HasToolUse = hasToolUse != 0
 				ev.CanaryLeak = canaryLeaked != 0
@@ -140,9 +221,10 @@ func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, err
 		}
 	}
 
-	// Collect llm_call IDs for this trace
+	// Collect llm_call IDs for this trace (using same dual-query as above)
 	var llmCallIDs []int64
-	idRows, err := e.db.Query(`SELECT id FROM llm_calls WHERE trace_id=?`, traceID)
+	idRows, err := e.db.Query(fmt.Sprintf(`SELECT DISTINCT id FROM llm_calls WHERE trace_id IN (%s) OR im_trace_id IN (%s)`,
+		strings.Join(llmPlaceholders, ","), strings.Join(imPlaceholders2, ",")), llmArgs...)
 	if err == nil {
 		defer idRows.Close()
 		for idRows.Next() {

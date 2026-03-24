@@ -184,16 +184,37 @@
                         <div v-if="detailLoading" class="skel-lines"><div class="skel-line" v-for="i in 4" :key="i"></div></div>
                         <div v-else-if="sessions.length === 0" class="dtab-empty">暂无会话</div>
                         <table v-else class="inner-table">
-                          <thead><tr><th>Key</th><th>Channel</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th></tr></thead>
+                          <thead><tr><th style="width:24px"></th><th>Key</th><th>Channel</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th></tr></thead>
                           <tbody>
-                            <tr v-for="s in sessions" :key="s.key||s.sessionId">
-                              <td><code class="mono-sm">{{ truncKey(s.key||s.sessionId) }}</code></td>
-                              <td>{{ s.channel||s.lastChannel||'—' }}</td>
-                              <td class="text-dim">{{ s.model||'—' }}</td>
-                              <td>{{ fmtTokens(s) }}</td>
-                              <td>{{ fmtContext(s) }}</td>
-                              <td>{{ fmtTime(s.updatedAt||s.updated_at) }}</td>
-                            </tr>
+                            <template v-for="s in sessions" :key="s.key||s.sessionId">
+                              <tr class="session-row" :class="{ 'row-active': expandedSessionKey === (s.key||s.sessionId) }" @click="toggleSessionHistory(s)">
+                                <td><svg class="expand-chevron" :class="{ open: expandedSessionKey === (s.key||s.sessionId) }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
+                                <td><code class="mono-sm">{{ truncKey(s.key||s.sessionId) }}</code></td>
+                                <td>{{ s.channel||s.lastChannel||'—' }}</td>
+                                <td class="text-dim">{{ s.model||'—' }}</td>
+                                <td>{{ fmtTokens(s) }}</td>
+                                <td>{{ fmtContext(s) }}</td>
+                                <td>{{ fmtTime(s.updatedAt||s.updated_at) }}</td>
+                              </tr>
+                              <tr v-if="expandedSessionKey === (s.key||s.sessionId)" class="session-detail-row">
+                                <td colspan="7">
+                                  <div class="session-replay">
+                                    <div v-if="sessionHistoryLoading" class="skel-lines"><div class="skel-line" v-for="i in 4" :key="i"></div></div>
+                                    <div v-else-if="sessionMessages.length === 0" class="dtab-empty">暂无消息</div>
+                                    <div v-else class="chat-messages">
+                                      <div v-for="(msg, idx) in sessionMessages" :key="idx"
+                                           class="chat-msg" :class="'msg-' + msg.role">
+                                        <div class="msg-role">{{ msg.role }}</div>
+                                        <div class="msg-content">{{ msgExpanded[idx] ? extractContentFull(msg.content) : extractContent(msg.content) }}</div>
+                                        <button v-if="extractContentFull(msg.content).length > 500 && !msgExpanded[idx]" class="msg-expand-btn" @click.stop="msgExpanded[idx] = true">展开全文</button>
+                                        <button v-if="msgExpanded[idx]" class="msg-expand-btn" @click.stop="msgExpanded[idx] = false">收起</button>
+                                        <div class="msg-meta" v-if="msg.timestamp">{{ fmtTime(msg.timestamp) }}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            </template>
                           </tbody>
                         </table>
                       </div>
@@ -573,6 +594,11 @@ const sessions = ref([])
 const cronJobs = ref([])
 const diagRunning = ref(false)
 const diagResult = ref(null)
+// Session history state
+const expandedSessionKey = ref(null)
+const sessionMessages = ref([])
+const sessionHistoryLoading = ref(false)
+const msgExpanded = reactive({})
 const lastRefreshTime = ref('')
 const lastRefreshDisplay = ref('')
 const refreshInterval = ref(localStorage.getItem('gm_refresh') || '30000')
@@ -1097,10 +1123,10 @@ function extractSessions(up) {
 
 async function toggleExpand(up) {
   if (expandedId.value === up.id) { expandedId.value = null; return }
-  expandedId.value = up.id; activeTab.value = 'sessions'; diagResult.value = null
+  expandedId.value = up.id; activeTab.value = 'sessions'; diagResult.value = null; expandedSessionKey.value = null; sessionMessages.value = []
   if (up.token_configured && up.gateway_status !== 'not_configured') await loadTabData(up.id, 'sessions')
 }
-async function switchTab(tab, id) { activeTab.value = tab; if (tab === 'agent') { aocView.value = 'dashboard'; await loadTabData(id, 'cron') } else if (tab !== 'diag') await loadTabData(id, tab) }
+async function switchTab(tab, id) { activeTab.value = tab; expandedSessionKey.value = null; sessionMessages.value = []; if (tab === 'agent') { aocView.value = 'dashboard'; await loadTabData(id, 'cron') } else if (tab !== 'diag') await loadTabData(id, tab) }
 async function loadTabData(id, tab) {
   detailLoading.value = true
   try {
@@ -1132,6 +1158,48 @@ async function quickPing(up) {
   try { const r = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/ping`); showToast(r.api_ok ? `${up.id}: ✅ ${r.latency_ms}ms` : `${up.id}: ❌ ${r.message||'连接失败'}`, r.api_ok?'success':'error') }
   catch (e) { showToast(`${up.id}: ❌ ${e.message}`, 'error') } finally { up._pinging = false }
 }
+
+// Session history
+async function toggleSessionHistory(s) {
+  const key = s.key || s.sessionId
+  if (expandedSessionKey.value === key) {
+    expandedSessionKey.value = null
+    sessionMessages.value = []
+    return
+  }
+  expandedSessionKey.value = key
+  sessionMessages.value = []
+  Object.keys(msgExpanded).forEach(k => delete msgExpanded[k])
+  if (!expandedId.value) return
+  sessionHistoryLoading.value = true
+  try {
+    const d = await api(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/session-history?sessionKey=${encodeURIComponent(key)}&limit=30`)
+    sessionMessages.value = d.messages || []
+  } catch(e) { console.error('loadSessionHistory error:', e) }
+  finally { sessionHistoryLoading.value = false }
+}
+
+function extractContent(content) {
+  const full = extractContentFull(content)
+  if (full.length > 500) return full.substring(0, 500) + '...'
+  return full
+}
+
+function extractContentFull(content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map(c => {
+      if (c.type === 'text') return c.text || ''
+      if (c.type === 'thinking') return '[思考] ' + (c.thinking || '').substring(0, 200) + '...'
+      if (c.type === 'tool_use') return '[工具调用] ' + (c.name || '') + ': ' + JSON.stringify(c.input || {}).substring(0, 200)
+      if (c.type === 'tool_result') return '[工具结果] ' + (typeof c.content === 'string' ? c.content.substring(0, 200) : JSON.stringify(c.content || '').substring(0, 200))
+      return JSON.stringify(c)
+    }).join('\n')
+  }
+  if (content && typeof content === 'object') return JSON.stringify(content)
+  return String(content || '')
+}
+
 function openTokenModal(up) { tokenModal.data=up; tokenModal.token=''; tokenModal.showPwd=false; tokenModal.testing=false; tokenModal.saving=false; tokenModal.testResult=null; tokenModal.show=true }
 async function testInModal() {
   if (!tokenModal.token||!tokenModal.data) return; tokenModal.testing=true; tokenModal.testResult=null
@@ -1575,5 +1643,24 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .skill-icon svg { width:16px; height:16px; }
 .skill-cat-tag svg { width:12px; height:12px; vertical-align:-2px; }
 .eye-btn svg { vertical-align:middle; }
+
+/* Session History / Replay */
+.session-row { cursor:pointer; transition:background .15s; }
+.session-row:hover { background:rgba(99,102,241,.06); }
+.session-detail-row { cursor:default !important; }
+.session-detail-row:hover { background:transparent !important; }
+.session-detail-row td { padding:0 !important; border-bottom:1px solid rgba(51,65,85,.3); }
+.session-replay { max-height:400px; overflow-y:auto; padding:12px 16px; background:rgba(15,23,42,.4); border-radius:0 0 8px 8px; animation:slideDown .2s; }
+.chat-messages { display:flex; flex-direction:column; gap:10px; }
+.chat-msg { padding:8px 12px; border-radius:8px; }
+.msg-user { background:rgba(99,102,241,.08); border-left:3px solid #6366f1; }
+.msg-assistant { background:rgba(34,197,94,.06); border-left:3px solid #22c55e; }
+.msg-system { background:rgba(245,158,11,.06); border-left:3px solid #eab308; font-size:12px; }
+.msg-tool { background:rgba(6,182,212,.06); border-left:3px solid #06b6d4; font-size:12px; }
+.msg-role { font-size:11px; font-weight:600; text-transform:uppercase; margin-bottom:4px; color:var(--text-tertiary,#64748b); letter-spacing:.03em; }
+.msg-content { font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; color:var(--text-primary,#e2e8f0); }
+.msg-meta { font-size:10px; color:var(--text-tertiary,#64748b); margin-top:4px; }
+.msg-expand-btn { background:none; border:none; color:#6366f1; cursor:pointer; font-size:11px; padding:2px 0; margin-top:4px; transition:color .15s; }
+.msg-expand-btn:hover { color:#a5b4fc; text-decoration:underline; }
 
 </style>
