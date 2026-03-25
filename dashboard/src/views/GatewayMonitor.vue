@@ -1137,7 +1137,14 @@ async function loadTabData(id, tab) {
       const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/cron`)
       cronJobs.value = d.error ? [] : (Array.isArray(d.jobs) ? d.jobs : [])
     }
-  } catch { sessions.value = []; cronJobs.value = [] } finally { detailLoading.value = false }
+  } catch (e) {
+    sessions.value = []; cronJobs.value = []
+    // 502 upstream_auth_failed: 提示用户重新配置 Token，不要静默
+    const msg = e.message || ''
+    if (msg.includes('502')) {
+      showToast(`${id}: Gateway Token 无效或连接失败，请检查配置`, 'error')
+    }
+  } finally { detailLoading.value = false }
 }
 async function runDiag(up) {
   diagRunning.value = true; diagResult.value = null

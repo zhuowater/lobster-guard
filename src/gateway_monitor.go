@@ -329,8 +329,8 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 	if err != nil {
 		errStr := err.Error()
 		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 401, map[string]interface{}{
-				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			jsonResponse(w, 502, map[string]interface{}{
+				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
 			})
 			return
 		}
@@ -388,8 +388,8 @@ func (api *ManagementAPI) handleGatewayCron(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		errStr := err.Error()
 		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 401, map[string]interface{}{
-				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			jsonResponse(w, 502, map[string]interface{}{
+				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
 			})
 			return
 		}
@@ -446,8 +446,8 @@ func (api *ManagementAPI) handleGatewayStatus(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		errStr := err.Error()
 		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 401, map[string]interface{}{
-				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			jsonResponse(w, 502, map[string]interface{}{
+				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
 			})
 			return
 		}
@@ -517,8 +517,8 @@ func (api *ManagementAPI) handleGatewayAgents(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		errStr := err.Error()
 		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 401, map[string]interface{}{
-				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			jsonResponse(w, 502, map[string]interface{}{
+				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
 			})
 			return
 		}
@@ -957,8 +957,8 @@ func (api *ManagementAPI) handleGatewaySessionHistory(w http.ResponseWriter, r *
 	if err != nil {
 		errStr := err.Error()
 		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 401, map[string]interface{}{
-				"error": "authentication_failed", "message": "Gateway Token 无效或已过期",
+			jsonResponse(w, 502, map[string]interface{}{
+				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
 			})
 			return
 		}
