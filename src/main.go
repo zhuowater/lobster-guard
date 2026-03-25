@@ -604,7 +604,8 @@ func main() {
 	}
 	// v23.0: 路径级策略引擎
 	pathPolicyEngine := NewPathPolicyEngine(logger.DB())
-	fmt.Println("[初始化] ✅ 路径级策略引擎已就绪 (路径追踪 + 序列/累计/降级规则)")
+	pathPolicyEngine.SetUserProfileEngine(mgmtAPI.userProfileEng) // v23.1: 攻击者画像联动
+	fmt.Println("[初始化] ✅ 路径级策略引擎已就绪 (路径追踪 + 序列/累计/降级规则 + 画像联动)")
 
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine

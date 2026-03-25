@@ -120,16 +120,39 @@ var defaultPathPolicies = []PathPolicyRule{
 		Conditions: `{"risk_threshold":95,"degrade_to":"isolate"}`,
 		Action: "block", Enabled: true, Priority: 10, TenantID: "default",
 		Description: "Isolate session when risk score exceeds 95"},
+
+	// v23.2: AI Act 合规策略模板
+	{ID: "pp-009", Name: "ai_act_data_minimization", RuleType: "cumulative",
+		Conditions: `{"label":"PII-TAINTED","threshold":5}`,
+		Action: "block", Enabled: false, Priority: 15, TenantID: "default",
+		Description: "[AI Act] Data minimization: block when PII field exposure exceeds 5 in a session"},
+	{ID: "pp-010", Name: "ai_act_high_risk_shell", RuleType: "sequence",
+		Conditions: `{"after":"database_query","before":"shell_exec","window_sec":120}`,
+		Action: "block", Enabled: false, Priority: 10, TenantID: "default",
+		Description: "[AI Act] High-risk AI: block shell execution within 120s after database query"},
+	{ID: "pp-011", Name: "ai_act_exfiltration_chain", RuleType: "sequence",
+		Conditions: `{"after":"file_read","before":"send_email","window_sec":60}`,
+		Action: "block", Enabled: false, Priority: 10, TenantID: "default",
+		Description: "[AI Act] Prevent data exfiltration: block email after file read within 60s"},
+	{ID: "pp-012", Name: "ai_act_credential_zero_tolerance", RuleType: "cumulative",
+		Conditions: `{"label":"CREDENTIAL-TAINTED","threshold":1}`,
+		Action: "block", Enabled: false, Priority: 5, TenantID: "default",
+		Description: "[AI Act] Zero tolerance: block immediately on any credential exposure"},
+	{ID: "pp-013", Name: "ai_act_risk_human_review", RuleType: "degradation",
+		Conditions: `{"risk_threshold":70,"degrade_to":"warn"}`,
+		Action: "warn", Enabled: false, Priority: 25, TenantID: "default",
+		Description: "[AI Act] Human oversight: require review when risk score exceeds 70"},
 }
 
 type PathPolicyEngine struct {
-	db          *sql.DB
-	mu          sync.RWMutex
-	contexts    map[string]*PathContext
-	rules       []PathPolicyRule
-	riskWeights map[string]float64
-	halfLifeSec float64
-	evictAfter  time.Duration
+	db             *sql.DB
+	mu             sync.RWMutex
+	contexts       map[string]*PathContext
+	rules          []PathPolicyRule
+	riskWeights    map[string]float64
+	halfLifeSec    float64
+	evictAfter     time.Duration
+	userProfileEng *UserProfileEngine // v23.1: 攻击者画像联动
 }
 
 func NewPathPolicyEngine(db *sql.DB) *PathPolicyEngine {
@@ -161,12 +184,10 @@ func (e *PathPolicyEngine) initSchema() {
 
 func (e *PathPolicyEngine) loadRules() {
 	if e.db == nil { e.rules = append([]PathPolicyRule{}, defaultPathPolicies...); return }
-	var c int
-	if e.db.QueryRow("SELECT COUNT(*) FROM path_policies").Scan(&c) != nil || c == 0 {
-		for _, r := range defaultPathPolicies {
-			e.db.Exec("INSERT OR IGNORE INTO path_policies (id,name,rule_type,conditions,action,enabled,priority,description,tenant_id) VALUES (?,?,?,?,?,?,?,?,?)",
-				r.ID, r.Name, r.RuleType, r.Conditions, r.Action, boolToInt(r.Enabled), r.Priority, r.Description, r.TenantID)
-		}
+	// 始终用 INSERT OR IGNORE 确保新增的默认规则被补入（不覆盖已有配置）
+	for _, r := range defaultPathPolicies {
+		e.db.Exec("INSERT OR IGNORE INTO path_policies (id,name,rule_type,conditions,action,enabled,priority,description,tenant_id) VALUES (?,?,?,?,?,?,?,?,?)",
+			r.ID, r.Name, r.RuleType, r.Conditions, r.Action, boolToInt(r.Enabled), r.Priority, r.Description, r.TenantID)
 	}
 	rows, err := e.db.Query("SELECT id,name,rule_type,conditions,action,enabled,priority,COALESCE(description,''),COALESCE(tenant_id,'default'),COALESCE(created_at,''),COALESCE(updated_at,'') FROM path_policies ORDER BY priority ASC, id ASC")
 	if err != nil { e.rules = append([]PathPolicyRule{}, defaultPathPolicies...); return }
@@ -251,6 +272,40 @@ func (e *PathPolicyEngine) decayScore(ctx *PathContext) float64 {
 	s := ctx.RiskScore * math.Pow(2, -el/e.halfLifeSec)
 	if s < 0.01 { return 0 }
 	return s
+}
+
+// v23.1: 攻击者画像联动
+func (e *PathPolicyEngine) SetUserProfileEngine(upe *UserProfileEngine) { e.mu.Lock(); defer e.mu.Unlock(); e.userProfileEng = upe }
+
+// v23.1: 查询用户历史风险分，作为路径上下文的先验起始分
+// 用户画像 RiskScore 0-100，映射到路径起始分 0-30（不超过 warn 阈值）
+func (e *PathPolicyEngine) userPriorScore(senderID string) float64 {
+	if e.userProfileEng == nil || senderID == "" { return 0 }
+	profile, err := e.userProfileEng.GetUserProfile(senderID)
+	if err != nil || profile == nil { return 0 }
+	// 映射: userRiskScore 0-100 → pathPrior 0-30
+	// 线性映射，截断在 30（不让先验就超过 warn 阈值）
+	prior := float64(profile.RiskScore) * 0.3
+	if prior > 30 { prior = 30 }
+	return prior
+}
+
+// RegisterStepWithSender 带 sender 信息的步骤注册（v23.1: 新会话时注入先验风险分）
+func (e *PathPolicyEngine) RegisterStepWithSender(traceID, senderID string, step PathStep) {
+	if traceID == "" { return }
+	e.mu.Lock()
+	_, isNew := e.contexts[traceID]
+	e.mu.Unlock()
+	// 先注册步骤（会自动创建 context）
+	e.RegisterStep(traceID, step)
+	// 如果是新会话，注入用户先验风险分
+	if !isNew {
+		prior := e.userPriorScore(senderID)
+		if prior > 0 {
+			e.UpdateRiskScore(traceID, prior)
+			log.Printf("[PathPolicy] v23.1 先验风险注入: sender=%s prior=%.1f", senderID, prior)
+		}
+	}
 }
 
 func (e *PathPolicyEngine) SetHalfLife(sec float64)              { e.mu.Lock(); defer e.mu.Unlock(); if sec > 0 { e.halfLifeSec = sec } }

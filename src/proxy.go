@@ -277,9 +277,9 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			}
 		}
 
-		// v23.0: 路径级策略 — 注册入站步骤
+		// v23.0+v23.1: 路径级策略 — 注册入站步骤（带 sender 先验风险注入）
 		if ip.pathPolicyEngine != nil {
-			ip.pathPolicyEngine.RegisterStep(bridgeTraceID, PathStep{
+			ip.pathPolicyEngine.RegisterStepWithSender(bridgeTraceID, senderID, PathStep{
 				Stage: "inbound", Action: "inbound_message",
 				Details: truncate(msgText, 100),
 			})

@@ -18,8 +18,10 @@
 
     <div class="tab-bar">
       <button class="tab-btn" :class="{active:activeTab==='rules'}" @click="activeTab='rules'"><Icon name="file-text" :size="14"/> Policy Rules ({{ rules.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='gauge'}" @click="activeTab='gauge'; loadGauge()"><Icon name="activity" :size="14"/> Risk Gauge</button>
       <button class="tab-btn" :class="{active:activeTab==='paths'}" @click="activeTab='paths'; loadContexts()"><Icon name="git-branch" :size="14"/> Active Paths ({{ contexts.length }})</button>
       <button class="tab-btn" :class="{active:activeTab==='events'}" @click="activeTab='events'; loadEvents()"><Icon name="clipboard" :size="14"/> Decision Log ({{ events.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='templates'}" @click="activeTab='templates'; loadTemplates()"><Icon name="book" :size="14"/> Templates</button>
     </div>
 
     <!-- Rules Tab -->
@@ -126,6 +128,63 @@
       </div>
     </div>
 
+    <!-- Risk Gauge Tab (v23.1) -->
+    <div v-if="activeTab==='gauge'" class="section">
+      <div class="gauge-header">
+        <p class="gauge-desc">Real-time risk score for each active agent session. Scores decay exponentially over time.</p>
+        <button class="btn btn-sm" @click="loadGauge"><Icon name="refresh" :size="14"/> Refresh</button>
+      </div>
+      <div class="gauge-grid" v-if="gauges.length">
+        <div class="gauge-card" v-for="g in gauges" :key="g.trace_id" :class="gaugeLevel(g.risk_score)">
+          <div class="gauge-top">
+            <div class="gauge-ring-wrap">
+              <svg width="80" height="80" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(100,116,139,0.15)" stroke-width="6" />
+                <circle cx="40" cy="40" r="34" fill="none" :stroke="riskColor(g.risk_score)" stroke-width="6"
+                  stroke-linecap="round" :stroke-dasharray="gaugeDash(g.risk_score)"
+                  transform="rotate(-90 40 40)" class="gauge-arc" />
+              </svg>
+              <span class="gauge-value" :style="{color: riskColor(g.risk_score)}">{{ Math.round(g.risk_score) }}</span>
+            </div>
+            <div class="gauge-info">
+              <div class="gauge-trace">{{ g.trace_id }}</div>
+              <div class="gauge-session" v-if="g.session_id">{{ g.session_id }}</div>
+              <div class="gauge-meta-row">
+                <span>{{ g.step_count }} steps</span>
+                <span>{{ g.tool_count }} tools</span>
+                <span>{{ g.age_sec }}s ago</span>
+              </div>
+            </div>
+          </div>
+          <div class="gauge-taints" v-if="g.taint_labels && g.taint_labels.length">
+            <span class="taint-badge" v-for="t in g.taint_labels" :key="t">{{ t }}</span>
+          </div>
+          <div class="gauge-last" v-if="g.last_action">Last: <span class="td-mono">{{ g.last_action }}</span></div>
+        </div>
+      </div>
+      <div v-else class="empty-state"><Icon name="activity" :size="48" color="#6366F1"/><p>No active sessions</p></div>
+    </div>
+
+    <!-- Templates Tab (v23.2) -->
+    <div v-if="activeTab==='templates'" class="section">
+      <p class="template-desc">Pre-built policy templates for common compliance and security scenarios. Activate a template to enable its rules.</p>
+      <div class="template-grid" v-if="templates.length">
+        <div class="template-card" v-for="t in templates" :key="t.id">
+          <div class="template-header">
+            <h3 class="template-name">{{ t.name }}</h3>
+            <button class="btn btn-primary btn-sm" @click="activateTemplate(t)" :disabled="t._activating">
+              {{ t._activating ? 'Activating...' : 'Activate' }}
+            </button>
+          </div>
+          <p class="template-text">{{ t.description }}</p>
+          <div class="template-rules">
+            <span class="template-rule-badge" v-for="rid in t.rules" :key="rid">{{ rid }}</span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-state"><Icon name="book" :size="48" color="#6366F1"/><p>No templates available</p></div>
+    </div>
+
     <!-- Rule Modal -->
     <div class="modal-overlay" v-if="showRuleModal" @click.self="showRuleModal=false">
       <div class="modal">
@@ -182,8 +241,10 @@ export default {
   data() {
     return {
       activeTab: 'rules', initialLoading: true, stats: {}, rules: [], contexts: [], events: [],
+      gauges: [], templates: [],
       ruleSearch: '', eventSearch: '', eventSince: '',
       showRuleModal: false, editingRule: null, ruleForm: this.emptyForm(), saving: false, deleteTarget: null,
+      gaugeTimer: null,
       svgPath: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/></svg>',
       svgRules: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
       svgBlock: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
@@ -226,7 +287,23 @@ export default {
     riskColor(s) { if (s > 80) return '#EF4444'; if (s > 60) return '#F59E0B'; return '#22C55E' },
     riskBgColor(s) { if (s > 80) return '#FEE2E2'; if (s > 60) return '#FEF3C7'; return '#DCFCE7' },
     riskDash(s) { const c = 2 * Math.PI * 26; return (c * Math.min(s / 100, 1)) + ' ' + c },
-  }
+    // v23.1: Risk Gauge
+    async loadGauge() {
+      try { const d = await api('/api/v1/path-policies/risk-gauge'); this.gauges = d.gauges || [] } catch(e) { console.error(e) }
+    },
+    gaugeDash(s) { const c = 2 * Math.PI * 34; return (c * Math.min(s / 100, 1)) + ' ' + c },
+    gaugeLevel(s) { if (s > 80) return 'gauge-danger'; if (s > 60) return 'gauge-warning'; return 'gauge-normal' },
+    // v23.2: Templates
+    async loadTemplates() {
+      try { const d = await api('/api/v1/path-policies/templates'); this.templates = (d.templates || []).map(t => ({...t, _activating: false})) } catch(e) { console.error(e) }
+    },
+    async activateTemplate(t) {
+      t._activating = true
+      try { await apiPost('/api/v1/path-policies/templates/' + t.id + '/activate', {}); await this.loadRules(); await this.loadStats() } catch(e) { alert(e.message||e) }
+      t._activating = false
+    },
+  },
+  beforeUnmount() { if (this.gaugeTimer) clearInterval(this.gaugeTimer) }
 }
 </script>
 
@@ -335,10 +412,43 @@ input:checked + .slider::before { transform: translateX(16px); }
 .field-input:focus { outline: none; border-color: #6366F1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
 textarea.field-input { font-family: var(--font-mono); resize: vertical; }
 
+/* v23.1: Risk Gauge */
+.gauge-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); }
+.gauge-desc { font-size: var(--text-sm); color: var(--text-secondary); }
+.gauge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--space-4); }
+.gauge-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: var(--space-4); transition: all var(--transition-fast); }
+.gauge-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.gauge-card.gauge-danger { border-left: 3px solid #EF4444; }
+.gauge-card.gauge-warning { border-left: 3px solid #F59E0B; }
+.gauge-card.gauge-normal { border-left: 3px solid #22C55E; }
+.gauge-top { display: flex; gap: var(--space-4); align-items: center; }
+.gauge-ring-wrap { position: relative; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.gauge-arc { transition: stroke-dasharray 0.8s ease; }
+.gauge-value { position: absolute; font-family: var(--font-mono); font-size: var(--text-2xl); font-weight: 800; transition: color 0.3s; }
+.gauge-info { flex: 1; min-width: 0; }
+.gauge-trace { font-family: var(--font-mono); font-size: var(--text-xs); color: #6366F1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gauge-session { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
+.gauge-meta-row { display: flex; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
+.gauge-taints { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
+.gauge-last { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--space-2); }
+
+/* v23.2: Templates */
+.template-desc { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-4); }
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--space-4); }
+.template-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: var(--space-5); transition: all var(--transition-fast); }
+.template-card:hover { border-color: #6366F1; box-shadow: 0 0 0 2px rgba(99,102,241,0.1); }
+.template-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+.template-name { font-size: var(--text-base); font-weight: 700; color: var(--text-primary); }
+.template-text { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--space-3); }
+.template-rules { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.template-rule-badge { display: inline-block; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); background: rgba(99,102,241,0.08); color: #6366F1; }
+
 @media (max-width: 768px) {
   .pathpolicy-page { padding: var(--space-3); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .paths-grid { grid-template-columns: 1fr; }
+  .gauge-grid { grid-template-columns: 1fr; }
+  .template-grid { grid-template-columns: 1fr; }
   .rules-toolbar, .events-toolbar { flex-direction: column; }
 }
 </style>

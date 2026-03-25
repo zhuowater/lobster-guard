@@ -409,3 +409,134 @@ func TestPathPolicyEngine_ShellSequence(t *testing.T) {
 	d := e.Evaluate(traceID, "shell_exec")
 	if d.Decision != "block" { t.Errorf("expected block (pp-002), got %s", d.Decision) }
 }
+
+// ============================================================
+// v23.1 Tests
+// ============================================================
+
+func TestPathPolicyEngine_UserPriorScore(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// 没有 userProfileEng 时应返回 0
+	score := e.userPriorScore("user-123")
+	if score != 0 {
+		t.Errorf("expected 0 without profile engine, got %f", score)
+	}
+}
+
+func TestPathPolicyEngine_RegisterStepWithSender(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// RegisterStepWithSender 应该正常工作（即使没有 userProfileEng）
+	e.RegisterStepWithSender("trace-sender-1", "sender-1", PathStep{
+		Stage: "inbound", Action: "inbound_message", Details: "hello",
+	})
+
+	ctx := e.GetContext("trace-sender-1")
+	if ctx == nil {
+		t.Fatal("context should exist after RegisterStepWithSender")
+	}
+	if len(ctx.Steps) != 1 {
+		t.Errorf("expected 1 step, got %d", len(ctx.Steps))
+	}
+}
+
+func TestPathPolicyEngine_RiskGaugeData(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// 创建几个路径上下文
+	e.RegisterStep("trace-g1", PathStep{Stage: "inbound", Action: "shell_exec"})
+	e.RegisterStep("trace-g2", PathStep{Stage: "inbound", Action: "web_fetch"})
+	e.RegisterStep("trace-g3", PathStep{Stage: "inbound", Action: "inbound_message"})
+
+	contexts := e.ListContexts()
+	if len(contexts) != 3 {
+		t.Errorf("expected 3 contexts, got %d", len(contexts))
+	}
+
+	// 验证风险分不同
+	scores := make(map[string]float64)
+	for _, ctx := range contexts {
+		scores[ctx.TraceID] = ctx.RiskScore
+	}
+	if scores["trace-g1"] <= scores["trace-g3"] {
+		t.Errorf("shell_exec should have higher risk than inbound_message: %.1f vs %.1f",
+			scores["trace-g1"], scores["trace-g3"])
+	}
+}
+
+// ============================================================
+// v23.2 Tests — AI Act Compliance Templates
+// ============================================================
+
+func TestPathPolicyEngine_AIActTemplateRules(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// AI Act 模板规则应存在但默认禁用
+	aiActIDs := []string{"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"}
+	for _, id := range aiActIDs {
+		r := e.GetRule(id)
+		if r == nil {
+			t.Errorf("AI Act rule %s should exist", id)
+			continue
+		}
+		if r.Enabled {
+			t.Errorf("AI Act rule %s should be disabled by default", id)
+		}
+		if r.Description == "" || r.Description[:7] != "[AI Act" {
+			t.Errorf("AI Act rule %s should have [AI Act] prefix in description, got: %s", id, r.Description)
+		}
+	}
+}
+
+func TestPathPolicyEngine_AIActActivation(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// 激活 pp-009
+	err := e.SetRuleEnabled("pp-009", true)
+	if err != nil {
+		t.Fatalf("SetRuleEnabled failed: %v", err)
+	}
+
+	r := e.GetRule("pp-009")
+	if r == nil || !r.Enabled {
+		t.Fatal("pp-009 should be enabled after activation")
+	}
+
+	// 验证 AI Act 数据最小化规则生效
+	e.RegisterStep("trace-aiact", PathStep{Stage: "inbound", Action: "inbound_message"})
+	// 添加 6 个 PII 标签（超过阈值 5）
+	for i := 0; i < 6; i++ {
+		e.AddTaintLabel("trace-aiact", "PII-TAINTED")
+		e.RegisterStep("trace-aiact", PathStep{Stage: "taint", Action: "pii_detected", Details: "PII-TAINTED"})
+	}
+
+	d := e.Evaluate("trace-aiact", "send_email")
+	// 6 PII 触发 pp-009 (block) + 120 风险分触发 pp-008 (isolate)
+	// isolate > block，所以最终 decision 可以是 block 或 isolate
+	if d.Decision != "block" && d.Decision != "isolate" {
+		t.Errorf("AI Act data minimization should block or isolate after 6 PII, got: %s", d.Decision)
+	}
+}
+
+func TestPathPolicyEngine_DefaultRulesCount(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	rules := e.ListRules()
+	// 8 原始 + 5 AI Act = 13
+	if len(rules) != 13 {
+		t.Errorf("expected 13 default rules (8 + 5 AI Act), got %d", len(rules))
+	}
+}
