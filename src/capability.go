@@ -346,6 +346,8 @@ func (ce *CapabilityEngine) ListToolMappings() []CapToolMapping {
 
 func (ce *CapabilityEngine) UpdateToolMapping(m CapToolMapping) error {
 	if m.ToolName == "" { return fmt.Errorf("tool_name required") }
+	if m.Category == "" { return fmt.Errorf("category required") }
+	if m.DefaultLevel == "" { m.DefaultLevel = "medium" }
 	if m.AllowedCaps == nil { m.AllowedCaps = []string{} }; if m.DeniedCaps == nil { m.DeniedCaps = []string{} }
 	if m.TrustFactor < 0 || m.TrustFactor > 1 { m.TrustFactor = 0.5 }
 	now := time.Now().UTC().Format(time.RFC3339)
