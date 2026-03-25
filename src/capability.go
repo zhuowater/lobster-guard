@@ -221,37 +221,40 @@ func (ce *CapabilityEngine) InitContext(traceID, userID string, userCaps []CapLa
 }
 
 func (ce *CapabilityEngine) RegisterToolResult(traceID, toolName, dataID string) *CapToolResult {
-	ce.mu.Lock(); ctx := ce.contexts[traceID]; ce.mu.Unlock()
-	if ctx == nil { return nil }
 	now := time.Now().UTC().Format(time.RFC3339)
 	rawCaps := []CapLabel{{Name: "none", Source: "tool_result", Level: "none", Granted: false}}
+
+	ce.mu.Lock()
+	ctx := ce.contexts[traceID]
+	if ctx == nil { ce.mu.Unlock(); return nil }
+	mp := ce.toolMappings[toolName]
 	var mappedCaps []CapLabel
-	ce.mu.RLock(); mp := ce.toolMappings[toolName]; ce.mu.RUnlock()
 	if mp != nil {
 		for _, ac := range mp.AllowedCaps { mappedCaps = append(mappedCaps, CapLabel{Name: ac, Source: "tool_mapping", Level: ac, Granted: true}) }
 	}
 	if mappedCaps == nil { mappedCaps = []CapLabel{} }
 	tr := CapToolResult{ToolName: toolName, DataID: dataID, RawCaps: rawCaps, MappedCaps: mappedCaps, Timestamp: now}
 	tf := 0.0; if mp != nil { tf = mp.TrustFactor }
-	ce.mu.Lock()
 	ctx.ToolResults = append(ctx.ToolResults, tr)
 	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "tool_result:" + toolName, Labels: rawCaps, TrustScore: tf, CreatedAt: now}
-	ctx.UpdatedAt = now; ce.mu.Unlock()
+	ctx.UpdatedAt = now
+	ce.mu.Unlock()
 	ce.capPersistCtx(ctx)
 	return &tr
 }
 
 func (ce *CapabilityEngine) Evaluate(traceID, dataID, action, toolName string) *CapEvaluation {
-	ce.mu.RLock(); ctx := ce.contexts[traceID]; ce.mu.RUnlock()
 	eval := &CapEvaluation{ID: capGenID(), TraceID: traceID, DataID: dataID, Action: action, ToolName: toolName, Timestamp: time.Now().UTC().Format(time.RFC3339)}
+	ce.mu.RLock()
+	ctx := ce.contexts[traceID]
 	if ctx == nil {
 		eval.Decision = ce.config.DefaultPolicy; eval.Reason = "no context"; eval.Labels = []CapLabel{}
-		ce.capPersistEval(eval); return eval
+		ce.mu.RUnlock(); ce.capPersistEval(eval); return eval
 	}
-	ce.mu.RLock(); di := ctx.DataItems[dataID]; ce.mu.RUnlock()
+	di := ctx.DataItems[dataID]
 	if di == nil {
 		eval.Decision = "allow"; eval.Reason = "data not tracked"; eval.TrustScore = 1.0; eval.Labels = []CapLabel{}
-		ce.capPersistEval(eval); return eval
+		ce.mu.RUnlock(); ce.capPersistEval(eval); return eval
 	}
 	eval.Labels = di.Labels; eval.TrustScore = di.TrustScore
 	userHas := false
@@ -264,7 +267,7 @@ func (ce *CapabilityEngine) Evaluate(traceID, dataID, action, toolName string) *
 		if !userHas {
 			eval.Decision = "deny"; eval.Reason = fmt.Sprintf("user lacks '%s' cap", action)
 		} else {
-			ce.mu.RLock(); m := ce.toolMappings[toolName]; ce.mu.RUnlock()
+			m := ce.toolMappings[toolName]
 			if m != nil {
 				denied := false
 				for _, dc := range m.DeniedCaps {
@@ -281,6 +284,7 @@ func (ce *CapabilityEngine) Evaluate(traceID, dataID, action, toolName string) *
 		} else { eval.Decision = "allow"; eval.Reason = "intersection disabled" }
 	} else { eval.Decision = ce.config.DefaultPolicy; eval.Reason = "unknown source" }
 	if eval.Decision == "" { eval.Decision = ce.config.DefaultPolicy }
+	ce.mu.RUnlock()
 	ce.mu.Lock()
 	ctx.Evaluations = append(ctx.Evaluations, *eval)
 	if eval.Decision == "deny" { ctx.Status = "violated" }
@@ -295,28 +299,36 @@ func (ce *CapabilityEngine) capEvalIntersect(item *CapDataItem, action string) s
 }
 
 func (ce *CapabilityEngine) RegisterLLMSummary(traceID, dataID string, sourceDataIDs []string) {
-	ce.mu.Lock(); ctx := ce.contexts[traceID]; ce.mu.Unlock()
-	if ctx == nil { return }
-	now := time.Now().UTC().Format(time.RFC3339)
-	intersected := ce.capComputeIntersect(ctx, sourceDataIDs)
-	minTrust := 1.0
-	ce.mu.RLock()
-	for _, sid := range sourceDataIDs { if item, ok := ctx.DataItems[sid]; ok && item.TrustScore < minTrust { minTrust = item.TrustScore } }
-	ce.mu.RUnlock()
-	inter := CapIntersection{SourceDataIDs: sourceDataIDs, ResultLabels: intersected, Context: "llm_summary", Timestamp: now}
 	ce.mu.Lock()
+	ctx := ce.contexts[traceID]
+	if ctx == nil { ce.mu.Unlock(); return }
+	now := time.Now().UTC().Format(time.RFC3339)
+	// compute intersection under lock (ctx.DataItems access)
+	intersected := ce.capComputeIntersectLocked(ctx, sourceDataIDs)
+	minTrust := 1.0
+	for _, sid := range sourceDataIDs { if item, ok := ctx.DataItems[sid]; ok && item.TrustScore < minTrust { minTrust = item.TrustScore } }
+	inter := CapIntersection{SourceDataIDs: sourceDataIDs, ResultLabels: intersected, Context: "llm_summary", Timestamp: now}
 	ctx.Intersections = append(ctx.Intersections, inter)
 	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "llm_summary", Labels: intersected, TrustScore: minTrust, CreatedAt: now}
-	ctx.UpdatedAt = now; ce.mu.Unlock()
+	ctx.UpdatedAt = now
+	ce.mu.Unlock()
 	ce.capPersistCtx(ctx)
 }
 
+// capComputeIntersect acquires RLock internally — call without holding lock
 func (ce *CapabilityEngine) capComputeIntersect(ctx *CapContext, dataIDs []string) []CapLabel {
 	if len(dataIDs) == 0 { return []CapLabel{} }
 	ce.mu.RLock()
+	result := ce.capComputeIntersectLocked(ctx, dataIDs)
+	ce.mu.RUnlock()
+	return result
+}
+
+// capComputeIntersectLocked — caller must hold at least RLock
+func (ce *CapabilityEngine) capComputeIntersectLocked(ctx *CapContext, dataIDs []string) []CapLabel {
+	if len(dataIDs) == 0 { return []CapLabel{} }
 	var sets [][]CapLabel
 	for _, did := range dataIDs { if item, ok := ctx.DataItems[did]; ok { sets = append(sets, item.Labels) } }
-	ce.mu.RUnlock()
 	if len(sets) == 0 { return []CapLabel{} }
 	counts := map[string]int{}
 	for _, labels := range sets { seen := map[string]bool{}; for _, l := range labels { if l.Granted && !seen[l.Level] { counts[l.Level]++; seen[l.Level] = true } } }
