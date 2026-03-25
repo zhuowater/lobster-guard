@@ -151,6 +151,8 @@ type ManagementAPI struct {
 	k8sDiscovery *K8sDiscovery
 	// v23.0 路径级策略引擎
 	pathPolicyEngine *PathPolicyEngine
+	// v24.0 反事实验证引擎
+	cfVerifier *CounterfactualVerifier
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -1030,6 +1032,22 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handlePathPolicyUpdate(w, r)
 	case strings.HasPrefix(path, "/api/v1/path-policies/") && method == "DELETE":
 		api.handlePathPolicyDelete(w, r)
+
+	// v24.0: 反事实验证引擎 API
+	case path == "/api/v1/counterfactual/stats" && method == "GET":
+		api.handleCFStats(w, r)
+	case path == "/api/v1/counterfactual/verifications" && method == "GET":
+		api.handleCFVerifications(w, r)
+	case path == "/api/v1/counterfactual/config" && method == "GET":
+		api.handleCFConfigGet(w, r)
+	case path == "/api/v1/counterfactual/config" && method == "PUT":
+		api.handleCFConfigUpdate(w, r)
+	case path == "/api/v1/counterfactual/cache" && method == "GET":
+		api.handleCFCacheGet(w, r)
+	case path == "/api/v1/counterfactual/cache" && method == "DELETE":
+		api.handleCFCacheClear(w, r)
+	case strings.HasPrefix(path, "/api/v1/counterfactual/verifications/") && method == "GET":
+		api.handleCFVerificationGet(w, r)
 
 	default:
 		w.WriteHeader(404)

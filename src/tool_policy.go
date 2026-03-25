@@ -53,6 +53,22 @@ type ToolCallEvent struct {
 	TenantID  string                 `json:"tenant_id"`
 }
 
+// RiskScoreNum 将风险等级转为数值
+func (e *ToolCallEvent) RiskScoreNum() float64 {
+	switch e.RiskLevel {
+	case "critical":
+		return 100
+	case "high":
+		return 80
+	case "medium":
+		return 50
+	case "low":
+		return 20
+	default:
+		return 0
+	}
+}
+
 // ToolPolicyEngine 工具调用策略引擎
 type ToolPolicyEngine struct {
 	db          *sql.DB

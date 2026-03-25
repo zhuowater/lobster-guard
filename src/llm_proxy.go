@@ -51,6 +51,8 @@ type LLMProxy struct {
 	apiGateway *APIGateway
 	// v18.3 奇点蜜罐引擎
 	singularityEngine *SingularityEngine
+	// v24.0 反事实验证引擎
+	cfVerifier *CounterfactualVerifier
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -465,6 +467,30 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						return
 					} else if tpEvent.Decision == "warn" {
 						log.Printf("[ToolPolicy] 工具调用告警: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
+					}
+					// v24.0: 反事实验证 — 在 tool_call 被 ToolPolicy 评估后
+					if lp.cfVerifier != nil && lp.cfVerifier.ShouldVerify(tcName, tcArgs, traceID, tpEvent.RiskScoreNum()) {
+						cfUpstream := upstreamURL
+						cfAuth := r.Header.Get("Authorization")
+						cfCfg := lp.cfVerifier.GetConfig()
+						if cfCfg.Mode == "sync" {
+							cfResult := lp.cfVerifier.Verify(r.Context(), bodyBytes, tcName, tcArgs, cfUpstream, cfAuth)
+							if cfResult != nil && cfResult.Decision == "block" {
+								log.Printf("[Counterfactual] 反事实验证阻断: tool=%s verdict=%s attribution=%.2f trace=%s",
+									tcName, cfResult.Verdict, cfResult.AttributionScore, traceID)
+								w.Header().Set("Content-Type", "application/json")
+								w.WriteHeader(403)
+								fmt.Fprintf(w, `{"error":"Tool call blocked by counterfactual verification","tool":"%s","verdict":"%s","attribution_score":%.2f}`,
+									tcName, cfResult.Verdict, cfResult.AttributionScore)
+								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+								return
+							}
+						} else {
+							// async 模式: 后台验证，不阻塞
+							go func(body []byte, tn, ta, url, auth string) {
+								lp.cfVerifier.Verify(context.Background(), body, tn, ta, url, auth)
+							}(bodyBytes, tcName, tcArgs, cfUpstream, cfAuth)
+						}
 					}
 				}
 			}

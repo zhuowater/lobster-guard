@@ -607,6 +607,15 @@ func main() {
 	pathPolicyEngine.SetUserProfileEngine(mgmtAPI.userProfileEng) // v23.1: 攻击者画像联动
 	fmt.Println("[初始化] ✅ 路径级策略引擎已就绪 (路径追踪 + 序列/累计/降级规则 + 画像联动)")
 
+	// v24.0: 反事实验证引擎
+	cfVerifier := NewCounterfactualVerifier(logger.DB(), defaultCFConfig, nil)
+	cfVerifier.SetPathPolicy(pathPolicyEngine)
+	mgmtAPI.cfVerifier = cfVerifier
+	if llmProxy != nil {
+		llmProxy.cfVerifier = cfVerifier
+	}
+	fmt.Println("[初始化] ✅ 反事实验证引擎已就绪 (AttriGuard 对照验证 + 归因分析)")
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {
