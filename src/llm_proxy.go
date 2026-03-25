@@ -53,6 +53,10 @@ type LLMProxy struct {
 	singularityEngine *SingularityEngine
 	// v24.0 反事实验证引擎
 	cfVerifier *CounterfactualVerifier
+	// v25.0 执行计划编译器
+	planCompiler      *PlanCompiler
+	capabilityEngine  *CapabilityEngine
+	deviationDetector *DeviationDetector
 }
 
 // NewLLMProxy 创建 LLM 代理

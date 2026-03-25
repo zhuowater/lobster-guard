@@ -45,6 +45,9 @@ const routes = [
   { path: '/gateway', name: 'gateway', component: () => import('./views/APIGateway.vue'), meta: { title: 'API 网关', icon: 'door', group: 'system' } },
   { path: '/gateway-monitor', name: 'gateway-monitor', component: () => import('./views/GatewayMonitor.vue'), meta: { title: 'Gateway 监控', icon: 'activity', group: 'system' } },
   { path: '/counterfactual', name: 'counterfactual', component: () => import('./views/Counterfactual.vue'), meta: { title: '反事实验证', icon: 'microscope', group: 'govern' } },
+  { path: '/plan-compiler', name: 'plan-compiler', component: () => import('./views/PlanCompiler.vue'), meta: { title: '执行计划', icon: 'git-branch', group: 'llm' } },
+    { path: '/capability', name: 'capability', component: () => import('./views/Capability.vue'), meta: { title: 'Capability', icon: 'key', group: 'govern' } },
+    { path: '/deviations', name: 'deviations', component: () => import('./views/PlanDeviation.vue'), meta: { title: '偏差检测', icon: 'alert-triangle', group: 'govern' } },
   { path: '/bigscreen', name: 'bigscreen', component: () => import('./views/BigScreen.vue'), meta: { title: '态势大屏', icon: 'layout', public: true, bigscreen: true } },
 ]
 

@@ -155,6 +155,10 @@ type ManagementAPI struct {
 	cfVerifier *CounterfactualVerifier
 	// v24.2 自适应验证策略
 	adaptiveStrategy *AdaptiveStrategy
+	// v25.0 执行计划编译器
+	planCompiler      *PlanCompiler
+	capabilityEngine  *CapabilityEngine
+	deviationDetector *DeviationDetector
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -1069,6 +1073,54 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCFAdaptiveConfigGet(w, r)
 	case path == "/api/v1/counterfactual/adaptive-config" && method == "PUT":
 		api.handleCFAdaptiveConfigUpdate(w, r)
+
+	// v25.0: 执行计划编译器 API
+	case path == "/api/v1/plans/templates" && method == "GET":
+		api.handlePlanTemplatesList(w, r)
+	case path == "/api/v1/plans/templates" && method == "POST":
+		api.handlePlanTemplatesCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/plans/templates/") && method == "PUT":
+		api.handlePlanTemplatesUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/plans/templates/") && method == "DELETE":
+		api.handlePlanTemplatesDelete(w, r)
+	case path == "/api/v1/plans/active" && method == "GET":
+		api.handlePlanActive(w, r)
+	case path == "/api/v1/plans/history" && method == "GET":
+		api.handlePlanHistory(w, r)
+	case path == "/api/v1/plans/violations" && method == "GET":
+		api.handlePlanViolations(w, r)
+	case path == "/api/v1/plans/stats" && method == "GET":
+		api.handlePlanStats(w, r)
+	case path == "/api/v1/plans/config" && method == "PUT":
+		api.handlePlanConfigUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/plans/") && method == "GET":
+		api.handlePlanGet(w, r)
+
+	// v25.1: Capability 权限系统
+	case path == "/api/v1/capabilities/mappings" && method == "GET":
+		api.handleCapMappingsList(w, r)
+	case strings.HasPrefix(path, "/api/v1/capabilities/mappings/") && method == "PUT":
+		api.handleCapMappingsUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/capabilities/mappings/") && method == "DELETE":
+		api.handleCapMappingsDelete(w, r)
+	case path == "/api/v1/capabilities/contexts" && method == "GET":
+		api.handleCapContexts(w, r)
+	case path == "/api/v1/capabilities/evaluations" && method == "GET":
+		api.handleCapEvaluations(w, r)
+	case path == "/api/v1/capabilities/stats" && method == "GET":
+		api.handleCapStats(w, r)
+
+	// v25.2: Plan 偏差检测
+	case path == "/api/v1/deviations" && method == "GET":
+		api.handleDeviationsList(w, r)
+	case path == "/api/v1/deviations/stats" && method == "GET":
+		api.handleDeviationsStats(w, r)
+	case path == "/api/v1/deviations/config" && method == "GET":
+		api.handleDeviationsConfigGet(w, r)
+	case path == "/api/v1/deviations/config" && method == "PUT":
+		api.handleDeviationsConfigUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/deviations/") && method == "GET":
+		api.handleDeviationsDetail(w, r)
 
 	default:
 		w.WriteHeader(404)

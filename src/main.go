@@ -622,6 +622,30 @@ func main() {
 	mgmtAPI.adaptiveStrategy = adaptiveStrategy
 	fmt.Println("[初始化] ✅ 自适应验证策略引擎已就绪 (成本控制 + 优先级调度 + 效果追踪)")
 
+	// v25.0: 执行计划编译器
+	planCompiler := NewPlanCompiler(logger.DB(), defaultPlanConfig)
+	mgmtAPI.planCompiler = planCompiler
+	if llmProxy != nil {
+		llmProxy.planCompiler = planCompiler
+	}
+	fmt.Println("[初始化] ✅ 执行计划编译器已就绪 (CaMeL 网关级程序解释器, 20+ 内置模板)")
+
+	// v25.1: Capability 权限系统
+	capEngine := NewCapabilityEngine(logger.DB(), CapConfig{Enabled: false, DefaultPolicy: "allow"})
+	mgmtAPI.capabilityEngine = capEngine
+	if llmProxy != nil {
+		llmProxy.capabilityEngine = capEngine
+	}
+	fmt.Println("[初始化] ✅ Capability 权限系统已就绪")
+
+	// v25.2: Plan 偏差检测器
+	devDetector := NewDeviationDetector(logger.DB(), defaultDeviationConfig, planCompiler, capEngine)
+	mgmtAPI.deviationDetector = devDetector
+	if llmProxy != nil {
+		llmProxy.deviationDetector = devDetector
+	}
+	fmt.Println("[初始化] ✅ 偏差检测器已就绪")
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {
@@ -850,6 +874,10 @@ func main() {
 	// v20.1: 停止污染追踪引擎
 	if taintTracker != nil {
 		taintTracker.Stop()
+	}
+	// v25.0: 停止计划编译器
+	if planCompiler != nil {
+		planCompiler.Stop()
 	}
 	// v19.0: 停止自进化引擎
 	if evolutionEngine != nil {
