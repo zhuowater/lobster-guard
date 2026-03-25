@@ -341,7 +341,7 @@
 > 理论基础：Runtime Governance (arXiv:2603.16586) — 执行路径是治理的核心对象
 > 依赖：✅ 纯内部改造（现有 TraceCorrelator + RuleEngine 扩展）
 
-- [ ] v23.0 **路径级策略引擎（PathPolicyEngine）**
+- [x] v23.0 **路径级策略引擎（PathPolicyEngine）** ✅ (commit f7dcb86, 2026-03-25)
   - **核心**: 规则不再是 `f(input) → decision`，而是 `f(agent_identity, partial_path, proposed_action, org_state) → violation_prob`
   - 同一个操作在不同执行历史下触发不同策略：
     - "读取客户邮箱" 如果之前用户授权了 → 合规
