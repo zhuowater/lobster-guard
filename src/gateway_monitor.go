@@ -71,11 +71,9 @@ type toolsInvokeError struct {
 // gatewayToolsInvoke 通过 POST /tools/invoke 调用上游 Gateway 的 tool
 // 返回解析后的 details 对象和原始文本
 func gatewayToolsInvoke(address string, port int, pathPrefix, gatewayToken string, req toolsInvokeRequest) (*toolsInvokeResponse, int64, error) {
-	// 构造 URL
+	// 构造 URL — 管理接口忽略 pathPrefix，直接请求根路径
+	// pathPrefix 仅用于消息转发路由（蓝信/飞书回调等），/tools/invoke 始终在根路径
 	baseURL := fmt.Sprintf("http://%s:%d", address, port)
-	if pathPrefix != "" {
-		baseURL += "/" + strings.Trim(pathPrefix, "/")
-	}
 	fullURL := baseURL + "/tools/invoke"
 
 	body, err := json.Marshal(req)
