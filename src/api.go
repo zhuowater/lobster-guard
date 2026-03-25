@@ -149,6 +149,8 @@ type ManagementAPI struct {
 	apiGateway *APIGateway
 	// v21.0 K8s 服务发现
 	k8sDiscovery *K8sDiscovery
+	// v23.0 路径级策略引擎
+	pathPolicyEngine *PathPolicyEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -996,6 +998,24 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleGatewayTokenValidate(w, r)
 	case path == "/api/v1/gateway/log" && method == "GET":
 		api.handleGatewayLog(w, r)
+
+	// v23.0: 路径级策略引擎 API
+	case path == "/api/v1/path-policies" && method == "GET":
+		api.handlePathPolicyList(w, r)
+	case path == "/api/v1/path-policies" && method == "POST":
+		api.handlePathPolicyCreate(w, r)
+	case path == "/api/v1/path-policies/events" && method == "GET":
+		api.handlePathPolicyEvents(w, r)
+	case path == "/api/v1/path-policies/contexts" && method == "GET":
+		api.handlePathPolicyContexts(w, r)
+	case path == "/api/v1/path-policies/stats" && method == "GET":
+		api.handlePathPolicyStats(w, r)
+	case strings.HasPrefix(path, "/api/v1/path-policies/contexts/") && method == "GET":
+		api.handlePathPolicyContextDetail(w, r)
+	case strings.HasPrefix(path, "/api/v1/path-policies/") && method == "PUT":
+		api.handlePathPolicyUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/path-policies/") && method == "DELETE":
+		api.handlePathPolicyDelete(w, r)
 
 	default:
 		w.WriteHeader(404)

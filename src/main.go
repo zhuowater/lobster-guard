@@ -602,6 +602,10 @@ func main() {
 	} else {
 		fmt.Println("[初始化] ⚠️ 语义检测引擎: 未启用")
 	}
+	// v23.0: 路径级策略引擎
+	pathPolicyEngine := NewPathPolicyEngine(logger.DB())
+	fmt.Println("[初始化] ✅ 路径级策略引擎已就绪 (路径追踪 + 序列/累计/降级规则)")
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {
@@ -613,6 +617,7 @@ func main() {
 	mgmtAPI.toolPolicy = toolPolicyEngine
 	if llmProxy != nil {
 		llmProxy.toolPolicy = toolPolicyEngine
+		llmProxy.pathPolicyEngine = pathPolicyEngine // v23.0
 	}
 
 	// v20.1: 信息流污染追踪
@@ -625,6 +630,7 @@ func main() {
 		fmt.Println("[初始化] ⚠️ 信息流污染追踪: 未启用")
 	}
 	mgmtAPI.taintTracker = taintTracker
+	inbound.pathPolicyEngine = pathPolicyEngine // v23.0
 	inbound.taintTracker = taintTracker
 	outbound.taintTracker = taintTracker
 	if llmProxy != nil {
@@ -691,6 +697,7 @@ func main() {
 	}
 
 	mgmtAPI.honeypotDeep = honeypotDeep
+	mgmtAPI.pathPolicyEngine = pathPolicyEngine // v23.0
 	mgmtAPI.k8sDiscovery = k8sDiscovery // v21.0
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector

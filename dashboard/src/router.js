@@ -39,6 +39,7 @@ const routes = [
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { title: '设置', icon: 'settings', group: 'system' } },
   { path: '/semantic', name: 'semantic', component: () => import('./views/SemanticDetector.vue'), meta: { title: '语义检测', icon: 'microscope', group: 'threat' } },
   { path: '/tools', name: 'tools', component: () => import('./views/ToolPolicy.vue'), meta: { title: '工具策略', icon: 'wrench', group: 'llm' } },
+  { path: '/path-policy', name: 'path-policy', component: () => import('./views/PathPolicy.vue'), meta: { title: '路径策略', icon: 'git-branch', group: 'govern' } },
   { path: '/taint', name: 'taint', component: () => import('./views/TaintTracker.vue'), meta: { title: '污染追踪', icon: 'biohazard', group: 'threat' } },
   { path: '/cache', name: 'cache', component: () => import('./views/LLMCache.vue'), meta: { title: '响应缓存', icon: 'save', group: 'llm' } },
   { path: '/gateway', name: 'gateway', component: () => import('./views/APIGateway.vue'), meta: { title: 'API 网关', icon: 'door', group: 'system' } },

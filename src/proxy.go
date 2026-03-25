@@ -192,6 +192,8 @@ type InboundProxy struct {
 	taintTracker *TaintTracker
 	// v18.3 奇点蜜罐引擎
 	singularityEngine *SingularityEngine
+	// v23.0 路径级策略引擎
+	pathPolicyEngine *PathPolicyEngine
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -275,11 +277,28 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			}
 		}
 
+		// v23.0: 路径级策略 — 注册入站步骤
+		if ip.pathPolicyEngine != nil {
+			ip.pathPolicyEngine.RegisterStep(bridgeTraceID, PathStep{
+				Stage: "inbound", Action: "inbound_message",
+				Details: truncate(msgText, 100),
+			})
+		}
+
 		// v20.1: 入站污染标记
 		if ip.taintTracker != nil {
 			taintEntry := ip.taintTracker.MarkTainted(bridgeTraceID, msgText, "inbound")
 			if taintEntry != nil {
 				log.Printf("[桥接入站] 🏷️ 污染标记 sender=%s trace=%s labels=%v", senderID, bridgeTraceID, taintEntry.Labels)
+				// v23.0: 同步污染标签到路径上下文（驱动 cumulative 规则）
+				if ip.pathPolicyEngine != nil {
+					for _, label := range taintEntry.Labels {
+						ip.pathPolicyEngine.AddTaintLabel(bridgeTraceID, label)
+						ip.pathPolicyEngine.RegisterStep(bridgeTraceID, PathStep{
+							Stage: "taint", Action: taintActionForLabel(label), Details: label,
+						})
+					}
+				}
 			}
 		}
 
@@ -297,6 +316,15 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			act = "pass"
 		}
 		ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+
+		// v23.0: 路径级策略 — 评估入站消息
+		if ip.pathPolicyEngine != nil {
+			ppDecision := ip.pathPolicyEngine.Evaluate(bridgeTraceID, "inbound_message")
+			if actionSev(ppDecision.Decision) > actionSev(act) {
+				act = ppDecision.Decision
+				reason = reason + ",path_policy:" + ppDecision.Reason
+			}
+		}
 
 		// v18.0: 执行信封
 		if ip.envelopeMgr != nil {
@@ -857,6 +885,15 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		taintEntry := ip.taintTracker.MarkTainted(traceID, msgText, "inbound")
 		if taintEntry != nil {
 			log.Printf("[入站] 🏷️ 污染标记 sender=%s trace=%s labels=%v", senderID, traceID, taintEntry.Labels)
+			// v23.0: 同步污染标签到路径上下文（驱动 cumulative 规则）
+			if ip.pathPolicyEngine != nil {
+				for _, label := range taintEntry.Labels {
+					ip.pathPolicyEngine.AddTaintLabel(traceID, label)
+					ip.pathPolicyEngine.RegisterStep(traceID, PathStep{
+						Stage: "taint", Action: taintActionForLabel(label), Details: label,
+					})
+				}
+			}
 		}
 	}
 
@@ -1357,3 +1394,13 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	op.proxy.ServeHTTP(w, r)
 }
 
+
+// taintActionForLabel 将污染标签映射到风险权重 action 名
+func taintActionForLabel(label string) string {
+	switch label {
+	case "CREDENTIAL-TAINTED":
+		return "credential_detected"
+	default:
+		return "pii_detected"
+	}
+}

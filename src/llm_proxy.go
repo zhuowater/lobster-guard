@@ -39,6 +39,8 @@ type LLMProxy struct {
 	semanticDetector *SemanticDetector
 	// v20.0 工具策略引擎
 	toolPolicy *ToolPolicyEngine
+	// v23.0 路径级策略引擎
+	pathPolicyEngine *PathPolicyEngine
 	// v20.1 污染追踪引擎
 	taintTracker *TaintTracker
 	// v20.2 污染链逆转引擎
@@ -435,6 +437,16 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						tcArgs = info.ToolInputs[i]
 					}
 					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, traceID, tenantID)
+					// v23.0: 路径策略引擎 — 注册 tool_call 步骤并评估
+					if lp.pathPolicyEngine != nil {
+						lp.pathPolicyEngine.RegisterStep(traceID, PathStep{Stage: "tool_call", Action: tcName, Details: tcArgs})
+						ppDec := lp.pathPolicyEngine.Evaluate(traceID, tcName)
+						if actionSev(ppDec.Decision) > actionSev(tpEvent.Decision) {
+							tpEvent.Decision = ppDec.Decision
+							tpEvent.RuleHit = ppDec.RuleName
+							tpEvent.RiskLevel = "high"
+						}
+					}
 					if tpEvent.Decision == "block" {
 						log.Printf("[ToolPolicy] 工具调用被阻断: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
 						if lp.eventBus != nil {
@@ -571,6 +583,15 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 						tcArgs = info.ToolInputs[i]
 					}
 					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, auditCtx.TraceID, auditCtx.TenantID)
+					// v23.0: 路径策略引擎 — SSE 模式下也注册步骤
+					if lp.pathPolicyEngine != nil {
+						lp.pathPolicyEngine.RegisterStep(auditCtx.TraceID, PathStep{Stage: "tool_call", Action: tcName, Details: tcArgs})
+						ppDec := lp.pathPolicyEngine.Evaluate(auditCtx.TraceID, tcName)
+						if actionSev(ppDec.Decision) > actionSev(tpEvent.Decision) {
+							tpEvent.Decision = ppDec.Decision
+							tpEvent.RuleHit = ppDec.RuleName
+						}
+					}
 					if tpEvent.Decision == "block" || tpEvent.Decision == "warn" {
 						log.Printf("[ToolPolicy] SSE 工具调用 %s: tool=%s rule=%s trace=%s (流式模式仅记录)",
 							tpEvent.Decision, tcName, tpEvent.RuleHit, auditCtx.TraceID)
