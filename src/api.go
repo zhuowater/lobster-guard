@@ -1014,8 +1014,16 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handlePathPolicyRiskGauge(w, r)
 	case path == "/api/v1/path-policies/templates" && method == "GET":
 		api.handlePathPolicyTemplates(w, r)
+	case path == "/api/v1/path-policies/templates" && method == "POST":
+		api.handlePathPolicyTemplateCreate(w, r)
 	case strings.HasPrefix(path, "/api/v1/path-policies/templates/") && strings.HasSuffix(path, "/activate") && method == "POST":
 		api.handlePathPolicyTemplateActivate(w, r)
+	case strings.HasPrefix(path, "/api/v1/path-policies/templates/") && strings.HasSuffix(path, "/deactivate") && method == "POST":
+		api.handlePathPolicyTemplateDeactivate(w, r)
+	case strings.HasPrefix(path, "/api/v1/path-policies/templates/") && method == "PUT":
+		api.handlePathPolicyTemplateUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/path-policies/templates/") && method == "DELETE":
+		api.handlePathPolicyTemplateDelete(w, r)
 	case strings.HasPrefix(path, "/api/v1/path-policies/contexts/") && method == "GET":
 		api.handlePathPolicyContextDetail(w, r)
 	case strings.HasPrefix(path, "/api/v1/path-policies/") && method == "PUT":

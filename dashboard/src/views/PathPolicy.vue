@@ -165,24 +165,85 @@
       <div v-else class="empty-state"><Icon name="activity" :size="48" color="#6366F1"/><p>No active sessions</p></div>
     </div>
 
-    <!-- Templates Tab (v23.2) -->
+    <!-- Templates Tab (v23.2 CRUD) -->
     <div v-if="activeTab==='templates'" class="section">
-      <p class="template-desc">Pre-built policy templates for common compliance and security scenarios. Activate a template to enable its rules.</p>
+      <div class="template-toolbar">
+        <p class="template-desc">Policy templates for compliance, security, and industry scenarios. Activate to enable rules, deactivate to disable.</p>
+        <button class="btn btn-primary btn-sm" @click="openNewTemplate"><Icon name="plus" :size="14"/> New Template</button>
+      </div>
       <div class="template-grid" v-if="templates.length">
-        <div class="template-card" v-for="t in templates" :key="t.id">
+        <div class="template-card" v-for="t in templates" :key="t.id" :class="{'tpl-disabled': !t.enabled}">
           <div class="template-header">
-            <h3 class="template-name">{{ t.name }}</h3>
-            <button class="btn btn-primary btn-sm" @click="activateTemplate(t)" :disabled="t._activating">
-              {{ t._activating ? 'Activating...' : 'Activate' }}
-            </button>
+            <div>
+              <h3 class="template-name">{{ t.name }}</h3>
+              <span class="category-badge" :class="'cat-'+t.category">{{ t.category }}</span>
+              <span class="builtin-badge" v-if="t.built_in">built-in</span>
+            </div>
+            <div class="tpl-actions">
+              <button class="btn btn-sm" @click="activateTemplate(t)" :disabled="t._busy" title="Enable all rules in this template">
+                <Icon name="play" :size="12"/> Activate
+              </button>
+              <button class="btn btn-sm btn-ghost" @click="deactivateTemplate(t)" :disabled="t._busy" title="Disable all rules in this template">
+                <Icon name="pause" :size="12"/> Deactivate
+              </button>
+              <button class="btn-icon" @click="editTemplate(t)" title="Edit"><Icon name="edit" :size="14"/></button>
+              <button class="btn-icon btn-icon-danger" v-if="!t.built_in" @click="confirmDeleteTemplate(t)" title="Delete"><Icon name="trash" :size="14"/></button>
+            </div>
           </div>
           <p class="template-text">{{ t.description }}</p>
           <div class="template-rules">
-            <span class="template-rule-badge" v-for="rid in t.rules" :key="rid">{{ rid }}</span>
+            <span class="template-rule-badge" v-for="rid in t.rule_ids" :key="rid">{{ rid }}</span>
           </div>
         </div>
       </div>
       <div v-else class="empty-state"><Icon name="book" :size="48" color="#6366F1"/><p>No templates available</p></div>
+    </div>
+
+    <!-- Template Modal -->
+    <div class="modal-overlay" v-if="showTemplateModal" @click.self="showTemplateModal=false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>{{ editingTemplate ? 'Edit Template' : 'New Template' }}</h3>
+          <button class="btn-close" @click="showTemplateModal=false"><Icon name="x-circle" :size="18"/></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row"><label>ID</label><input v-model="tplForm.id" class="field-input" :disabled="!!editingTemplate" placeholder="tpl-xxx"/></div>
+          <div class="form-row"><label>Name</label><input v-model="tplForm.name" class="field-input" placeholder="Template name"/></div>
+          <div class="form-row"><label>Category</label>
+            <select v-model="tplForm.category" class="field-input">
+              <option value="compliance">Compliance</option><option value="security">Security</option>
+              <option value="industry">Industry</option><option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="form-row"><label>Description</label><textarea v-model="tplForm.description" class="field-input" rows="3"></textarea></div>
+          <div class="form-row">
+            <label>Rule IDs (select rules to include)</label>
+            <div class="rule-checkboxes">
+              <label class="rule-checkbox" v-for="r in rules" :key="r.id">
+                <input type="checkbox" :value="r.id" v-model="tplForm.rule_ids"/>
+                <span class="rc-label">{{ r.id }} <span class="rc-name">{{ r.name }}</span></span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row"><label><input type="checkbox" v-model="tplForm.enabled"/> Enabled</label></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" @click="showTemplateModal=false">Cancel</button>
+          <button class="btn btn-primary" @click="saveTemplate" :disabled="tplSaving">{{ tplSaving ? 'Saving...' : editingTemplate ? 'Update' : 'Create' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Template Delete Confirm -->
+    <div class="modal-overlay" v-if="deleteTemplateTarget" @click.self="deleteTemplateTarget=null">
+      <div class="modal modal-sm">
+        <div class="modal-header"><h3>Confirm Delete</h3></div>
+        <div class="modal-body"><p>Delete template <strong>{{ deleteTemplateTarget.name }}</strong>?</p></div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" @click="deleteTemplateTarget=null">Cancel</button>
+          <button class="btn btn-danger" @click="doDeleteTemplate">Delete</button>
+        </div>
+      </div>
     </div>
 
     <!-- Rule Modal -->
@@ -244,6 +305,7 @@ export default {
       gauges: [], templates: [],
       ruleSearch: '', eventSearch: '', eventSince: '',
       showRuleModal: false, editingRule: null, ruleForm: this.emptyForm(), saving: false, deleteTarget: null,
+      showTemplateModal: false, editingTemplate: null, tplForm: this.emptyTplForm(), tplSaving: false, deleteTemplateTarget: null,
       gaugeTimer: null,
       svgPath: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/></svg>',
       svgRules: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
@@ -293,14 +355,39 @@ export default {
     },
     gaugeDash(s) { const c = 2 * Math.PI * 34; return (c * Math.min(s / 100, 1)) + ' ' + c },
     gaugeLevel(s) { if (s > 80) return 'gauge-danger'; if (s > 60) return 'gauge-warning'; return 'gauge-normal' },
-    // v23.2: Templates
+    // v23.2 CRUD: Templates
+    emptyTplForm() { return { id: '', name: '', category: 'custom', description: '', rule_ids: [], enabled: true } },
     async loadTemplates() {
-      try { const d = await api('/api/v1/path-policies/templates'); this.templates = (d.templates || []).map(t => ({...t, _activating: false})) } catch(e) { console.error(e) }
+      try { const d = await api('/api/v1/path-policies/templates'); this.templates = (d.templates || []).map(t => ({...t, _busy: false})) } catch(e) { console.error(e) }
     },
     async activateTemplate(t) {
-      t._activating = true
+      t._busy = true
       try { await apiPost('/api/v1/path-policies/templates/' + t.id + '/activate', {}); await this.loadRules(); await this.loadStats() } catch(e) { alert(e.message||e) }
-      t._activating = false
+      t._busy = false
+    },
+    async deactivateTemplate(t) {
+      t._busy = true
+      try { await apiPost('/api/v1/path-policies/templates/' + t.id + '/deactivate', {}); await this.loadRules(); await this.loadStats() } catch(e) { alert(e.message||e) }
+      t._busy = false
+    },
+    openNewTemplate() { this.editingTemplate = null; this.tplForm = this.emptyTplForm(); this.showTemplateModal = true },
+    editTemplate(t) {
+      this.editingTemplate = t
+      this.tplForm = { id: t.id, name: t.name, category: t.category || 'custom', description: t.description || '', rule_ids: [...(t.rule_ids || [])], enabled: t.enabled }
+      this.showTemplateModal = true
+    },
+    async saveTemplate() {
+      this.tplSaving = true
+      try {
+        if (this.editingTemplate) { await apiPut('/api/v1/path-policies/templates/' + this.tplForm.id, this.tplForm) }
+        else { await apiPost('/api/v1/path-policies/templates', this.tplForm) }
+        this.showTemplateModal = false; await this.loadTemplates()
+      } catch(e) { alert(e.message||e) }
+      this.tplSaving = false
+    },
+    confirmDeleteTemplate(t) { this.deleteTemplateTarget = t },
+    async doDeleteTemplate() {
+      try { await apiDelete('/api/v1/path-policies/templates/' + this.deleteTemplateTarget.id); this.deleteTemplateTarget = null; await this.loadTemplates() } catch(e) { alert(e.message||e) }
     },
   },
   beforeUnmount() { if (this.gaugeTimer) clearInterval(this.gaugeTimer) }
@@ -432,8 +519,9 @@ textarea.field-input { font-family: var(--font-mono); resize: vertical; }
 .gauge-taints { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 .gauge-last { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--space-2); }
 
-/* v23.2: Templates */
-.template-desc { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-4); }
+/* v23.2 CRUD: Templates */
+.template-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); }
+.template-desc { font-size: var(--text-sm); color: var(--text-secondary); flex: 1; }
 .template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--space-4); }
 .template-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: var(--space-5); transition: all var(--transition-fast); }
 .template-card:hover { border-color: #6366F1; box-shadow: 0 0 0 2px rgba(99,102,241,0.1); }
@@ -442,6 +530,19 @@ textarea.field-input { font-family: var(--font-mono); resize: vertical; }
 .template-text { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--space-3); }
 .template-rules { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .template-rule-badge { display: inline-block; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); background: rgba(99,102,241,0.08); color: #6366F1; }
+.tpl-disabled { opacity: 0.5; }
+.tpl-actions { display: flex; gap: var(--space-1); align-items: center; flex-shrink: 0; }
+.category-badge { display: inline-block; padding: 1px 6px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; margin-left: var(--space-2); }
+.cat-compliance { background: rgba(34,197,94,0.1); color: #16A34A; }
+.cat-security { background: rgba(99,102,241,0.1); color: #6366F1; }
+.cat-industry { background: rgba(245,158,11,0.1); color: #D97706; }
+.cat-custom { background: rgba(107,114,128,0.1); color: #6B7280; }
+.builtin-badge { display: inline-block; padding: 1px 6px; border-radius: var(--radius-full); font-size: 10px; font-weight: 500; margin-left: var(--space-1); background: rgba(100,116,139,0.1); color: #64748B; }
+.rule-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-1); max-height: 200px; overflow-y: auto; padding: var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.rule-checkbox { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); cursor: pointer; padding: 2px 4px; border-radius: var(--radius-sm); }
+.rule-checkbox:hover { background: var(--bg-hover); }
+.rc-label { font-family: var(--font-mono); }
+.rc-name { color: var(--text-tertiary); font-family: inherit; }
 
 @media (max-width: 768px) {
   .pathpolicy-page { padding: var(--space-3); }

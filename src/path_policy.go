@@ -144,11 +144,25 @@ var defaultPathPolicies = []PathPolicyRule{
 		Description: "[AI Act] Human oversight: require review when risk score exceeds 70"},
 }
 
+// PolicyTemplate 策略模板（v23.2 CRUD）
+type PolicyTemplate struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Category    string   `json:"category"`    // compliance / security / industry / custom
+	RuleIDs     []string `json:"rule_ids"`
+	Enabled     bool     `json:"enabled"`
+	BuiltIn     bool     `json:"built_in"`    // 内置模板不可删除
+	CreatedAt   string   `json:"created_at,omitempty"`
+	UpdatedAt   string   `json:"updated_at,omitempty"`
+}
+
 type PathPolicyEngine struct {
 	db             *sql.DB
 	mu             sync.RWMutex
 	contexts       map[string]*PathContext
 	rules          []PathPolicyRule
+	templates      []PolicyTemplate
 	riskWeights    map[string]float64
 	halfLifeSec    float64
 	evictAfter     time.Duration
@@ -159,9 +173,9 @@ func NewPathPolicyEngine(db *sql.DB) *PathPolicyEngine {
 	e := &PathPolicyEngine{db: db, contexts: make(map[string]*PathContext),
 		riskWeights: make(map[string]float64), halfLifeSec: 300, evictAfter: 2 * time.Hour}
 	for k, v := range defaultRiskWeights { e.riskWeights[k] = v }
-	e.initSchema(); e.loadRules()
+	e.initSchema(); e.loadRules(); e.loadTemplates()
 	go e.evictionLoop()
-	log.Printf("[PathPolicy] Engine initialized (%d rules, %d weights)", len(e.rules), len(e.riskWeights))
+	log.Printf("[PathPolicy] Engine initialized (%d rules, %d templates, %d weights)", len(e.rules), len(e.templates), len(e.riskWeights))
 	return e
 }
 
@@ -180,6 +194,12 @@ func (e *PathPolicyEngine) initSchema() {
 		tenant_id TEXT NOT NULL DEFAULT 'default', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
 	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_path_events_trace ON path_events(trace_id)`)
 	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_path_events_tenant ON path_events(tenant_id)`)
+	// v23.2 CRUD: 策略模板表
+	e.db.Exec(`CREATE TABLE IF NOT EXISTS policy_templates (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
+		category TEXT NOT NULL DEFAULT 'custom', rule_ids TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1, built_in INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
 }
 
 func (e *PathPolicyEngine) loadRules() {
@@ -519,4 +539,178 @@ func (e *PathPolicyEngine) EvictExpired() int {
 
 func (e *PathPolicyEngine) SetEvictAfter(d time.Duration) {
 	e.mu.Lock(); defer e.mu.Unlock(); e.evictAfter = d
+}
+
+// ============================================================
+// v23.2 CRUD: 策略模板管理
+// ============================================================
+
+// 8 个内置模板，覆盖合规/安全/行业/运维场景
+var defaultTemplates = []PolicyTemplate{
+	{ID: "tpl-ai-act", Name: "AI Act Compliance", Category: "compliance",
+		Description: "EU AI Act: data minimization, human oversight, credential zero-tolerance, exfiltration prevention, high-risk system controls",
+		RuleIDs: []string{"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-strict", Name: "Strict Security", Category: "security",
+		Description: "Maximum security posture with all core rules enabled and aggressive risk thresholds",
+		RuleIDs: []string{"pp-001", "pp-002", "pp-003", "pp-004", "pp-005", "pp-006", "pp-007", "pp-008"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-monitor", Name: "Monitoring Only", Category: "security",
+		Description: "Observe without blocking - log all violations for initial deployment or audit periods",
+		RuleIDs: []string{"pp-006"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-finance", Name: "Financial Services", Category: "industry",
+		Description: "SOX/PCI-DSS aligned: zero-tolerance on credentials, strict PII limits, block database-to-external data flows",
+		RuleIDs: []string{"pp-004", "pp-005", "pp-010", "pp-011", "pp-012"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-healthcare", Name: "Healthcare / HIPAA", Category: "industry",
+		Description: "HIPAA aligned: aggressive PII protection (threshold 2), human review at lower risk score, credential lockdown",
+		RuleIDs: []string{"pp-004", "pp-005", "pp-009", "pp-012", "pp-013"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-devops", Name: "DevOps / CI-CD", Category: "industry",
+		Description: "Protect CI/CD pipelines: block shell after web fetch, prevent credential leaks, monitor file-to-HTTP chains",
+		RuleIDs: []string{"pp-001", "pp-002", "pp-003", "pp-005", "pp-007"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-zero-trust", Name: "Zero Trust Agent", Category: "security",
+		Description: "Trust nothing by default: all sequence rules, all cumulative rules, aggressive degradation at score 60",
+		RuleIDs: []string{"pp-001", "pp-002", "pp-003", "pp-004", "pp-005", "pp-006", "pp-007", "pp-008", "pp-009", "pp-010", "pp-011", "pp-012", "pp-013"}, Enabled: true, BuiltIn: true},
+	{ID: "tpl-minimal", Name: "Minimal Protection", Category: "security",
+		Description: "Essential protection only: block credential leaks and shell execution after external data access",
+		RuleIDs: []string{"pp-002", "pp-005"}, Enabled: true, BuiltIn: true},
+}
+
+func (e *PathPolicyEngine) loadTemplates() {
+	if e.db == nil {
+		e.templates = append([]PolicyTemplate{}, defaultTemplates...)
+		return
+	}
+	// 补入内置模板
+	for _, t := range defaultTemplates {
+		rids, _ := json.Marshal(t.RuleIDs)
+		e.db.Exec("INSERT OR IGNORE INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in) VALUES (?,?,?,?,?,?,?)",
+			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), boolToInt(t.BuiltIn))
+	}
+	rows, err := e.db.Query("SELECT id,name,COALESCE(description,''),COALESCE(category,'custom'),rule_ids,enabled,built_in,COALESCE(created_at,''),COALESCE(updated_at,'') FROM policy_templates ORDER BY built_in DESC, id ASC")
+	if err != nil {
+		e.templates = append([]PolicyTemplate{}, defaultTemplates...)
+		return
+	}
+	defer rows.Close()
+	var templates []PolicyTemplate
+	for rows.Next() {
+		var t PolicyTemplate
+		var ridsJSON string
+		var en, bi int
+		if rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &ridsJSON, &en, &bi, &t.CreatedAt, &t.UpdatedAt) != nil {
+			continue
+		}
+		t.Enabled = en != 0
+		t.BuiltIn = bi != 0
+		json.Unmarshal([]byte(ridsJSON), &t.RuleIDs)
+		if t.RuleIDs == nil { t.RuleIDs = []string{} }
+		templates = append(templates, t)
+	}
+	if len(templates) == 0 {
+		templates = append([]PolicyTemplate{}, defaultTemplates...)
+	}
+	e.templates = templates
+}
+
+func (e *PathPolicyEngine) ListTemplates() []PolicyTemplate {
+	e.mu.RLock(); defer e.mu.RUnlock()
+	return append([]PolicyTemplate{}, e.templates...)
+}
+
+func (e *PathPolicyEngine) GetTemplate(id string) *PolicyTemplate {
+	e.mu.RLock(); defer e.mu.RUnlock()
+	for _, t := range e.templates {
+		if t.ID == id { c := t; return &c }
+	}
+	return nil
+}
+
+func (e *PathPolicyEngine) AddTemplate(t PolicyTemplate) error {
+	if t.ID == "" || t.Name == "" { return fmt.Errorf("id and name required") }
+	if t.Category == "" { t.Category = "custom" }
+	if t.RuleIDs == nil { t.RuleIDs = []string{} }
+	e.mu.Lock(); defer e.mu.Unlock()
+	for _, ex := range e.templates {
+		if ex.ID == t.ID { return fmt.Errorf("template %q already exists", t.ID) }
+	}
+	if e.db != nil {
+		rids, _ := json.Marshal(t.RuleIDs)
+		if _, err := e.db.Exec("INSERT INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in) VALUES (?,?,?,?,?,?,?)",
+			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), 0); err != nil {
+			return err
+		}
+	}
+	e.templates = append(e.templates, t)
+	return nil
+}
+
+func (e *PathPolicyEngine) UpdateTemplate(t PolicyTemplate) error {
+	if t.ID == "" { return fmt.Errorf("id required") }
+	e.mu.Lock(); defer e.mu.Unlock()
+	idx := -1
+	for i, ex := range e.templates {
+		if ex.ID == t.ID { idx = i; break }
+	}
+	if idx < 0 { return fmt.Errorf("template %q not found", t.ID) }
+	if t.Name != "" { e.templates[idx].Name = t.Name }
+	if t.Description != "" { e.templates[idx].Description = t.Description }
+	if t.Category != "" { e.templates[idx].Category = t.Category }
+	if t.RuleIDs != nil { e.templates[idx].RuleIDs = t.RuleIDs }
+	e.templates[idx].Enabled = t.Enabled
+	if e.db != nil {
+		rids, _ := json.Marshal(e.templates[idx].RuleIDs)
+		e.db.Exec("UPDATE policy_templates SET name=?,description=?,category=?,rule_ids=?,enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+			e.templates[idx].Name, e.templates[idx].Description, e.templates[idx].Category, string(rids), boolToInt(e.templates[idx].Enabled), t.ID)
+	}
+	return nil
+}
+
+func (e *PathPolicyEngine) DeleteTemplate(id string) error {
+	e.mu.Lock(); defer e.mu.Unlock()
+	n := make([]PolicyTemplate, 0, len(e.templates))
+	found := false
+	for _, t := range e.templates {
+		if t.ID == id {
+			if t.BuiltIn { return fmt.Errorf("cannot delete built-in template %q", id) }
+			found = true
+			continue
+		}
+		n = append(n, t)
+	}
+	if !found { return fmt.Errorf("template %q not found", id) }
+	e.templates = n
+	if e.db != nil { e.db.Exec("DELETE FROM policy_templates WHERE id=? AND built_in=0", id) }
+	return nil
+}
+
+func (e *PathPolicyEngine) SetTemplateEnabled(id string, en bool) error {
+	e.mu.Lock(); defer e.mu.Unlock()
+	for i, t := range e.templates {
+		if t.ID == id {
+			e.templates[i].Enabled = en
+			if e.db != nil { e.db.Exec("UPDATE policy_templates SET enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", boolToInt(en), id) }
+			return nil
+		}
+	}
+	return fmt.Errorf("template %q not found", id)
+}
+
+// ActivateTemplate 激活模板中所有规则
+func (e *PathPolicyEngine) ActivateTemplate(id string) (int, error) {
+	t := e.GetTemplate(id)
+	if t == nil { return 0, fmt.Errorf("template %q not found", id) }
+	activated := 0
+	for _, rid := range t.RuleIDs {
+		if err := e.SetRuleEnabled(rid, true); err == nil { activated++ }
+	}
+	return activated, nil
+}
+
+// DeactivateTemplate 停用模板中所有规则
+func (e *PathPolicyEngine) DeactivateTemplate(id string) (int, error) {
+	t := e.GetTemplate(id)
+	if t == nil { return 0, fmt.Errorf("template %q not found", id) }
+	deactivated := 0
+	for _, rid := range t.RuleIDs {
+		if err := e.SetRuleEnabled(rid, false); err == nil { deactivated++ }
+	}
+	return deactivated, nil
 }

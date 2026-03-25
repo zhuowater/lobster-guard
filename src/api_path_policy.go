@@ -189,54 +189,117 @@ func sortGauges(gs []map[string]interface{}) {
 	}
 }
 
-// v23.2: GET /api/v1/path-policies/templates — 获取策略模板列表
+// v23.2 CRUD: GET /api/v1/path-policies/templates — 模板列表
 func (api *ManagementAPI) handlePathPolicyTemplates(w http.ResponseWriter, r *http.Request) {
-	templates := []map[string]interface{}{
-		{
-			"id": "ai_act", "name": "AI Act Compliance",
-			"description": "EU AI Act inspired policies: data minimization, human oversight, zero-tolerance credentials, exfiltration prevention",
-			"rules": []string{"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"},
-		},
-		{
-			"id": "strict_security", "name": "Strict Security",
-			"description": "Maximum security posture: all default rules enabled with aggressive thresholds",
-			"rules": []string{"pp-001", "pp-002", "pp-003", "pp-004", "pp-005", "pp-006", "pp-007", "pp-008"},
-		},
-		{
-			"id": "monitoring_only", "name": "Monitoring Only",
-			"description": "Log all violations without blocking — suitable for initial deployment",
-			"rules": []string{"pp-006"},
-		},
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 200, map[string]interface{}{"templates": []interface{}{}, "total": 0})
+		return
 	}
-	jsonResponse(w, 200, map[string]interface{}{"templates": templates})
+	templates := api.pathPolicyEngine.ListTemplates()
+	if templates == nil { templates = []PolicyTemplate{} }
+	jsonResponse(w, 200, map[string]interface{}{"templates": templates, "total": len(templates)})
 }
 
-// v23.2: POST /api/v1/path-policies/templates/:id/activate — 激活策略模板
+// POST /api/v1/path-policies/templates — 创建模板
+func (api *ManagementAPI) handlePathPolicyTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
+		return
+	}
+	var t PolicyTemplate
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if t.ID == "" || t.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id and name required"})
+		return
+	}
+	if err := api.pathPolicyEngine.AddTemplate(t); err != nil {
+		jsonResponse(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "created", "template": t})
+}
+
+// PUT /api/v1/path-policies/templates/:id — 更新模板
+func (api *ManagementAPI) handlePathPolicyTemplateUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
+		return
+	}
+	id := extractTemplateID(r.URL.Path)
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	var t PolicyTemplate
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	t.ID = id
+	if err := api.pathPolicyEngine.UpdateTemplate(t); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "id": id})
+}
+
+// DELETE /api/v1/path-policies/templates/:id — 删除模板（内置模板不可删）
+func (api *ManagementAPI) handlePathPolicyTemplateDelete(w http.ResponseWriter, r *http.Request) {
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
+		return
+	}
+	id := extractTemplateID(r.URL.Path)
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	if err := api.pathPolicyEngine.DeleteTemplate(id); err != nil {
+		status := 404
+		if strings.Contains(err.Error(), "built-in") { status = 403 }
+		jsonResponse(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// POST /api/v1/path-policies/templates/:id/activate — 激活模板中的规则
 func (api *ManagementAPI) handlePathPolicyTemplateActivate(w http.ResponseWriter, r *http.Request) {
 	if api.pathPolicyEngine == nil {
 		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
 		return
 	}
-	templateID := strings.TrimPrefix(r.URL.Path, "/api/v1/path-policies/templates/")
-	templateID = strings.TrimSuffix(templateID, "/activate")
-
-	templateRules := map[string][]string{
-		"ai_act":          {"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"},
-		"strict_security": {"pp-001", "pp-002", "pp-003", "pp-004", "pp-005", "pp-006", "pp-007", "pp-008"},
-		"monitoring_only": {"pp-006"},
-	}
-
-	ruleIDs, ok := templateRules[templateID]
-	if !ok {
-		jsonResponse(w, 404, map[string]string{"error": "template not found"})
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/path-policies/templates/")
+	id = strings.TrimSuffix(id, "/activate")
+	n, err := api.pathPolicyEngine.ActivateTemplate(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "activated", "template": id, "rules_enabled": n})
+}
 
-	activated := 0
-	for _, id := range ruleIDs {
-		if err := api.pathPolicyEngine.SetRuleEnabled(id, true); err == nil {
-			activated++
-		}
+// POST /api/v1/path-policies/templates/:id/deactivate — 停用模板中的规则
+func (api *ManagementAPI) handlePathPolicyTemplateDeactivate(w http.ResponseWriter, r *http.Request) {
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
+		return
 	}
-	jsonResponse(w, 200, map[string]interface{}{"status": "activated", "template": templateID, "rules_enabled": activated})
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/path-policies/templates/")
+	id = strings.TrimSuffix(id, "/deactivate")
+	n, err := api.pathPolicyEngine.DeactivateTemplate(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deactivated", "template": id, "rules_disabled": n})
+}
+
+func extractTemplateID(path string) string {
+	s := strings.TrimPrefix(path, "/api/v1/path-policies/templates/")
+	if i := strings.Index(s, "/"); i >= 0 { s = s[:i] }
+	return s
 }

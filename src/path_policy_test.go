@@ -540,3 +540,141 @@ func TestPathPolicyEngine_DefaultRulesCount(t *testing.T) {
 		t.Errorf("expected 13 default rules (8 + 5 AI Act), got %d", len(rules))
 	}
 }
+
+// ============================================================
+// v23.2 CRUD: Template Tests
+// ============================================================
+
+func TestPathPolicyEngine_TemplateCRUD(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// List — should have 8 built-in templates
+	tpls := e.ListTemplates()
+	if len(tpls) != 8 {
+		t.Fatalf("expected 8 built-in templates, got %d", len(tpls))
+	}
+
+	// Create custom template
+	err := e.AddTemplate(PolicyTemplate{
+		ID: "tpl-custom-1", Name: "My Custom", Category: "custom",
+		Description: "Test custom template", RuleIDs: []string{"pp-001", "pp-005"},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("AddTemplate failed: %v", err)
+	}
+	if len(e.ListTemplates()) != 9 {
+		t.Errorf("expected 9 templates after create, got %d", len(e.ListTemplates()))
+	}
+
+	// Get
+	tpl := e.GetTemplate("tpl-custom-1")
+	if tpl == nil || tpl.Name != "My Custom" {
+		t.Error("GetTemplate failed")
+	}
+
+	// Update
+	err = e.UpdateTemplate(PolicyTemplate{ID: "tpl-custom-1", Name: "My Custom Updated", Enabled: true})
+	if err != nil {
+		t.Fatalf("UpdateTemplate failed: %v", err)
+	}
+	tpl = e.GetTemplate("tpl-custom-1")
+	if tpl.Name != "My Custom Updated" {
+		t.Errorf("expected updated name, got %s", tpl.Name)
+	}
+
+	// Delete custom — should succeed
+	err = e.DeleteTemplate("tpl-custom-1")
+	if err != nil {
+		t.Fatalf("DeleteTemplate custom failed: %v", err)
+	}
+	if len(e.ListTemplates()) != 8 {
+		t.Errorf("expected 8 templates after delete, got %d", len(e.ListTemplates()))
+	}
+
+	// Delete built-in — should fail
+	err = e.DeleteTemplate("tpl-ai-act")
+	if err == nil {
+		t.Error("DeleteTemplate built-in should fail")
+	}
+}
+
+func TestPathPolicyEngine_TemplateActivateDeactivate(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	// Deactivate AI Act first (all rules should be disabled)
+	n, err := e.DeactivateTemplate("tpl-ai-act")
+	if err != nil {
+		t.Fatalf("DeactivateTemplate failed: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 deactivated, got %d", n)
+	}
+
+	// Verify AI Act rules disabled
+	for _, id := range []string{"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"} {
+		r := e.GetRule(id)
+		if r != nil && r.Enabled {
+			t.Errorf("rule %s should be disabled after deactivation", id)
+		}
+	}
+
+	// Activate
+	n, err = e.ActivateTemplate("tpl-ai-act")
+	if err != nil {
+		t.Fatalf("ActivateTemplate failed: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 activated, got %d", n)
+	}
+
+	// Verify enabled
+	for _, id := range []string{"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"} {
+		r := e.GetRule(id)
+		if r == nil || !r.Enabled {
+			t.Errorf("rule %s should be enabled after activation", id)
+		}
+	}
+}
+
+func TestPathPolicyEngine_TemplateDBPersistence(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Create with engine 1
+	e1 := NewPathPolicyEngine(db)
+	e1.AddTemplate(PolicyTemplate{
+		ID: "tpl-persist", Name: "Persist Test", Category: "custom",
+		Description: "Should survive restart", RuleIDs: []string{"pp-001"},
+		Enabled: true,
+	})
+
+	// Create engine 2 — should load from DB
+	e2 := NewPathPolicyEngine(db)
+	tpl := e2.GetTemplate("tpl-persist")
+	if tpl == nil {
+		t.Fatal("custom template should persist across engine restarts")
+	}
+	if tpl.Name != "Persist Test" {
+		t.Errorf("expected 'Persist Test', got %s", tpl.Name)
+	}
+}
+
+func TestPathPolicyEngine_TemplateCategories(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	e := NewPathPolicyEngine(db)
+
+	cats := make(map[string]int)
+	for _, tpl := range e.ListTemplates() {
+		cats[tpl.Category]++
+	}
+	// Should have compliance, security, industry
+	if cats["compliance"] < 1 || cats["security"] < 1 || cats["industry"] < 1 {
+		t.Errorf("expected templates in all categories, got: %v", cats)
+	}
+}
