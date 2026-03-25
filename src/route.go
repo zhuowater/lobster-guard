@@ -1238,15 +1238,22 @@ func NewRoutePolicyEngine(policies []RoutePolicyConfig) *RoutePolicyEngine {
 
 // Match 匹配策略，返回 upstream_id 和是否命中
 func (rpe *RoutePolicyEngine) Match(info *UserInfo, appID string) (string, bool) {
-	if info == nil {
-		return "", false
-	}
 	rpe.mu.RLock()
 	defer rpe.mu.RUnlock()
 
 	// default 策略作为兜底，必须在所有精确匹配之后才生效
 	var defaultUpstream string
 	hasDefault := false
+
+	// info 为 nil 时无法做精确匹配，但 default 策略仍然生效
+	if info == nil {
+		for _, p := range rpe.policies {
+			if p.Match.Default {
+				return p.UpstreamID, true
+			}
+		}
+		return "", false
+	}
 
 	for _, p := range rpe.policies {
 		if p.Match.Default {
@@ -1311,11 +1318,18 @@ func (rpe *RoutePolicyEngine) SetPolicies(policies []RoutePolicyConfig) {
 
 // TestMatch 测试某个用户会命中哪条策略
 func (rpe *RoutePolicyEngine) TestMatch(info *UserInfo, appID string) (int, *RoutePolicyConfig, bool) {
-	if info == nil {
-		return -1, nil, false
-	}
 	rpe.mu.RLock()
 	defer rpe.mu.RUnlock()
+
+	// info 为 nil 时只能匹配 default 策略
+	if info == nil {
+		for i, p := range rpe.policies {
+			if p.Match.Default {
+				return i, &p, true
+			}
+		}
+		return -1, nil, false
+	}
 
 	// default 策略作为兜底，必须在所有精确匹配之后才生效
 	defaultIdx := -1

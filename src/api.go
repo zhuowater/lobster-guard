@@ -1469,6 +1469,8 @@ func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Reques
 	}
 
 	// 策略冲突检测：对每条路由，用用户信息匹配策略，看结果是否和当前绑定一致
+	// 注意：默认(兜底)策略命中时不标记冲突 — 用户已有亲和路由说明已被精确分配，
+	// 默认策略本来就是"没有其他匹配时才生效"，不应与已有亲和绑定冲突。
 	enriched := make([]RouteEntryWithConflict, 0, len(entries))
 	conflictCount := 0
 	for _, e := range entries {
@@ -1487,12 +1489,15 @@ func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Reques
 					info = cached
 				}
 			}
-			if pUID, ok := api.policyEng.Match(info, e.AppID); ok && pUID != "" {
-				ec.PolicyUpstream = pUID
-				if pUID != e.UpstreamID {
-					ec.PolicyConflict = true
-					ec.PolicyRule = api.describePolicyMatch(info, e.AppID)
-					conflictCount++
+			if _, policy, ok := api.policyEng.TestMatch(info, e.AppID); ok && policy != nil {
+				ec.PolicyUpstream = policy.UpstreamID
+				if policy.UpstreamID != e.UpstreamID {
+					// 默认(兜底)策略不构成冲突 — 亲和路由优先级更高
+					if !policy.Match.Default {
+						ec.PolicyConflict = true
+						ec.PolicyRule = api.describePolicyMatch(info, e.AppID)
+						conflictCount++
+					}
 				}
 			}
 		}
@@ -2099,9 +2104,24 @@ func (api *ManagementAPI) handleTestRoutePolicy(w http.ResponseWriter, r *http.R
 		info = api.userCache.GetCached(req.SenderID)
 	}
 	if info == nil {
+		// info 为 nil 时仍然检查 default 策略
+		if api.policyEng != nil {
+			idx, policy, matched := api.policyEng.TestMatch(nil, req.AppID)
+			if matched {
+				jsonResponse(w, 200, map[string]interface{}{
+					"matched":      true,
+					"policy_index": idx,
+					"policy":       policy,
+					"upstream_id":  policy.UpstreamID,
+					"user_info":    nil,
+					"note":         "matched via default policy (no user info needed)",
+				})
+				return
+			}
+		}
 		jsonResponse(w, 200, map[string]interface{}{
 			"matched":  false,
-			"message":  "no user info available for matching",
+			"message":  "no user info available and no default policy configured",
 		})
 		return
 	}

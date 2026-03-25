@@ -519,8 +519,14 @@ func (ip *InboundProxy) resolveUpstream(senderID, appID, logPrefix string) strin
 				}
 			}
 		} else if !hasBind {
-			// 500ms 内没拿到用户信息，也没有旧绑定 → 降级到负载均衡，后面异步纠偏
-			// （有旧绑定的情况下面走亲和路由兜底）
+			// 用户信息获取失败，但 default 策略不需要用户信息
+			if pUID, ok := ip.policyEng.Match(nil, appID); ok && pUID != "" && ip.pool.IsHealthy(pUID) {
+				ip.routes.Bind(senderID, appID, pUID)
+				ip.pool.IncrUserCount(pUID, 1)
+				log.Printf("%s default策略绑定(无用户信息) sender=%s app=%s -> %s", logPrefix, senderID, appID, pUID)
+				return pUID
+			}
+			// 也没有 default 策略 → 降级到负载均衡，后面异步纠偏
 		}
 	}
 

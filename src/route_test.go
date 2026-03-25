@@ -575,8 +575,8 @@ func TestRoutePolicyEngine_Match(t *testing.T) {
 		{
 			name:      "nil info",
 			info:      nil,
-			wantUID:   "",
-			wantMatch: false,
+			wantUID:   "upstream-default",
+			wantMatch: true, // default 策略不需要用户信息
 		},
 	}
 

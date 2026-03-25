@@ -682,3 +682,144 @@ inbound_rules:
 	}
 }
 
+// ============================================================
+// v22.8: 默认策略路由不应标记为冲突
+// ============================================================
+
+func TestListRoutes_DefaultPolicyNoConflict(t *testing.T) {
+	tmpDB := "/tmp/lobster-guard-test-defpolicy-" + fmt.Sprintf("%d", time.Now().UnixNano()) + ".db"
+	cfg := &Config{
+		StaticUpstreams:       []StaticUpstreamConfig{{ID: "team-1", Address: "127.0.0.1", Port: 18790}},
+		ManagementToken:       "mgmt-token",
+		RegistrationToken:     "reg-token",
+		HeartbeatIntervalSec:  10,
+		HeartbeatTimeoutCount: 3,
+		RoutePersist:          false,
+		RoutePolicies: []RoutePolicyConfig{
+			{UpstreamID: "default-upstream", Match: RoutePolicyMatch{Default: true}},
+		},
+	}
+	db, _ := initDB(tmpDB)
+	defer func() { db.Close(); os.Remove(tmpDB) }()
+
+	pool := NewUpstreamPool(cfg, db)
+	routes := NewRouteTable(db, false)
+	logger, _ := NewAuditLogger(db)
+	outEngine := NewOutboundRuleEngine(nil)
+	engine := NewRuleEngine()
+	channel := NewGenericPlugin("", "")
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
+
+	// 创建策略引擎（只有一个 default 兜底规则）
+	policyEng := NewRoutePolicyEngine(cfg.RoutePolicies)
+
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	api.policyEng = policyEng
+
+	// 绑定用户到 team-1（非默认上游）
+	body := `{"sender_id":"user-A","upstream_id":"team-1","display_name":"张三","department":"研发部"}`
+	req := httptest.NewRequest("POST", "/api/v1/routes/bind", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("绑定期望 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 查询路由 — 默认策略指向 default-upstream，用户绑定 team-1，不应标记冲突
+	req = httptest.NewRequest("GET", "/api/v1/routes", nil)
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("查询路由期望 200，实际 %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+
+	// 不应有 conflict_count
+	if cc, ok := resp["conflict_count"]; ok {
+		t.Errorf("不应有 conflict_count，实际: %v", cc)
+	}
+
+	// 路由条目的 policy_conflict 应为 false
+	routesList := resp["routes"].([]interface{})
+	if len(routesList) != 1 {
+		t.Fatalf("期望 1 条路由，实际 %d", len(routesList))
+	}
+	route := routesList[0].(map[string]interface{})
+	if route["policy_conflict"] == true {
+		t.Errorf("默认策略不应标记冲突，但 policy_conflict=true，policy_upstream=%v", route["policy_upstream"])
+	}
+	// policy_upstream 仍应返回（告知匹配结果，只是不标冲突）
+	if route["policy_upstream"] != "default-upstream" {
+		t.Errorf("policy_upstream 应为 default-upstream，实际: %v", route["policy_upstream"])
+	}
+}
+
+func TestListRoutes_ExplicitPolicyConflict(t *testing.T) {
+	tmpDB := "/tmp/lobster-guard-test-explpolicy-" + fmt.Sprintf("%d", time.Now().UnixNano()) + ".db"
+	cfg := &Config{
+		StaticUpstreams:       []StaticUpstreamConfig{{ID: "team-1", Address: "127.0.0.1", Port: 18790}},
+		ManagementToken:       "mgmt-token",
+		RegistrationToken:     "reg-token",
+		HeartbeatIntervalSec:  10,
+		HeartbeatTimeoutCount: 3,
+		RoutePersist:          false,
+		RoutePolicies: []RoutePolicyConfig{
+			{UpstreamID: "dept-upstream", Match: RoutePolicyMatch{Department: "研发部"}},
+			{UpstreamID: "default-upstream", Match: RoutePolicyMatch{Default: true}},
+		},
+	}
+	db, _ := initDB(tmpDB)
+	defer func() { db.Close(); os.Remove(tmpDB) }()
+
+	pool := NewUpstreamPool(cfg, db)
+	routes := NewRouteTable(db, false)
+	logger, _ := NewAuditLogger(db)
+	outEngine := NewOutboundRuleEngine(nil)
+	engine := NewRuleEngine()
+	channel := NewGenericPlugin("", "")
+	inbound := NewInboundProxy(cfg, channel, engine, logger, pool, routes, nil, nil, nil, nil, nil)
+
+	policyEng := NewRoutePolicyEngine(cfg.RoutePolicies)
+
+	api := NewManagementAPI(cfg, "", pool, routes, logger, engine, outEngine, inbound, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	api.policyEng = policyEng
+
+	// 绑定用户到 team-1，但部门匹配的精确策略指向 dept-upstream → 应该标记冲突
+	body := `{"sender_id":"user-B","upstream_id":"team-1","display_name":"李四","department":"研发部"}`
+	req := httptest.NewRequest("POST", "/api/v1/routes/bind", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("绑定期望 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 查询路由 — 精确策略指向 dept-upstream，用户绑定 team-1，应标记冲突
+	req = httptest.NewRequest("GET", "/api/v1/routes", nil)
+	req.Header.Set("Authorization", "Bearer mgmt-token")
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+
+	// 应有 conflict_count = 1
+	cc, ok := resp["conflict_count"]
+	if !ok || int(cc.(float64)) != 1 {
+		t.Errorf("期望 conflict_count=1，实际: %v", cc)
+	}
+
+	routesList := resp["routes"].([]interface{})
+	route := routesList[0].(map[string]interface{})
+	if route["policy_conflict"] != true {
+		t.Errorf("精确策略冲突应标记 policy_conflict=true")
+	}
+	if route["policy_upstream"] != "dept-upstream" {
+		t.Errorf("policy_upstream 应为 dept-upstream，实际: %v", route["policy_upstream"])
+	}
+}
+
