@@ -128,3 +128,86 @@ func (api *ManagementAPI) handleCFCacheClear(w http.ResponseWriter, r *http.Requ
 		"cleared": n,
 	})
 }
+
+// ============================================================
+// v24.1 归因报告 API
+// ============================================================
+
+// handleCFReports GET /api/v1/counterfactual/reports — 归因报告列表
+func (api *ManagementAPI) handleCFReports(w http.ResponseWriter, r *http.Request) {
+	if api.cfVerifier == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"reports": []interface{}{},
+			"total":   0,
+		})
+		return
+	}
+	traceID := r.URL.Query().Get("trace_id")
+	verdict := r.URL.Query().Get("verdict")
+	since := r.URL.Query().Get("since")
+	if since != "" && len(since) <= 3 {
+		since = parseSinceParam(since)
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	results := api.cfVerifier.QueryAttributionReports(traceID, verdict, since, limit)
+	if results == nil {
+		results = []AttributionReport{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"reports": results,
+		"total":   len(results),
+	})
+}
+
+// handleCFReportGet GET /api/v1/counterfactual/reports/:id — 归因报告详情
+func (api *ManagementAPI) handleCFReportGet(w http.ResponseWriter, r *http.Request) {
+	if api.cfVerifier == nil {
+		jsonResponse(w, 404, map[string]string{"error": "counterfactual verifier not enabled"})
+		return
+	}
+	id := r.URL.Path[len("/api/v1/counterfactual/reports/"):]
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	report := api.cfVerifier.GetAttributionReport(id)
+	if report == nil {
+		jsonResponse(w, 404, map[string]string{"error": "report not found"})
+		return
+	}
+	jsonResponse(w, 200, report)
+}
+
+// handleCFTimeline GET /api/v1/counterfactual/timeline — 因果归因时间线
+func (api *ManagementAPI) handleCFTimeline(w http.ResponseWriter, r *http.Request) {
+	if api.cfVerifier == nil {
+		jsonResponse(w, 200, map[string]interface{}{
+			"events": []interface{}{},
+			"total":  0,
+		})
+		return
+	}
+	since := r.URL.Query().Get("since")
+	if since != "" && len(since) <= 3 {
+		since = parseSinceParam(since)
+	}
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	events := api.cfVerifier.QueryTimeline(since, limit)
+	if events == nil {
+		events = []CFTimelineEvent{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"events": events,
+		"total":  len(events),
+	})
+}

@@ -153,6 +153,8 @@ type ManagementAPI struct {
 	pathPolicyEngine *PathPolicyEngine
 	// v24.0 反事实验证引擎
 	cfVerifier *CounterfactualVerifier
+	// v24.2 自适应验证策略
+	adaptiveStrategy *AdaptiveStrategy
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -1046,8 +1048,27 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCFCacheGet(w, r)
 	case path == "/api/v1/counterfactual/cache" && method == "DELETE":
 		api.handleCFCacheClear(w, r)
+	// v24.1: 归因报告 API
+	case path == "/api/v1/counterfactual/reports" && method == "GET":
+		api.handleCFReports(w, r)
+	case path == "/api/v1/counterfactual/timeline" && method == "GET":
+		api.handleCFTimeline(w, r)
+	case strings.HasPrefix(path, "/api/v1/counterfactual/reports/") && method == "GET":
+		api.handleCFReportGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/counterfactual/verifications/") && method == "GET":
 		api.handleCFVerificationGet(w, r)
+
+	// v24.2: 自适应验证策略 API
+	case path == "/api/v1/counterfactual/cost" && method == "GET":
+		api.handleCFAdaptiveCost(w, r)
+	case path == "/api/v1/counterfactual/effectiveness" && method == "GET":
+		api.handleCFAdaptiveEffectiveness(w, r)
+	case path == "/api/v1/counterfactual/feedback" && method == "POST":
+		api.handleCFAdaptiveFeedback(w, r)
+	case path == "/api/v1/counterfactual/adaptive-config" && method == "GET":
+		api.handleCFAdaptiveConfigGet(w, r)
+	case path == "/api/v1/counterfactual/adaptive-config" && method == "PUT":
+		api.handleCFAdaptiveConfigUpdate(w, r)
 
 	default:
 		w.WriteHeader(404)

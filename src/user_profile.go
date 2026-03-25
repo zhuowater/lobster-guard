@@ -533,3 +533,20 @@ func truncateStr(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
+
+// RecordEvent 记录安全事件到用户画像（v24.1 反事实验证联动）
+func (e *UserProfileEngine) RecordEvent(userID, eventType string, score float64) {
+	if e == nil || e.db == nil || userID == "" {
+		return
+	}
+	// 将事件记录为 audit_log 中的 block 条目（与现有风险分计算兼容）
+	ts := time.Now().UTC().Format(time.RFC3339)
+	reason := fmt.Sprintf("cf_attribution: %s (score=%.2f)", eventType, score)
+	_, err := e.db.Exec(`INSERT INTO audit_log (timestamp, direction, sender_id, action, reason, content_preview, full_request_hash, latency_ms, upstream_id, app_id, trace_id)
+		VALUES (?, 'inbound', ?, 'block', ?, ?, '', 0, '', '', '')`,
+		ts, userID, reason, fmt.Sprintf("counterfactual_%s", eventType))
+	if err != nil {
+		// best-effort, log and continue
+		fmt.Printf("[UserProfile] RecordEvent 写入失败: %v\n", err)
+	}
+}

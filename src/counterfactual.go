@@ -36,6 +36,7 @@ type CFConfig struct {
 type CFVerification struct {
 	ID               string    `json:"id"`
 	TraceID          string    `json:"trace_id"`
+	SenderID         string    `json:"sender_id"`
 	ToolName         string    `json:"tool_name"`
 	ToolArgs         string    `json:"tool_args"`
 	OriginalMessages string    `json:"original_messages"`
@@ -66,6 +67,30 @@ type CFStats struct {
 	AvgAttribution     float64 `json:"avg_attribution_score"`
 }
 
+// AttributionReport 归因报告
+type AttributionReport struct {
+	ID                   string       `json:"id"`
+	VerificationID       string       `json:"verification_id"`
+	TraceID              string       `json:"trace_id"`
+	OriginalToolCall     string       `json:"original_tool_call"`
+	CounterfactualResult string       `json:"counterfactual_result"`
+	CausalDriver         string       `json:"causal_driver"`
+	CausalChain          []CausalStep `json:"causal_chain"`
+	AttributionScore     float64      `json:"attribution_score"`
+	Verdict              string       `json:"verdict"`
+	EvidenceSummary      string       `json:"evidence_summary"`
+	CreatedAt            time.Time    `json:"created_at"`
+}
+
+// CausalStep 因果链步骤
+type CausalStep struct {
+	StepIndex   int    `json:"step_index"`
+	Role        string `json:"role"`
+	ContentType string `json:"content_type"`
+	WasRemoved  bool   `json:"was_removed"`
+	Impact      string `json:"impact"`
+}
+
 // CFCacheEntry 缓存条目
 type CFCacheEntry struct {
 	Survived         bool
@@ -85,13 +110,18 @@ type CFMessage struct {
 
 // CounterfactualVerifier 反事实验证引擎
 type CounterfactualVerifier struct {
-	db         *sql.DB
-	mu         sync.RWMutex
-	config     CFConfig
-	client     *http.Client
-	cache      map[string]*CFCacheEntry
-	stats      CFStats
-	pathPolicy *PathPolicyEngine
+	db               *sql.DB
+	mu               sync.RWMutex
+	config           CFConfig
+	client           *http.Client
+	cache            map[string]*CFCacheEntry
+	stats            CFStats
+	pathPolicy       *PathPolicyEngine
+	adaptiveStrategy *AdaptiveStrategy // v24.2
+
+	// v24.1 归因报告联动
+	envelopeMgr    *EnvelopeManager
+	userProfileEng *UserProfileEngine
 
 	totalVerifications int64
 	blockedCount       int64
@@ -186,6 +216,38 @@ func (v *CounterfactualVerifier) initDB() {
 	v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_cf_trace ON cf_verifications(trace_id)`)
 	v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_cf_verdict ON cf_verifications(verdict)`)
 	v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_cf_created ON cf_verifications(created_at)`)
+
+	// v24.1: 归因报告表
+	v.db.Exec(`CREATE TABLE IF NOT EXISTS attribution_reports (
+		id TEXT PRIMARY KEY,
+		verification_id TEXT NOT NULL,
+		trace_id TEXT NOT NULL,
+		original_tool_call TEXT,
+		counterfactual_result TEXT,
+		causal_driver TEXT,
+		causal_chain TEXT,
+		attribution_score REAL NOT NULL DEFAULT 0,
+		verdict TEXT NOT NULL,
+		evidence_summary TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_ar_verification ON attribution_reports(verification_id)`)
+	v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_ar_trace ON attribution_reports(trace_id)`)
+	v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_ar_created ON attribution_reports(created_at)`)
+}
+
+// SetEnvelopeManager 设置执行信封管理器（v24.1 联动）
+func (v *CounterfactualVerifier) SetEnvelopeManager(em *EnvelopeManager) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.envelopeMgr = em
+}
+
+// SetUserProfileEngine 设置用户画像引擎（v24.1 联动）
+func (v *CounterfactualVerifier) SetUserProfileEngine(upe *UserProfileEngine) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.userProfileEng = upe
 }
 
 func (v *CounterfactualVerifier) SetPathPolicy(pp *PathPolicyEngine) {
@@ -193,6 +255,14 @@ func (v *CounterfactualVerifier) SetPathPolicy(pp *PathPolicyEngine) {
 	defer v.mu.Unlock()
 	v.pathPolicy = pp
 }
+
+// SetAdaptiveStrategy v24.2: 关联自适应验证策略引擎
+func (v *CounterfactualVerifier) SetAdaptiveStrategy(as *AdaptiveStrategy) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.adaptiveStrategy = as
+}
+
 
 // ShouldVerify 判断是否需要对该 tool call 进行反事实验证
 func (v *CounterfactualVerifier) ShouldVerify(toolName, toolArgs, traceID string, riskScore float64) bool {
@@ -260,7 +330,8 @@ func generateCFID() string {
 }
 
 // Verify 执行反事实验证
-func (v *CounterfactualVerifier) Verify(ctx context.Context, originalReqBody []byte, toolName, toolArgs, upstreamURL, authHeader string) *CFVerification {
+// senderID 可选，用于 v24.1 攻击者画像联动
+func (v *CounterfactualVerifier) Verify(ctx context.Context, originalReqBody []byte, toolName, toolArgs, upstreamURL, authHeader string, senderID ...string) *CFVerification {
 	start := time.Now()
 	v.consumeBudget()
 
@@ -277,6 +348,9 @@ func (v *CounterfactualVerifier) Verify(ctx context.Context, originalReqBody []b
 				Verdict: entry.Verdict, Decision: v.verdictToDecision(entry.Verdict),
 				LatencyMs: time.Since(start).Milliseconds(), Cached: true,
 				TenantID: "default", CreatedAt: time.Now(),
+			}
+			if len(senderID) > 0 {
+				vf.SenderID = senderID[0]
 			}
 			v.recordVerification(vf)
 			return vf
@@ -299,6 +373,9 @@ func (v *CounterfactualVerifier) Verify(ctx context.Context, originalReqBody []b
 		OriginalMessages: origMsgJSON, ControlMessages: ctrlMsgJSON,
 		OriginalResult: cfTruncateStr(fmt.Sprintf(`{"tool_name":%q,"tool_args":%s}`, toolName, toolArgs), 4096),
 		TenantID: "default", CreatedAt: time.Now(),
+	}
+	if len(senderID) > 0 {
+		vf.SenderID = senderID[0]
 	}
 
 	if err != nil {
@@ -357,6 +434,9 @@ func (v *CounterfactualVerifier) Verify(ctx context.Context, originalReqBody []b
 
 	log.Printf("[Counterfactual] 验证完成: tool=%s verdict=%s attribution=%.2f latency=%dms",
 		toolName, vf.Verdict, attribution, vf.LatencyMs)
+
+	// v24.1: 生成归因报告
+	v.generateAttributionReport(vf, messages, controlMessages)
 
 	return vf
 }
@@ -808,4 +888,399 @@ func cfTruncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
+}
+
+// ============================================================
+// v24.1 归因报告生成 + 联动
+// ============================================================
+
+func generateARID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "ar-" + hex.EncodeToString(b)
+}
+
+// generateAttributionReport 在 Verify 末尾调用，生成归因报告并持久化
+func (v *CounterfactualVerifier) generateAttributionReport(vf *CFVerification, origMsgs, ctrlMsgs []CFMessage) {
+	if vf == nil {
+		return
+	}
+
+	report := &AttributionReport{
+		ID:                   generateARID(),
+		VerificationID:       vf.ID,
+		TraceID:              vf.TraceID,
+		OriginalToolCall:     fmt.Sprintf("%s(%s)", vf.ToolName, cfTruncateStr(vf.ToolArgs, 200)),
+		CounterfactualResult: cfTruncateStr(vf.ControlResult, 500),
+		CausalDriver:         vf.CausalDriver,
+		AttributionScore:     vf.AttributionScore,
+		Verdict:              vf.Verdict,
+		CreatedAt:            vf.CreatedAt,
+	}
+
+	// 构建因果链：分析 origMsgs 与 ctrlMsgs 的差异
+	report.CausalChain = v.buildCausalChain(origMsgs, ctrlMsgs)
+
+	// 生成人类可读的证据摘要（中文）
+	report.EvidenceSummary = v.buildEvidenceSummary(vf, report.CausalChain)
+
+	// 持久化到 DB
+	v.saveAttributionReport(report)
+
+	// v24.1: 与 v18.0 执行信封联动
+	v.mu.RLock()
+	em := v.envelopeMgr
+	upe := v.userProfileEng
+	v.mu.RUnlock()
+
+	if em != nil {
+		reportJSON, _ := json.Marshal(report)
+		em.Seal(vf.TraceID, "attribution_report", string(reportJSON), vf.Verdict, nil, "")
+	}
+
+	// v24.1: 与 v11.0 攻击者画像联动
+	if upe != nil && vf.Verdict == "INJECTION_DRIVEN" && vf.SenderID != "" {
+		upe.RecordEvent(vf.SenderID, "injection_detected", vf.AttributionScore)
+	}
+
+	log.Printf("[Counterfactual] 归因报告生成: id=%s verdict=%s score=%.2f chain_len=%d",
+		report.ID, report.Verdict, report.AttributionScore, len(report.CausalChain))
+}
+
+// buildCausalChain 分析原始与对照 messages 的差异，构建因果链
+func (v *CounterfactualVerifier) buildCausalChain(origMsgs, ctrlMsgs []CFMessage) []CausalStep {
+	var chain []CausalStep
+
+	// 构建对照 messages 的快速查找集（按 role+index）
+	ctrlSet := make(map[string]bool)
+	for i, msg := range ctrlMsgs {
+		key := fmt.Sprintf("%d:%s", i, msg.Role)
+		ctrlSet[key] = true
+	}
+
+	ctrlIdx := 0
+	for i, msg := range origMsgs {
+		step := CausalStep{
+			StepIndex: i,
+			Role:      msg.Role,
+		}
+
+		// 判断 content type
+		switch msg.Content.(type) {
+		case string:
+			step.ContentType = "text"
+		case []interface{}:
+			blocks, _ := msg.Content.([]interface{})
+			hasToolResult := false
+			for _, b := range blocks {
+				if bm, ok := b.(map[string]interface{}); ok {
+					if bm["type"] == "tool_result" {
+						hasToolResult = true
+						break
+					}
+					if bm["type"] == "tool_use" {
+						step.ContentType = "tool_use"
+					}
+				}
+			}
+			if hasToolResult {
+				step.ContentType = "tool_result"
+			} else if step.ContentType == "" {
+				step.ContentType = "text"
+			}
+		default:
+			step.ContentType = "text"
+		}
+
+		// 判断是否被移除
+		wasRemoved := false
+		if msg.Role == "tool" || msg.Role == "function" {
+			wasRemoved = true
+		} else if step.ContentType == "tool_result" {
+			wasRemoved = true
+		} else {
+			// 检查对照组中是否还存在匹配项
+			if ctrlIdx < len(ctrlMsgs) && ctrlMsgs[ctrlIdx].Role == msg.Role {
+				ctrlIdx++
+			} else {
+				wasRemoved = true
+			}
+		}
+		step.WasRemoved = wasRemoved
+
+		// 判断影响程度
+		if wasRemoved {
+			if step.ContentType == "tool_result" || msg.Role == "tool" || msg.Role == "function" {
+				step.Impact = "high"
+			} else {
+				step.Impact = "medium"
+			}
+		} else {
+			step.Impact = "low"
+		}
+
+		chain = append(chain, step)
+	}
+
+	return chain
+}
+
+// buildEvidenceSummary 生成人类可读的中文解释
+func (v *CounterfactualVerifier) buildEvidenceSummary(vf *CFVerification, chain []CausalStep) string {
+	removedCount := 0
+	highImpactCount := 0
+	var removedRoles []string
+	for _, step := range chain {
+		if step.WasRemoved {
+			removedCount++
+			removedRoles = append(removedRoles, fmt.Sprintf("step%d(%s/%s)", step.StepIndex, step.Role, step.ContentType))
+			if step.Impact == "high" {
+				highImpactCount++
+			}
+		}
+	}
+
+	var summary string
+	switch vf.Verdict {
+	case "INJECTION_DRIVEN":
+		summary = fmt.Sprintf(
+			"分析结论: 该工具调用 %s 被判定为注入驱动。对照实验中移除了 %d 个外部数据步骤（其中 %d 个高影响），"+
+				"工具调用在对照组中消失，归因分数 %.2f（高于0.7阈值）。"+
+				"因果来源: %s。移除的步骤: %s。",
+			vf.ToolName, removedCount, highImpactCount,
+			vf.AttributionScore, vf.CausalDriver,
+			strings.Join(removedRoles, ", "),
+		)
+	case "USER_DRIVEN":
+		summary = fmt.Sprintf(
+			"分析结论: 该工具调用 %s 被判定为用户驱动。对照实验中移除了 %d 个外部数据步骤，"+
+				"但工具调用在对照组中仍然存在，归因分数 %.2f（低于0.3阈值）。"+
+				"这表明该调用源自用户的原始意图，而非外部数据注入。",
+			vf.ToolName, removedCount, vf.AttributionScore,
+		)
+	default:
+		summary = fmt.Sprintf(
+			"分析结论: 该工具调用 %s 的因果归因不确定。对照实验中移除了 %d 个外部数据步骤，"+
+				"归因分数 %.2f 处于灰色区间（0.3-0.7）。建议人工审查。因果来源: %s。",
+			vf.ToolName, removedCount, vf.AttributionScore, vf.CausalDriver,
+		)
+	}
+
+	return summary
+}
+
+// saveAttributionReport 持久化归因报告
+func (v *CounterfactualVerifier) saveAttributionReport(report *AttributionReport) {
+	if v.db == nil || report == nil {
+		return
+	}
+	chainJSON, _ := json.Marshal(report.CausalChain)
+	_, err := v.db.Exec(`INSERT INTO attribution_reports
+		(id, verification_id, trace_id, original_tool_call, counterfactual_result,
+		 causal_driver, causal_chain, attribution_score, verdict, evidence_summary, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		report.ID, report.VerificationID, report.TraceID,
+		report.OriginalToolCall, report.CounterfactualResult,
+		report.CausalDriver, string(chainJSON),
+		report.AttributionScore, report.Verdict,
+		report.EvidenceSummary,
+		report.CreatedAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		log.Printf("[Counterfactual] 归因报告写入失败: %v", err)
+	}
+}
+
+// GetAttributionReport 查询单条归因报告
+func (v *CounterfactualVerifier) GetAttributionReport(id string) *AttributionReport {
+	if v.db == nil {
+		return nil
+	}
+	row := v.db.QueryRow(`SELECT id, verification_id, trace_id, COALESCE(original_tool_call,''),
+		COALESCE(counterfactual_result,''), COALESCE(causal_driver,''),
+		COALESCE(causal_chain,'[]'), attribution_score, verdict,
+		COALESCE(evidence_summary,''), COALESCE(created_at,'')
+		FROM attribution_reports WHERE id = ?`, id)
+	return v.scanAttributionReport(row)
+}
+
+func (v *CounterfactualVerifier) scanAttributionReport(row *sql.Row) *AttributionReport {
+	var ar AttributionReport
+	var chainJSON, createdAt string
+	err := row.Scan(&ar.ID, &ar.VerificationID, &ar.TraceID,
+		&ar.OriginalToolCall, &ar.CounterfactualResult,
+		&ar.CausalDriver, &chainJSON,
+		&ar.AttributionScore, &ar.Verdict,
+		&ar.EvidenceSummary, &createdAt)
+	if err != nil {
+		return nil
+	}
+	json.Unmarshal([]byte(chainJSON), &ar.CausalChain)
+	if ar.CausalChain == nil {
+		ar.CausalChain = []CausalStep{}
+	}
+	ar.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return &ar
+}
+
+// QueryAttributionReports 查询归因报告列表
+func (v *CounterfactualVerifier) QueryAttributionReports(traceID, verdict, since string, limit int) []AttributionReport {
+	if v.db == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	q := `SELECT id, verification_id, trace_id, COALESCE(original_tool_call,''),
+		COALESCE(counterfactual_result,''), COALESCE(causal_driver,''),
+		COALESCE(causal_chain,'[]'), attribution_score, verdict,
+		COALESCE(evidence_summary,''), COALESCE(created_at,'')
+		FROM attribution_reports WHERE 1=1`
+	var args []interface{}
+	if traceID != "" {
+		q += " AND trace_id = ?"
+		args = append(args, traceID)
+	}
+	if verdict != "" {
+		q += " AND verdict = ?"
+		args = append(args, verdict)
+	}
+	if since != "" {
+		q += " AND created_at >= ?"
+		args = append(args, since)
+	}
+	q += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := v.db.Query(q, args...)
+	if err != nil {
+		log.Printf("[Counterfactual] 归因报告查询失败: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []AttributionReport
+	for rows.Next() {
+		var ar AttributionReport
+		var chainJSON, createdAt string
+		err := rows.Scan(&ar.ID, &ar.VerificationID, &ar.TraceID,
+			&ar.OriginalToolCall, &ar.CounterfactualResult,
+			&ar.CausalDriver, &chainJSON,
+			&ar.AttributionScore, &ar.Verdict,
+			&ar.EvidenceSummary, &createdAt)
+		if err != nil {
+			continue
+		}
+		json.Unmarshal([]byte(chainJSON), &ar.CausalChain)
+		if ar.CausalChain == nil {
+			ar.CausalChain = []CausalStep{}
+		}
+		ar.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		results = append(results, ar)
+	}
+	return results
+}
+
+// CFTimelineEvent 时间线事件（验证+归因合并）
+type CFTimelineEvent struct {
+	Timestamp        time.Time    `json:"timestamp"`
+	EventType        string       `json:"event_type"` // "verification" or "attribution"
+	ID               string       `json:"id"`
+	TraceID          string       `json:"trace_id"`
+	ToolName         string       `json:"tool_name"`
+	Verdict          string       `json:"verdict"`
+	AttributionScore float64      `json:"attribution_score"`
+	Decision         string       `json:"decision,omitempty"`
+	EvidenceSummary  string       `json:"evidence_summary,omitempty"`
+	CausalChain      []CausalStep `json:"causal_chain,omitempty"`
+}
+
+// QueryTimeline 查询因果归因时间线
+func (v *CounterfactualVerifier) QueryTimeline(since string, limit int) []CFTimelineEvent {
+	if v.db == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	var events []CFTimelineEvent
+
+	// 查询验证记录
+	vq := `SELECT id, trace_id, tool_name, verdict, attribution_score, decision, COALESCE(created_at,'')
+		FROM cf_verifications WHERE 1=1`
+	var vargs []interface{}
+	if since != "" {
+		vq += " AND created_at >= ?"
+		vargs = append(vargs, since)
+	}
+	vq += " ORDER BY created_at DESC LIMIT ?"
+	vargs = append(vargs, limit)
+
+	rows, err := v.db.Query(vq, vargs...)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e CFTimelineEvent
+			var createdAt string
+			err := rows.Scan(&e.ID, &e.TraceID, &e.ToolName, &e.Verdict, &e.AttributionScore, &e.Decision, &createdAt)
+			if err != nil {
+				continue
+			}
+			e.EventType = "verification"
+			e.Timestamp, _ = time.Parse(time.RFC3339, createdAt)
+			events = append(events, e)
+		}
+	}
+
+	// 查询归因报告
+	aq := `SELECT id, trace_id, COALESCE(original_tool_call,''), verdict, attribution_score, COALESCE(evidence_summary,''), COALESCE(causal_chain,'[]'), COALESCE(created_at,'')
+		FROM attribution_reports WHERE 1=1`
+	var aargs []interface{}
+	if since != "" {
+		aq += " AND created_at >= ?"
+		aargs = append(aargs, since)
+	}
+	aq += " ORDER BY created_at DESC LIMIT ?"
+	aargs = append(aargs, limit)
+
+	rows2, err := v.db.Query(aq, aargs...)
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var e CFTimelineEvent
+			var createdAt, chainJSON string
+			err := rows2.Scan(&e.ID, &e.TraceID, &e.ToolName, &e.Verdict, &e.AttributionScore, &e.EvidenceSummary, &chainJSON, &createdAt)
+			if err != nil {
+				continue
+			}
+			e.EventType = "attribution"
+			e.Timestamp, _ = time.Parse(time.RFC3339, createdAt)
+			json.Unmarshal([]byte(chainJSON), &e.CausalChain)
+			if e.CausalChain == nil {
+				e.CausalChain = []CausalStep{}
+			}
+			events = append(events, e)
+		}
+	}
+
+	// 按时间排序（最近优先）
+	for i := 0; i < len(events); i++ {
+		for j := i + 1; j < len(events); j++ {
+			if events[j].Timestamp.After(events[i].Timestamp) {
+				events[i], events[j] = events[j], events[i]
+			}
+		}
+	}
+
+	if len(events) > limit {
+		events = events[:limit]
+	}
+
+	return events
 }

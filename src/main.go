@@ -616,6 +616,12 @@ func main() {
 	}
 	fmt.Println("[初始化] ✅ 反事实验证引擎已就绪 (AttriGuard 对照验证 + 归因分析)")
 
+	// v24.2: 自适应验证策略引擎
+	adaptiveStrategy := NewAdaptiveStrategy(logger.DB(), defaultAdaptiveConfig, pathPolicyEngine)
+	cfVerifier.SetAdaptiveStrategy(adaptiveStrategy)
+	mgmtAPI.adaptiveStrategy = adaptiveStrategy
+	fmt.Println("[初始化] ✅ 自适应验证策略引擎已就绪 (成本控制 + 优先级调度 + 效果追踪)")
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {

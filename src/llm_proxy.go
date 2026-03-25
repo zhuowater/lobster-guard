@@ -473,8 +473,10 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						cfUpstream := upstreamURL
 						cfAuth := r.Header.Get("Authorization")
 						cfCfg := lp.cfVerifier.GetConfig()
+						// v24.1: 传入 senderID 用于攻击者画像联动
+						cfSenderID := auditCtx.SenderID
 						if cfCfg.Mode == "sync" {
-							cfResult := lp.cfVerifier.Verify(r.Context(), bodyBytes, tcName, tcArgs, cfUpstream, cfAuth)
+							cfResult := lp.cfVerifier.Verify(r.Context(), bodyBytes, tcName, tcArgs, cfUpstream, cfAuth, cfSenderID)
 							if cfResult != nil && cfResult.Decision == "block" {
 								log.Printf("[Counterfactual] 反事实验证阻断: tool=%s verdict=%s attribution=%.2f trace=%s",
 									tcName, cfResult.Verdict, cfResult.AttributionScore, traceID)
@@ -487,9 +489,9 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 							}
 						} else {
 							// async 模式: 后台验证，不阻塞
-							go func(body []byte, tn, ta, url, auth string) {
-								lp.cfVerifier.Verify(context.Background(), body, tn, ta, url, auth)
-							}(bodyBytes, tcName, tcArgs, cfUpstream, cfAuth)
+							go func(body []byte, tn, ta, url, auth, sid string) {
+								lp.cfVerifier.Verify(context.Background(), body, tn, ta, url, auth, sid)
+							}(bodyBytes, tcName, tcArgs, cfUpstream, cfAuth, cfSenderID)
 						}
 					}
 				}

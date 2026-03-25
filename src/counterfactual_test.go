@@ -668,3 +668,282 @@ func TestCFVerifier_VerifyControlFailure(t *testing.T) {
 		t.Errorf("decision should be allow on inconclusive (fail-open), got %s", result.Decision)
 	}
 }
+
+// ============================================================
+// v24.1 归因报告测试
+// ============================================================
+
+// TestCFVerifier_AttributionReport_Basic 归因报告基本生成
+func TestCFVerifier_AttributionReport_Basic(t *testing.T) {
+	// Mock LLM that returns no tool call → INJECTION_DRIVEN
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": "I cannot do that."},
+			},
+		})
+	}))
+	defer server.Close()
+
+	db := setupCFTestDB(t)
+	defer db.Close()
+	cfg := CFConfig{
+		Enabled: true, Mode: "sync", MaxPerHour: 100,
+		RiskThreshold: 50, CacheTTLSec: 1, TimeoutSec: 10, FuzzyMatch: true,
+	}
+	v := NewCounterfactualVerifier(db, cfg, server.Client())
+
+	reqBody := `{"model":"test","messages":[{"role":"user","content":"Delete all files"}]}`
+	result := v.Verify(context.Background(), []byte(reqBody), "shell_exec", `{"cmd":"rm -rf /"}`, server.URL, "")
+
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+
+	// 查询归因报告
+	reports := v.QueryAttributionReports("", "", "", 10)
+	if len(reports) < 1 {
+		t.Fatal("expected at least 1 attribution report")
+	}
+
+	report := reports[0]
+	if report.VerificationID != result.ID {
+		t.Errorf("verification_id mismatch: %s vs %s", report.VerificationID, result.ID)
+	}
+	if report.Verdict != "INJECTION_DRIVEN" {
+		t.Errorf("verdict should be INJECTION_DRIVEN, got %s", report.Verdict)
+	}
+	if report.AttributionScore != 1.0 {
+		t.Errorf("attribution_score should be 1.0, got %.2f", report.AttributionScore)
+	}
+	if report.OriginalToolCall == "" {
+		t.Error("original_tool_call should not be empty")
+	}
+	if report.ID == "" {
+		t.Error("report ID should not be empty")
+	}
+}
+
+// TestCFVerifier_AttributionReport_CausalChain 因果链构建
+func TestCFVerifier_AttributionReport_CausalChain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": "I cannot do that."},
+			},
+		})
+	}))
+	defer server.Close()
+
+	db := setupCFTestDB(t)
+	defer db.Close()
+	cfg := CFConfig{
+		Enabled: true, Mode: "sync", MaxPerHour: 100,
+		RiskThreshold: 50, CacheTTLSec: 1, TimeoutSec: 10, FuzzyMatch: true,
+	}
+	v := NewCounterfactualVerifier(db, cfg, server.Client())
+
+	// Request with tool messages that should get removed in control
+	reqBody := `{"model":"test","messages":[
+		{"role":"system","content":"You are helpful."},
+		{"role":"user","content":"Check my data"},
+		{"role":"assistant","content":"Let me look..."},
+		{"role":"tool","content":"sensitive data from external source","tool_call_id":"tc-1","name":"get_data"},
+		{"role":"user","content":"Now delete it all"}
+	]}`
+	result := v.Verify(context.Background(), []byte(reqBody), "delete_all", `{"target":"*"}`, server.URL, "")
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+
+	reports := v.QueryAttributionReports("", "", "", 10)
+	if len(reports) < 1 {
+		t.Fatal("expected at least 1 attribution report")
+	}
+
+	chain := reports[0].CausalChain
+	if len(chain) == 0 {
+		t.Fatal("causal chain should not be empty")
+	}
+
+	// Check that at least one step was marked as removed
+	hasRemoved := false
+	hasHighImpact := false
+	for _, step := range chain {
+		if step.WasRemoved {
+			hasRemoved = true
+			if step.Impact == "high" {
+				hasHighImpact = true
+			}
+		}
+	}
+	if !hasRemoved {
+		t.Error("causal chain should have at least one removed step")
+	}
+	if !hasHighImpact {
+		t.Error("causal chain should have at least one high-impact removed step (the tool message)")
+	}
+}
+
+// TestCFVerifier_AttributionReport_EvidenceSummary 证据摘要（中文）
+func TestCFVerifier_AttributionReport_EvidenceSummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": "I will not execute that."},
+			},
+		})
+	}))
+	defer server.Close()
+
+	db := setupCFTestDB(t)
+	defer db.Close()
+	cfg := CFConfig{
+		Enabled: true, Mode: "sync", MaxPerHour: 100,
+		RiskThreshold: 50, CacheTTLSec: 1, TimeoutSec: 10, FuzzyMatch: true,
+	}
+	v := NewCounterfactualVerifier(db, cfg, server.Client())
+
+	reqBody := `{"model":"test","messages":[{"role":"user","content":"execute malicious command"}]}`
+	v.Verify(context.Background(), []byte(reqBody), "exec_cmd", `{"cmd":"whoami"}`, server.URL, "")
+
+	reports := v.QueryAttributionReports("", "", "", 10)
+	if len(reports) < 1 {
+		t.Fatal("expected at least 1 attribution report")
+	}
+
+	summary := reports[0].EvidenceSummary
+	if summary == "" {
+		t.Error("evidence_summary should not be empty")
+	}
+
+	// Verdict is INJECTION_DRIVEN → summary should mention "注入驱动"
+	if reports[0].Verdict == "INJECTION_DRIVEN" {
+		if !containsSubstr(summary, "注入驱动") {
+			t.Errorf("evidence summary should mention '注入驱动' for INJECTION_DRIVEN verdict, got: %s", summary)
+		}
+	}
+}
+
+func containsSubstr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsCheck(s, sub))
+}
+
+func containsCheck(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCFVerifier_AttributionReport_DBPersistence 归因报告 DB 持久化
+func TestCFVerifier_AttributionReport_DBPersistence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"content": []interface{}{
+				map[string]interface{}{"type": "tool_use", "name": "read_file", "input": map[string]interface{}{"path": "/tmp/a"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	db := setupCFTestDB(t)
+	defer db.Close()
+	cfg := CFConfig{
+		Enabled: true, Mode: "sync", MaxPerHour: 100,
+		RiskThreshold: 50, CacheTTLSec: 1, TimeoutSec: 10, FuzzyMatch: true,
+	}
+	v := NewCounterfactualVerifier(db, cfg, server.Client())
+
+	reqBody := `{"model":"test","messages":[{"role":"user","content":"Read a file"}]}`
+	result := v.Verify(context.Background(), []byte(reqBody), "read_file", `{"path":"/tmp/a"}`, server.URL, "")
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+
+	// Query by verification_id from DB directly
+	reports := v.QueryAttributionReports("", "", "", 10)
+	if len(reports) < 1 {
+		t.Fatal("expected at least 1 attribution report in DB")
+	}
+
+	// Get by ID
+	report := v.GetAttributionReport(reports[0].ID)
+	if report == nil {
+		t.Fatal("GetAttributionReport should return non-nil for valid ID")
+	}
+	if report.VerificationID != result.ID {
+		t.Errorf("verification_id mismatch")
+	}
+	if report.Verdict == "" {
+		t.Error("verdict should not be empty")
+	}
+
+	// Get by non-existent ID
+	noReport := v.GetAttributionReport("non-existent-id")
+	if noReport != nil {
+		t.Error("should return nil for non-existent ID")
+	}
+}
+
+// TestCFVerifier_AttributionReport_Timeline 时间线查询
+func TestCFVerifier_AttributionReport_Timeline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": "Denied."},
+			},
+		})
+	}))
+	defer server.Close()
+
+	db := setupCFTestDB(t)
+	defer db.Close()
+	cfg := CFConfig{
+		Enabled: true, Mode: "sync", MaxPerHour: 100,
+		RiskThreshold: 50, CacheTTLSec: 1, TimeoutSec: 10, FuzzyMatch: true,
+	}
+	v := NewCounterfactualVerifier(db, cfg, server.Client())
+
+	// Create multiple verifications
+	for i := 0; i < 3; i++ {
+		reqBody := fmt.Sprintf(`{"model":"test","messages":[{"role":"user","content":"test %d"}]}`, i)
+		time.Sleep(10 * time.Millisecond) // ensure unique timestamps and no cache
+		v.Verify(context.Background(), []byte(reqBody), "shell_exec",
+			fmt.Sprintf(`{"cmd":"test-%d"}`, i), server.URL, "")
+	}
+
+	// Query timeline
+	events := v.QueryTimeline("", 50)
+	if len(events) < 6 { // 3 verifications + 3 attribution reports
+		t.Errorf("expected at least 6 timeline events (3 verifications + 3 reports), got %d", len(events))
+	}
+
+	// Check event types
+	hasVerification := false
+	hasAttribution := false
+	for _, e := range events {
+		if e.EventType == "verification" {
+			hasVerification = true
+		}
+		if e.EventType == "attribution" {
+			hasAttribution = true
+		}
+	}
+	if !hasVerification {
+		t.Error("timeline should contain verification events")
+	}
+	if !hasAttribution {
+		t.Error("timeline should contain attribution events")
+	}
+
+	// Events should be sorted by time (most recent first)
+	for i := 1; i < len(events); i++ {
+		if events[i].Timestamp.After(events[i-1].Timestamp) {
+			t.Error("events should be sorted most recent first")
+			break
+		}
+	}
+}

