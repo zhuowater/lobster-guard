@@ -434,7 +434,7 @@
 > 依赖：✅ 现有 LLMProxy（解析 tool_calls 序列）+ InboundProxy（提取用户 query）
 > 参考实现：github.com/google-research/camel-prompt-injection
 
-- [ ] v25.0 **执行计划编译器（PlanCompiler）** 🔥🔥
+- [x] v25.0 **执行计划编译器（PlanCompiler）** 🔥🔥
   - **核心架构变革**:
     ```
     传统: 用户 → LLM 自己决定做什么 → 执行
@@ -471,7 +471,7 @@
   - 数据来源：InboundProxy（用户 query）+ LLMProxy（tool_calls 序列）
   - Dashboard: 执行计划管理页（模板库 + 编译日志 + 偏差可视化）
 
-- [ ] v25.1 **Capability 权限系统**
+- [x] v25.1 **Capability 权限系统**
   - 每个数据变量携带 **capability 标签**（CaMeL 核心创新）:
     ```
     capability("email_write")   — 允许发送邮件
@@ -490,7 +490,7 @@
   - 与 v23.0 路径策略联动：路径风险分 > 阈值 → 动态收窄 capability 范围
   - Dashboard: Capability 矩阵（哪些 Agent / 用户 / 数据源 拥有哪些权限）
 
-- [ ] v25.2 **Plan 偏差检测 + 自动修复**
+- [x] v25.2 **Plan 偏差检测 + 自动修复**
   - 实时比对 LLM 实际 tool_call 序列 vs PlanCompiler 编译的模板
   - 偏差类型分级：
     - **Minor**: tool 参数差异（允许，记录）
