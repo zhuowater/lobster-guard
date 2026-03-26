@@ -167,6 +167,14 @@ const allNavItems = {
   'events':            { path: '/events',         label: '事件总线',       icon: 'radio' },
   'ab-testing':        { path: '/ab-testing',     label: 'A/B 测试',      icon: 'split' },
   'upstream':          { path: '/upstream',       label: '上游管理',       icon: 'server' },
+  'plan-compiler':     { path: '/plan-compiler',  label: '执行计划',       icon: 'git-branch' },
+  'agent':             { path: '/agent',          label: 'Agent 行为',    icon: 'bot' },
+  // 治理引擎
+  'path-policy':       { path: '/path-policy',    label: '路径策略',       icon: 'git-branch' },
+  'counterfactual':    { path: '/counterfactual', label: '反事实验证',     icon: 'microscope' },
+  'capability':        { path: '/capability',     label: 'Capability',    icon: 'key' },
+  'deviations':        { path: '/deviations',     label: '偏差检测',       icon: 'alert-triangle' },
+  'ifc':               { path: '/ifc',            label: '信息流控制',     icon: 'shield' },
   // 运营管理
   'reports':           { path: '/reports',        label: '报告中心',       icon: 'file-up' },
   'leaderboard':       { path: '/leaderboard',    label: '排行榜',         icon: 'trophy' },
