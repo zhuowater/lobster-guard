@@ -671,6 +671,9 @@ func main() {
 	}
 	mgmtAPI.taintTracker = taintTracker
 	inbound.pathPolicyEngine = pathPolicyEngine // v23.0
+	inbound.planCompiler = planCompiler          // v25.0
+	inbound.capabilityEngine = capEngine         // v25.1
+	inbound.deviationDetector = devDetector      // v25.2
 	inbound.taintTracker = taintTracker
 	outbound.taintTracker = taintTracker
 	if llmProxy != nil {

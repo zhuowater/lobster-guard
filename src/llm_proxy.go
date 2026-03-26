@@ -502,6 +502,66 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// v25.0-v25.2: 执行计划验证 + Capability + 偏差检测
+		if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
+			info25 := ParseAnthropicResponse(respBody)
+			if info25 != nil && info25.HasToolUse {
+				for i25, tcName25 := range info25.ToolNames {
+					tcArgs25 := ""
+					if i25 < len(info25.ToolInputs) { tcArgs25 = info25.ToolInputs[i25] }
+
+					// v25.0: PlanCompiler — 比对 tool_call vs 计划模板
+					if lp.planCompiler != nil {
+						planEval := lp.planCompiler.EvaluateToolCall(traceID, tcName25, tcArgs25)
+						if planEval != nil && planEval.Violation != nil {
+							log.Printf("[PlanCompiler] 计划偏离: tool=%s violation=%s severity=%s decision=%s trace=%s",
+								tcName25, planEval.Violation.Description, planEval.Violation.Severity, planEval.Decision, traceID)
+							if planEval.Decision == "block" {
+								w.Header().Set("Content-Type", "application/json")
+								w.WriteHeader(403)
+								fmt.Fprintf(w, `{"error":"Tool call blocked by plan compiler","tool":"%s","violation":"%s"}`,
+									tcName25, planEval.Violation.Description)
+								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+								return
+							}
+						}
+					}
+
+					// v25.1: CapabilityEngine — 数据级权限检查
+					if lp.capabilityEngine != nil {
+						lp.capabilityEngine.RegisterToolResult(traceID, tcName25, fmt.Sprintf("tool-%s-%d", tcName25, i25))
+						capEval := lp.capabilityEngine.Evaluate(traceID, fmt.Sprintf("tool-%s-%d", tcName25, i25), "execute", tcName25)
+						if capEval != nil && capEval.Decision == "deny" {
+							log.Printf("[Capability] 权限不足: tool=%s reason=%s trace=%s", tcName25, capEval.Reason, traceID)
+							if lp.eventBus != nil {
+								lp.eventBus.Emit(&SecurityEvent{
+									Type: "capability_deny", Severity: "high", Domain: "llm", TraceID: traceID,
+									Summary: fmt.Sprintf("Capability denied: %s (%s)", tcName25, capEval.Reason),
+								})
+							}
+						}
+					}
+
+					// v25.2: DeviationDetector — 综合偏差检测
+					if lp.deviationDetector != nil {
+						devResult := lp.deviationDetector.Detect(traceID, tcName25, tcArgs25)
+						if devResult.HasDeviation {
+							log.Printf("[Deviation] 检测到偏差: tool=%s type=%s severity=%s decision=%s trace=%s",
+								tcName25, devResult.Deviation.Type, devResult.Deviation.Severity, devResult.Decision, traceID)
+							if devResult.Decision == "block" {
+								w.Header().Set("Content-Type", "application/json")
+								w.WriteHeader(403)
+								fmt.Fprintf(w, `{"error":"Tool call blocked by deviation detector","tool":"%s","reason":"%s"}`,
+									tcName25, devResult.Reason)
+								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// v20.1: LLM 响应侧污染传播（使用关联的 IM trace_id）
 		if lp.taintTracker != nil {
 			lp.taintTracker.Propagate(taintTraceID, "llm_response",
@@ -627,6 +687,26 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 					if tpEvent.Decision == "block" || tpEvent.Decision == "warn" {
 						log.Printf("[ToolPolicy] SSE 工具调用 %s: tool=%s rule=%s trace=%s (流式模式仅记录)",
 							tpEvent.Decision, tcName, tpEvent.RuleHit, auditCtx.TraceID)
+					}
+					// v25.0: PlanCompiler — SSE 模式下也评估 tool_call
+					if lp.planCompiler != nil {
+						planEval := lp.planCompiler.EvaluateToolCall(auditCtx.TraceID, tcName, tcArgs)
+						if planEval != nil && planEval.Violation != nil {
+							log.Printf("[PlanCompiler] SSE 计划偏离: tool=%s severity=%s trace=%s (流式仅记录)",
+								tcName, planEval.Violation.Severity, auditCtx.TraceID)
+						}
+					}
+					// v25.1: CapabilityEngine — SSE 模式下注册 tool 结果
+					if lp.capabilityEngine != nil {
+						lp.capabilityEngine.RegisterToolResult(auditCtx.TraceID, tcName, fmt.Sprintf("sse-tool-%s-%d", tcName, i))
+					}
+					// v25.2: DeviationDetector — SSE 模式下检测偏差
+					if lp.deviationDetector != nil {
+						devResult := lp.deviationDetector.Detect(auditCtx.TraceID, tcName, tcArgs)
+						if devResult.HasDeviation {
+							log.Printf("[Deviation] SSE 偏差: tool=%s type=%s severity=%s trace=%s (流式仅记录)",
+								tcName, devResult.Deviation.Type, devResult.Deviation.Severity, auditCtx.TraceID)
+						}
 					}
 				}
 			}

@@ -194,6 +194,10 @@ type InboundProxy struct {
 	singularityEngine *SingularityEngine
 	// v23.0 路径级策略引擎
 	pathPolicyEngine *PathPolicyEngine
+	// v25.0 执行计划编译器
+	planCompiler      *PlanCompiler
+	capabilityEngine  *CapabilityEngine
+	deviationDetector *DeviationDetector
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -300,6 +304,23 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					}
 				}
 			}
+		}
+
+		// v25.0: Bridge 模式 — 编译执行计划
+		if ip.planCompiler != nil && msgText != "" {
+			plan := ip.planCompiler.CompileIntent(bridgeTraceID, msgText)
+			if plan != nil {
+				log.Printf("[桥接入站] 📋 执行计划已编译 trace=%s plan=%s steps=%d", bridgeTraceID, plan.ID, plan.TotalSteps)
+			}
+		}
+		// v25.1: Bridge 模式 — 初始化 Capability 上下文
+		if ip.capabilityEngine != nil && senderID != "" {
+			userCaps := []CapLabel{
+				{Name: "read", Source: "user_input", Level: "read", Granted: true},
+				{Name: "write", Source: "user_input", Level: "write", Granted: true},
+				{Name: "execute", Source: "user_input", Level: "execute", Granted: true},
+			}
+			ip.capabilityEngine.InitContext(bridgeTraceID, senderID, userCaps)
 		}
 
 		// 审计日志
@@ -894,6 +915,27 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					})
 				}
 			}
+		}
+	}
+
+	// v25.0: 编译执行计划 — 从用户 query 提取意图并生成允许的执行模板
+	if ip.planCompiler != nil && msgText != "" {
+		plan := ip.planCompiler.CompileIntent(traceID, msgText)
+		if plan != nil {
+			log.Printf("[入站] 📋 执行计划已编译 trace=%s plan=%s steps=%d", traceID, plan.ID, plan.TotalSteps)
+		}
+	}
+
+	// v25.1: 初始化 Capability 上下文 — 用户输入拥有完整权限
+	if ip.capabilityEngine != nil && senderID != "" {
+		userCaps := []CapLabel{
+			{Name: "read", Source: "user_input", Level: "read", Granted: true},
+			{Name: "write", Source: "user_input", Level: "write", Granted: true},
+			{Name: "execute", Source: "user_input", Level: "execute", Granted: true},
+		}
+		ctx := ip.capabilityEngine.InitContext(traceID, senderID, userCaps)
+		if ctx != nil {
+			log.Printf("[入站] 🔑 Capability 上下文已初始化 trace=%s user=%s caps=%d", traceID, senderID, len(userCaps))
 		}
 	}
 
