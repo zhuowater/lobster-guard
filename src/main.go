@@ -689,6 +689,11 @@ func main() {
 		fmt.Printf("[初始化] ℹ️  IFC 隔离LLM未启用\n")
 	}
 
+	// v26.3 审计日志注入LLMProxy，治理引擎事件联动
+	if llmProxy != nil {
+		llmProxy.auditLogger = logger
+	}
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {

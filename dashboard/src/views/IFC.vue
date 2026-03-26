@@ -1,97 +1,97 @@
 <template>
 <div class="page"><div class="page-header"><div><h1 class="page-title"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> IFC 信息流控制</h1>
 <p class="page-subtitle">Bell-LaPadula 信息流控制引擎 — 机密性上行、完整性下行</p></div>
-<button class="btn btn-sm" @click="loadAll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Refresh</button></div>
+<button class="btn btn-sm" @click="loadAll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> 刷新</button></div>
 
 <div class="stats-grid">
 <div class="stat-card" v-for="s in statCards" :key="s.label"><div class="stat-val" :style="{color:s.color}">{{ s.value }}</div><div class="stat-label">{{ s.label }}</div></div>
 </div>
 
 <div class="tab-bar">
-<button class="tab-btn" :class="{active:tab==='source-rules'}" @click="tab='source-rules'">Source Rules ({{ sourceRules.length }})</button>
-<button class="tab-btn" :class="{active:tab==='tool-reqs'}" @click="tab='tool-reqs'">Tool Requirements ({{ toolReqs.length }})</button>
-<button class="tab-btn" :class="{active:tab==='variables'}" @click="tab='variables'">Variables</button>
-<button class="tab-btn" :class="{active:tab==='violations'}" @click="tab='violations'">Violations ({{ violations.length }})</button>
-<button class="tab-btn" :class="{active:tab==='check'}" @click="tab='check'">Live Check</button>
-<button class="tab-btn" :class="{active:tab==='quarantine'}" @click="tab='quarantine'; loadQuarantine()">🔒 Quarantine</button>
-<button class="tab-btn" :class="{active:tab==='dataflow'}" @click="tab='dataflow'">📊 Data Flow</button>
+<button class="tab-btn" :class="{active:tab==='source-rules'}" @click="tab='source-rules'">来源规则 ({{ sourceRules.length }})</button>
+<button class="tab-btn" :class="{active:tab==='tool-reqs'}" @click="tab='tool-reqs'">工具要求 ({{ toolReqs.length }})</button>
+<button class="tab-btn" :class="{active:tab==='variables'}" @click="tab='variables'">变量</button>
+<button class="tab-btn" :class="{active:tab==='violations'}" @click="tab='violations'">违规记录 ({{ violations.length }})</button>
+<button class="tab-btn" :class="{active:tab==='check'}" @click="tab='check'">实时检测</button>
+<button class="tab-btn" :class="{active:tab==='quarantine'}" @click="tab='quarantine'; loadQuarantine()">🔒 隔离区</button>
+<button class="tab-btn" :class="{active:tab==='dataflow'}" @click="tab='dataflow'">📊 数据流</button>
 </div>
 
 <!-- Source Rules Tab -->
 <div v-if="tab==='source-rules'" class="section">
-<div class="section-header"><h3>Source Rules</h3><button class="btn btn-primary btn-sm" @click="showAddSource=true">+ Add</button></div>
-<table class="data-table" v-if="sourceRules.length"><thead><tr><th>Source</th><th>Confidentiality</th><th>Integrity</th><th>Actions</th></tr></thead>
+<div class="section-header"><h3>来源规则</h3><button class="btn btn-primary btn-sm" @click="showAddSource=true">+ 添加</button></div>
+<table class="data-table" v-if="sourceRules.length"><thead><tr><th>来源</th><th>机密性</th><th>完整性</th><th>操作</th></tr></thead>
 <tbody><tr v-for="r in sourceRules" :key="r.source"><td class="mono">{{ r.source }}</td>
 <td><span class="badge" :class="'conf-'+r.label.confidentiality">{{ confLabel(r.label.confidentiality) }}</span></td>
 <td><span class="badge" :class="'integ-'+r.label.integrity">{{ integLabel(r.label.integrity) }}</span></td>
-<td><button class="btn-icon" @click="editSource(r)" title="Edit">✏️</button>
-<button class="btn-icon" @click="deleteSource(r.source)" title="Delete">🗑️</button></td></tr></tbody></table>
-<div v-else class="empty">No source rules</div>
+<td><button class="btn-icon" @click="editSource(r)" title="编辑">✏️</button>
+<button class="btn-icon" @click="deleteSource(r.source)" title="删除">🗑️</button></td></tr></tbody></table>
+<div v-else class="empty">暂无来源规则</div>
 
 <!-- Add/Edit Source Rule Modal -->
 <div v-if="showAddSource" class="modal-overlay" @click.self="showAddSource=false"><div class="modal">
-<h3>{{ editingSource ? 'Edit' : 'Add' }} Source Rule</h3>
-<div class="form-row"><label>Source</label><input v-model="sourceForm.source" :disabled="!!editingSource" class="field-input"/></div>
-<div class="form-row"><label>Confidentiality</label><select v-model.number="sourceForm.confidentiality" class="field-input"><option :value="0">PUBLIC</option><option :value="1">INTERNAL</option><option :value="2">CONFIDENTIAL</option><option :value="3">SECRET</option></select></div>
-<div class="form-row"><label>Integrity</label><select v-model.number="sourceForm.integrity" class="field-input"><option :value="0">TAINT</option><option :value="1">LOW</option><option :value="2">MEDIUM</option><option :value="3">HIGH</option></select></div>
-<div class="modal-actions"><button class="btn" @click="showAddSource=false">Cancel</button><button class="btn btn-primary" @click="saveSource">Save</button></div>
+<h3>{{ editingSource ? '编辑' : '添加' }}来源规则</h3>
+<div class="form-row"><label>来源</label><input v-model="sourceForm.source" :disabled="!!editingSource" class="field-input"/></div>
+<div class="form-row"><label>机密性</label><select v-model.number="sourceForm.confidentiality" class="field-input"><option :value="0">PUBLIC</option><option :value="1">INTERNAL</option><option :value="2">CONFIDENTIAL</option><option :value="3">SECRET</option></select></div>
+<div class="form-row"><label>完整性</label><select v-model.number="sourceForm.integrity" class="field-input"><option :value="0">TAINT</option><option :value="1">LOW</option><option :value="2">MEDIUM</option><option :value="3">HIGH</option></select></div>
+<div class="modal-actions"><button class="btn" @click="showAddSource=false">取消</button><button class="btn btn-primary" @click="saveSource">保存</button></div>
 </div></div>
 </div>
 
 <!-- Tool Requirements Tab -->
 <div v-if="tab==='tool-reqs'" class="section">
-<div class="section-header"><h3>Tool Requirements</h3><button class="btn btn-primary btn-sm" @click="showAddTool=true">+ Add</button></div>
-<table class="data-table" v-if="toolReqs.length"><thead><tr><th>Tool</th><th>Required Integrity</th><th>Max Confidentiality</th><th>Actions</th></tr></thead>
+<div class="section-header"><h3>工具要求</h3><button class="btn btn-primary btn-sm" @click="showAddTool=true">+ 添加</button></div>
+<table class="data-table" v-if="toolReqs.length"><thead><tr><th>工具</th><th>最低完整性</th><th>最高机密性</th><th>操作</th></tr></thead>
 <tbody><tr v-for="r in toolReqs" :key="r.tool"><td class="mono">{{ r.tool }}</td>
 <td><span class="badge" :class="'integ-'+r.required_integrity">{{ integLabel(r.required_integrity) }}</span></td>
 <td><span class="badge" :class="'conf-'+r.max_confidentiality">{{ confLabel(r.max_confidentiality) }}</span></td>
-<td><button class="btn-icon" @click="editTool(r)" title="Edit">✏️</button>
-<button class="btn-icon" @click="deleteTool(r.tool)" title="Delete">🗑️</button></td></tr></tbody></table>
-<div v-else class="empty">No tool requirements</div>
+<td><button class="btn-icon" @click="editTool(r)" title="编辑">✏️</button>
+<button class="btn-icon" @click="deleteTool(r.tool)" title="删除">🗑️</button></td></tr></tbody></table>
+<div v-else class="empty">暂无工具要求</div>
 
 <!-- Add/Edit Tool Modal -->
 <div v-if="showAddTool" class="modal-overlay" @click.self="showAddTool=false"><div class="modal">
-<h3>{{ editingTool ? 'Edit' : 'Add' }} Tool Requirement</h3>
-<div class="form-row"><label>Tool</label><input v-model="toolForm.tool" :disabled="!!editingTool" class="field-input"/></div>
-<div class="form-row"><label>Required Integrity</label><select v-model.number="toolForm.required_integrity" class="field-input"><option :value="0">TAINT</option><option :value="1">LOW</option><option :value="2">MEDIUM</option><option :value="3">HIGH</option></select></div>
-<div class="form-row"><label>Max Confidentiality</label><select v-model.number="toolForm.max_confidentiality" class="field-input"><option :value="0">PUBLIC</option><option :value="1">INTERNAL</option><option :value="2">CONFIDENTIAL</option><option :value="3">SECRET</option></select></div>
-<div class="modal-actions"><button class="btn" @click="showAddTool=false">Cancel</button><button class="btn btn-primary" @click="saveTool">Save</button></div>
+<h3>{{ editingTool ? '编辑' : '添加' }}工具要求</h3>
+<div class="form-row"><label>工具</label><input v-model="toolForm.tool" :disabled="!!editingTool" class="field-input"/></div>
+<div class="form-row"><label>最低完整性</label><select v-model.number="toolForm.required_integrity" class="field-input"><option :value="0">TAINT</option><option :value="1">LOW</option><option :value="2">MEDIUM</option><option :value="3">HIGH</option></select></div>
+<div class="form-row"><label>最高机密性</label><select v-model.number="toolForm.max_confidentiality" class="field-input"><option :value="0">PUBLIC</option><option :value="1">INTERNAL</option><option :value="2">CONFIDENTIAL</option><option :value="3">SECRET</option></select></div>
+<div class="modal-actions"><button class="btn" @click="showAddTool=false">取消</button><button class="btn btn-primary" @click="saveTool">保存</button></div>
 </div></div>
 </div>
 
 <!-- Variables Tab -->
 <div v-if="tab==='variables'" class="section">
-<div class="section-header"><h3>Variables</h3>
+<div class="section-header"><h3>变量</h3>
 <div class="inline-form"><input v-model="varTraceId" placeholder="trace_id" class="field-input" @keyup.enter="loadVars"/>
-<button class="btn btn-sm" @click="loadVars">Search</button></div></div>
-<table class="data-table" v-if="variables.length"><thead><tr><th>ID</th><th>Name</th><th>Source</th><th>Conf</th><th>Integ</th><th>Parents</th></tr></thead>
+<button class="btn btn-sm" @click="loadVars">搜索</button></div></div>
+<table class="data-table" v-if="variables.length"><thead><tr><th>ID</th><th>名称</th><th>来源</th><th>机密性</th><th>完整性</th><th>父变量</th></tr></thead>
 <tbody><tr v-for="v in variables" :key="v.id"><td class="mono">{{ (v.id||'').substring(0,16) }}</td><td>{{ v.name }}</td><td class="mono">{{ v.source }}</td>
 <td><span class="badge" :class="'conf-'+v.label.confidentiality">{{ confLabel(v.label.confidentiality) }}</span></td>
 <td><span class="badge" :class="'integ-'+v.label.integrity">{{ integLabel(v.label.integrity) }}</span></td>
 <td class="mono">{{ (v.parents||[]).map(p=>p.substring(0,8)).join(', ') || '-' }}</td></tr></tbody></table>
-<div v-else class="empty">Enter a trace_id to search variables</div>
+<div v-else class="empty">输入 trace_id 搜索变量</div>
 </div>
 
 <!-- Violations Tab -->
 <div v-if="tab==='violations'" class="section">
-<table class="data-table" v-if="violations.length"><thead><tr><th>Type</th><th>Variable</th><th>Tool</th><th>Label</th><th>Action</th><th>Time</th></tr></thead>
+<table class="data-table" v-if="violations.length"><thead><tr><th>类型</th><th>变量</th><th>工具</th><th>标签</th><th>动作</th><th>时间</th></tr></thead>
 <tbody><tr v-for="v in violations" :key="v.id">
 <td><span class="badge" :class="'viol-'+v.type">{{ v.type }}</span></td>
 <td class="mono">{{ (v.variable||'').substring(0,12) }}</td>
 <td class="mono">{{ v.tool }}</td>
-<td>conf={{ confLabel(v.var_label.confidentiality) }}, integ={{ integLabel(v.var_label.integrity) }}</td>
+<td>机密={{ confLabel(v.var_label.confidentiality) }}, 完整={{ integLabel(v.var_label.integrity) }}</td>
 <td><span class="badge" :class="'dec-'+v.action">{{ v.action }}</span></td>
 <td>{{ formatTime(v.timestamp) }}</td></tr></tbody></table>
-<div v-else class="empty">No violations</div>
+<div v-else class="empty">暂无违规记录</div>
 </div>
 
 <!-- Live Check Tab -->
 <div v-if="tab==='check'" class="section">
 <div class="check-form">
 <div class="form-row"><label>Trace ID</label><input v-model="checkForm.trace_id" class="field-input"/></div>
-<div class="form-row"><label>Tool</label><input v-model="checkForm.tool" class="field-input" placeholder="e.g. send_email, shell_exec"/></div>
-<div class="form-row"><label>Input Var IDs (comma-sep)</label><input v-model="checkForm.var_ids_str" class="field-input" placeholder="ifc-xxxx,ifc-yyyy"/></div>
-<button class="btn btn-primary" @click="runCheck" :disabled="checking">{{ checking ? 'Checking...' : 'Check' }}</button>
+<div class="form-row"><label>工具</label><input v-model="checkForm.tool" class="field-input" placeholder="例如 send_email, shell_exec"/></div>
+<div class="form-row"><label>输入变量 ID（逗号分隔）</label><input v-model="checkForm.var_ids_str" class="field-input" placeholder="ifc-xxxx,ifc-yyyy"/></div>
+<button class="btn btn-primary" @click="runCheck" :disabled="checking">{{ checking ? '检测中...' : '检测' }}</button>
 </div>
 <div v-if="checkResult" class="check-result" :class="'result-'+checkResult.decision">
 <div class="result-header"><span class="result-icon">{{ checkResult.allowed ? '✅' : '🚫' }}</span>
@@ -103,17 +103,17 @@
 
 <!-- v26.1: Quarantine Tab -->
 <div v-if="tab==='quarantine'" class="section">
-<div class="section-header"><h3>🔒 Quarantine Sessions</h3>
-<button class="btn btn-sm" @click="loadQuarantine">Refresh</button></div>
+<div class="section-header"><h3>🔒 隔离会话</h3>
+<button class="btn btn-sm" @click="loadQuarantine">刷新</button></div>
 
 <div class="stats-grid quarantine-stats">
-<div class="stat-card"><div class="stat-val" style="color:#6366F1">{{ quarantineStats.total_routed??0 }}</div><div class="stat-label">Total Routed</div></div>
-<div class="stat-card"><div class="stat-val" style="color:#22C55E">{{ quarantineStats.total_depurified??0 }}</div><div class="stat-label">Depurified</div></div>
-<div class="stat-card"><div class="stat-val" style="color:#EF4444">{{ quarantineStats.total_failed??0 }}</div><div class="stat-label">Failed</div></div>
-<div class="stat-card"><div class="stat-val" style="color:#F59E0B">{{ quarantineStats.active_sessions??0 }}</div><div class="stat-label">Active Sessions</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#6366F1">{{ quarantineStats.total_routed??0 }}</div><div class="stat-label">总路由数</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#22C55E">{{ quarantineStats.total_depurified??0 }}</div><div class="stat-label">已净化</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#EF4444">{{ quarantineStats.total_failed??0 }}</div><div class="stat-label">已失败</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#F59E0B">{{ quarantineStats.active_sessions??0 }}</div><div class="stat-label">活跃会话</div></div>
 </div>
 
-<table class="data-table" v-if="quarantineSessions.length"><thead><tr><th>Trace ID</th><th>Status</th><th>Input Vars</th><th>Output Var</th><th>Start</th><th>End</th></tr></thead>
+<table class="data-table" v-if="quarantineSessions.length"><thead><tr><th>Trace ID</th><th>状态</th><th>输入变量</th><th>输出变量</th><th>开始</th><th>结束</th></tr></thead>
 <tbody><tr v-for="s in quarantineSessions" :key="s.session_id">
 <td class="mono">{{ (s.trace_id||'').substring(0,16) }}</td>
 <td><span class="badge" :class="'qs-'+s.status">{{ s.status }}</span></td>
@@ -121,19 +121,19 @@
 <td class="mono">{{ s.output_var ? s.output_var.substring(0,12) : '-' }}</td>
 <td>{{ formatTime(s.start_time) }}</td>
 <td>{{ formatTime(s.end_time) }}</td></tr></tbody></table>
-<div v-else class="empty">No quarantine sessions</div>
+<div v-else class="empty">暂无隔离会话</div>
 </div>
 
 <!-- v26.2: Data Flow Tab -->
 <div v-if="tab==='dataflow'" class="section">
-<div class="section-header"><h3>📊 Data Flow Explorer</h3>
+<div class="section-header"><h3>📊 数据流探索</h3>
 <div class="inline-form"><input v-model="dfTraceId" placeholder="trace_id" class="field-input" @keyup.enter="loadDataFlow"/>
-<button class="btn btn-sm" @click="loadDataFlow">Search</button></div></div>
+<button class="btn btn-sm" @click="loadDataFlow">搜索</button></div></div>
 
 <!-- Propagation Chain -->
 <div v-if="dfVariables.length" class="dataflow-chain">
-<h4>Variable Propagation Chain</h4>
-<table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Source</th><th>Conf</th><th>Integ</th><th>Parents →</th></tr></thead>
+<h4>变量传播链</h4>
+<table class="data-table"><thead><tr><th>ID</th><th>名称</th><th>来源</th><th>机密性</th><th>完整性</th><th>父变量 →</th></tr></thead>
 <tbody><tr v-for="v in dfVariables" :key="v.id" :class="{'taint-row': v.label.integrity===0}">
 <td class="mono">{{ (v.id||'').substring(0,16) }}</td>
 <td>{{ v.name }}</td>
@@ -142,12 +142,12 @@
 <td><span class="badge" :class="'integ-'+v.label.integrity">{{ integLabel(v.label.integrity) }}</span></td>
 <td class="mono">{{ (v.parents||[]).length > 0 ? (v.parents||[]).map(p=>p.substring(0,8)).join(' → ') : '(root)' }}</td></tr></tbody></table>
 </div>
-<div v-else class="empty">Enter a trace_id to explore data flow</div>
+<div v-else class="empty">输入 trace_id 探索数据流</div>
 
 <!-- DOE Events from Stats -->
 <div class="doe-section" v-if="stats.total_doe > 0">
-<h4>⚠️ Data Over-Exposure Events</h4>
-<div class="doe-alert">Total DOE detections: <strong>{{ stats.total_doe }}</strong></div>
+<h4>⚠️ 数据过度暴露事件</h4>
+<div class="doe-alert">DOE 检测总数: <strong>{{ stats.total_doe }}</strong></div>
 </div>
 </div>
 
@@ -171,12 +171,12 @@ export default {
   }},
   computed: {
     statCards() { const s = this.stats; return [
-      {label:'Total Variables', value: s.total_variables??0, color:'#6366F1'},
-      {label:'Active Traces', value: s.active_traces??0, color:'#8B5CF6'},
-      {label:'Violations', value: s.total_violations??0, color:'#F59E0B'},
-      {label:'Blocked', value: s.total_blocked??0, color:'#EF4444'},
-      {label:'Hidden', value: s.total_hidden??0, color:'#8B5CF6'},
-      {label:'DOE', value: s.total_doe??0, color:'#F97316'}
+      {label:'变量总数', value: s.total_variables??0, color:'#6366F1'},
+      {label:'活跃追踪', value: s.active_traces??0, color:'#8B5CF6'},
+      {label:'违规数', value: s.total_violations??0, color:'#F59E0B'},
+      {label:'已拦截', value: s.total_blocked??0, color:'#EF4444'},
+      {label:'已隐藏', value: s.total_hidden??0, color:'#8B5CF6'},
+      {label:'数据提取', value: s.total_doe??0, color:'#F97316'}
     ]}
   },
   mounted() { this.loadAll() },
@@ -202,7 +202,7 @@ export default {
         this.showAddSource = false; this.editingSource = null; this.loadAll()
       } catch(e) { alert(e.message||e) }
     },
-    async deleteSource(src) { if(!confirm('Delete source rule: '+src+'?')) return; try { await apiDelete('/api/v1/ifc/source-rules/'+encodeURIComponent(src)); this.loadAll() } catch(e){ alert(e.message||e) } },
+    async deleteSource(src) { if(!confirm('确定删除来源规则: '+src+'？')) return; try { await apiDelete('/api/v1/ifc/source-rules/'+encodeURIComponent(src)); this.loadAll() } catch(e){ alert(e.message||e) } },
     editTool(r) { this.editingTool = r.tool; this.toolForm = { tool: r.tool, required_integrity: r.required_integrity, max_confidentiality: r.max_confidentiality }; this.showAddTool = true },
     async saveTool() {
       try {
@@ -211,7 +211,7 @@ export default {
         this.showAddTool = false; this.editingTool = null; this.loadAll()
       } catch(e) { alert(e.message||e) }
     },
-    async deleteTool(tool) { if(!confirm('Delete tool requirement: '+tool+'?')) return; try { await apiDelete('/api/v1/ifc/tool-requirements/'+encodeURIComponent(tool)); this.loadAll() } catch(e){ alert(e.message||e) } },
+    async deleteTool(tool) { if(!confirm('确定删除工具要求: '+tool+'？')) return; try { await apiDelete('/api/v1/ifc/tool-requirements/'+encodeURIComponent(tool)); this.loadAll() } catch(e){ alert(e.message||e) } },
     async runCheck() {
       this.checking = true; this.checkResult = null
       try {

@@ -61,6 +61,8 @@ type LLMProxy struct {
 	ifcEngine *IFCEngine
 	// v26.1 隔离LLM
 	ifcQuarantine *IFCQuarantine
+	// v26.3 审计日志写入(治理引擎事件)
+	auditLogger *AuditLogger
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -561,6 +563,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 									Summary: fmt.Sprintf("Capability denied: %s (%s)", tcName25, capEval.Reason),
 								})
 							}
+							// v26.3: 写入审计日志
+							if lp.auditLogger != nil {
+								lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, "warn",
+									fmt.Sprintf("[Capability] 权限不足: %s", capEval.Reason),
+									fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
+							}
 						}
 					}
 
@@ -570,6 +578,16 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						if devResult.HasDeviation {
 							log.Printf("[Deviation] 检测到偏差: tool=%s type=%s severity=%s decision=%s trace=%s",
 								tcName25, devResult.Deviation.Type, devResult.Deviation.Severity, devResult.Decision, traceID)
+							// v26.3: 写入审计日志
+							if lp.auditLogger != nil {
+								devAction := "warn"
+								if devResult.Decision == "block" {
+									devAction = "block"
+								}
+								lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, devAction,
+									fmt.Sprintf("[Deviation] %s: %s", devResult.Deviation.Type, devResult.Reason),
+									fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
+							}
 							if devResult.Decision == "block" {
 								w.Header().Set("Content-Type", "application/json")
 								w.WriteHeader(403)
@@ -597,6 +615,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 							ifcDecision := lp.ifcEngine.CheckToolCall(traceID, tcName25, varIDs)
 							if ifcDecision != nil && !ifcDecision.Allowed && ifcDecision.Decision == "block" {
 								log.Printf("[IFC] 信息流违规阻断: tool=%s type=%s trace=%s", tcName25, ifcDecision.Violation.Type, traceID)
+								// v26.3: 写入审计日志
+								if lp.auditLogger != nil {
+									lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, "block",
+										fmt.Sprintf("[IFC] %s violation: %s", ifcDecision.Violation.Type, ifcDecision.Reason),
+										fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
+								}
 								w.Header().Set("Content-Type", "application/json")
 								w.WriteHeader(403)
 								fmt.Fprintf(w, `{"error":"Tool call blocked by IFC: %s","tool":"%s","type":"%s"}`,
@@ -605,6 +629,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 								return
 							} else if ifcDecision != nil && ifcDecision.Decision == "warn" {
 								log.Printf("[IFC] 信息流告警: tool=%s reason=%s trace=%s", tcName25, ifcDecision.Reason, traceID)
+								// v26.3: 写入审计日志
+								if lp.auditLogger != nil {
+									lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, "warn",
+										fmt.Sprintf("[IFC] %s: %s", ifcDecision.Violation.Type, ifcDecision.Reason),
+										fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
+								}
 							}
 
 							// v26.1: IFC 隔离路由

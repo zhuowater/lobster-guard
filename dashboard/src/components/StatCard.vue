@@ -106,6 +106,10 @@ watch(() => props.value, (newVal) => {
 .stat-card--green::before { background: var(--color-success); }
 .stat-card--indigo::before { background: #6366F1; }
 .stat-card--indigo .stat-card-icon { color: #6366F1; }
+.stat-card--purple::before { background: #8B5CF6; }
+.stat-card--purple .stat-card-icon { color: #8B5CF6; }
+.stat-card--orange::before { background: #F97316; }
+.stat-card--orange .stat-card-icon { color: #F97316; }
 
 .stat-card:hover {
   transform: translateY(-2px);

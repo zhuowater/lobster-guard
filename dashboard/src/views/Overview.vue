@@ -96,8 +96,11 @@
       <StatCard :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" :badge="timeRange" color="yellow" :change="stats.warnedChange" :changeUp="false" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { action: 'warn', since: timeRange } })"/>
       <StatCard :iconSvg="svgPercent" :value="stats.rate" label="拦截率" :badge="timeRange" color="green" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/rules' })"/>
       <StatCard :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" badge="30d" color="red" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/user-profiles')"/>
+      <StatCard :iconSvg="svgIFC" :value="ifcStats ? ifcStats.total_violations : '--'" label="IFC Violations" badge="all" color="purple" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/ifc')"/>
+      <StatCard :iconSvg="svgDeviation" :value="deviationStats ? deviationStats.total_deviations : '--'" label="Plan Deviations" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/deviations')"/>
+      <StatCard :iconSvg="svgCapDeny" :value="capabilityStats ? capabilityStats.deny_count : '--'" label="Capability Denials" badge="all" color="red" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/capability')"/>
     </div>
-    <div class="ov-cards" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
+    <div class="ov-cards" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
 
     <!-- 快捷操作 + 最近告警 -->
     <div class="quick-row">
@@ -175,6 +178,14 @@
         <div class="insight-card" @click="router.push('/leaderboard')"><div class="insight-header"><Icon name="trophy" :size="14" /> 排行榜</div><div class="insight-value">{{ summaryTopTenant }}</div><div class="insight-sub">{{ summaryTopScore }} 分 · TOP1</div></div>
         <div class="insight-card" @click="router.push('/behavior')"><div class="insight-header"><Icon name="behavior" :size="14" /> 行为画像</div><div class="insight-value" :class="(summary.behavior?.high_risk||0) > 0 ? 'warning' : ''">{{ summary.behavior?.anomaly_count || 0 }}</div><div class="insight-sub">行为突变 · {{ summary.behavior?.high_risk || 0 }} 高风险</div></div>
         <div class="insight-card" @click="router.push('/ab-testing')"><div class="insight-header"><Icon name="split" :size="14" /> A/B 测试</div><div class="insight-value">{{ summary.ab_testing?.active_tests || 0 }}</div><div class="insight-sub">进行中 · {{ summary.ab_testing?.total_tests || 0 }} 总计</div></div>
+        <div class="insight-card governance-insight" v-if="governanceSummary" @click="router.push('/ifc')">
+          <div class="insight-header"><Icon name="shield" :size="14" /> 治理引擎</div>
+          <div class="governance-engines">
+            <div class="gov-engine-row"><span class="gov-engine-name">IFC</span><span class="gov-engine-status" :class="governanceSummary.ifc.enabled ? 'enabled' : 'disabled'">{{ governanceSummary.ifc.enabled ? '启用' : '停用' }}</span><span class="gov-engine-count">{{ governanceSummary.ifc.violations }} 违规</span></div>
+            <div class="gov-engine-row"><span class="gov-engine-name">偏差检测</span><span class="gov-engine-status" :class="governanceSummary.deviations.enabled ? 'enabled' : 'disabled'">{{ governanceSummary.deviations.enabled ? '启用' : '停用' }}</span><span class="gov-engine-count">{{ governanceSummary.deviations.detected }} 偏差</span></div>
+            <div class="gov-engine-row"><span class="gov-engine-name">Capability</span><span class="gov-engine-status" :class="governanceSummary.capability.enabled ? 'enabled' : 'disabled'">{{ governanceSummary.capability.enabled ? '启用' : '停用' }}</span><span class="gov-engine-count">{{ governanceSummary.capability.denials }} 拒绝</span></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -223,6 +234,9 @@ const svgHeart = svgTrend
 const svgTarget = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>'
 const svgGrid = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>'
 const svgShieldCheck = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
+const svgIFC = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 11l4-4 4 4"/><path d="M12 7v10"/></svg>'
+const svgDeviation = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+const svgCapDeny = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><line x1="12" y1="15" x2="12" y2="19"/></svg>'
 
 // ====== 响应式状态 ======
 const loaded = ref(false)
@@ -243,6 +257,10 @@ const healthScore = ref(null)
 const showScoreDetail = ref(false)
 const systemHealth = ref(null)
 const anomalyStatus = ref(null)
+const ifcStats = ref(null)
+const deviationStats = ref(null)
+const capabilityStats = ref(null)
+const governanceSummary = ref(null)
 const refreshInterval = ref(localStorage.getItem('overview_refresh') || '30000')
 const timeRange = ref(localStorage.getItem('overview_time_range') || '24h')
 const lastRefreshTs = ref(Date.now())
@@ -319,7 +337,7 @@ function fmtTime(ts) { if (!ts) return '--'; const d = new Date(ts); return isNa
 function fmtTimeShort(ts) { if (!ts) return '--'; const d = new Date(ts); return isNaN(d.getTime()) ? String(ts) : d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }) }
 
 function deductionLink(name) {
-  const map = { 'IM拦截率': '/audit', 'IM 拦截率': '/audit', 'LLM异常率': '/agent', 'LLM 异常率': '/agent', 'Canary泄露': '/settings?section=canary', 'Canary 泄露': '/settings?section=canary', '高危用户': '/user-profiles', '规则命中': '/rules', '规则覆盖': '/rules' }
+  const map = { 'IM拦截率': '/audit', 'IM 拦截率': '/audit', 'LLM异常率': '/agent', 'LLM 异常率': '/agent', 'Canary泄露': '/settings?section=canary', 'Canary 泄露': '/settings?section=canary', '高危用户': '/user-profiles', '规则命中': '/rules', '规则覆盖': '/rules', 'IFC 违规率': '/ifc', 'IFC违规率': '/ifc', 'Plan 偏差': '/deviations', 'Plan偏差': '/deviations' }
   for (const [k, v] of Object.entries(map)) { if (name.includes(k) || k.includes(name)) return v }
   return null
 }
@@ -366,6 +384,22 @@ async function loadTrend() {
 async function loadHealthScore() { try { healthScore.value = await api('/api/v1/health/score') } catch {} }
 async function loadSystemHealth() { try { const d = await api('/healthz'); if (d.system) systemHealth.value = d.system } catch {} }
 async function loadAnomalyStatus() { try { anomalyStatus.value = await api('/api/v1/anomaly/status') } catch { anomalyStatus.value = null } }
+async function loadGovernanceStats() {
+  try { ifcStats.value = await api('/api/v1/ifc/stats') } catch { ifcStats.value = null }
+  try { deviationStats.value = await api('/api/v1/deviations/stats') } catch { deviationStats.value = null }
+  try { capabilityStats.value = await api('/api/v1/capabilities/stats') } catch { capabilityStats.value = null }
+  // Build governance summary from individual stats + config
+  try {
+    const ifcConfig = await api('/api/v1/ifc/config').catch(() => null)
+    const devConfig = await api('/api/v1/deviations/config').catch(() => null)
+    const capMappings = await api('/api/v1/capabilities/mappings').catch(() => null)
+    governanceSummary.value = {
+      ifc: { enabled: ifcConfig?.enabled ?? false, violations: ifcStats.value?.total_violations || 0, blocked: ifcStats.value?.total_blocked || 0 },
+      deviations: { enabled: devConfig?.enabled ?? false, detected: deviationStats.value?.total_deviations || 0, critical: deviationStats.value?.critical_count || 0 },
+      capability: { enabled: true, denials: capabilityStats.value?.deny_count || 0, evaluations: capabilityStats.value?.total_evaluations || 0 }
+    }
+  } catch { governanceSummary.value = null }
+}
 
 async function loadData() {
   try {
@@ -416,7 +450,7 @@ async function loadSummary() { try { summary.value = await api('/api/v1/overview
 
 async function refreshAllData() {
   refreshing.value = true
-  await Promise.all([loadData(), loadHealthScore(), loadSystemHealth(), loadAnomalyStatus()])
+  await Promise.all([loadData(), loadHealthScore(), loadSystemHealth(), loadAnomalyStatus(), loadGovernanceStats()])
   lastRefreshTs.value = Date.now()
   updateRefreshDisplay()
   refreshing.value = false
@@ -605,6 +639,16 @@ onUnmounted(() => { clearInterval(refreshTimer); clearInterval(refreshDisplayTim
 .insight-value { font-size: 28px; font-weight: 700; color: var(--text-primary); }
 .insight-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
 .insight-value.danger { color: var(--color-danger); } .insight-value.warning { color: var(--color-warning); } .insight-value.success { color: var(--color-success); }
+
+/* ====== 治理引擎洞察卡片 ====== */
+.governance-insight { grid-column: span 1; }
+.governance-engines { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.gov-engine-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.gov-engine-name { font-weight: 600; color: var(--text-primary); min-width: 60px; }
+.gov-engine-status { display: inline-block; padding: 1px 6px; border-radius: 9999px; font-size: 10px; font-weight: 600; }
+.gov-engine-status.enabled { background: rgba(16,185,129,0.15); color: #10B981; }
+.gov-engine-status.disabled { background: rgba(107,114,128,0.15); color: var(--text-tertiary); }
+.gov-engine-count { color: var(--text-tertiary); margin-left: auto; font-family: var(--font-mono); font-size: 11px; }
 
 /* ====== 响应式 ====== */
 @media (max-width: 1024px) {

@@ -163,6 +163,56 @@ func (e *HealthScoreEngine) Calculate() (*HealthScoreResult, error) {
 		})
 	}
 
+	// 6. IFC 违规率扣分 (权重15%): violations / total_variables
+	var ifcViolations, ifcTotalVars int64
+	e.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN action='block' OR action='warn' THEN 1 ELSE 0 END),0), COUNT(*) FROM ifc_violations WHERE timestamp >= ?`, since7d).Scan(&ifcViolations, &ifcTotalVars)
+	if ifcTotalVars == 0 {
+		// fallback: count from ifc_variables as total checks
+		e.db.QueryRow(`SELECT COUNT(*) FROM ifc_variables WHERE created_at >= ?`, since7d).Scan(&ifcTotalVars)
+	}
+	ifcViolationRate := float64(0)
+	if ifcTotalVars > 0 {
+		ifcViolationRate = float64(ifcViolations) / float64(ifcTotalVars) * 100
+	}
+	ifcDeduct := 0
+	if ifcViolationRate > 20 {
+		ifcDeduct = 15
+	} else if ifcViolationRate > 10 {
+		ifcDeduct = 10
+	} else if ifcViolationRate > 5 {
+		ifcDeduct = 5
+	}
+	if ifcDeduct > 0 {
+		score -= ifcDeduct
+		deductions = append(deductions, HealthDeduction{
+			Name: "IFC 违规率", Points: ifcDeduct, MaxPoints: 15,
+			Detail: fmt.Sprintf("违规率 %.1f%% (%d/%d)", ifcViolationRate, ifcViolations, ifcTotalVars),
+		})
+	}
+
+	// 7. Plan 偏差率扣分 (权重10%): deviations / total_checks
+	var planDeviations, planTotalChecks int64
+	e.db.QueryRow(`SELECT COUNT(*) FROM plan_deviations WHERE detected_at >= ?`, since7d).Scan(&planDeviations)
+	e.db.QueryRow(`SELECT COUNT(*) FROM plan_deviations WHERE detected_at >= ?`, since7d).Scan(&planTotalChecks)
+	// total_checks is actually deviations detected; use a broader count if available
+	// For now, treat any deviation > 0 as needing deduction based on absolute count
+	_ = planTotalChecks // absolute count used below
+	planDeduct := 0
+	if planDeviations > 10 {
+		planDeduct = 10
+	} else if planDeviations > 5 {
+		planDeduct = 7
+	} else if planDeviations > 0 {
+		planDeduct = 3
+	}
+	if planDeduct > 0 {
+		score -= planDeduct
+		deductions = append(deductions, HealthDeduction{
+			Name: "Plan 偏差", Points: planDeduct, MaxPoints: 10,
+			Detail: fmt.Sprintf("检测到 %d 个执行偏差", planDeviations),
+		})
+	}
+
 	if score < 0 {
 		score = 0
 	}

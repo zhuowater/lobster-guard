@@ -1,36 +1,36 @@
 <template>
-<div class="page"><div class="page-header"><div><h1 class="page-title"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78m0 0L12 16m0 0l3-3m-3 3l-3 3m9-15l2 2m-2-2v3.5m0 0h3.5"/></svg> Capability Engine</h1>
-<p class="page-subtitle">Data-level capability tagging — track what operations each data source is allowed to trigger</p></div>
-<button class="btn btn-sm" @click="loadAll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Refresh</button></div>
+<div class="page"><div class="page-header"><div><h1 class="page-title"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78m0 0L12 16m0 0l3-3m-3 3l-3 3m9-15l2 2m-2-2v3.5m0 0h3.5"/></svg> 能力标签引擎</h1>
+<p class="page-subtitle">数据级能力标签 — 追踪每个数据源允许触发的操作</p></div>
+<button class="btn btn-sm" @click="loadAll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> 刷新</button></div>
 
 <div class="stats-grid">
 <div class="stat-card" v-for="s in statCards" :key="s.label"><div class="stat-val">{{ s.value }}</div><div class="stat-label">{{ s.label }}</div></div>
 </div>
 
 <div class="tab-bar">
-<button class="tab-btn" :class="{active:tab==='mappings'}" @click="tab='mappings'">Tool Mappings ({{ mappings.length }})</button>
-<button class="tab-btn" :class="{active:tab==='contexts'}" @click="tab='contexts'">Active Contexts</button>
-<button class="tab-btn" :class="{active:tab==='evals'}" @click="tab='evals'">Evaluations</button>
+<button class="tab-btn" :class="{active:tab==='mappings'}" @click="tab='mappings'">工具映射 ({{ mappings.length }})</button>
+<button class="tab-btn" :class="{active:tab==='contexts'}" @click="tab='contexts'">活跃上下文</button>
+<button class="tab-btn" :class="{active:tab==='evals'}" @click="tab='evals'">评估记录</button>
 </div>
 
 <div v-if="tab==='mappings'" class="section">
-<table class="data-table" v-if="mappings.length"><thead><tr><th>Tool</th><th>Category</th><th>Level</th><th>Allowed Caps</th><th>Denied Caps</th><th>Trust</th></tr></thead>
+<table class="data-table" v-if="mappings.length"><thead><tr><th>工具</th><th>分类</th><th>级别</th><th>允许能力</th><th>拒绝能力</th><th>信任度</th></tr></thead>
 <tbody><tr v-for="m in mappings" :key="m.tool_name"><td class="mono">{{ m.tool_name }}</td><td>{{ m.category }}</td><td><span class="badge" :class="'lvl-'+m.default_level">{{ m.default_level }}</span></td>
 <td>{{ (m.allowed_caps||[]).join(', ')||'-' }}</td><td>{{ (m.denied_caps||[]).join(', ')||'-' }}</td><td>{{ (m.trust_factor||0).toFixed(2) }}</td></tr></tbody></table>
-<div v-else class="empty">No tool mappings configured</div>
+<div v-else class="empty">暂无工具映射配置</div>
 </div>
 
 <div v-if="tab==='contexts'" class="section">
-<table class="data-table" v-if="contexts.length"><thead><tr><th>Trace ID</th><th>User</th><th>Status</th><th>Created</th></tr></thead>
+<table class="data-table" v-if="contexts.length"><thead><tr><th>Trace ID</th><th>用户</th><th>状态</th><th>创建时间</th></tr></thead>
 <tbody><tr v-for="c in contexts" :key="c.trace_id"><td class="mono">{{ c.trace_id }}</td><td>{{ c.user_id||'-' }}</td><td><span class="badge" :class="'st-'+c.status">{{ c.status }}</span></td><td class="mono">{{ c.created_at }}</td></tr></tbody></table>
-<div v-else class="empty">No active contexts</div>
+<div v-else class="empty">暂无活跃上下文</div>
 </div>
 
 <div v-if="tab==='evals'" class="section">
-<table class="data-table" v-if="evals.length"><thead><tr><th>Time</th><th>Tool</th><th>Action</th><th>Decision</th><th>Reason</th><th>Trace</th></tr></thead>
+<table class="data-table" v-if="evals.length"><thead><tr><th>时间</th><th>工具</th><th>动作</th><th>决策</th><th>原因</th><th>Trace</th></tr></thead>
 <tbody><tr v-for="e in evals" :key="e.created_at+e.tool_name"><td class="mono">{{ e.created_at }}</td><td class="mono">{{ e.tool_name }}</td><td>{{ e.action }}</td>
 <td><span class="badge" :class="'dec-'+e.decision">{{ e.decision }}</span></td><td>{{ e.reason||'-' }}</td><td class="mono">{{ (e.trace_id||'').substring(0,12) }}</td></tr></tbody></table>
-<div v-else class="empty">No evaluations recorded</div>
+<div v-else class="empty">暂无评估记录</div>
 </div>
 </div>
 </template>
@@ -41,8 +41,8 @@ export default {
   data() { return { tab: 'mappings', mappings: [], contexts: [], evals: [], stats: {} } },
   computed: {
     statCards() { const s = this.stats; return [
-      {label:'Tool Mappings', value: s.tool_mapping_count??0}, {label:'Total Contexts', value: s.total_contexts??0},
-      {label:'Active Contexts', value: s.active_contexts??0}, {label:'Blocked', value: s.deny_count??0}
+      {label:'工具映射', value: s.tool_mapping_count??0}, {label:'活跃上下文', value: s.total_contexts??0},
+      {label:'活跃上下文', value: s.active_contexts??0}, {label:'已拒绝', value: s.deny_count??0}
     ]}
   },
   mounted() { this.loadAll() },

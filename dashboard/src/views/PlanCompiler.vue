@@ -121,7 +121,7 @@
       <div class="modal">
         <div class="modal-header"><h3>{{ editingTemplate ? '编辑模板' : '新建模板' }}</h3><button class="btn-close" @click="showNewTemplate=false">X</button></div>
         <div class="modal-body">
-          <div class="form-row"><label>名称</label><input v-model="formTemplate.name" class="field-input" placeholder="Plan Name"/></div>
+          <div class="form-row"><label>名称</label><input v-model="formTemplate.name" class="field-input" placeholder="计划名称"/></div>
           <div class="form-row"><label>分类</label><input v-model="formTemplate.category" class="field-input" placeholder="query/email/file/code/web/admin"/></div>
           <div class="form-row"><label>意图模式 (|分隔)</label><input v-model="formTemplate.intent_pattern" class="field-input" placeholder="search|find|look up"/></div>
           <div class="form-row"><label>描述</label><textarea v-model="formTemplate.description" class="field-input" rows="2"></textarea></div>
@@ -238,7 +238,7 @@ export default {
       this.saving = false
     },
     async deleteTemplate(t) {
-      if (!confirm('Delete template "' + t.name + '"?')) return
+      if (!confirm('确定删除模板 "' + t.name + '"？')) return
       try {
         await apiDelete('/api/v1/plans/templates/' + t.id)
         await this.loadAll()

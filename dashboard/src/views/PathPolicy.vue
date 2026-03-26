@@ -2,26 +2,26 @@
   <div class="pathpolicy-page">
     <div class="page-header">
       <div>
-        <h1 class="page-title"><Icon name="git-branch" :size="20" /> Path Policy Engine</h1>
-        <p class="page-subtitle">Runtime path-level governance: sequence, cumulative, and degradation rules for agent execution paths</p>
+        <h1 class="page-title"><Icon name="git-branch" :size="20" /> 路径治理引擎</h1>
+        <p class="page-subtitle">运行时路径级治理：序列、累积与降级规则</p>
       </div>
-      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> Refresh</button>
+      <button class="btn btn-sm" @click="loadAll"><Icon name="refresh" :size="14" /> 刷新</button>
     </div>
 
     <div class="stats-grid" v-if="!initialLoading">
-      <StatCard :iconSvg="svgPath" :value="stats.active_contexts!=null?stats.active_contexts:'-'" label="Active Paths" color="indigo" />
-      <StatCard :iconSvg="svgRules" :value="stats.total_rules!=null?stats.total_rules:'-'" label="Total Rules" color="blue" />
-      <StatCard :iconSvg="svgBlock" :value="stats.block_count!=null?stats.block_count:'-'" label="Blocked" color="red" />
-      <StatCard :iconSvg="svgWarn" :value="stats.warn_count!=null?stats.warn_count:'-'" label="Warned" color="yellow" />
+      <StatCard :iconSvg="svgPath" :value="stats.active_contexts!=null?stats.active_contexts:'-'" label="活跃路径" color="indigo" />
+      <StatCard :iconSvg="svgRules" :value="stats.total_rules!=null?stats.total_rules:'-'" label="规则总数" color="blue" />
+      <StatCard :iconSvg="svgBlock" :value="stats.block_count!=null?stats.block_count:'-'" label="已拦截" color="red" />
+      <StatCard :iconSvg="svgWarn" :value="stats.warn_count!=null?stats.warn_count:'-'" label="已告警" color="yellow" />
     </div>
     <div class="stats-grid" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
 
     <div class="tab-bar">
-      <button class="tab-btn" :class="{active:activeTab==='rules'}" @click="activeTab='rules'"><Icon name="file-text" :size="14"/> Policy Rules ({{ rules.length }})</button>
-      <button class="tab-btn" :class="{active:activeTab==='gauge'}" @click="activeTab='gauge'; loadGauge()"><Icon name="activity" :size="14"/> Risk Gauge</button>
-      <button class="tab-btn" :class="{active:activeTab==='paths'}" @click="activeTab='paths'; loadContexts()"><Icon name="git-branch" :size="14"/> Active Paths ({{ contexts.length }})</button>
-      <button class="tab-btn" :class="{active:activeTab==='events'}" @click="activeTab='events'; loadEvents()"><Icon name="clipboard" :size="14"/> Decision Log ({{ events.length }})</button>
-      <button class="tab-btn" :class="{active:activeTab==='templates'}" @click="activeTab='templates'; loadTemplates()"><Icon name="book" :size="14"/> Templates</button>
+      <button class="tab-btn" :class="{active:activeTab==='rules'}" @click="activeTab='rules'"><Icon name="file-text" :size="14"/> 策略规则 ({{ rules.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='gauge'}" @click="activeTab='gauge'; loadGauge()"><Icon name="activity" :size="14"/> 风险仪表</button>
+      <button class="tab-btn" :class="{active:activeTab==='paths'}" @click="activeTab='paths'; loadContexts()"><Icon name="git-branch" :size="14"/> 活跃路径 ({{ contexts.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='events'}" @click="activeTab='events'; loadEvents()"><Icon name="clipboard" :size="14"/> 决策日志 ({{ events.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='templates'}" @click="activeTab='templates'; loadTemplates()"><Icon name="book" :size="14"/> 模板</button>
     </div>
 
     <!-- Rules Tab -->
@@ -29,13 +29,13 @@
       <div class="rules-toolbar">
         <div class="search-box">
           <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input v-model="ruleSearch" placeholder="Search rules..." class="search-input"/>
+          <input v-model="ruleSearch" placeholder="搜索规则..." class="search-input"/>
         </div>
-        <button class="btn btn-primary btn-sm" @click="openNewRule"><Icon name="plus" :size="14"/> New Rule</button>
+        <button class="btn btn-primary btn-sm" @click="openNewRule"><Icon name="plus" :size="14"/> 新建规则</button>
       </div>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>Name</th><th>Type</th><th>Action</th><th>Priority</th><th>Description</th><th>Enabled</th><th>Actions</th></tr></thead>
+          <thead><tr><th>名称</th><th>类型</th><th>动作</th><th>优先级</th><th>描述</th><th>启用</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="r in filteredRules" :key="r.id">
               <td class="td-mono">{{ r.name }}</td>
@@ -45,11 +45,11 @@
               <td class="td-desc">{{ r.description }}</td>
               <td><label class="switch"><input type="checkbox" :checked="r.enabled" @change="toggleEnabled(r)"/><span class="slider"></span></label></td>
               <td class="td-actions">
-                <button class="btn-icon" @click="editRule(r)" title="Edit"><Icon name="edit" :size="14"/></button>
-                <button class="btn-icon btn-icon-danger" @click="confirmDeleteRule(r)" title="Delete"><Icon name="trash" :size="14"/></button>
+                <button class="btn-icon" @click="editRule(r)" title="编辑"><Icon name="edit" :size="14"/></button>
+                <button class="btn-icon btn-icon-danger" @click="confirmDeleteRule(r)" title="删除"><Icon name="trash" :size="14"/></button>
               </td>
             </tr>
-            <tr v-if="filteredRules.length===0"><td colspan="7" class="empty-row">No rules found</td></tr>
+            <tr v-if="filteredRules.length===0"><td colspan="7" class="empty-row">暂无规则</td></tr>
           </tbody>
         </table>
       </div>
@@ -87,12 +87,12 @@
             </div>
           </div>
           <div class="path-meta">
-            <span>Steps: {{ (ctx.steps||[]).length }}</span>
-            <span>Tools: {{ (ctx.tool_history||[]).length }}</span>
+            <span>步骤: {{ (ctx.steps||[]).length }}</span>
+            <span>工具: {{ (ctx.tool_history||[]).length }}</span>
           </div>
         </div>
       </div>
-      <div v-else class="empty-state"><Icon name="git-branch" :size="48" color="#6366F1"/><p>No active paths</p></div>
+      <div v-else class="empty-state"><Icon name="git-branch" :size="48" color="#6366F1"/><p>暂无活跃路径</p></div>
     </div>
 
     <!-- Events Tab -->
@@ -100,18 +100,18 @@
       <div class="events-toolbar">
         <div class="search-box">
           <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input v-model="eventSearch" placeholder="Search trace ID..." class="search-input"/>
+          <input v-model="eventSearch" placeholder="搜索 Trace ID..." class="search-input"/>
         </div>
         <select v-model="eventSince" class="select-sm" @change="loadEvents">
-          <option value="">All time</option>
-          <option value="1h">Last 1h</option>
-          <option value="24h">Last 24h</option>
-          <option value="7d">Last 7d</option>
+          <option value="">全部时间</option>
+          <option value="1h">最近 1 小时</option>
+          <option value="24h">最近 24 小时</option>
+          <option value="7d">最近 7 天</option>
         </select>
       </div>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>Time</th><th>Trace ID</th><th>Rule</th><th>Decision</th><th>Risk Score</th><th>Reason</th><th>Path Len</th></tr></thead>
+          <thead><tr><th>时间</th><th>Trace ID</th><th>规则</th><th>决策</th><th>风险分</th><th>原因</th><th>路径长度</th></tr></thead>
           <tbody>
             <tr v-for="ev in filteredEvents" :key="ev.id">
               <td class="td-mono td-time">{{ formatTime(ev.created_at) }}</td>
@@ -122,7 +122,7 @@
               <td class="td-desc">{{ ev.reason }}</td>
               <td class="td-mono">{{ ev.path_length }}</td>
             </tr>
-            <tr v-if="filteredEvents.length===0"><td colspan="7" class="empty-row">No events found</td></tr>
+            <tr v-if="filteredEvents.length===0"><td colspan="7" class="empty-row">暂无事件</td></tr>
           </tbody>
         </table>
       </div>
@@ -131,8 +131,8 @@
     <!-- Risk Gauge Tab (v23.1) -->
     <div v-if="activeTab==='gauge'" class="section">
       <div class="gauge-header">
-        <p class="gauge-desc">Real-time risk score for each active agent session. Scores decay exponentially over time.</p>
-        <button class="btn btn-sm" @click="loadGauge"><Icon name="refresh" :size="14"/> Refresh</button>
+        <p class="gauge-desc">每个活跃 Agent 会话的实时风险评分，分数随时间指数衰减。</p>
+        <button class="btn btn-sm" @click="loadGauge"><Icon name="refresh" :size="14"/> 刷新</button>
       </div>
       <div class="gauge-grid" v-if="gauges.length">
         <div class="gauge-card" v-for="g in gauges" :key="g.trace_id" :class="gaugeLevel(g.risk_score)">
@@ -150,26 +150,26 @@
               <div class="gauge-trace">{{ g.trace_id }}</div>
               <div class="gauge-session" v-if="g.session_id">{{ g.session_id }}</div>
               <div class="gauge-meta-row">
-                <span>{{ g.step_count }} steps</span>
-                <span>{{ g.tool_count }} tools</span>
-                <span>{{ g.age_sec }}s ago</span>
+                <span>{{ g.step_count }} 步骤</span>
+                <span>{{ g.tool_count }} 工具</span>
+                <span>{{ g.age_sec }}秒前</span>
               </div>
             </div>
           </div>
           <div class="gauge-taints" v-if="g.taint_labels && g.taint_labels.length">
             <span class="taint-badge" v-for="t in g.taint_labels" :key="t">{{ t }}</span>
           </div>
-          <div class="gauge-last" v-if="g.last_action">Last: <span class="td-mono">{{ g.last_action }}</span></div>
+          <div class="gauge-last" v-if="g.last_action">最近: <span class="td-mono">{{ g.last_action }}</span></div>
         </div>
       </div>
-      <div v-else class="empty-state"><Icon name="activity" :size="48" color="#6366F1"/><p>No active sessions</p></div>
+      <div v-else class="empty-state"><Icon name="activity" :size="48" color="#6366F1"/><p>暂无活跃会话</p></div>
     </div>
 
     <!-- Templates Tab (v23.2 CRUD) -->
     <div v-if="activeTab==='templates'" class="section">
       <div class="template-toolbar">
-        <p class="template-desc">Policy templates for compliance, security, and industry scenarios. Activate to enable rules, deactivate to disable.</p>
-        <button class="btn btn-primary btn-sm" @click="openNewTemplate"><Icon name="plus" :size="14"/> New Template</button>
+        <p class="template-desc">合规、安全与行业场景的策略模板。激活以启用规则，停用以禁用。</p>
+        <button class="btn btn-primary btn-sm" @click="openNewTemplate"><Icon name="plus" :size="14"/> 新建模板</button>
       </div>
       <div class="template-grid" v-if="templates.length">
         <div class="template-card" v-for="t in templates" :key="t.id" :class="{'tpl-disabled': !t.enabled}">
@@ -180,14 +180,14 @@
               <span class="builtin-badge" v-if="t.built_in">built-in</span>
             </div>
             <div class="tpl-actions">
-              <button class="btn btn-sm" @click="activateTemplate(t)" :disabled="t._busy" title="Enable all rules in this template">
-                <Icon name="play" :size="12"/> Activate
+              <button class="btn btn-sm" @click="activateTemplate(t)" :disabled="t._busy" title="启用模板中的所有规则">
+                <Icon name="play" :size="12"/> 激活
               </button>
-              <button class="btn btn-sm btn-ghost" @click="deactivateTemplate(t)" :disabled="t._busy" title="Disable all rules in this template">
-                <Icon name="pause" :size="12"/> Deactivate
+              <button class="btn btn-sm btn-ghost" @click="deactivateTemplate(t)" :disabled="t._busy" title="禁用模板中的所有规则">
+                <Icon name="pause" :size="12"/> 停用
               </button>
-              <button class="btn-icon" @click="editTemplate(t)" title="Edit"><Icon name="edit" :size="14"/></button>
-              <button class="btn-icon btn-icon-danger" v-if="!t.built_in" @click="confirmDeleteTemplate(t)" title="Delete"><Icon name="trash" :size="14"/></button>
+              <button class="btn-icon" @click="editTemplate(t)" title="编辑"><Icon name="edit" :size="14"/></button>
+              <button class="btn-icon btn-icon-danger" v-if="!t.built_in" @click="confirmDeleteTemplate(t)" title="删除"><Icon name="trash" :size="14"/></button>
             </div>
           </div>
           <p class="template-text">{{ t.description }}</p>
@@ -196,28 +196,28 @@
           </div>
         </div>
       </div>
-      <div v-else class="empty-state"><Icon name="book" :size="48" color="#6366F1"/><p>No templates available</p></div>
+      <div v-else class="empty-state"><Icon name="book" :size="48" color="#6366F1"/><p>暂无模板</p></div>
     </div>
 
     <!-- Template Modal -->
     <div class="modal-overlay" v-if="showTemplateModal" @click.self="showTemplateModal=false">
       <div class="modal">
         <div class="modal-header">
-          <h3>{{ editingTemplate ? 'Edit Template' : 'New Template' }}</h3>
+          <h3>{{ editingTemplate ? '编辑模板' : '新建模板' }}</h3>
           <button class="btn-close" @click="showTemplateModal=false"><Icon name="x-circle" :size="18"/></button>
         </div>
         <div class="modal-body">
           <div class="form-row"><label>ID</label><input v-model="tplForm.id" class="field-input" :disabled="!!editingTemplate" placeholder="tpl-xxx"/></div>
-          <div class="form-row"><label>Name</label><input v-model="tplForm.name" class="field-input" placeholder="Template name"/></div>
-          <div class="form-row"><label>Category</label>
+          <div class="form-row"><label>名称</label><input v-model="tplForm.name" class="field-input" placeholder="模板名称"/></div>
+          <div class="form-row"><label>分类</label>
             <select v-model="tplForm.category" class="field-input">
-              <option value="compliance">Compliance</option><option value="security">Security</option>
-              <option value="industry">Industry</option><option value="custom">Custom</option>
+              <option value="compliance">合规</option><option value="security">安全</option>
+              <option value="industry">行业</option><option value="custom">自定义</option>
             </select>
           </div>
-          <div class="form-row"><label>Description</label><textarea v-model="tplForm.description" class="field-input" rows="3"></textarea></div>
+          <div class="form-row"><label>描述</label><textarea v-model="tplForm.description" class="field-input" rows="3"></textarea></div>
           <div class="form-row">
-            <label>Rule IDs (select rules to include)</label>
+            <label>规则 ID（选择要包含的规则）</label>
             <div class="rule-checkboxes">
               <label class="rule-checkbox" v-for="r in rules" :key="r.id">
                 <input type="checkbox" :value="r.id" v-model="tplForm.rule_ids"/>
@@ -225,11 +225,11 @@
               </label>
             </div>
           </div>
-          <div class="form-row"><label><input type="checkbox" v-model="tplForm.enabled"/> Enabled</label></div>
+          <div class="form-row"><label><input type="checkbox" v-model="tplForm.enabled"/> 启用</label></div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showTemplateModal=false">Cancel</button>
-          <button class="btn btn-primary" @click="saveTemplate" :disabled="tplSaving">{{ tplSaving ? 'Saving...' : editingTemplate ? 'Update' : 'Create' }}</button>
+          <button class="btn btn-ghost" @click="showTemplateModal=false">取消</button>
+          <button class="btn btn-primary" @click="saveTemplate" :disabled="tplSaving">{{ tplSaving ? '保存中...' : editingTemplate ? '更新' : '创建' }}</button>
         </div>
       </div>
     </div>
@@ -237,11 +237,11 @@
     <!-- Template Delete Confirm -->
     <div class="modal-overlay" v-if="deleteTemplateTarget" @click.self="deleteTemplateTarget=null">
       <div class="modal modal-sm">
-        <div class="modal-header"><h3>Confirm Delete</h3></div>
-        <div class="modal-body"><p>Delete template <strong>{{ deleteTemplateTarget.name }}</strong>?</p></div>
+        <div class="modal-header"><h3>确认删除</h3></div>
+        <div class="modal-body"><p>确定删除模板 <strong>{{ deleteTemplateTarget.name }}</strong>？</p></div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="deleteTemplateTarget=null">Cancel</button>
-          <button class="btn btn-danger" @click="doDeleteTemplate">Delete</button>
+          <button class="btn btn-ghost" @click="deleteTemplateTarget=null">取消</button>
+          <button class="btn btn-danger" @click="doDeleteTemplate">删除</button>
         </div>
       </div>
     </div>
@@ -250,28 +250,28 @@
     <div class="modal-overlay" v-if="showRuleModal" @click.self="showRuleModal=false">
       <div class="modal">
         <div class="modal-header">
-          <h3>{{ editingRule ? 'Edit Rule' : 'New Rule' }}</h3>
+          <h3>{{ editingRule ? '编辑规则' : '新建规则' }}</h3>
           <button class="btn-close" @click="showRuleModal=false"><Icon name="x-circle" :size="18"/></button>
         </div>
         <div class="modal-body">
           <div class="form-row"><label>ID</label><input v-model="ruleForm.id" class="field-input" :disabled="!!editingRule" placeholder="pp-xxx"/></div>
-          <div class="form-row"><label>Name</label><input v-model="ruleForm.name" class="field-input" placeholder="rule_name"/></div>
-          <div class="form-row"><label>Type</label>
+          <div class="form-row"><label>名称</label><input v-model="ruleForm.name" class="field-input" placeholder="规则名称"/></div>
+          <div class="form-row"><label>类型</label>
             <select v-model="ruleForm.rule_type" class="field-input">
-              <option value="sequence">Sequence</option><option value="cumulative">Cumulative</option><option value="degradation">Degradation</option>
+              <option value="sequence">序列</option><option value="cumulative">累积</option><option value="degradation">降级</option>
             </select>
           </div>
-          <div class="form-row"><label>Conditions (JSON)</label><textarea v-model="ruleForm.conditions" class="field-input" rows="3"></textarea></div>
-          <div class="form-row"><label>Action</label>
-            <select v-model="ruleForm.action" class="field-input"><option value="block">Block</option><option value="warn">Warn</option><option value="log">Log</option></select>
+          <div class="form-row"><label>条件 (JSON)</label><textarea v-model="ruleForm.conditions" class="field-input" rows="3"></textarea></div>
+          <div class="form-row"><label>动作</label>
+            <select v-model="ruleForm.action" class="field-input"><option value="block">拦截</option><option value="warn">告警</option><option value="log">记录</option></select>
           </div>
-          <div class="form-row"><label>Priority</label><input v-model.number="ruleForm.priority" class="field-input" type="number"/></div>
-          <div class="form-row"><label>Description</label><input v-model="ruleForm.description" class="field-input"/></div>
-          <div class="form-row"><label><input type="checkbox" v-model="ruleForm.enabled"/> Enabled</label></div>
+          <div class="form-row"><label>优先级</label><input v-model.number="ruleForm.priority" class="field-input" type="number"/></div>
+          <div class="form-row"><label>描述</label><input v-model="ruleForm.description" class="field-input"/></div>
+          <div class="form-row"><label><input type="checkbox" v-model="ruleForm.enabled"/> 启用</label></div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showRuleModal=false">Cancel</button>
-          <button class="btn btn-primary" @click="saveRule" :disabled="saving">{{ saving?'Saving...': editingRule?'Update':'Create' }}</button>
+          <button class="btn btn-ghost" @click="showRuleModal=false">取消</button>
+          <button class="btn btn-primary" @click="saveRule" :disabled="saving">{{ saving?'保存中...': editingRule?'更新':'创建' }}</button>
         </div>
       </div>
     </div>
@@ -279,11 +279,11 @@
     <!-- Delete Confirm -->
     <div class="modal-overlay" v-if="deleteTarget" @click.self="deleteTarget=null">
       <div class="modal modal-sm">
-        <div class="modal-header"><h3>Confirm Delete</h3></div>
-        <div class="modal-body"><p>Delete rule <strong>{{ deleteTarget.name }}</strong>?</p></div>
+        <div class="modal-header"><h3>确认删除</h3></div>
+        <div class="modal-body"><p>确定删除规则 <strong>{{ deleteTarget.name }}</strong>？</p></div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="deleteTarget=null">Cancel</button>
-          <button class="btn btn-danger" @click="doDelete">Delete</button>
+          <button class="btn btn-ghost" @click="deleteTarget=null">取消</button>
+          <button class="btn btn-danger" @click="doDelete">删除</button>
         </div>
       </div>
     </div>
