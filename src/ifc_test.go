@@ -695,3 +695,103 @@ func TestExtractFieldNames(t *testing.T) {
 		t.Errorf("expected nil for array JSON, got %v", keys4)
 	}
 }
+
+// ============================================================
+// Fides-aligned IFC Tests (v28.0h)
+// ============================================================
+
+func TestIFC_PropagateWithTool(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+	e := NewIFCEngine(db, IFCConfig{
+		Enabled: true,
+		SourceRules: []IFCSourceRule{
+			{Source: "tool:web_fetch", Label: IFCLabel{Confidentiality: ConfPublic, Integrity: IntegTaint}},
+			{Source: "user_input", Label: IFCLabel{Confidentiality: ConfInternal, Integrity: IntegHigh}},
+		},
+	})
+	traceID := "test-fides-prop"
+
+	// Register a trusted user input variable
+	userVar := e.RegisterVariable(traceID, "user_query", "user_input", "hello")
+
+	// Propagate WITHOUT tool label — should inherit from user_input
+	v1 := e.Propagate(traceID, "output1", []string{userVar.ID})
+	if v1.Label.Integrity != IntegHigh {
+		t.Errorf("without tool: expected integrity HIGH, got %v", v1.Label.Integrity)
+	}
+
+	// Propagate WITH web_fetch tool label — should downgrade integrity to TAINT
+	v2 := e.PropagateWithTool(traceID, "output2", "web_fetch", []string{userVar.ID})
+	if v2.Label.Integrity != IntegTaint {
+		t.Errorf("with web_fetch tool: expected integrity TAINT, got %v", v2.Label.Integrity)
+	}
+	if v2.Label.Confidentiality != ConfInternal {
+		t.Errorf("expected conf INTERNAL, got %v", v2.Label.Confidentiality)
+	}
+}
+
+func TestIFC_CheckToolCallFides_PTvsPF(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+	e := NewIFCEngine(db, IFCConfig{
+		Enabled:         true,
+		ViolationAction: "warn",
+		ToolRequirements: []IFCToolRequirement{
+			{Tool: "send_email", RequiredInteg: IntegMedium, MaxConf: ConfInternal},
+		},
+	})
+	traceID := "test-fides-ptpf"
+
+	// Register a low-integrity, low-confidentiality variable
+	v1 := e.RegisterVariable(traceID, "web_data", "tool:web_fetch", "untrusted")
+	e.mu.Lock()
+	e.variables[traceID][v1.ID].Label = IFCLabel{Confidentiality: ConfPublic, Integrity: IntegTaint}
+	e.mu.Unlock()
+
+	// Case 1: High-integrity context + low-conf args → P-T pass, P-F pass
+	highCtx := &IFCLabel{Confidentiality: ConfPublic, Integrity: IntegHigh}
+	dec1 := e.CheckToolCallFides(traceID, "send_email", []string{v1.ID}, highCtx)
+	if !dec1.Allowed {
+		t.Errorf("Fides: high-integrity context should allow, got: %s (%s)", dec1.Decision, dec1.Reason)
+	}
+
+	// Case 2: Low-integrity context → P-T fail
+	lowCtx := &IFCLabel{Confidentiality: ConfPublic, Integrity: IntegLow}
+	dec2 := e.CheckToolCallFides(traceID, "send_email", []string{v1.ID}, lowCtx)
+	if dec2.Allowed {
+		t.Errorf("Fides: low-integrity context should block")
+	}
+
+	// Case 3: Backward compat (nil context) → falls back to args (TAINT < MEDIUM → fail)
+	dec3 := e.CheckToolCallFides(traceID, "send_email", []string{v1.ID}, nil)
+	if dec3.Allowed {
+		t.Errorf("backward-compat: tainted args should fail P-T")
+	}
+}
+
+func TestIFC_FidesExplicitSecrecy(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+	e := NewIFCEngine(db, IFCConfig{
+		Enabled:         true,
+		ViolationAction: "block",
+		ToolRequirements: []IFCToolRequirement{
+			{Tool: "send_external", RequiredInteg: IntegHigh, MaxConf: ConfPublic},
+		},
+	})
+	traceID := "test-fides-secrecy"
+
+	// Register a SECRET variable
+	v1 := e.RegisterVariable(traceID, "secret_doc", "system_prompt", "top secret")
+	e.mu.Lock()
+	e.variables[traceID][v1.ID].Label = IFCLabel{Confidentiality: ConfSecret, Integrity: IntegHigh}
+	e.mu.Unlock()
+
+	// Trying to send SECRET data through send_external (MaxConf=PUBLIC) → P-F violation
+	trustedCtx := &IFCLabel{Confidentiality: ConfPublic, Integrity: IntegHigh}
+	dec := e.CheckToolCallFides(traceID, "send_external", []string{v1.ID}, trustedCtx)
+	if dec.Allowed {
+		t.Error("P-F should block: SECRET data → PUBLIC-only tool")
+	}
+}

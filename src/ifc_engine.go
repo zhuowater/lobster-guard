@@ -438,11 +438,31 @@ func (e *IFCEngine) RegisterVariable(traceID, name, source, content string) *IFC
 // ============================================================
 
 func (e *IFCEngine) Propagate(traceID, outputName string, inputVarIDs []string) *IFCVariable {
+	return e.PropagateWithTool(traceID, outputName, "", inputVarIDs)
+}
+
+// PropagateWithTool — Fides-aligned: joins input var labels + tool's own source rule label (ℓf).
+// Algorithm 5 line 9: ℓ'' = ⊔(τ(x) for x in R(f)) ⊔ ℓf ⊔ ⊔(ℓa for a in args)
+func (e *IFCEngine) PropagateWithTool(traceID, outputName, toolName string, inputVarIDs []string) *IFCVariable {
 	var maxConf IFCLevel
 	var minInteg IntegLevel = IntegHigh
 	var found bool
 
 	e.mu.RLock()
+
+	// Fides: include tool's own source rule label (ℓf)
+	if toolName != "" {
+		if toolLabel, ok := e.sourceRules["tool:"+toolName]; ok {
+			maxConf = toolLabel.Confidentiality
+			minInteg = toolLabel.Integrity
+			found = true
+		} else if toolLabel, ok := e.sourceRules[toolName]; ok {
+			maxConf = toolLabel.Confidentiality
+			minInteg = toolLabel.Integrity
+			found = true
+		}
+	}
+
 	traceVars := e.variables[traceID]
 	for _, vid := range inputVarIDs {
 		if traceVars != nil {
@@ -500,6 +520,18 @@ func (e *IFCEngine) Propagate(traceID, outputName string, inputVarIDs []string) 
 // ============================================================
 
 func (e *IFCEngine) CheckToolCall(traceID, toolName string, inputVarIDs []string) *IFCDecision {
+	return e.CheckToolCallFides(traceID, toolName, inputVarIDs, nil)
+}
+
+// CheckToolCallFides — Fides-aligned policy enforcement.
+// Distinguishes between:
+//   - Context label (ℓf): accumulated integrity of the context where the tool call was generated
+//     → used for P-T (Trusted Action) check: was the decision to call this tool made in trusted context?
+//   - Argument labels (ℓa): aggregated from inputVarIDs
+//     → used for P-F (Permitted Flow) check: is the data allowed to flow to this tool?
+//
+// If contextLabel is nil, falls back to computing it from inputVarIDs (backward compatible).
+func (e *IFCEngine) CheckToolCallFides(traceID, toolName string, inputVarIDs []string, contextLabel *IFCLabel) *IFCDecision {
 	e.mu.RLock()
 	req, hasReq := e.toolRequirements[toolName]
 	e.mu.RUnlock()
@@ -512,9 +544,9 @@ func (e *IFCEngine) CheckToolCall(traceID, toolName string, inputVarIDs []string
 		}
 	}
 
-	// Aggregate label from inputs
-	var maxConf IFCLevel
-	var minInteg IntegLevel = IntegHigh
+	// Aggregate argument labels from input vars
+	var argsMaxConf IFCLevel
+	var argsMinInteg IntegLevel = IntegHigh
 	var found bool
 
 	e.mu.RLock()
@@ -522,11 +554,11 @@ func (e *IFCEngine) CheckToolCall(traceID, toolName string, inputVarIDs []string
 	for _, vid := range inputVarIDs {
 		if traceVars != nil {
 			if v, ok := traceVars[vid]; ok {
-				if v.Label.Confidentiality > maxConf {
-					maxConf = v.Label.Confidentiality
+				if v.Label.Confidentiality > argsMaxConf {
+					argsMaxConf = v.Label.Confidentiality
 				}
-				if v.Label.Integrity < minInteg {
-					minInteg = v.Label.Integrity
+				if v.Label.Integrity < argsMinInteg {
+					argsMinInteg = v.Label.Integrity
 				}
 				found = true
 			}
@@ -535,27 +567,36 @@ func (e *IFCEngine) CheckToolCall(traceID, toolName string, inputVarIDs []string
 	e.mu.RUnlock()
 
 	if !found {
-		maxConf = e.config.DefaultConf
-		minInteg = e.config.DefaultInteg
+		argsMaxConf = e.config.DefaultConf
+		argsMinInteg = e.config.DefaultInteg
 	}
 
-	aggLabel := IFCLabel{Confidentiality: maxConf, Integrity: minInteg}
+	argsLabel := IFCLabel{Confidentiality: argsMaxConf, Integrity: argsMinInteg}
 	reqLabel := IFCLabel{Confidentiality: req.MaxConf, Integrity: req.RequiredInteg}
 
-	// Confidentiality check first (data leak is more critical than integrity deficit)
-	if aggLabel.Confidentiality > req.MaxConf {
-		return e.createViolation(traceID, toolName, "confidentiality", aggLabel, reqLabel, inputVarIDs)
+	// Determine context label for P-T check
+	ctxLabel := argsLabel // backward compatible default
+	if contextLabel != nil {
+		ctxLabel = *contextLabel
 	}
 
-	// Integrity check: aggregated integrity >= required integrity
-	if aggLabel.Integrity < req.RequiredInteg {
-		return e.createViolation(traceID, toolName, "integrity", aggLabel, reqLabel, inputVarIDs)
+	// P-F (Permitted Flow): argument confidentiality ⊑ max allowed
+	// "Data flowing into this tool must not exceed the tool's confidentiality ceiling"
+	if argsLabel.Confidentiality > req.MaxConf {
+		return e.createViolation(traceID, toolName, "confidentiality", argsLabel, reqLabel, inputVarIDs)
+	}
+
+	// P-T (Trusted Action): context integrity ≥ required integrity
+	// "The decision to call this tool must have been made in a sufficiently trusted context"
+	if ctxLabel.Integrity < req.RequiredInteg {
+		return e.createViolation(traceID, toolName, "integrity", ctxLabel, reqLabel, inputVarIDs)
 	}
 
 	return &IFCDecision{
 		Allowed:  true,
 		Decision: "allow",
-		Reason:   fmt.Sprintf("tool %s: label {conf=%s, integ=%s} meets requirements", toolName, aggLabel.Confidentiality, aggLabel.Integrity),
+		Reason:   fmt.Sprintf("tool %s: args{conf=%s} ctx{integ=%s} meets P-F{maxConf=%s} P-T{minInteg=%s}",
+			toolName, argsLabel.Confidentiality, ctxLabel.Integrity, reqLabel.Confidentiality, reqLabel.Integrity),
 	}
 }
 
