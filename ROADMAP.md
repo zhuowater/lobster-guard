@@ -507,7 +507,7 @@
 > 依赖：✅ v25.1 Capability 系统（提供标签基础设施）
 > 参考实现：github.com/microsoft/fides
 
-- [ ] v26.0 **双标签系统（Confidentiality + Integrity）**
+- [x] v26.0 **双标签系统（Confidentiality + Integrity）** ✅ (2026-03-26)
   - **v20.1 到 v26.0 的飞跃**:
     - v20.1: trace 级标签（整个会话 TAINTED 或不 TAINTED）
     - v26.0: 字段级标签（每个变量独立的机密性+完整性标签）
@@ -540,7 +540,7 @@
   - 与 v25.1 Capability 联动：capability 作为第三个维度，IFC 标签+capability 双重检查
   - Dashboard: IFC 策略编辑器（标签来源配置 + 传播规则可视化 + 违规日志）
 
-- [ ] v26.1 **隔离 LLM（Quarantined LLM）**
+- [x] v26.1 **隔离 LLM（Quarantined LLM）** ✅ (2026-03-26)
   - **核心创新**（Fides 独有）: 被污染数据不能直接喂给主 Agent，需要先经过隔离 LLM 处理
   - **工作流**:
     ```
@@ -557,7 +557,7 @@
     - quarantine 输出自动标记为 MEDIUM integ
   - 与 v20.2 污染链逆转联动：quarantine 就是一种更优雅的"解毒"方式
 
-- [ ] v26.2 **选择性隐藏（Selective Hiding）+ DOE 检测**
+- [x] v26.2 **选择性隐藏（Selective Hiding）+ DOE 检测** ✅ (2026-03-26)
   - **选择性隐藏**: 向 LLM 隐藏高机密字段
     - LLM 看到的是: `{name: "张三", phone: "[REDACTED:conf=SECRET]", dept: "安全"}`
     - LLM 推理不基于被隐藏字段，保证机密性

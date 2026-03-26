@@ -1,5 +1,27 @@
 # Changelog
 
+## v26.0 — IFC 双标签系统 (2026-03-26)
+- Fides 信息流控制引擎: Confidentiality (PUBLIC→SECRET) + Integrity (TAINT→HIGH)
+- Bell-LaPadula 传播规则: conf=max(inputs), integ=min(inputs)
+- 6 默认来源规则 + 5 默认工具安全要求
+- 18 API 端点 (config/source-rules/tool-requirements/register/propagate/check/hide/doe)
+- InboundProxy + LLMProxy 双向 hook (入站打标 + tool_call 安全检查)
+- IFC.vue Dashboard: 5-tab (Source Rules / Tool Requirements / Variables / Violations / Live Check)
+- 15 tests PASS
+
+## v26.1 — 隔离 LLM (2026-03-26)
+- IFCQuarantine: TAINT 数据自动路由到只读上游
+- 去污: quarantine 输出 integ 提升为 MEDIUM
+- Session 管理 + 统计 (total_routed/depurified/failed/active)
+- 4 API: quarantine/route + quarantine/complete + quarantine/sessions + quarantine/stats
+
+## v26.2 — 选择性隐藏 + DOE 检测 Proxy 集成 (2026-03-26)
+- LLM Proxy 请求转发前选择性隐藏 PII ([REDACTED:conf=XXX])
+- LLM Proxy tool_call 后 DOE 检测 (字段过度暴露)
+- IFC.vue 新增 Quarantine + Data Flow 两个 tab
+- Simulate 集成: quarantine 判断 + DOE 演示
+- 6 新测试, 21 IFC 测试总计
+
 ## Fixes (2026-03-26)
 - Dashboard field binding: 6 pages, 8 mismatches fixed
 - Deviation/Taint counters: restored from DB on restart

@@ -11,14 +11,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v25.2-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v26.2-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-1151_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-256+_routes-purple?style=flat-square" alt="API Routes">
-  <img src="https://img.shields.io/badge/dashboard-46_pages-orange?style=flat-square" alt="Dashboard">
+  <img src="https://img.shields.io/badge/tests-1172_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-278+_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/dashboard-47_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
 
@@ -83,7 +83,7 @@
 | Go 代码行数 | ~86,300 行（源）+ ~33,600 行（测试）|
 | Vue 前端 | 46 页面 + 组件，72 文件 ~27,300 行 |
 | API 路由 | ~256+ 个 |
-| 测试函数 | 1151 个（全部通过）|
+| 测试函数 | 1172 个（全部通过）|
 | 引擎/组件 | 53 个 |
 | Git Commit | 242 个 |
 | 外部依赖 | 5 个（sqlite3 + yaml.v3 + uuid + gorilla/websocket + x/crypto）|
