@@ -54,6 +54,56 @@ func (api *ManagementAPI) handleCapMappingsDelete(w http.ResponseWriter, r *http
 	jsonResponse(w, 200, map[string]string{"status": "deleted"})
 }
 
+// handleCapContextGet GET /api/v1/capabilities/contexts/:trace_id
+func (api *ManagementAPI) handleCapContextGet(w http.ResponseWriter, r *http.Request) {
+	if api.capabilityEngine == nil {
+		jsonResponse(w, 503, map[string]string{"error": "capability engine not enabled"})
+		return
+	}
+	traceID := strings.TrimPrefix(r.URL.Path, "/api/v1/capabilities/contexts/")
+	ctx := api.capabilityEngine.GetContext(traceID)
+	if ctx == nil {
+		jsonResponse(w, 404, map[string]string{"error": "context not found"})
+		return
+	}
+	jsonResponse(w, 200, ctx)
+}
+
+// handleCapContextUpdate PUT /api/v1/capabilities/contexts/:trace_id — 更新用户能力标签
+func (api *ManagementAPI) handleCapContextUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.capabilityEngine == nil {
+		jsonResponse(w, 503, map[string]string{"error": "capability engine not enabled"})
+		return
+	}
+	traceID := strings.TrimPrefix(r.URL.Path, "/api/v1/capabilities/contexts/")
+	var req struct {
+		UserCaps []CapLabel `json:"user_caps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := api.capabilityEngine.UpdateContextCaps(traceID, req.UserCaps); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "updated", "trace_id": traceID})
+}
+
+// handleCapContextDelete DELETE /api/v1/capabilities/contexts/:trace_id
+func (api *ManagementAPI) handleCapContextDelete(w http.ResponseWriter, r *http.Request) {
+	if api.capabilityEngine == nil {
+		jsonResponse(w, 503, map[string]string{"error": "capability engine not enabled"})
+		return
+	}
+	traceID := strings.TrimPrefix(r.URL.Path, "/api/v1/capabilities/contexts/")
+	if err := api.capabilityEngine.DeleteContext(traceID); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "deleted", "trace_id": traceID})
+}
+
 // handleCapContexts GET /api/v1/capabilities/contexts
 func (api *ManagementAPI) handleCapContexts(w http.ResponseWriter, r *http.Request) {
 	if api.capabilityEngine == nil {

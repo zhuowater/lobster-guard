@@ -49,9 +49,41 @@
 </div>
 
 <div v-if="tab==='contexts'" class="section">
-<table class="data-table" v-if="contexts.length"><thead><tr><th>Trace ID</th><th>用户</th><th>状态</th><th>创建时间</th></tr></thead>
-<tbody><tr v-for="c in contexts" :key="c.trace_id"><td class="mono">{{ c.trace_id }}</td><td>{{ c.user_id||'-' }}</td><td><span class="badge" :class="'st-'+c.status">{{ c.status }}</span></td><td class="mono">{{ c.created_at }}</td></tr></tbody></table>
-<EmptyState v-else :iconSvg="emptyIcons.contexts" title="暂无活跃上下文" description="活跃的能力评估上下文将显示在这里" />
+<div class="section-toolbar"><button class="btn btn-primary btn-sm" @click="openCtxModal(null)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 创建上下文</button></div>
+<table class="data-table" v-if="contexts.length"><thead><tr><th>Trace ID</th><th>用户</th><th>状态</th><th>能力标签</th><th>创建时间</th><th>操作</th></tr></thead>
+<tbody><tr v-for="c in contexts" :key="c.trace_id"><td class="mono">{{ (c.trace_id||'').substring(0,16) }}</td><td>{{ c.user_id||'-' }}</td><td><span class="badge" :class="'st-'+c.status">{{ c.status }}</span></td>
+<td><span class="cap-tag" v-for="l in (c.user_caps||[])" :key="l.name">{{ l.name }}:{{ l.level }}</span><span v-if="!(c.user_caps||[]).length" class="text-muted">-</span></td>
+<td class="mono">{{ c.created_at }}</td>
+<td class="actions-cell"><button class="link-btn" @click="openCtxModal(c)">编辑能力</button><button class="link-btn link-danger" @click="confirmDeleteCtx(c.trace_id)">删除</button></td></tr></tbody></table>
+<EmptyState v-else :iconSvg="emptyIcons.contexts" title="暂无活跃上下文" description="点击「创建上下文」为用户/Agent 分配能力标签" />
+
+<!-- Context Modal -->
+<div class="modal-overlay" v-if="showCtxModal" @click.self="showCtxModal=false">
+<div class="modal-box">
+<h3 class="modal-title">{{ editingCtx ? '编辑能力标签' : '创建上下文' }}</h3>
+<div class="form-group" v-if="!editingCtx"><label class="form-label">Trace ID</label><input class="field-input" v-model="ctxForm.trace_id" placeholder="唯一标识" /></div>
+<div class="form-group" v-if="!editingCtx"><label class="form-label">用户 ID</label><input class="field-input" v-model="ctxForm.user_id" placeholder="如 agent-001" /></div>
+<div class="form-group"><label class="form-label">能力标签</label>
+<div class="cap-list">
+<div class="cap-row" v-for="(cap,i) in ctxForm.user_caps" :key="i">
+<input class="field-input field-sm" v-model="cap.name" placeholder="能力名" />
+<select class="field-select field-sm" v-model="cap.level"><option value="read">read</option><option value="write">write</option><option value="execute">execute</option><option value="admin">admin</option></select>
+<label class="toggle-sm"><input type="checkbox" v-model="cap.granted" /><span>{{ cap.granted?'启用':'禁用' }}</span></label>
+<button class="tag-x" @click="ctxForm.user_caps.splice(i,1)">×</button>
+</div>
+<button class="btn btn-sm btn-ghost" @click="ctxForm.user_caps.push({name:'',level:'read',source:'dashboard',granted:true})">+ 添加能力</button>
+</div></div>
+<div class="modal-actions"><button class="btn btn-primary" @click="saveCtx" :disabled="ctxSaving">{{ ctxSaving ? '保存中...' : '保存' }}</button><button class="btn btn-ghost" @click="showCtxModal=false">取消</button></div>
+<div v-if="ctxMsg" class="config-msg" :class="ctxMsgType">{{ ctxMsg }}</div>
+</div></div>
+
+<!-- Context Delete Confirm -->
+<div class="modal-overlay" v-if="showCtxDelete" @click.self="showCtxDelete=false">
+<div class="modal-box modal-sm">
+<h3 class="modal-title">确认删除</h3>
+<p>确定删除上下文 <strong class="mono">{{ ctxDeleteTarget }}</strong> 吗？</p>
+<div class="modal-actions"><button class="btn btn-danger" @click="doDeleteCtx">删除</button><button class="btn btn-ghost" @click="showCtxDelete=false">取消</button></div>
+</div></div>
 </div>
 
 <div v-if="tab==='evals'" class="section">
@@ -73,6 +105,9 @@ export default {
     newAllowed: '', newDenied: '',
     mapForm: { tool_name: '', category: '', default_level: 'medium', allowed_caps: [], denied_caps: [], trust_factor: 0.5 },
     showDeleteConfirm: false, deleteTarget: '',
+    showCtxModal: false, editingCtx: null, ctxSaving: false, ctxMsg: '', ctxMsgType: 'success',
+    ctxForm: { trace_id: '', user_id: '', user_caps: [] },
+    showCtxDelete: false, ctxDeleteTarget: '',
     emptyIcons: {
       mappings: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78m0 0L12 16m0 0l3-3m-3 3l-3 3m9-15l2 2m-2-2v3.5m0 0h3.5"/></svg>',
       contexts: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
@@ -131,6 +166,37 @@ export default {
         await api(`/api/v1/capabilities/mappings/${this.deleteTarget}`, { method: 'DELETE' });
         this.showDeleteConfirm = false; this.loadAll();
       } catch(e) { alert('删除失败: ' + (e.message||e)); }
+    },
+    openCtxModal(c) {
+      this.ctxMsg = '';
+      if (c) {
+        this.editingCtx = c;
+        this.ctxForm = { trace_id: c.trace_id, user_id: c.user_id||'', user_caps: (c.user_caps||[]).map(l => ({...l})) };
+      } else {
+        this.editingCtx = null;
+        this.ctxForm = { trace_id: '', user_id: '', user_caps: [{name:'read',level:'read',source:'dashboard',granted:true},{name:'write',level:'write',source:'dashboard',granted:true}] };
+      }
+      this.showCtxModal = true;
+    },
+    async saveCtx() {
+      this.ctxSaving = true; this.ctxMsg = '';
+      try {
+        if (this.editingCtx) {
+          await api(`/api/v1/capabilities/contexts/${this.ctxForm.trace_id}`, { method: 'PUT', body: JSON.stringify({ user_caps: this.ctxForm.user_caps }) });
+        } else {
+          await api('/api/v1/capabilities/contexts', { method: 'POST', body: JSON.stringify(this.ctxForm) });
+        }
+        this.ctxMsg = '保存成功'; this.ctxMsgType = 'success';
+        this.showCtxModal = false; this.loadAll();
+      } catch(e) { this.ctxMsg = '失败: ' + (e.message||e); this.ctxMsgType = 'error'; }
+      this.ctxSaving = false;
+    },
+    confirmDeleteCtx(tid) { this.ctxDeleteTarget = tid; this.showCtxDelete = true; },
+    async doDeleteCtx() {
+      try {
+        await api(`/api/v1/capabilities/contexts/${this.ctxDeleteTarget}`, { method: 'DELETE' });
+        this.showCtxDelete = false; this.loadAll();
+      } catch(e) { alert('删除失败: ' + (e.message||e)); }
     }
   }
 }
@@ -186,4 +252,9 @@ export default {
 .config-msg { margin-top:var(--space-2); font-size:var(--text-xs); padding:var(--space-2); border-radius:var(--radius-md); }
 .config-msg.success { background:rgba(34,197,94,0.1); color:#16A34A; }
 .config-msg.error { background:rgba(239,68,68,0.1); color:#EF4444; }
+.cap-list { display:flex; flex-direction:column; gap:var(--space-2); }
+.cap-row { display:flex; gap:var(--space-2); align-items:center; }
+.field-sm { width:auto; flex:1; padding:var(--space-1) var(--space-2); font-size:var(--text-xs); }
+.toggle-sm { display:flex; align-items:center; gap:4px; font-size:var(--text-xs); cursor:pointer; white-space:nowrap; }
+.toggle-sm input { margin:0; }
 </style>

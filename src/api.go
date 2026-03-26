@@ -1187,6 +1187,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCapMappingsDelete(w, r)
 	case path == "/api/v1/capabilities/contexts" && method == "GET":
 		api.handleCapContexts(w, r)
+	case strings.HasPrefix(path, "/api/v1/capabilities/contexts/") && method == "GET":
+		api.handleCapContextGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/capabilities/contexts/") && method == "PUT":
+		api.handleCapContextUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/capabilities/contexts/") && method == "DELETE":
+		api.handleCapContextDelete(w, r)
 	case path == "/api/v1/capabilities/evaluations" && method == "GET":
 		api.handleCapEvaluations(w, r)
 	case path == "/api/v1/capabilities/stats" && method == "GET":

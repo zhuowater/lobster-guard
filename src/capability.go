@@ -349,6 +349,41 @@ func (ce *CapabilityEngine) CompleteContext(traceID string) {
 	ce.mu.Unlock(); if ctx != nil { ce.capPersistCtx(ctx) }
 }
 
+// UpdateContextCaps 更新上下文的用户能力标签
+func (ce *CapabilityEngine) UpdateContextCaps(traceID string, caps []CapLabel) error {
+	ce.mu.Lock()
+	ctx := ce.contexts[traceID]
+	if ctx == nil {
+		ce.mu.Unlock()
+		// try DB
+		ctx = ce.capLoadCtxDB(traceID)
+		if ctx == nil {
+			return fmt.Errorf("context %s not found", traceID)
+		}
+		ce.mu.Lock()
+		ce.contexts[traceID] = ctx
+	}
+	ctx.UserCaps = caps
+	ctx.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	ce.mu.Unlock()
+	ce.capPersistCtx(ctx)
+	return nil
+}
+
+// DeleteContext 删除/终止上下文
+func (ce *CapabilityEngine) DeleteContext(traceID string) error {
+	ce.mu.Lock()
+	ctx := ce.contexts[traceID]
+	if ctx != nil {
+		delete(ce.contexts, traceID)
+	}
+	ce.mu.Unlock()
+	if _, err := ce.db.Exec("DELETE FROM cap_contexts WHERE trace_id=?", traceID); err != nil {
+		return fmt.Errorf("delete context: %w", err)
+	}
+	return nil
+}
+
 func (ce *CapabilityEngine) GetToolMapping(toolName string) *CapToolMapping { ce.mu.RLock(); defer ce.mu.RUnlock(); return ce.toolMappings[toolName] }
 
 func (ce *CapabilityEngine) ListToolMappings() []CapToolMapping {
