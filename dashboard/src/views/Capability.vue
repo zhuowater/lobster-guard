@@ -14,10 +14,38 @@
 </div>
 
 <div v-if="tab==='mappings'" class="section">
-<table class="data-table" v-if="mappings.length"><thead><tr><th>工具</th><th>分类</th><th>级别</th><th>允许能力</th><th>拒绝能力</th><th>信任度</th></tr></thead>
+<div class="section-toolbar"><button class="btn btn-primary btn-sm" @click="openMappingModal(null)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 添加映射</button></div>
+<table class="data-table" v-if="mappings.length"><thead><tr><th>工具</th><th>分类</th><th>级别</th><th>允许能力</th><th>拒绝能力</th><th>信任度</th><th>操作</th></tr></thead>
 <tbody><tr v-for="m in mappings" :key="m.tool_name"><td class="mono">{{ m.tool_name }}</td><td>{{ m.category }}</td><td><span class="badge" :class="'lvl-'+m.default_level">{{ m.default_level }}</span></td>
-<td>{{ (m.allowed_caps||[]).join(', ')||'-' }}</td><td>{{ (m.denied_caps||[]).join(', ')||'-' }}</td><td>{{ (m.trust_factor||0).toFixed(2) }}</td></tr></tbody></table>
-<EmptyState v-else :iconSvg="emptyIcons.mappings" title="暂无工具映射配置" description="配置工具的能力标签来追踪数据源允许的操作" />
+<td><span class="cap-tag" v-for="c in (m.allowed_caps||[])" :key="c">{{ c }}</span><span v-if="!(m.allowed_caps||[]).length" class="text-muted">-</span></td>
+<td><span class="cap-tag cap-deny" v-for="c in (m.denied_caps||[])" :key="c">{{ c }}</span><span v-if="!(m.denied_caps||[]).length" class="text-muted">-</span></td>
+<td>{{ (m.trust_factor||0).toFixed(2) }}</td>
+<td class="actions-cell"><button class="link-btn" @click="openMappingModal(m)">编辑</button><button class="link-btn link-danger" @click="confirmDeleteMapping(m.tool_name)">删除</button></td></tr></tbody></table>
+<EmptyState v-else :iconSvg="emptyIcons.mappings" title="暂无工具映射配置" description="点击「添加映射」配置工具的能力标签" />
+
+<!-- Mapping Modal -->
+<div class="modal-overlay" v-if="showMapModal" @click.self="showMapModal=false">
+<div class="modal-box">
+<h3 class="modal-title">{{ editingMapping ? '编辑工具映射' : '添加工具映射' }}</h3>
+<div class="form-group"><label class="form-label">工具名</label><input class="field-input" v-model="mapForm.tool_name" :disabled="!!editingMapping" placeholder="如 send_email" /></div>
+<div class="form-group"><label class="form-label">分类</label><input class="field-input" v-model="mapForm.category" placeholder="如 communication" /></div>
+<div class="form-group"><label class="form-label">级别</label><select class="field-select" v-model="mapForm.default_level"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="critical">critical</option></select></div>
+<div class="form-group"><label class="form-label">允许能力</label>
+<div class="tag-input-wrap"><span class="cap-tag" v-for="(c,i) in mapForm.allowed_caps" :key="c">{{ c }} <button class="tag-x" @click="mapForm.allowed_caps.splice(i,1)">×</button></span><input class="tag-input" v-model="newAllowed" @keydown.enter.prevent="addTag('allowed')" placeholder="输入后回车添加" /></div></div>
+<div class="form-group"><label class="form-label">拒绝能力</label>
+<div class="tag-input-wrap"><span class="cap-tag cap-deny" v-for="(c,i) in mapForm.denied_caps" :key="c">{{ c }} <button class="tag-x" @click="mapForm.denied_caps.splice(i,1)">×</button></span><input class="tag-input" v-model="newDenied" @keydown.enter.prevent="addTag('denied')" placeholder="输入后回车添加" /></div></div>
+<div class="form-group"><label class="form-label">信任度 (0~1)</label><input class="field-input" type="number" v-model.number="mapForm.trust_factor" min="0" max="1" step="0.1" /></div>
+<div class="modal-actions"><button class="btn btn-primary" @click="saveMapping" :disabled="!mapForm.tool_name||mapSaving">{{ mapSaving ? '保存中...' : '保存' }}</button><button class="btn btn-ghost" @click="showMapModal=false">取消</button></div>
+<div v-if="mapMsg" class="config-msg" :class="mapMsgType">{{ mapMsg }}</div>
+</div></div>
+
+<!-- Delete Confirm -->
+<div class="modal-overlay" v-if="showDeleteConfirm" @click.self="showDeleteConfirm=false">
+<div class="modal-box modal-sm">
+<h3 class="modal-title">确认删除</h3>
+<p>确定删除工具映射 <strong>{{ deleteTarget }}</strong> 吗？</p>
+<div class="modal-actions"><button class="btn btn-danger" @click="doDeleteMapping">删除</button><button class="btn btn-ghost" @click="showDeleteConfirm=false">取消</button></div>
+</div></div>
 </div>
 
 <div v-if="tab==='contexts'" class="section">
@@ -41,6 +69,10 @@ export default {
   name: 'Capability',
   components: { EmptyState },
   data() { return { tab: 'mappings', mappings: [], contexts: [], evals: [], stats: {},
+    showMapModal: false, editingMapping: null, mapSaving: false, mapMsg: '', mapMsgType: 'success',
+    newAllowed: '', newDenied: '',
+    mapForm: { tool_name: '', category: '', default_level: 'medium', allowed_caps: [], denied_caps: [], trust_factor: 0.5 },
+    showDeleteConfirm: false, deleteTarget: '',
     emptyIcons: {
       mappings: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78m0 0L12 16m0 0l3-3m-3 3l-3 3m9-15l2 2m-2-2v3.5m0 0h3.5"/></svg>',
       contexts: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
@@ -60,6 +92,45 @@ export default {
       try { const d = await api('/api/v1/capabilities/contexts'); this.contexts = d.contexts||[] } catch(e){}
       try { const d = await api('/api/v1/capabilities/evaluations'); this.evals = d.evaluations||[] } catch(e){}
       try { this.stats = await api('/api/v1/capabilities/stats') } catch(e){}
+    },
+    openMappingModal(m) {
+      this.mapMsg = '';
+      if (m) {
+        this.editingMapping = m;
+        this.mapForm = { tool_name: m.tool_name, category: m.category||'', default_level: m.default_level||'medium', allowed_caps: [...(m.allowed_caps||[])], denied_caps: [...(m.denied_caps||[])], trust_factor: m.trust_factor||0.5 };
+      } else {
+        this.editingMapping = null;
+        this.mapForm = { tool_name: '', category: '', default_level: 'medium', allowed_caps: [], denied_caps: [], trust_factor: 0.5 };
+      }
+      this.newAllowed = ''; this.newDenied = '';
+      this.showMapModal = true;
+    },
+    addTag(which) {
+      const v = which === 'allowed' ? this.newAllowed.trim() : this.newDenied.trim();
+      if (!v) return;
+      const arr = which === 'allowed' ? this.mapForm.allowed_caps : this.mapForm.denied_caps;
+      if (!arr.includes(v)) arr.push(v);
+      if (which === 'allowed') this.newAllowed = ''; else this.newDenied = '';
+    },
+    async saveMapping() {
+      this.mapSaving = true; this.mapMsg = '';
+      try {
+        if (this.editingMapping) {
+          await api(`/api/v1/capabilities/mappings/${this.mapForm.tool_name}`, { method: 'PUT', body: JSON.stringify(this.mapForm) });
+        } else {
+          await api(`/api/v1/capabilities/mappings/${this.mapForm.tool_name}`, { method: 'PUT', body: JSON.stringify(this.mapForm) });
+        }
+        this.mapMsg = '保存成功'; this.mapMsgType = 'success';
+        this.showMapModal = false; this.loadAll();
+      } catch(e) { this.mapMsg = '保存失败: ' + (e.message||e); this.mapMsgType = 'error'; }
+      this.mapSaving = false;
+    },
+    confirmDeleteMapping(name) { this.deleteTarget = name; this.showDeleteConfirm = true; },
+    async doDeleteMapping() {
+      try {
+        await api(`/api/v1/capabilities/mappings/${this.deleteTarget}`, { method: 'DELETE' });
+        this.showDeleteConfirm = false; this.loadAll();
+      } catch(e) { alert('删除失败: ' + (e.message||e)); }
     }
   }
 }
@@ -89,4 +160,30 @@ export default {
 .st-completed { background:rgba(107,114,128,0.1); color:#6B7280; }
 .empty { text-align:center; padding:var(--space-8); color:var(--text-tertiary); }
 .btn { display:inline-flex; align-items:center; gap:var(--space-1); padding:var(--space-1) var(--space-3); border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:var(--bg-card); cursor:pointer; font-size:var(--text-sm); }
+.btn-primary { background:#6366F1; color:#fff; border-color:#6366F1; }
+.btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
+.btn-danger { background:#EF4444; color:#fff; border-color:#EF4444; }
+.btn-ghost { background:transparent; border-color:var(--border-subtle); }
+.section-toolbar { display:flex; justify-content:flex-end; margin-bottom:var(--space-3); }
+.actions-cell { display:flex; gap:var(--space-2); }
+.link-btn { background:none; border:none; color:#6366F1; cursor:pointer; font-size:var(--text-xs); padding:2px 4px; }
+.link-btn:hover { text-decoration:underline; }
+.link-danger { color:#EF4444; }
+.cap-tag { display:inline-block; padding:1px 8px; margin:1px 2px; border-radius:var(--radius-full); font-size:10px; font-weight:600; background:rgba(99,102,241,0.1); color:#6366F1; }
+.cap-deny { background:rgba(239,68,68,0.1); color:#EF4444; }
+.tag-x { border:none; background:none; cursor:pointer; color:inherit; margin-left:2px; font-size:12px; }
+.text-muted { color:var(--text-tertiary); font-size:var(--text-xs); }
+.modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal-box { background:var(--bg-card); border-radius:var(--radius-xl); padding:var(--space-6); width:480px; max-height:80vh; overflow-y:auto; border:1px solid var(--border-subtle); }
+.modal-sm { width:360px; }
+.modal-title { font-size:var(--text-lg); font-weight:700; margin-bottom:var(--space-4); }
+.form-group { margin-bottom:var(--space-3); }
+.form-label { display:block; font-size:var(--text-xs); font-weight:600; color:var(--text-secondary); margin-bottom:var(--space-1); }
+.field-input,.field-select { width:100%; padding:var(--space-2); border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:var(--bg-surface); color:var(--text-primary); font-size:var(--text-sm); box-sizing:border-box; }
+.tag-input-wrap { display:flex; flex-wrap:wrap; gap:4px; padding:4px; border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:var(--bg-surface); min-height:36px; align-items:center; }
+.tag-input { border:none; outline:none; background:transparent; flex:1; min-width:120px; font-size:var(--text-sm); color:var(--text-primary); padding:2px 4px; }
+.modal-actions { display:flex; gap:var(--space-2); justify-content:flex-end; margin-top:var(--space-4); }
+.config-msg { margin-top:var(--space-2); font-size:var(--text-xs); padding:var(--space-2); border-radius:var(--radius-md); }
+.config-msg.success { background:rgba(34,197,94,0.1); color:#16A34A; }
+.config-msg.error { background:rgba(239,68,68,0.1); color:#EF4444; }
 </style>
