@@ -91,67 +91,67 @@ var defaultPathPolicies = []PathPolicyRule{
 	{ID: "pp-001", Name: "web_fetch_then_send_email", RuleType: "sequence",
 		Conditions: `{"after":"web_fetch","before":"send_email","window_sec":30}`,
 		Action: "block", Enabled: true, Priority: 10, TenantID: "default",
-		Description: "After reading external web content, block email sending within 30 seconds"},
+		Description: "读取外部网页后30秒内禁止发送邮件"},
 	{ID: "pp-002", Name: "web_fetch_then_shell", RuleType: "sequence",
 		Conditions: `{"after":"web_fetch","before":"shell_exec","window_sec":60}`,
 		Action: "block", Enabled: true, Priority: 10, TenantID: "default",
-		Description: "After reading external web content, block shell execution within 60 seconds"},
+		Description: "读取外部网页后60秒内禁止执行Shell命令"},
 	{ID: "pp-003", Name: "file_read_then_http", RuleType: "sequence",
 		Conditions: `{"after":"file_read","before":"http_request","window_sec":30}`,
 		Action: "warn", Enabled: true, Priority: 20, TenantID: "default",
-		Description: "After reading local files, warn on HTTP requests within 30 seconds"},
+		Description: "读取本地文件后30秒内发起HTTP请求时告警"},
 	{ID: "pp-004", Name: "pii_exposure_limit", RuleType: "cumulative",
 		Conditions: `{"label":"PII-TAINTED","threshold":3}`,
 		Action: "block", Enabled: true, Priority: 10, TenantID: "default",
-		Description: "Block when PII exposure count exceeds 3 in a single session"},
+		Description: "单次会话内个人信息暴露次数超过3次时阻断"},
 	{ID: "pp-005", Name: "credential_any", RuleType: "cumulative",
 		Conditions: `{"label":"CREDENTIAL-TAINTED","threshold":1}`,
 		Action: "block", Enabled: true, Priority: 5, TenantID: "default",
-		Description: "Block immediately when any credential is exposed"},
+		Description: "检测到任何凭据泄露时立即阻断"},
 	{ID: "pp-006", Name: "risk_warn_threshold", RuleType: "degradation",
 		Conditions: `{"risk_threshold":60,"degrade_to":"warn"}`,
 		Action: "warn", Enabled: true, Priority: 30, TenantID: "default",
-		Description: "Degrade to warn mode when risk score exceeds 60"},
+		Description: "风险评分超过60时降级为告警模式"},
 	{ID: "pp-007", Name: "risk_block_threshold", RuleType: "degradation",
 		Conditions: `{"risk_threshold":80,"degrade_to":"block"}`,
 		Action: "block", Enabled: true, Priority: 20, TenantID: "default",
-		Description: "Block all actions when risk score exceeds 80"},
+		Description: "风险评分超过80时阻断所有操作"},
 	{ID: "pp-008", Name: "risk_isolate_threshold", RuleType: "degradation",
 		Conditions: `{"risk_threshold":95,"degrade_to":"isolate"}`,
 		Action: "block", Enabled: true, Priority: 10, TenantID: "default",
-		Description: "Isolate session when risk score exceeds 95"},
+		Description: "风险评分超过95时隔离当前会话"},
 
 	// v23.2: AI Act 合规策略模板
 	{ID: "pp-009", Name: "ai_act_data_minimization", RuleType: "cumulative",
 		Conditions: `{"label":"PII-TAINTED","threshold":5}`,
 		Action: "block", Enabled: false, Priority: 15, TenantID: "default",
-		Description: "[AI Act] Data minimization: block when PII field exposure exceeds 5 in a session"},
+		Description: "[AI法案] 数据最小化：单次会话个人信息暴露超5个字段时阻断"},
 	{ID: "pp-010", Name: "ai_act_high_risk_shell", RuleType: "sequence",
 		Conditions: `{"after":"database_query","before":"shell_exec","window_sec":120}`,
 		Action: "block", Enabled: false, Priority: 10, TenantID: "default",
-		Description: "[AI Act] High-risk AI: block shell execution within 120s after database query"},
+		Description: "[AI法案] 高风险AI：数据库查询后120秒内禁止执行Shell"},
 	{ID: "pp-011", Name: "ai_act_exfiltration_chain", RuleType: "sequence",
 		Conditions: `{"after":"file_read","before":"send_email","window_sec":60}`,
 		Action: "block", Enabled: false, Priority: 10, TenantID: "default",
-		Description: "[AI Act] Prevent data exfiltration: block email after file read within 60s"},
+		Description: "[AI法案] 防数据外泄：读取文件后60秒内禁止发送邮件"},
 	{ID: "pp-012", Name: "ai_act_credential_zero_tolerance", RuleType: "cumulative",
 		Conditions: `{"label":"CREDENTIAL-TAINTED","threshold":1}`,
 		Action: "block", Enabled: false, Priority: 5, TenantID: "default",
-		Description: "[AI Act] Zero tolerance: block immediately on any credential exposure"},
+		Description: "[AI法案] 零容忍：检测到任何凭据泄露立即阻断"},
 	{ID: "pp-013", Name: "ai_act_risk_human_review", RuleType: "degradation",
 		Conditions: `{"risk_threshold":70,"degrade_to":"warn"}`,
 		Action: "warn", Enabled: false, Priority: 25, TenantID: "default",
-		Description: "[AI Act] Human oversight: require review when risk score exceeds 70"},
+		Description: "[AI法案] 人工审核：风险评分超过70时要求人工复核"},
 	// v27.0: 芯片设计关键词累积检测
 	{ID: "pp-014", Name: "chip_design_ip_leak", RuleType: "cumulative",
 		Conditions: `{"label":"chip_ip","threshold":2}`,
 		Action: "block", Enabled: false, Priority: 5, TenantID: "default",
-		Description: "Block when chip design IP keywords (ISA, uarch codename, process node) appear >= 2 times"},
+		Description: "芯片设计IP关键词（指令集/微架构代号/制程节点）出现≥2次时阻断"},
 	// v27.0: 芯片代码泄露序列检测（先读取设计文件，再发送到外部）
 	{ID: "pp-015", Name: "chip_rtl_exfiltration", RuleType: "sequence",
 		Conditions: `{"before":"http_send","after":"file_read","window_sec":300}`,
 		Action: "block", Enabled: false, Priority: 5, TenantID: "default",
-		Description: "Block HTTP send after file read within 5 minutes (RTL/HDL exfiltration prevention)"},
+		Description: "读取文件后5分钟内禁止HTTP外发（防RTL/HDL设计文件泄露）"},
 }
 
 // PolicyTemplate 策略模板（v23.2 CRUD）
@@ -219,9 +219,12 @@ func (e *PathPolicyEngine) initSchema() {
 func (e *PathPolicyEngine) loadRules() {
 	if e.db == nil { e.rules = append([]PathPolicyRule{}, defaultPathPolicies...); return }
 	// 始终用 INSERT OR IGNORE 确保新增的默认规则被补入（不覆盖已有配置）
+	// 同时用 UPDATE 同步内置规则的描述（中文化等变更）
 	for _, r := range defaultPathPolicies {
 		e.db.Exec("INSERT OR IGNORE INTO path_policies (id,name,rule_type,conditions,action,enabled,priority,description,tenant_id) VALUES (?,?,?,?,?,?,?,?,?)",
 			r.ID, r.Name, r.RuleType, r.Conditions, r.Action, boolToInt(r.Enabled), r.Priority, r.Description, r.TenantID)
+		// 同步内置规则描述（仅更新 pp-0xx 原始规则，不动租户绑定的副本）
+		e.db.Exec("UPDATE path_policies SET description=? WHERE id=?", r.Description, r.ID)
 	}
 	rows, err := e.db.Query("SELECT id,name,rule_type,conditions,action,enabled,priority,COALESCE(description,''),COALESCE(tenant_id,'default'),COALESCE(created_at,''),COALESCE(updated_at,'') FROM path_policies ORDER BY priority ASC, id ASC")
 	if err != nil { e.rules = append([]PathPolicyRule{}, defaultPathPolicies...); return }
@@ -565,33 +568,33 @@ func (e *PathPolicyEngine) SetEvictAfter(d time.Duration) {
 
 // 8 个内置模板，覆盖合规/安全/行业/运维场景
 var defaultTemplates = []PolicyTemplate{
-	{ID: "tpl-ai-act", Name: "AI Act Compliance", Category: "compliance",
-		Description: "EU AI Act: data minimization, human oversight, credential zero-tolerance, exfiltration prevention, high-risk system controls",
+	{ID: "tpl-ai-act", Name: "AI法案合规", Category: "compliance",
+		Description: "EU AI法案：数据最小化、人工审核、凭据零容忍、防数据外泄、高风险系统管控",
 		RuleIDs: []string{"pp-009", "pp-010", "pp-011", "pp-012", "pp-013"}, Enabled: true, BuiltIn: true},
-	{ID: "tpl-strict", Name: "Strict Security", Category: "security",
-		Description: "Maximum security posture with all core rules enabled and aggressive risk thresholds",
+	{ID: "tpl-strict", Name: "严格安全", Category: "security",
+		Description: "最高安全等级：启用全部核心规则，激进风险阈值",
 		RuleIDs: []string{"pp-001", "pp-002", "pp-003", "pp-004", "pp-005", "pp-006", "pp-007", "pp-008"}, Enabled: true, BuiltIn: true},
-	{ID: "tpl-monitor", Name: "Monitoring Only", Category: "security",
-		Description: "Observe without blocking - log all violations for initial deployment or audit periods",
+	{ID: "tpl-monitor", Name: "仅监控", Category: "security",
+		Description: "只观察不阻断——记录所有违规，适用于初始部署或审计期",
 		RuleIDs: []string{"pp-006"}, Enabled: true, BuiltIn: true},
-	{ID: "tpl-finance", Name: "Financial Services", Category: "industry",
-		Description: "SOX/PCI-DSS aligned: zero-tolerance on credentials, strict PII limits, block database-to-external data flows",
+	{ID: "tpl-finance", Name: "金融行业", Category: "industry",
+		Description: "对标SOX/PCI-DSS：凭据零容忍、严格个人信息限制、阻断数据库到外部的数据流",
 		RuleIDs: []string{"pp-004", "pp-005", "pp-010", "pp-011", "pp-012"}, Enabled: true, BuiltIn: true},
-	{ID: "tpl-healthcare", Name: "Healthcare / HIPAA", Category: "industry",
-		Description: "HIPAA aligned: aggressive PII protection (threshold 2), human review at lower risk score, credential lockdown",
+	{ID: "tpl-healthcare", Name: "医疗健康 / HIPAA", Category: "industry",
+		Description: "对标HIPAA：激进个人信息保护（阈值2）、低风险分即人工审核、凭据锁定",
 		RuleIDs: []string{"pp-004", "pp-005", "pp-009", "pp-012", "pp-013"}, Enabled: true, BuiltIn: true},
 	{ID: "tpl-devops", Name: "DevOps / CI-CD", Category: "industry",
-		Description: "Protect CI/CD pipelines: block shell after web fetch, prevent credential leaks, monitor file-to-HTTP chains",
+		Description: "保护CI/CD流水线：外部网页后禁止Shell、防凭据泄露、监控文件到HTTP链路",
 		RuleIDs: []string{"pp-001", "pp-002", "pp-003", "pp-005", "pp-007"}, Enabled: true, BuiltIn: true},
-	{ID: "tpl-zero-trust", Name: "Zero Trust Agent", Category: "security",
-		Description: "Trust nothing by default: all sequence rules, all cumulative rules, aggressive degradation at score 60",
+	{ID: "tpl-zero-trust", Name: "零信任Agent", Category: "security",
+		Description: "默认不信任：启用全部序列规则和累积规则，风险60即降级",
 		RuleIDs: []string{"pp-001", "pp-002", "pp-003", "pp-004", "pp-005", "pp-006", "pp-007", "pp-008", "pp-009", "pp-010", "pp-011", "pp-012", "pp-013"}, Enabled: true, BuiltIn: true},
-	{ID: "tpl-minimal", Name: "Minimal Protection", Category: "security",
-		Description: "Essential protection only: block credential leaks and shell execution after external data access",
+	{ID: "tpl-minimal", Name: "最小防护", Category: "security",
+		Description: "仅基本防护：阻断凭据泄露和外部数据读取后的Shell执行",
 		RuleIDs: []string{"pp-002", "pp-005"}, Enabled: true, BuiltIn: true},
 	// v27.0: 芯片行业模板
-	{ID: "tpl-semiconductor", Name: "Semiconductor / Chip Design", Category: "industry",
-		Description: "Protect chip design IP: ISA names, microarchitecture codenames, RTL/HDL code patterns, foundry/process info, EDA tool configs",
+	{ID: "tpl-semiconductor", Name: "芯片/半导体行业", Category: "industry",
+		Description: "保护芯片设计IP：指令集名称、微架构代号、RTL/HDL代码、代工/制程信息、EDA工具配置",
 		RuleIDs: []string{"pp-004", "pp-005", "pp-011", "pp-012", "pp-014", "pp-015"}, Enabled: true, BuiltIn: true},
 }
 
@@ -600,11 +603,13 @@ func (e *PathPolicyEngine) loadTemplates() {
 		e.templates = append([]PolicyTemplate{}, defaultTemplates...)
 		return
 	}
-	// 补入内置模板
+	// 补入内置模板，同步名称和描述
 	for _, t := range defaultTemplates {
 		rids, _ := json.Marshal(t.RuleIDs)
 		e.db.Exec("INSERT OR IGNORE INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in,tenant_id) VALUES (?,?,?,?,?,?,?,?)",
 			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), boolToInt(t.BuiltIn), t.TenantID)
+		// 同步内置模板的名称和描述
+		e.db.Exec("UPDATE policy_templates SET name=?, description=? WHERE id=? AND built_in=1", t.Name, t.Description, t.ID)
 	}
 	rows, err := e.db.Query("SELECT id,name,COALESCE(description,''),COALESCE(category,'custom'),rule_ids,enabled,built_in,COALESCE(tenant_id,''),COALESCE(created_at,''),COALESCE(updated_at,'') FROM policy_templates ORDER BY built_in DESC, id ASC")
 	if err != nil {

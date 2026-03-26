@@ -171,7 +171,7 @@ func TestSemiconductorTemplate(t *testing.T) {
 	if tpl == nil {
 		t.Fatal("tpl-semiconductor 模板应存在")
 	}
-	if tpl.Name != "Semiconductor / Chip Design" {
+	if tpl.Name != "芯片/半导体行业" {
 		t.Fatalf("模板名称不匹配: got %s", tpl.Name)
 	}
 	if tpl.Category != "industry" {

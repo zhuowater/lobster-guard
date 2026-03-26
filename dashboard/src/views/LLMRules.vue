@@ -35,10 +35,10 @@
           </select>
           <select v-model="filterAction" class="filter-select">
             <option value="">全部动作</option>
-            <option value="log">Log</option>
-            <option value="warn">Warn</option>
-            <option value="block">Block</option>
-            <option value="rewrite">Rewrite</option>
+            <option value="log">记录</option>
+            <option value="warn">告警</option>
+            <option value="block">阻断</option>
+            <option value="rewrite">改写</option>
           </select>
           <select v-model="filterDirection" class="filter-select">
             <option value="">全部方向</option>
@@ -119,10 +119,10 @@
           <button class="btn btn-ghost btn-sm" @click="batchEnable(false)">批量禁用</button>
           <select class="filter-select" v-model="batchActionVal" @change="batchChangeAction">
             <option value="">批量改动作</option>
-            <option value="log">Log</option>
-            <option value="warn">Warn</option>
-            <option value="block">Block</option>
-            <option value="rewrite">Rewrite</option>
+            <option value="log">记录</option>
+            <option value="warn">告警</option>
+            <option value="block">阻断</option>
+            <option value="rewrite">改写</option>
           </select>
           <button class="btn btn-danger btn-sm" @click="batchDeleteConfirm">批量删除</button>
           <button class="btn btn-ghost btn-sm" @click="selectedIds.clear()">取消</button>
@@ -210,7 +210,7 @@
               <select v-model="form.type" class="input"><option value="keyword">Keyword</option><option value="regex">Regex</option></select>
             </div>
             <div class="form-group"><label>动作</label>
-              <select v-model="form.action" class="input"><option value="log">Log</option><option value="warn">Warn</option><option value="block">Block</option><option value="rewrite">Rewrite</option></select>
+              <select v-model="form.action" class="input"><option value="log">记录</option><option value="warn">告警</option><option value="block">阻断</option><option value="rewrite">改写</option></select>
             </div>
           </div>
           <div class="form-group">

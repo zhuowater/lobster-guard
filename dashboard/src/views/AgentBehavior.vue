@@ -161,7 +161,7 @@
           <div class="form-group"><label class="form-label">规则名称</label><input v-model="editingRule.name" class="form-input" placeholder="如: 禁止执行命令" /></div>
           <div class="form-group"><label class="form-label">匹配条件</label><input v-model="editingRule.condition" class="form-input" placeholder="如: tool_name == 'exec'" /></div>
           <div class="form-group"><label class="form-label">触发动作</label>
-            <select v-model="editingRule.action" class="form-input"><option value="log">Log 记录</option><option value="warn">Warn 告警</option><option value="block">Block 拦截</option></select>
+            <select v-model="editingRule.action" class="form-input"><option value="log">记录</option><option value="warn">告警</option><option value="block">阻断</option></select>
           </div>
           <div class="form-group"><label class="form-label"><input type="checkbox" v-model="editingRule.enabled" style="margin-right:6px;accent-color:var(--color-primary)" />启用</label></div>
         </div>

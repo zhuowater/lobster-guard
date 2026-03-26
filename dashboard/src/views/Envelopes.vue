@@ -30,13 +30,13 @@
         <div class="search-box"><Icon name="search" :size="14" /><input v-model="searchQuery" placeholder="搜索信封 ID / TraceID / 域..." /></div>
         <select v-model="filterDecision" class="filter-select">
           <option value="">全部决策</option>
-          <option value="block">Block</option><option value="warn">Warn</option><option value="pass">Pass</option>
-          <option value="allow">Allow</option><option value="deny">Deny</option><option value="log">Log</option>
+          <option value="block">阻断</option><option value="warn">告警</option><option value="pass">放行</option>
+          <option value="allow">允许</option><option value="deny">拒绝</option><option value="log">记录</option>
         </select>
       </div>
       <DataTable :columns="envelopeColumns" :data="filteredEnvelopes" :loading="loading" :expandable="true" rowKey="id" emptyText="暂无信封记录" emptyDesc="系统运行后会自动生成决策信封">
         <template #cell-id="{value}"><code class="mono-cell">{{truncate(value,12)}}</code></template>
-        <template #cell-decision="{value}"><span class="decision-badge" :class="'decision-'+value">{{value||'-'}}</span></template>
+        <template #cell-decision="{value}"><span class="decision-badge" :class="'decision-'+value">{{({block:'阻断',warn:'告警',pass:'放行',allow:'允许',deny:'拒绝',log:'记录'})[value]||value||'-'}}</span></template>
         <template #cell-trace_id="{value}"><code class="mono-cell">{{truncate(value,14)}}</code></template>
         <template #cell-created_at="{row}"><span class="mono-cell tc">{{fmtTime(row.created_at||row.timestamp)}}</span></template>
         <template #actions="{row}">
@@ -48,7 +48,7 @@
         </template>
         <template #expand="{row}">
           <div class="expand-detail">
-            <div class="dg"><div class="di"><span class="dl">信封 ID</span><code>{{row.id}}</code></div><div class="di"><span class="dl">TraceID</span><code>{{row.trace_id||'-'}}</code></div><div class="di"><span class="dl">域</span><span>{{row.domain||'-'}}</span></div><div class="di"><span class="dl">决策</span><span class="decision-badge" :class="'decision-'+row.decision">{{row.decision}}</span></div><div class="di"><span class="dl">签名</span><code class="sig">{{row.signature||row.hmac||'-'}}</code></div><div class="di"><span class="dl">时间</span><span>{{fmtFull(row.created_at||row.timestamp)}}</span></div></div>
+            <div class="dg"><div class="di"><span class="dl">信封 ID</span><code>{{row.id}}</code></div><div class="di"><span class="dl">TraceID</span><code>{{row.trace_id||'-'}}</code></div><div class="di"><span class="dl">域</span><span>{{row.domain||'-'}}</span></div><div class="di"><span class="dl">决策</span><span class="decision-badge" :class="'decision-'+row.decision">{{({block:'阻断',warn:'告警',pass:'放行',allow:'允许',deny:'拒绝',log:'记录'})[row.decision]||row.decision}}</span></div><div class="di"><span class="dl">签名</span><code class="sig">{{row.signature||row.hmac||'-'}}</code></div><div class="di"><span class="dl">时间</span><span>{{fmtFull(row.created_at||row.timestamp)}}</span></div></div>
             <div v-if="row.payload||row.data" class="dp"><span class="dl">信封内容</span><pre class="dc">{{JSON.stringify(row.payload||row.data||{},null,2)}}</pre></div>
           </div>
         </template>
@@ -232,7 +232,7 @@ onMounted(loadAll)
 .mono-cell { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
 .tc { color: var(--text-tertiary); }
 .root-hash { color: #a78bfa; }
-.decision-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.decision-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; }
 .decision-block, .decision-deny { background: #EF4444; color: #fff; }
 .decision-warn { background: #F59E0B; color: #1a1a2e; }
 .decision-pass, .decision-allow { background: #10B981; color: #fff; }

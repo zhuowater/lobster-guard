@@ -102,52 +102,52 @@ type llmACEntry struct {
 
 // defaultLLMRules 内置默认规则集
 var defaultLLMRules = []LLMRule{
-	// Prompt Injection（请求方向）
-	{ID: "llm-pi-001", Name: "System Prompt Extract", Category: "prompt_injection", Direction: "request", Type: "keyword",
+	// 提示词注入（请求方向）
+	{ID: "llm-pi-001", Name: "提取系统提示词", Category: "prompt_injection", Direction: "request", Type: "keyword",
 		Patterns: []string{"reveal your system prompt", "show me your instructions", "what are your rules", "ignore previous instructions", "disregard above"},
 		Action: "warn", Enabled: true, Priority: 10},
 
-	{ID: "llm-pi-002", Name: "Jailbreak Attempt", Category: "prompt_injection", Direction: "request", Type: "keyword",
+	{ID: "llm-pi-002", Name: "越狱攻击", Category: "prompt_injection", Direction: "request", Type: "keyword",
 		Patterns: []string{"DAN mode", "developer mode", "no restrictions", "pretend you have no guidelines", "act as an unrestricted"},
 		Action: "block", Enabled: true, Priority: 10},
 
-	{ID: "llm-pi-003", Name: "Prompt Injection Regex", Category: "prompt_injection", Direction: "request", Type: "regex",
+	{ID: "llm-pi-003", Name: "提示词注入(正则)", Category: "prompt_injection", Direction: "request", Type: "regex",
 		Patterns: []string{`(?i)ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|guidelines)`, `(?i)(you\s+are|act\s+as)\s+.{0,30}(unrestricted|unfiltered|without\s+rules)`},
 		Action: "warn", Enabled: true, Priority: 5},
 
-	// PII Leak（响应方向）
-	{ID: "llm-pii-001", Name: "Credit Card in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+	// 个人信息泄露（响应方向）
+	{ID: "llm-pii-001", Name: "响应中检测到信用卡号", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{`\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b`},
-		Action: "rewrite", RewriteTo: "[REDACTED-CC]", Enabled: true, Priority: 20},
+		Action: "rewrite", RewriteTo: "[已脱敏-信用卡]", Enabled: true, Priority: 20},
 
-	{ID: "llm-pii-002", Name: "SSN in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+	{ID: "llm-pii-002", Name: "响应中检测到社保号", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{`\b\d{3}-\d{2}-\d{4}\b`},
-		Action: "rewrite", RewriteTo: "[REDACTED-SSN]", Enabled: true, Priority: 20},
+		Action: "rewrite", RewriteTo: "[已脱敏-社保号]", Enabled: true, Priority: 20},
 
-	{ID: "llm-pii-003", Name: "API Key in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+	{ID: "llm-pii-003", Name: "响应中检测到API密钥", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{`(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16})`},
-		Action: "rewrite", RewriteTo: "[REDACTED-KEY]", Enabled: true, Priority: 25},
+		Action: "rewrite", RewriteTo: "[已脱敏-密钥]", Enabled: true, Priority: 25},
 
-	// v20.8.1: Chinese PII patterns
-	{ID: "llm-pii-004", Name: "Chinese ID Card in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+	// 中国个人信息模式
+	{ID: "llm-pii-004", Name: "响应中检测到身份证号", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{`(?:\D|^)([1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx])(?:\D|$)`},
 		Action: "warn", Enabled: true, Severity: "high", Priority: 22},
-	{ID: "llm-pii-005", Name: "Chinese Phone Number in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+	{ID: "llm-pii-005", Name: "响应中检测到手机号", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{`(?:\D|^)(1[3-9]\d{9})(?:\D|$)`},
 		Action: "warn", Enabled: true, Severity: "medium", Priority: 21},
 
-	// Sensitive Topic（双向）
-	{ID: "llm-st-001", Name: "Sensitive Topics", Category: "sensitive_topic", Direction: "both", Type: "keyword",
+	// 敏感话题（双向）
+	{ID: "llm-st-001", Name: "敏感话题检测", Category: "sensitive_topic", Direction: "both", Type: "keyword",
 		Patterns: []string{"how to make a bomb", "synthesize drugs", "create malware", "hack into"},
 		Action: "block", Enabled: true, Priority: 15},
 
-	// Token Abuse（请求方向，用关键词检测过长重复内容的常见模式）
-	{ID: "llm-ta-001", Name: "Excessive Repetition", Category: "token_abuse", Direction: "request", Type: "regex",
-		Patterns: []string{`(?i)(AAAA{100,}|\.{100,}|={100,}|\s{200,})`}, // 超长重复字符
+	// Token滥用（请求方向，检测超长重复内容）
+	{ID: "llm-ta-001", Name: "超长重复字符攻击", Category: "token_abuse", Direction: "request", Type: "regex",
+		Patterns: []string{`(?i)(AAAA{100,}|\.{100,}|={100,}|\s{200,})`},
 		Action: "warn", Enabled: true, Priority: 5},
 
-	// v18: 响应方向 — System Prompt 泄露检测
-	{ID: "llm-resp-001", Name: "System Prompt Leak", Category: "pii_leak", Direction: "response", Type: "regex",
+	// 响应方向 — 系统提示词泄露检测
+	{ID: "llm-resp-001", Name: "系统提示词泄露", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{
 			`(?i)my\s+system\s+prompt\s+is`,
 			`(?i)my\s+instructions?\s+(are|is)`,
@@ -156,8 +156,8 @@ var defaultLLMRules = []LLMRule{
 		},
 		Action: "warn", Enabled: true, Priority: 15},
 
-	// v18: 响应方向 — 恶意代码/命令注入检测
-	{ID: "llm-resp-002", Name: "Malicious Code in Response", Category: "sensitive_topic", Direction: "response", Type: "regex",
+	// 响应方向 — 恶意代码/命令注入检测
+	{ID: "llm-resp-002", Name: "响应中检测到恶意代码", Category: "sensitive_topic", Direction: "response", Type: "regex",
 		Patterns: []string{
 			`(?i)os\.system\s*\(\s*['\"].*rm\s+-rf`,
 			`(?i)subprocess\.call\s*\(\s*\[.*curl.*bash`,
@@ -166,8 +166,8 @@ var defaultLLMRules = []LLMRule{
 		},
 		Action: "block", Enabled: true, Priority: 20},
 
-	// v18: 响应方向 — 凭据/密钥泄露（补充 llm-pii-003 的覆盖面）
-	{ID: "llm-resp-003", Name: "Credential Leak in Response", Category: "pii_leak", Direction: "response", Type: "regex",
+	// 响应方向 — 凭据/密钥泄露
+	{ID: "llm-resp-003", Name: "响应中检测到凭据泄露", Category: "pii_leak", Direction: "response", Type: "regex",
 		Patterns: []string{
 			`(?i)(database|db)\s+password\s+(is|=)\s*\S+`,
 			`(?i)api[_ ]key\s+(is|=)\s*\S+`,

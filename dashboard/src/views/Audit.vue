@@ -36,7 +36,7 @@
         </div>
         <div class="filter-row">
           <select v-model="filters.direction" @change="applyFilters" class="filter-select"><option value="">全部方向</option><option value="inbound">🔽 入站</option><option value="outbound">🔼 出站</option></select>
-          <select v-model="filters.action" @change="applyFilters" class="filter-select"><option value="">全部动作</option><option value="block">🔴 Block</option><option value="warn">🟡 Warn</option><option value="log">⚪ Log</option><option value="pass">🟢 Pass</option><option value="allow">🟢 Allow</option></select>
+          <select v-model="filters.action" @change="applyFilters" class="filter-select"><option value="">全部动作</option><option value="block">🔴 阻断</option><option value="warn">🟡 告警</option><option value="log">⚪ 记录</option><option value="pass">🟢 放行</option><option value="allow">🟢 允许</option></select>
           <input v-model="filters.sender_id" placeholder="发送者 ID" class="filter-input" @keyup.enter="applyFilters"/>
           <input v-model="filters.trace_id" placeholder="Trace ID" class="filter-input filter-input-mono" @keyup.enter="applyFilters"/>
           <button class="btn btn-sm" @click="applyFilters" :disabled="loading">筛选</button>
@@ -61,7 +61,7 @@
         </template>
         <template #cell-timestamp="{row}"><span class="time-cell" :title="fullTime(row.timestamp||row.time||row.created_at)">{{ relativeTime(row.timestamp||row.time||row.created_at) }}</span></template>
         <template #cell-direction="{value}"><span class="tag" :class="value==='inbound'?'tag-inbound':'tag-outbound'">{{ value==='inbound'?'入站':value==='outbound'?'出站':(value||'--') }}</span></template>
-        <template #cell-action="{value}"><span class="tag" :class="actionTagClass(value)">{{ value||'--' }}</span></template>
+        <template #cell-action="{value}"><span class="tag" :class="actionTagClass(value)">{{ ({block:'阻断',warn:'告警',pass:'放行',allow:'允许',log:'记录'})[value]||value||'--' }}</span></template>
         <template #cell-sender_id="{row}"><a v-if="row.sender_id" class="link-primary" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(row.sender_id))">{{ row.sender_id }}</a><span v-else class="text-muted">--</span></template>
         <template #cell-trace_id="{row}">
           <span v-if="row.trace_id" class="trace-cell"><a class="trace-link" @click.stop="$router.push('/sessions/'+encodeURIComponent(row.trace_id))" :title="row.trace_id">{{ row.trace_id.substring(0,8) }}…</a><span class="trace-filter" @click.stop="filters.trace_id=row.trace_id;applyFilters()" title="筛选">🔍</span></span>
@@ -76,7 +76,7 @@
                 <h4 class="detail-title">基本信息</h4>
                 <div class="detail-row"><span class="detail-label">时间</span><span>{{ fullTime(row.timestamp||row.time) }}</span></div>
                 <div class="detail-row"><span class="detail-label">方向</span><span class="tag" :class="row.direction==='inbound'?'tag-inbound':'tag-outbound'">{{ row.direction==='inbound'?'入站':'出站' }}</span></div>
-                <div class="detail-row"><span class="detail-label">动作</span><span class="tag" :class="actionTagClass(row.action)">{{ row.action }}</span></div>
+                <div class="detail-row"><span class="detail-label">动作</span><span class="tag" :class="actionTagClass(row.action)">{{ ({block:'阻断',warn:'告警',pass:'放行',allow:'允许',log:'记录'})[row.action]||row.action }}</span></div>
                 <div class="detail-row"><span class="detail-label">延迟</span><span :class="latencyClass(row)">{{ row.latency||row.latency_ms||'--' }}ms</span></div>
               </div>
               <div class="detail-section">
@@ -196,7 +196,7 @@ const activeFilterTags = computed(() => {
 })
 
 const timelineChartData = computed(() => timelineData.value.map(t => ({ pass:t.pass||0, block:t.block||0, warn:t.warn||0 })))
-const timelineLines = [{ key:'pass', color:'#10B981', label:'Pass' },{ key:'block', color:'#EF4444', label:'Block' },{ key:'warn', color:'#F59E0B', label:'Warn' }]
+const timelineLines = [{ key:'pass', color:'#10B981', label:'放行' },{ key:'block', color:'#EF4444', label:'阻断' },{ key:'warn', color:'#F59E0B', label:'告警' }]
 const timelineXLabels = computed(() => timelineData.value.map(t => { const h=t.hour||''; if (timelineRange.value==='7d') return h.substring(5,10); const hp=h.substring(11,13); return hp?hp+':00':'' }))
 
 function fullTime(ts) { if (!ts) return '--'; const d=new Date(ts); return isNaN(d.getTime())?String(ts):d.toLocaleString('zh-CN',{hour12:false}) }

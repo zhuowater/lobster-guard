@@ -5,6 +5,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -491,8 +492,8 @@ func TestPathPolicyEngine_AIActTemplateRules(t *testing.T) {
 		if r.Enabled {
 			t.Errorf("AI Act rule %s should be disabled by default", id)
 		}
-		if r.Description == "" || r.Description[:7] != "[AI Act" {
-			t.Errorf("AI Act rule %s should have [AI Act] prefix in description, got: %s", id, r.Description)
+		if r.Description == "" || (!strings.HasPrefix(r.Description, "[AI Act") && !strings.HasPrefix(r.Description, "[AI法案")) {
+			t.Errorf("AI Act rule %s should have [AI Act] or [AI法案] prefix in description, got: %s", id, r.Description)
 		}
 	}
 }
