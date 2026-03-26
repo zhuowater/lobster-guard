@@ -109,6 +109,11 @@ counterfactual:
   # cache_ttl_sec: 3600        # 验证结果缓存时间
   # timeout_sec: 30            # 单次验证超时
   # fuzzy_match: false         # 模糊匹配模式
+  # high_risk_tools:           # 自定义高风险工具列表（不配则用默认14个）
+  #   - shell_exec
+  #   - send_email
+  #   - file_write
+  #   - deploy_production      # 可添加自定义工具
 ```
 
 ### Dashboard
