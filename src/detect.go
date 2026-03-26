@@ -607,6 +607,45 @@ func (re *RuleEngine) DetectPII(text string) []string {
 	return piis
 }
 
+// DetectWithExclusions 入站检测，排除指定规则名（v27.0 租户策略闭环）
+func (re *RuleEngine) DetectWithExclusions(text, appID string, excludeRules []string) DetectResult {
+	if len(excludeRules) == 0 {
+		return re.DetectWithAppID(text, appID)
+	}
+	result := re.DetectWithAppID(text, appID)
+	if result.Action == "pass" {
+		return result
+	}
+	// 过滤掉被排除的规则
+	excSet := make(map[string]bool, len(excludeRules))
+	for _, r := range excludeRules {
+		excSet[r] = true
+	}
+	var filteredReasons []string
+	var filteredRules []string
+	for _, r := range result.MatchedRules {
+		if !excSet[r] {
+			filteredRules = append(filteredRules, r)
+		}
+	}
+	for _, r := range result.Reasons {
+		if !excSet[r] {
+			filteredReasons = append(filteredReasons, r)
+		}
+	}
+	// 如果所有规则都被排除，降级为 pass
+	if len(filteredRules) == 0 {
+		result.Action = "pass"
+		result.Reasons = nil
+		result.MatchedRules = nil
+		result.Message = ""
+		return result
+	}
+	result.MatchedRules = filteredRules
+	result.Reasons = filteredReasons
+	return result
+}
+
 // ============================================================
 // 出站规则引擎 v2.0（block/warn/log）
 // ============================================================

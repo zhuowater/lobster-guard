@@ -535,9 +535,9 @@ func TestPathPolicyEngine_DefaultRulesCount(t *testing.T) {
 	e := NewPathPolicyEngine(db)
 
 	rules := e.ListRules()
-	// 8 原始 + 5 AI Act = 13
-	if len(rules) != 13 {
-		t.Errorf("expected 13 default rules (8 + 5 AI Act), got %d", len(rules))
+	// 8 原始 + 5 AI Act + 2 Semiconductor = 15
+	if len(rules) != 15 {
+		t.Errorf("expected 15 default rules (8 + 5 AI Act + 2 Semiconductor), got %d", len(rules))
 	}
 }
 
@@ -550,10 +550,10 @@ func TestPathPolicyEngine_TemplateCRUD(t *testing.T) {
 	defer db.Close()
 	e := NewPathPolicyEngine(db)
 
-	// List — should have 8 built-in templates
+	// List — should have 9 built-in templates (8 original + 1 semiconductor)
 	tpls := e.ListTemplates()
-	if len(tpls) != 8 {
-		t.Fatalf("expected 8 built-in templates, got %d", len(tpls))
+	if len(tpls) != 9 {
+		t.Fatalf("expected 9 built-in templates, got %d", len(tpls))
 	}
 
 	// Create custom template
@@ -565,8 +565,8 @@ func TestPathPolicyEngine_TemplateCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddTemplate failed: %v", err)
 	}
-	if len(e.ListTemplates()) != 9 {
-		t.Errorf("expected 9 templates after create, got %d", len(e.ListTemplates()))
+	if len(e.ListTemplates()) != 10 {
+		t.Errorf("expected 10 templates after create, got %d", len(e.ListTemplates()))
 	}
 
 	// Get
@@ -590,8 +590,8 @@ func TestPathPolicyEngine_TemplateCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteTemplate custom failed: %v", err)
 	}
-	if len(e.ListTemplates()) != 8 {
-		t.Errorf("expected 8 templates after delete, got %d", len(e.ListTemplates()))
+	if len(e.ListTemplates()) != 9 {
+		t.Errorf("expected 9 templates after delete, got %d", len(e.ListTemplates()))
 	}
 
 	// Delete built-in — should fail

@@ -142,6 +142,16 @@ var defaultPathPolicies = []PathPolicyRule{
 		Conditions: `{"risk_threshold":70,"degrade_to":"warn"}`,
 		Action: "warn", Enabled: false, Priority: 25, TenantID: "default",
 		Description: "[AI Act] Human oversight: require review when risk score exceeds 70"},
+	// v27.0: 芯片设计关键词累积检测
+	{ID: "pp-014", Name: "chip_design_ip_leak", RuleType: "cumulative",
+		Conditions: `{"label":"chip_ip","threshold":2}`,
+		Action: "block", Enabled: false, Priority: 5, TenantID: "default",
+		Description: "Block when chip design IP keywords (ISA, uarch codename, process node) appear >= 2 times"},
+	// v27.0: 芯片代码泄露序列检测（先读取设计文件，再发送到外部）
+	{ID: "pp-015", Name: "chip_rtl_exfiltration", RuleType: "sequence",
+		Conditions: `{"before":"http_send","after":"file_read","window_sec":300}`,
+		Action: "block", Enabled: false, Priority: 5, TenantID: "default",
+		Description: "Block HTTP send after file read within 5 minutes (RTL/HDL exfiltration prevention)"},
 }
 
 // PolicyTemplate 策略模板（v23.2 CRUD）
@@ -153,6 +163,7 @@ type PolicyTemplate struct {
 	RuleIDs     []string `json:"rule_ids"`
 	Enabled     bool     `json:"enabled"`
 	BuiltIn     bool     `json:"built_in"`    // 内置模板不可删除
+	TenantID    string   `json:"tenant_id"`   // v27.0: 归属租户（空=全局）
 	CreatedAt   string   `json:"created_at,omitempty"`
 	UpdatedAt   string   `json:"updated_at,omitempty"`
 }
@@ -199,7 +210,10 @@ func (e *PathPolicyEngine) initSchema() {
 		id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
 		category TEXT NOT NULL DEFAULT 'custom', rule_ids TEXT NOT NULL,
 		enabled INTEGER NOT NULL DEFAULT 1, built_in INTEGER NOT NULL DEFAULT 0,
+		tenant_id TEXT NOT NULL DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
+	// v27.0: 补加 tenant_id 列（已有表忽略 duplicate column 错误）
+	e.db.Exec(`ALTER TABLE policy_templates ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''`)
 }
 
 func (e *PathPolicyEngine) loadRules() {
@@ -337,13 +351,17 @@ func (e *PathPolicyEngine) Evaluate(traceID, proposed string) PathDecision {
 	ctx, ok := e.contexts[traceID]
 	rules := append([]PathPolicyRule{}, e.rules...)
 	score := float64(0)
-	if ok && ctx != nil { score = e.decayScore(ctx) }
+	tenantID := "default"
+	if ok && ctx != nil { score = e.decayScore(ctx); tenantID = ctx.TenantID }
+	if tenantID == "" { tenantID = "default" }
 	e.mu.RUnlock()
 	def := PathDecision{Decision: "allow", RiskScore: score}
 	if !ok || ctx == nil { return def }
 	var best *PathDecision
 	for _, rule := range rules {
 		if !rule.Enabled { continue }
+		// v27.0: 租户过滤 — 只执行属于当前租户或 default 的规则
+		if rule.TenantID != "" && rule.TenantID != "default" && rule.TenantID != tenantID { continue }
 		var d *PathDecision
 		switch rule.RuleType {
 		case "sequence":   d = e.evalSeq(ctx, rule, proposed)
@@ -571,6 +589,10 @@ var defaultTemplates = []PolicyTemplate{
 	{ID: "tpl-minimal", Name: "Minimal Protection", Category: "security",
 		Description: "Essential protection only: block credential leaks and shell execution after external data access",
 		RuleIDs: []string{"pp-002", "pp-005"}, Enabled: true, BuiltIn: true},
+	// v27.0: 芯片行业模板
+	{ID: "tpl-semiconductor", Name: "Semiconductor / Chip Design", Category: "industry",
+		Description: "Protect chip design IP: ISA names, microarchitecture codenames, RTL/HDL code patterns, foundry/process info, EDA tool configs",
+		RuleIDs: []string{"pp-004", "pp-005", "pp-011", "pp-012", "pp-014", "pp-015"}, Enabled: true, BuiltIn: true},
 }
 
 func (e *PathPolicyEngine) loadTemplates() {
@@ -581,10 +603,10 @@ func (e *PathPolicyEngine) loadTemplates() {
 	// 补入内置模板
 	for _, t := range defaultTemplates {
 		rids, _ := json.Marshal(t.RuleIDs)
-		e.db.Exec("INSERT OR IGNORE INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in) VALUES (?,?,?,?,?,?,?)",
-			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), boolToInt(t.BuiltIn))
+		e.db.Exec("INSERT OR IGNORE INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in,tenant_id) VALUES (?,?,?,?,?,?,?,?)",
+			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), boolToInt(t.BuiltIn), t.TenantID)
 	}
-	rows, err := e.db.Query("SELECT id,name,COALESCE(description,''),COALESCE(category,'custom'),rule_ids,enabled,built_in,COALESCE(created_at,''),COALESCE(updated_at,'') FROM policy_templates ORDER BY built_in DESC, id ASC")
+	rows, err := e.db.Query("SELECT id,name,COALESCE(description,''),COALESCE(category,'custom'),rule_ids,enabled,built_in,COALESCE(tenant_id,''),COALESCE(created_at,''),COALESCE(updated_at,'') FROM policy_templates ORDER BY built_in DESC, id ASC")
 	if err != nil {
 		e.templates = append([]PolicyTemplate{}, defaultTemplates...)
 		return
@@ -595,7 +617,7 @@ func (e *PathPolicyEngine) loadTemplates() {
 		var t PolicyTemplate
 		var ridsJSON string
 		var en, bi int
-		if rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &ridsJSON, &en, &bi, &t.CreatedAt, &t.UpdatedAt) != nil {
+		if rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &ridsJSON, &en, &bi, &t.TenantID, &t.CreatedAt, &t.UpdatedAt) != nil {
 			continue
 		}
 		t.Enabled = en != 0
@@ -633,8 +655,8 @@ func (e *PathPolicyEngine) AddTemplate(t PolicyTemplate) error {
 	}
 	if e.db != nil {
 		rids, _ := json.Marshal(t.RuleIDs)
-		if _, err := e.db.Exec("INSERT INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in) VALUES (?,?,?,?,?,?,?)",
-			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), 0); err != nil {
+		if _, err := e.db.Exec("INSERT INTO policy_templates (id,name,description,category,rule_ids,enabled,built_in,tenant_id) VALUES (?,?,?,?,?,?,?,?)",
+			t.ID, t.Name, t.Description, t.Category, string(rids), boolToInt(t.Enabled), 0, t.TenantID); err != nil {
 			return err
 		}
 	}
@@ -713,4 +735,58 @@ func (e *PathPolicyEngine) DeactivateTemplate(id string) (int, error) {
 		if err := e.SetRuleEnabled(rid, false); err == nil { deactivated++ }
 	}
 	return deactivated, nil
+}
+
+// BindTemplateToTenant 将模板绑定到租户：复制模板中的规则，TenantID 改为目标租户（v27.0）
+func (e *PathPolicyEngine) BindTemplateToTenant(templateID, tenantID string) (int, error) {
+	t := e.GetTemplate(templateID)
+	if t == nil {
+		return 0, fmt.Errorf("template %q not found", templateID)
+	}
+	if tenantID == "" {
+		return 0, fmt.Errorf("tenant_id 不能为空")
+	}
+	bound := 0
+	for _, rid := range t.RuleIDs {
+		src := e.GetRule(rid)
+		if src == nil {
+			continue
+		}
+		// 生成新 ID：原ID + "-" + 租户ID
+		newID := rid + "-" + tenantID
+		// 检查是否已存在
+		if existing := e.GetRule(newID); existing != nil {
+			bound++ // 已绑定过
+			continue
+		}
+		newRule := PathPolicyRule{
+			ID:          newID,
+			Name:        src.Name,
+			RuleType:    src.RuleType,
+			Conditions:  src.Conditions,
+			Action:      src.Action,
+			Enabled:     true,
+			Priority:    src.Priority,
+			Description: src.Description + " [bound to " + tenantID + "]",
+			TenantID:    tenantID,
+		}
+		if err := e.AddRule(newRule); err == nil {
+			bound++
+		}
+	}
+	log.Printf("[PathPolicy] 模板 %s 绑定到租户 %s: %d/%d 规则", templateID, tenantID, bound, len(t.RuleIDs))
+	return bound, nil
+}
+
+// ListRulesForTenant 返回租户可见的所有规则（租户专属 + default）
+func (e *PathPolicyEngine) ListRulesForTenant(tenantID string) []PathPolicyRule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	var result []PathPolicyRule
+	for _, r := range e.rules {
+		if r.TenantID == tenantID || r.TenantID == "default" || r.TenantID == "" {
+			result = append(result, r)
+		}
+	}
+	return result
 }

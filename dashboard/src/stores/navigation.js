@@ -28,7 +28,7 @@ const TABS = {
   ops: {
     label: '运营管理',
     icon: 'bar-chart',
-    routes: ['reports', 'leaderboard', 'tenants', 'users', 'llm', 'ops', 'settings', 'gateway-monitor']
+    routes: ['reports', 'leaderboard', 'tenants', 'apikeys', 'users', 'llm', 'ops', 'settings', 'gateway-monitor']
   }
 }
 

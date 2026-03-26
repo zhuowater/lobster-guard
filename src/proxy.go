@@ -200,6 +200,9 @@ type InboundProxy struct {
 	deviationDetector *DeviationDetector
 	// v26.0 信息流控制引擎
 	ifcEngine *IFCEngine
+	// v27.0 租户识别
+	tenantMgr *TenantManager
+	apiKeyMgr *APIKeyManager
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -218,6 +221,20 @@ func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, log
 		metrics: metrics, ruleHits: ruleHits, userCache: userCache, policyEng: policyEng,
 		honeypot: honeypot,
 	}
+}
+
+// SetTenantManager 设置租户管理器（v27.0）
+func (ip *InboundProxy) SetTenantManager(tm *TenantManager) { ip.tenantMgr = tm }
+
+// SetAPIKeyManager 设置 API Key 管理器（v27.0）
+func (ip *InboundProxy) SetAPIKeyManager(akm *APIKeyManager) { ip.apiKeyMgr = akm }
+
+// resolveTenantID 根据 senderID 和 appID 解析真实租户 ID（v27.0）
+func (ip *InboundProxy) resolveTenantID(senderID, appID string) string {
+	if ip.tenantMgr != nil {
+		return ip.tenantMgr.ResolveTenant(senderID, appID)
+	}
+	return "default"
 }
 
 func (ip *InboundProxy) startBridge(ctx context.Context) error {
@@ -424,7 +441,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 				if tpl != nil {
 					fakeResp := ip.honeypot.GenerateFakeResponse(tpl, watermark)
 					ip.honeypot.RecordTrigger(&HoneypotTrigger{
-						TenantID:      "default",
+						TenantID:      ip.resolveTenantID(senderID, appID),
 						SenderID:      senderID,
 						TemplateID:    tpl.ID,
 						TemplateName:  tpl.Name,
@@ -1045,7 +1062,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if tpl != nil {
 				fakeResp := ip.honeypot.GenerateFakeResponse(tpl, watermark)
 				ip.honeypot.RecordTrigger(&HoneypotTrigger{
-					TenantID:      "default",
+					TenantID:      ip.resolveTenantID(senderID, appID),
 					SenderID:      senderID,
 					TemplateID:    tpl.ID,
 					TemplateName:  tpl.Name,
@@ -1103,6 +1120,21 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // runPipelineDetect 使用 Pipeline 进行检测，回退到 engine.DetectWithAppID
 // 返回兼容的 DetectResult 以减少对现有代码的侵入
 func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID string) DetectResult {
+	// v27.0: 根据租户配置获取排除规则
+	tenantID := ip.resolveTenantID(senderID, appID)
+	var excludeRules []string
+	if ip.tenantMgr != nil {
+		cfg := ip.tenantMgr.GetConfig(tenantID)
+		if cfg != nil && cfg.DisabledRules != "" {
+			for _, r := range strings.Split(cfg.DisabledRules, ",") {
+				r = strings.TrimSpace(r)
+				if r != "" {
+					excludeRules = append(excludeRules, r)
+				}
+			}
+		}
+	}
+
 	if ip.pipeline != nil {
 		ctx := &DetectContext{
 			Text:     msgText,
@@ -1130,6 +1162,10 @@ func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID stri
 		if pResult.FinalRule != "" && len(dr.Reasons) == 0 {
 			dr.Reasons = []string{pResult.FinalRule}
 		}
+		// v27.0: 排除租户禁用的规则
+		if len(excludeRules) > 0 {
+			dr = filterExcludedRules(dr, excludeRules)
+		}
 		// 日志: 各阶段耗时
 		if ip.slog != nil {
 			for _, sr := range pResult.StageResults {
@@ -1142,8 +1178,41 @@ func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID stri
 		}
 		return dr
 	}
-	// 回退: 直接调用引擎
-	return ip.engine.DetectWithAppID(msgText, appID)
+	// 回退: 直接调用引擎（带排除）
+	return ip.engine.DetectWithExclusions(msgText, appID, excludeRules)
+}
+
+// filterExcludedRules 从检测结果中移除被租户禁用的规则（v27.0）
+func filterExcludedRules(dr DetectResult, excludeRules []string) DetectResult {
+	if len(excludeRules) == 0 {
+		return dr
+	}
+	excSet := make(map[string]bool, len(excludeRules))
+	for _, r := range excludeRules {
+		excSet[r] = true
+	}
+	var filteredRules []string
+	var filteredReasons []string
+	for _, r := range dr.MatchedRules {
+		if !excSet[r] {
+			filteredRules = append(filteredRules, r)
+		}
+	}
+	for _, r := range dr.Reasons {
+		if !excSet[r] {
+			filteredReasons = append(filteredReasons, r)
+		}
+	}
+	if len(filteredRules) == 0 {
+		dr.Action = "pass"
+		dr.Reasons = nil
+		dr.MatchedRules = nil
+		dr.Message = ""
+		return dr
+	}
+	dr.MatchedRules = filteredRules
+	dr.Reasons = filteredReasons
+	return dr
 }
 
 // ============================================================

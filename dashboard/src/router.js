@@ -28,6 +28,7 @@ const routes = [
   { path: '/anomaly', name: 'anomaly', component: () => import('./views/AnomalyDetection.vue'), meta: { title: '异常检测', icon: 'bar-chart', group: 'threat' } },
   { path: '/reports', name: 'reports', component: () => import('./views/Reports.vue'), meta: { title: '报告', icon: 'file-text', group: 'govern' } },
   { path: '/tenants', name: 'tenants', component: () => import('./views/Tenants.vue'), meta: { title: '租户', icon: 'building', group: 'govern' } },
+  { path: '/apikeys', name: 'apikeys', component: () => import('./views/APIKeys.vue'), meta: { title: 'API Key', icon: 'key', group: 'govern' } },
   { path: '/redteam', name: 'redteam', component: () => import('./views/RedTeam.vue'), meta: { title: '红队测试', icon: 'crosshair', group: 'govern' } },
   { path: '/leaderboard', name: 'leaderboard', component: () => import('./views/Leaderboard.vue'), meta: { title: '排行榜', icon: 'trophy', group: 'govern' } },
   { path: '/envelopes', name: 'envelopes', component: () => import('./views/Envelopes.vue'), meta: { title: '执行信封', icon: 'lock', group: 'govern' } },

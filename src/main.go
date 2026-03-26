@@ -19,7 +19,7 @@ import (
 
 const (
 	AppName    = "lobster-guard"
-	AppVersion = "26.2"
+	AppVersion = "27.0"
 )
 
 var startTime = time.Now()
@@ -723,6 +723,16 @@ func main() {
 	inbound.capabilityEngine = capEngine         // v25.1
 	inbound.deviationDetector = devDetector      // v25.2
 	inbound.ifcEngine = ifcEngine                // v26.0
+	// v27.0: 租户策略闭环 + API Key 身份管理
+	apiKeyMgr := NewAPIKeyManager(db)
+	inbound.SetTenantManager(tenantMgr)
+	inbound.SetAPIKeyManager(apiKeyMgr)
+	if llmProxy != nil {
+		llmProxy.SetTenantManager(tenantMgr)
+		llmProxy.SetAPIKeyManager(apiKeyMgr)
+	}
+	mgmtAPI.apiKeyMgr = apiKeyMgr
+	fmt.Printf("[初始化] ✅ 租户策略闭环 + API Key 管理器已就绪\n")
 	inbound.taintTracker = taintTracker
 	outbound.taintTracker = taintTracker
 	if llmProxy != nil {

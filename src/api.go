@@ -163,6 +163,8 @@ type ManagementAPI struct {
 	ifcEngine *IFCEngine
 	// v26.1 隔离LLM
 	ifcQuarantine *IFCQuarantine
+	// v27.0 API Key 管理
+	apiKeyMgr *APIKeyManager
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -532,12 +534,30 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleTenantConfigGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/config") && method == "PUT":
 		api.handleTenantConfigUpdate(w, r)
+	// v27.0: 租户策略模板绑定 API
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/bind-template") && method == "POST":
+		api.handleTenantBindTemplate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/policies") && method == "GET":
+		api.handleTenantPolicies(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "GET":
 		api.handleTenantGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "PUT":
 		api.handleTenantUpdate(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "DELETE":
 		api.handleTenantDelete(w, r)
+	// v27.0 API Key 管理 API
+	case path == "/api/v1/apikeys" && method == "GET":
+		api.handleAPIKeyList(w, r)
+	case path == "/api/v1/apikeys" && method == "POST":
+		api.handleAPIKeyCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/apikeys/") && strings.HasSuffix(path, "/rotate") && method == "POST":
+		api.handleAPIKeyRotate(w, r)
+	case strings.HasPrefix(path, "/api/v1/apikeys/") && method == "GET":
+		api.handleAPIKeyGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/apikeys/") && method == "PUT":
+		api.handleAPIKeyUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/apikeys/") && method == "DELETE":
+		api.handleAPIKeyDelete(w, r)
 	// v13.1 Prompt 版本追踪 API
 	case path == "/api/v1/prompts" && method == "GET":
 		api.handlePromptsList(w, r)
@@ -8750,4 +8770,178 @@ func (api *ManagementAPI) saveSessionCorrelatorConfig() error {
 	}
 	log.Printf("[会话关联] 配置已保存: idle=%dmin, fp=%ds", api.cfg.SessionIdleTimeoutMin, api.cfg.SessionFPWindowSec)
 	return nil
+}
+
+// ============================================================
+// v27.0: API Key 管理 API
+// ============================================================
+
+// handleAPIKeyList GET /api/v1/apikeys — API Key 列表
+func (api *ManagementAPI) handleAPIKeyList(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	tenantID := r.URL.Query().Get("tenant")
+	list, err := api.apiKeyMgr.List(tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"keys": list, "total": len(list)})
+}
+
+// handleAPIKeyCreate POST /api/v1/apikeys — 创建 API Key
+func (api *ManagementAPI) handleAPIKeyCreate(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	var entry APIKeyEntry
+	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if entry.UserID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "user_id required"})
+		return
+	}
+	created, rawKey, err := api.apiKeyMgr.Create(&entry)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "created",
+		"key":    created,
+		"raw_key": rawKey,
+		"warning": "请妥善保管此 Key，它将不再显示完整内容",
+	})
+}
+
+// handleAPIKeyGet GET /api/v1/apikeys/:id — API Key 详情
+func (api *ManagementAPI) handleAPIKeyGet(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/apikeys/")
+	entry, err := api.apiKeyMgr.Get(id)
+	if err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, entry)
+}
+
+// handleAPIKeyUpdate PUT /api/v1/apikeys/:id — 更新 API Key
+func (api *ManagementAPI) handleAPIKeyUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/apikeys/")
+	var entry APIKeyEntry
+	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	entry.ID = id
+	if err := api.apiKeyMgr.Update(&entry); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "updated"})
+}
+
+// handleAPIKeyDelete DELETE /api/v1/apikeys/:id — 删除 API Key
+func (api *ManagementAPI) handleAPIKeyDelete(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/apikeys/")
+	if err := api.apiKeyMgr.Delete(id); err != nil {
+		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "deleted"})
+}
+
+// handleAPIKeyRotate POST /api/v1/apikeys/:id/rotate — 轮换 API Key
+func (api *ManagementAPI) handleAPIKeyRotate(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	// 从 /api/v1/apikeys/:id/rotate 中提取 id
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/apikeys/")
+	id := strings.TrimSuffix(trimmed, "/rotate")
+	entry, rawKey, err := api.apiKeyMgr.Rotate(id)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":  "rotated",
+		"key":     entry,
+		"raw_key": rawKey,
+		"warning": "旧 Key 已失效，请使用新 Key",
+	})
+}
+
+// ============================================================
+// v27.0: 租户策略模板绑定 API
+// ============================================================
+
+// handleTenantBindTemplate POST /api/v1/tenants/:id/bind-template — 绑定策略模板
+func (api *ManagementAPI) handleTenantBindTemplate(w http.ResponseWriter, r *http.Request) {
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
+		return
+	}
+	// 提取 tenant_id
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/bind-template")
+	if api.tenantMgr != nil && !api.tenantMgr.Exists(tenantID) {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("租户 %q 不存在", tenantID)})
+		return
+	}
+	var req struct {
+		TemplateID string `json:"template_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.TemplateID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template_id required"})
+		return
+	}
+	bound, err := api.pathPolicyEngine.BindTemplateToTenant(req.TemplateID, tenantID)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":     "bound",
+		"tenant_id":  tenantID,
+		"template_id": req.TemplateID,
+		"rules_bound": bound,
+	})
+}
+
+// handleTenantPolicies GET /api/v1/tenants/:id/policies — 查看租户绑定的策略规则
+func (api *ManagementAPI) handleTenantPolicies(w http.ResponseWriter, r *http.Request) {
+	if api.pathPolicyEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "path policy engine not enabled"})
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/policies")
+	rules := api.pathPolicyEngine.ListRulesForTenant(tenantID)
+	if rules == nil {
+		rules = []PathPolicyRule{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"tenant_id": tenantID, "rules": rules, "total": len(rules)})
 }

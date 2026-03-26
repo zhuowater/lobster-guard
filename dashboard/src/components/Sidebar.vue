@@ -179,6 +179,7 @@ const allNavItems = {
   'reports':           { path: '/reports',        label: '报告中心',       icon: 'file-up' },
   'leaderboard':       { path: '/leaderboard',    label: '排行榜',         icon: 'trophy' },
   'tenants':           { path: '/tenants',        label: '租户管理',       icon: 'building' },
+  'apikeys':           { path: '/apikeys',        label: 'API Key',       icon: 'key' },
   'users':             { path: '/users',          label: '用户管理',       icon: 'users' },
   'llm':               { path: '/llm',            label: 'LLM 概览',      icon: 'brain' },
   'ops':               { path: '/ops',            label: '运维工具',       icon: 'cog' },

@@ -63,6 +63,9 @@ type LLMProxy struct {
 	ifcQuarantine *IFCQuarantine
 	// v26.3 审计日志写入(治理引擎事件)
 	auditLogger *AuditLogger
+	// v27.0 API Key 身份管理
+	apiKeyMgr *APIKeyManager
+	tenantMgr *TenantManager
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -116,6 +119,12 @@ func NewLLMProxy(cfg LLMProxyConfig, auditor *LLMAuditor, ruleEngine *LLMRuleEng
 }
 
 // Start 启动 HTTP server
+// SetAPIKeyManager 设置 API Key 管理器（v27.0）
+func (lp *LLMProxy) SetAPIKeyManager(akm *APIKeyManager) { lp.apiKeyMgr = akm }
+
+// SetTenantManager 设置租户管理器（v27.0）
+func (lp *LLMProxy) SetTenantManager(tm *TenantManager) { lp.tenantMgr = tm }
+
 func (lp *LLMProxy) Start() error {
 	if err := lp.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
@@ -307,8 +316,30 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lp.envelopeMgr.Seal(traceID, "llm_request", string(bodyBytes), decision, llmReqRules, "")
 	}
 
-	// v14.0: 从请求头提取租户 ID（提前到缓存查找前）
+	// v14.0 + v27.0: 从请求头或 API Key 提取租户 ID
 	tenantID := r.Header.Get("X-Tenant-Id")
+	// v27.0: 尝试从 Authorization header 的 API Key 解析身份
+	if lp.apiKeyMgr != nil {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer sk-") {
+			if keyEntry, err := lp.apiKeyMgr.Resolve(authHeader); err == nil {
+				if tenantID == "" {
+					tenantID = keyEntry.TenantID
+				}
+				// 填充 sender_id（如果原来为空）
+				if sessionLink == nil || sessionLink.SenderID == "" {
+					r.Header.Set("X-Sender-Id", keyEntry.UserID)
+				}
+				// 配额检查
+				if !lp.apiKeyMgr.CheckQuota(keyEntry.ID) {
+					log.Printf("[LLM代理] API Key 配额已用完: user=%s key_prefix=%s", keyEntry.UserID, keyEntry.KeyPrefix)
+					http.Error(w, `{"error":"API key daily quota exceeded"}`, 429)
+					return
+				}
+				lp.apiKeyMgr.IncrUsage(keyEntry.ID)
+			}
+		}
+	}
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -465,6 +496,14 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					tcArgs := ""
 					if i < len(info.ToolInputs) {
 						tcArgs = info.ToolInputs[i]
+					}
+					// v27.0: 租户工具黑名单检查
+					if lp.tenantMgr != nil {
+						tcfg := lp.tenantMgr.GetConfig(tenantID)
+						if tcfg != nil && isToolBlacklisted(tcName, tcfg.ToolBlacklist) {
+							log.Printf("[ToolPolicy] 租户黑名单拦截: tool=%s tenant=%s trace=%s", tcName, tenantID, traceID)
+							continue
+						}
 					}
 					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, traceID, tenantID)
 					// v23.0: 路径策略引擎 — 注册 tool_call 步骤并评估
@@ -775,6 +814,14 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 					if i < len(info.ToolInputs) {
 						tcArgs = info.ToolInputs[i]
 					}
+					// v27.0: 租户工具黑名单检查（SSE）
+					if lp.tenantMgr != nil {
+						tcfg := lp.tenantMgr.GetConfig(auditCtx.TenantID)
+						if tcfg != nil && isToolBlacklisted(tcName, tcfg.ToolBlacklist) {
+							log.Printf("[ToolPolicy] SSE 租户黑名单拦截: tool=%s tenant=%s trace=%s", tcName, auditCtx.TenantID, auditCtx.TraceID)
+							continue
+						}
+					}
 					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, auditCtx.TraceID, auditCtx.TenantID)
 					// v23.0: 路径策略引擎 — SSE 模式下也注册步骤
 					if lp.pathPolicyEngine != nil {
@@ -963,4 +1010,18 @@ func (lp *LLMProxy) checkCanaryLeak(responseBody string, canaryToken string) boo
 		return false
 	}
 	return strings.Contains(responseBody, canaryToken)
+}
+
+// isToolBlacklisted 检查工具是否在黑名单中（v27.0 租户策略闭环）
+func isToolBlacklisted(toolName, blacklistCSV string) bool {
+	if blacklistCSV == "" || toolName == "" {
+		return false
+	}
+	for _, bl := range strings.Split(blacklistCSV, ",") {
+		bl = strings.TrimSpace(bl)
+		if bl != "" && bl == toolName {
+			return true
+		}
+	}
+	return false
 }
