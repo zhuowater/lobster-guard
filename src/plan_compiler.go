@@ -211,26 +211,26 @@ func (pc *PlanCompiler) loadBuiltinTemplates() {
 
 func getBuiltinPlanTemplates() []PlanTemplate {
 	return []PlanTemplate{
-		{Name: "search_and_summarize", Category: "query", Description: "Search and summarize", Keywords: []string{"search", "find", "lookup", "query", "what is", "tell me about"}, Steps: []PlanStep{{Order: 1, ToolName: "web_search", Required: true}, {Order: 2, ToolName: "summarize", Required: true}}},
-		{Name: "lookup_contact", Category: "query", Description: "Lookup contact", Keywords: []string{"contact", "phone", "email address", "find person"}, Steps: []PlanStep{{Order: 1, ToolName: "contacts_search", Required: true}}},
-		{Name: "check_weather", Category: "query", Description: "Check weather", Keywords: []string{"weather", "temperature", "forecast", "rain"}, Steps: []PlanStep{{Order: 1, ToolName: "weather_api", Required: true}}},
-		{Name: "database_readonly", Category: "query", Description: "Read-only DB query", Keywords: []string{"select", "query database", "count", "list records"}, Steps: []PlanStep{{Order: 1, ToolName: "db_query", Required: true}}},
-		{Name: "read_email", Category: "email", Description: "Read emails", Keywords: []string{"read email", "check inbox", "show emails", "unread"}, Steps: []PlanStep{{Order: 1, ToolName: "email_read", Required: true}}},
-		{Name: "send_email_simple", Category: "email", Description: "Send email", Keywords: []string{"send email", "compose email", "write email", "mail to"}, Steps: []PlanStep{{Order: 1, ToolName: "email_compose", Required: true}, {Order: 2, ToolName: "email_send", Required: true}}},
-		{Name: "reply_email", Category: "email", Description: "Reply to email", Keywords: []string{"reply", "respond to email", "answer email"}, Steps: []PlanStep{{Order: 1, ToolName: "email_read", Required: true}, {Order: 2, ToolName: "email_compose", Required: true}, {Order: 3, ToolName: "email_send", Required: true}}},
-		{Name: "read_file", Category: "file", Description: "Read file", Keywords: []string{"read file", "open file", "show file", "cat", "view"}, Steps: []PlanStep{{Order: 1, ToolName: "file_read", Required: true}}},
-		{Name: "write_report", Category: "file", Description: "Write report", Keywords: []string{"write report", "generate report", "create document", "save report"}, Steps: []PlanStep{{Order: 1, ToolName: "data_gather", Required: true}, {Order: 2, ToolName: "file_write", Required: true}}},
-		{Name: "file_convert", Category: "file", Description: "Convert file", Keywords: []string{"convert file", "transform", "export as", "change format"}, Steps: []PlanStep{{Order: 1, ToolName: "file_read", Required: true}, {Order: 2, ToolName: "file_convert", Required: true}, {Order: 3, ToolName: "file_write", Required: true}}},
-		{Name: "code_review", Category: "code", Description: "Code review", Keywords: []string{"review code", "check code", "code quality", "lint"}, Steps: []PlanStep{{Order: 1, ToolName: "file_read", Required: true}, {Order: 2, ToolName: "code_analyze", Required: true}}},
-		{Name: "run_test", Category: "code", Description: "Run tests", Keywords: []string{"run test", "execute test", "test suite", "unit test"}, Steps: []PlanStep{{Order: 1, ToolName: "shell_exec", Required: true}}},
-		{Name: "build_project", Category: "code", Description: "Build project", Keywords: []string{"build", "compile", "make", "npm build", "go build"}, Steps: []PlanStep{{Order: 1, ToolName: "shell_exec", Required: true}}},
-		{Name: "fetch_webpage", Category: "web", Description: "Fetch webpage", Keywords: []string{"fetch page", "scrape", "get url", "browse", "open url"}, Steps: []PlanStep{{Order: 1, ToolName: "web_fetch", Required: true}}},
-		{Name: "api_call", Category: "web", Description: "API call", Keywords: []string{"api call", "http request", "rest api", "curl"}, Steps: []PlanStep{{Order: 1, ToolName: "http_request", Required: true}}},
-		{Name: "download_file", Category: "web", Description: "Download file", Keywords: []string{"download", "save from url", "fetch file"}, Steps: []PlanStep{{Order: 1, ToolName: "web_fetch", Required: true}, {Order: 2, ToolName: "file_write", Required: true}}},
-		{Name: "create_calendar", Category: "admin", Description: "Create calendar event", Keywords: []string{"calendar", "schedule", "meeting", "event", "appointment"}, Steps: []PlanStep{{Order: 1, ToolName: "calendar_create", Required: true}}},
-		{Name: "manage_task", Category: "admin", Description: "Manage tasks", Keywords: []string{"task", "todo", "ticket", "create task", "assign"}, Steps: []PlanStep{{Order: 1, ToolName: "task_manage", Required: true}}},
-		{Name: "system_status", Category: "admin", Description: "Check system status", Keywords: []string{"status", "health", "monitor", "uptime", "disk", "memory"}, Steps: []PlanStep{{Order: 1, ToolName: "system_info", Required: true}}},
-		{Name: "deploy_service", Category: "admin", Description: "Deploy service", Keywords: []string{"deploy", "release", "rollout", "publish"}, Steps: []PlanStep{{Order: 1, ToolName: "build_check", Required: true}, {Order: 2, ToolName: "deploy_exec", Required: true}, {Order: 3, ToolName: "health_check", Required: true}}},
+		{Name: "search_and_summarize", Category: "query", Description: "Search and summarize", Keywords: []string{"search", "find", "lookup", "query", "what is", "tell me about", "搜索", "查找", "帮我找", "搜一下", "查询", "是什么"}, Steps: []PlanStep{{Order: 1, ToolName: "web_search", Required: true}, {Order: 2, ToolName: "summarize", Required: true}}},
+		{Name: "lookup_contact", Category: "query", Description: "Lookup contact", Keywords: []string{"contact", "phone", "email address", "find person", "联系人", "电话", "邮箱", "找人", "通讯录"}, Steps: []PlanStep{{Order: 1, ToolName: "contacts_search", Required: true}}},
+		{Name: "check_weather", Category: "query", Description: "Check weather", Keywords: []string{"weather", "temperature", "forecast", "rain", "天气", "气温", "预报", "下雨", "温度", "查天气"}, Steps: []PlanStep{{Order: 1, ToolName: "weather_api", Required: true}}},
+		{Name: "database_readonly", Category: "query", Description: "Read-only DB query", Keywords: []string{"select", "query database", "count", "list records", "查数据库", "查表", "统计", "记录"}, Steps: []PlanStep{{Order: 1, ToolName: "db_query", Required: true}}},
+		{Name: "read_email", Category: "email", Description: "Read emails", Keywords: []string{"read email", "check inbox", "show emails", "unread", "看邮件", "查邮件", "收件箱", "未读", "邮箱"}, Steps: []PlanStep{{Order: 1, ToolName: "email_read", Required: true}}},
+		{Name: "send_email_simple", Category: "email", Description: "Send email", Keywords: []string{"send email", "compose email", "write email", "mail to", "发邮件", "写邮件", "发送邮件", "邮件发给"}, Steps: []PlanStep{{Order: 1, ToolName: "email_compose", Required: true}, {Order: 2, ToolName: "email_send", Required: true}}},
+		{Name: "reply_email", Category: "email", Description: "Reply to email", Keywords: []string{"reply", "respond to email", "answer email", "回复邮件", "回邮件", "答复"}, Steps: []PlanStep{{Order: 1, ToolName: "email_read", Required: true}, {Order: 2, ToolName: "email_compose", Required: true}, {Order: 3, ToolName: "email_send", Required: true}}},
+		{Name: "read_file", Category: "file", Description: "Read file", Keywords: []string{"read file", "open file", "show file", "cat", "view", "看文件", "打开文件", "读取", "查看文件"}, Steps: []PlanStep{{Order: 1, ToolName: "file_read", Required: true}}},
+		{Name: "write_report", Category: "file", Description: "Write report", Keywords: []string{"write report", "generate report", "create document", "save report", "写报告", "生成报告", "创建文档", "保存报告"}, Steps: []PlanStep{{Order: 1, ToolName: "data_gather", Required: true}, {Order: 2, ToolName: "file_write", Required: true}}},
+		{Name: "file_convert", Category: "file", Description: "Convert file", Keywords: []string{"convert file", "transform", "export as", "change format", "转换文件", "格式转换", "导出", "转格式"}, Steps: []PlanStep{{Order: 1, ToolName: "file_read", Required: true}, {Order: 2, ToolName: "file_convert", Required: true}, {Order: 3, ToolName: "file_write", Required: true}}},
+		{Name: "code_review", Category: "code", Description: "Code review", Keywords: []string{"review code", "check code", "code quality", "lint", "代码审查", "代码检查", "代码质量", "审代码"}, Steps: []PlanStep{{Order: 1, ToolName: "file_read", Required: true}, {Order: 2, ToolName: "code_analyze", Required: true}}},
+		{Name: "run_test", Category: "code", Description: "Run tests", Keywords: []string{"run test", "execute test", "test suite", "unit test", "跑测试", "运行测试", "单元测试", "执行测试"}, Steps: []PlanStep{{Order: 1, ToolName: "shell_exec", Required: true}}},
+		{Name: "build_project", Category: "code", Description: "Build project", Keywords: []string{"build", "compile", "make", "npm build", "go build", "编译", "构建", "打包"}, Steps: []PlanStep{{Order: 1, ToolName: "shell_exec", Required: true}}},
+		{Name: "fetch_webpage", Category: "web", Description: "Fetch webpage", Keywords: []string{"fetch page", "scrape", "get url", "browse", "open url", "抓取网页", "爬取", "打开网址", "访问链接"}, Steps: []PlanStep{{Order: 1, ToolName: "web_fetch", Required: true}}},
+		{Name: "api_call", Category: "web", Description: "API call", Keywords: []string{"api call", "http request", "rest api", "curl", "调接口", "调API", "发请求", "HTTP请求"}, Steps: []PlanStep{{Order: 1, ToolName: "http_request", Required: true}}},
+		{Name: "download_file", Category: "web", Description: "Download file", Keywords: []string{"download", "save from url", "fetch file", "下载", "保存文件", "下载文件"}, Steps: []PlanStep{{Order: 1, ToolName: "web_fetch", Required: true}, {Order: 2, ToolName: "file_write", Required: true}}},
+		{Name: "create_calendar", Category: "admin", Description: "Create calendar event", Keywords: []string{"calendar", "schedule", "meeting", "event", "appointment", "日历", "日程", "会议", "排期", "预约"}, Steps: []PlanStep{{Order: 1, ToolName: "calendar_create", Required: true}}},
+		{Name: "manage_task", Category: "admin", Description: "Manage tasks", Keywords: []string{"task", "todo", "ticket", "create task", "assign", "任务", "待办", "工单", "创建任务", "分配"}, Steps: []PlanStep{{Order: 1, ToolName: "task_manage", Required: true}}},
+		{Name: "system_status", Category: "admin", Description: "Check system status", Keywords: []string{"status", "health", "monitor", "uptime", "disk", "memory", "状态", "健康检查", "监控", "运行时间", "磁盘", "内存"}, Steps: []PlanStep{{Order: 1, ToolName: "system_info", Required: true}}},
+		{Name: "deploy_service", Category: "admin", Description: "Deploy service", Keywords: []string{"deploy", "release", "rollout", "publish", "部署", "发布", "上线", "发版"}, Steps: []PlanStep{{Order: 1, ToolName: "build_check", Required: true}, {Order: 2, ToolName: "deploy_exec", Required: true}, {Order: 3, ToolName: "health_check", Required: true}}},
 	}
 }
 
@@ -329,20 +329,51 @@ func (pc *PlanCompiler) scoreTemplate(tpl *PlanTemplate, qLow string) float64 {
 		return 0
 	}
 	matched := 0
+	maxKWLen := 0
 	for _, kw := range tpl.Keywords {
-		if strings.Contains(qLow, strings.ToLower(kw)) {
+		kwLow := strings.ToLower(kw)
+		if keywordMatches(qLow, kwLow) {
 			matched++
+			if len(kwLow) > maxKWLen {
+				maxKWLen = len(kwLow)
+			}
 		}
 	}
 	if matched == 0 {
 		return 0
 	}
-	score := float64(matched) / float64(len(tpl.Keywords))
+	// Hybrid scoring: first match gives 0.3 (meets default threshold),
+	// each additional match adds diminishing bonus.
+	// Longer keyword matches get a specificity bonus to prefer
+	// "天气"→check_weather over "查一下"→search_and_summarize.
+	score := 0.3 + float64(matched-1)*0.15
+	// Specificity bonus: longer matched keyword = more specific intent
+	score += float64(maxKWLen) * 0.005
 	score += float64(tpl.Priority) * 0.001
 	if score > 1.0 {
 		score = 1.0
 	}
 	return score
+}
+
+// keywordMatches checks if keyword matches the query.
+// First tries exact substring, then bag-of-words for multi-word keywords
+// (e.g. "read file" matches "read the config file").
+func keywordMatches(qLow, kwLow string) bool {
+	if strings.Contains(qLow, kwLow) {
+		return true
+	}
+	// Bag-of-words fallback for multi-word keywords
+	words := strings.Fields(kwLow)
+	if len(words) <= 1 {
+		return false
+	}
+	for _, w := range words {
+		if !strings.Contains(qLow, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // EvaluateToolCall checks if a tool call conforms to the active plan

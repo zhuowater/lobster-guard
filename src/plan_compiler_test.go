@@ -308,3 +308,66 @@ func TestPlanCompilerGetPlanFromDB(t *testing.T) {
 		t.Errorf("expected trace-dbget, got %s", plan.TraceID)
 	}
 }
+
+func TestPlanCompilerCompileIntentChinese(t *testing.T) {
+	pc, _ := newTestPlanCompiler(t)
+
+	tests := []struct {
+		query    string
+		wantNil  bool
+		wantTmpl string
+	}{
+		{"帮我搜索安全产品", false, "search_and_summarize"},
+		{"查一下天气", false, "check_weather"},
+		{"发邮件给张卓", false, "send_email_simple"},
+		{"看文件内容", false, "read_file"},
+		{"部署服务到生产环境", false, "deploy_service"},
+		{"编译项目", false, "build_project"},
+		{"跑测试", false, "run_test"},
+		{"查邮件", false, "read_email"},
+		{"写报告", false, "write_report"},
+		{"下载文件", false, "download_file"},
+		{"完全无关的废话ABC", true, ""},
+	}
+	for _, tt := range tests {
+		plan := pc.CompileIntent("trace-zh-"+tt.query, tt.query)
+		if tt.wantNil && plan != nil {
+			t.Errorf("query %q: expected nil, got plan %s", tt.query, plan.TemplateName)
+		}
+		if !tt.wantNil && plan == nil {
+			t.Errorf("query %q: expected plan %s, got nil", tt.query, tt.wantTmpl)
+		}
+		if !tt.wantNil && plan != nil && plan.TemplateName != tt.wantTmpl {
+			t.Errorf("query %q: expected template %s, got %s", tt.query, tt.wantTmpl, plan.TemplateName)
+		}
+	}
+}
+
+func TestScoreTemplateHybrid(t *testing.T) {
+	pc, _ := newTestPlanCompiler(t)
+	// Single keyword match should score >= 0.3
+	var tpl *PlanTemplate
+	for _, v := range pc.templates {
+		if v.Name == "search_and_summarize" {
+			tpl = v
+			break
+		}
+	}
+	if tpl == nil {
+		t.Fatal("search_and_summarize template not found")
+	}
+	s1 := pc.scoreTemplate(tpl, "搜索")
+	if s1 < 0.3 {
+		t.Errorf("single CJK keyword: score %.2f < 0.3", s1)
+	}
+	// Two keywords should score higher
+	s2 := pc.scoreTemplate(tpl, "search and find")
+	if s2 <= s1 {
+		t.Errorf("two keywords (%.2f) should score > one (%.2f)", s2, s1)
+	}
+	// Zero matches should score 0
+	s0 := pc.scoreTemplate(tpl, "xyzzy gibberish")
+	if s0 != 0 {
+		t.Errorf("no match: score %.2f != 0", s0)
+	}
+}
