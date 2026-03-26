@@ -13,12 +13,12 @@
 </div>
 
 <div v-if="tab==='list'" class="section">
-<table class="data-table" v-if="deviations.length"><thead><tr><th>ID</th><th>类型</th><th>工具</th><th>严重度</th><th>决策</th><th>已修复</th><th>Trace</th><th>操作</th></tr></thead>
+<table class="data-table" v-if="deviations.length"><thead><tr><th>ID</th><th>类型</th><th>工具</th><th>严重度</th><th>决策</th><th>修复状态</th><th>Trace</th><th>操作</th></tr></thead>
 <tbody><tr v-for="d in deviations" :key="d.id"><td class="mono">{{ (d.id||'').substring(0,12) }}</td>
 <td><span class="type-badge">{{ d.type }}</span></td><td class="mono">{{ d.tool_name }}</td>
 <td><span class="badge" :class="'sev-'+d.severity">{{ d.severity }}</span></td>
 <td><span class="badge" :class="'dec-'+d.decision">{{ d.decision }}</span></td>
-<td>{{ d.repaired ? '是' : '-' }}</td>
+<td><span v-if="d.repaired" class="badge repaired-badge">✅ 已修复</span><span v-if="d.repaired && d.repaired_tool" class="repair-detail">{{ d.tool_name }} → {{ d.repaired_tool }}</span><span v-if="d.repaired && !d.repaired_tool && d.repaired_args" class="repair-detail">参数已修正</span><span v-if="!d.repaired">-</span></td>
 <td class="mono">{{ (d.trace_id||'').substring(0,12) }}</td>
 <td><button v-if="d.trace_id" class="link-btn" @click="$router.push('/audit?trace_id=' + d.trace_id)">📋 查看审计日志</button></td></tr></tbody></table>
 <EmptyState v-else :iconSvg="emptyIcon" title="暂无偏差检测" description="当检测到执行计划偏差时将显示在这里" />
@@ -103,4 +103,6 @@ export default {
 .empty { text-align:center; padding:var(--space-8); color:var(--text-tertiary); }
 .link-btn { background:none; border:1px solid var(--border-subtle); border-radius:var(--radius-md); cursor:pointer; padding:2px 8px; font-size:11px; color:#6366F1; transition:all .2s; white-space:nowrap; }
 .link-btn:hover { background:rgba(99,102,241,0.08); border-color:#6366F1; }
+.repaired-badge { background:rgba(16,185,129,0.12); color:#059669; }
+.repair-detail { display:block; font-size:10px; color:var(--text-secondary); margin-top:2px; font-family:var(--font-mono); }
 </style>

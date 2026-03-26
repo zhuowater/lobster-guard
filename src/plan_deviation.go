@@ -38,6 +38,7 @@ type Deviation struct {
 	Actual       string    `json:"actual"`
 	Severity     string    `json:"severity"` // minor / moderate / critical
 	Repaired     bool      `json:"repaired"`
+	RepairedTool string    `json:"repaired_tool,omitempty"`
 	RepairedArgs string    `json:"repaired_args,omitempty"`
 	Decision     string    `json:"decision"` // allow / warn / block
 	CreatedAt    time.Time `json:"created_at"`
@@ -48,6 +49,17 @@ type DeviationResult struct {
 	Deviation    *Deviation `json:"deviation,omitempty"`
 	Decision     string     `json:"decision"` // allow / warn / block
 	Reason       string     `json:"reason"`
+	Repaired     bool       `json:"repaired"`
+	RepairedTool string     `json:"repaired_tool,omitempty"` // 修复后的工具名（空=不替换）
+	RepairedArgs string     `json:"repaired_args,omitempty"` // 修复后的参数（空=不替换）
+}
+
+// RepairResult holds the outcome of an auto-repair attempt
+type RepairResult struct {
+	Success bool
+	Tool    string // 替换后的工具名（空=不替换）
+	Args    string // 替换后的参数（空=不替换）
+	Reason  string
 }
 
 type DeviationStats struct {
@@ -88,7 +100,7 @@ func (dd *DeviationDetector) initDeviationDB() {
 		id TEXT PRIMARY KEY, trace_id TEXT NOT NULL,
 		type TEXT NOT NULL, tool_name TEXT, expected TEXT, actual TEXT,
 		severity TEXT DEFAULT 'moderate', repaired INTEGER DEFAULT 0,
-		repaired_args TEXT, decision TEXT DEFAULT 'warn',
+		repaired_tool TEXT, repaired_args TEXT, decision TEXT DEFAULT 'warn',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
 	dd.db.Exec(`CREATE INDEX IF NOT EXISTS idx_dev_trace ON plan_deviations(trace_id)`)
 	dd.db.Exec(`CREATE INDEX IF NOT EXISTS idx_dev_severity ON plan_deviations(severity)`)
@@ -144,12 +156,13 @@ func (dd *DeviationDetector) Detect(traceID, toolName, toolArgs string) *Deviati
 				CreatedAt: time.Now(),
 			}
 
-			// Auto-repair for minor deviations
-			if cfg.AutoRepair && dev.Severity == "minor" {
-				repaired := dd.attemptRepair(traceID, toolName, toolArgs, eval)
-				if repaired != "" {
+			// Auto-repair for minor and moderate deviations
+			if cfg.AutoRepair && (dev.Severity == "minor" || dev.Severity == "moderate") {
+				repair := dd.attemptRepair(traceID, toolName, toolArgs, eval)
+				if repair.Success {
 					dev.Repaired = true
-					dev.RepairedArgs = repaired
+					dev.RepairedTool = repair.Tool
+					dev.RepairedArgs = repair.Args
 					dev.Decision = "allow"
 					atomic.AddInt64(&dd.stats.RepairsApplied, 1)
 				}
@@ -170,6 +183,11 @@ func (dd *DeviationDetector) Detect(traceID, toolName, toolArgs string) *Deviati
 			result.Deviation = dev
 			result.Decision = dev.Decision
 			result.Reason = fmt.Sprintf("plan deviation: %s (%s)", dev.Type, dev.Severity)
+			if dev.Repaired {
+				result.Repaired = true
+				result.RepairedTool = dev.RepairedTool
+				result.RepairedArgs = dev.RepairedArgs
+			}
 			return result
 		}
 	}
@@ -204,11 +222,17 @@ func (dd *DeviationDetector) Detect(traceID, toolName, toolArgs string) *Deviati
 	return result
 }
 
-func (dd *DeviationDetector) attemptRepair(traceID, toolName, toolArgs string, eval *PlanEvaluation) string {
-	// Simple repair: for constraint violations, try to sanitize args
-	if eval.Violation == nil || eval.Violation.Severity != "minor" {
-		return ""
+func (dd *DeviationDetector) attemptRepair(traceID, toolName, toolArgs string, eval *PlanEvaluation) RepairResult {
+	if eval.Violation == nil {
+		return RepairResult{Reason: "no violation"}
 	}
+
+	sev := eval.Violation.Severity
+	// Only repair minor and moderate; critical is never auto-repaired
+	if sev != "minor" && sev != "moderate" {
+		return RepairResult{Reason: fmt.Sprintf("severity %s not repairable", sev)}
+	}
+
 	// Check repair budget
 	dd.mu.RLock()
 	maxRepairs := dd.config.MaxRepairs
@@ -218,29 +242,49 @@ func (dd *DeviationDetector) attemptRepair(traceID, toolName, toolArgs string, e
 		var count int
 		dd.db.QueryRow("SELECT COUNT(*) FROM plan_deviations WHERE trace_id=? AND repaired=1", traceID).Scan(&count)
 		if count >= maxRepairs {
-			return ""
+			return RepairResult{Reason: "repair budget exhausted"}
 		}
 	}
 
-	// For now, return original args with a "repaired" marker
-	// In production, this would apply template constraints to sanitize
-	var args map[string]interface{}
-	if json.Unmarshal([]byte(toolArgs), &args) != nil {
-		return ""
+	sm := eval.StepMatch
+
+	// Strategy 1: out_of_order (moderate) — replace tool with expected tool, keep args
+	if sm == "out_of_order" && eval.Violation.Expected != "" {
+		return RepairResult{
+			Success: true,
+			Tool:    eval.Violation.Expected,
+			Args:    "", // keep original args
+			Reason:  fmt.Sprintf("tool replaced: %s → %s", toolName, eval.Violation.Expected),
+		}
 	}
-	args["_repaired"] = true
-	args["_repair_reason"] = eval.Violation.Expected
-	repaired, _ := json.Marshal(args)
-	return string(repaired)
+
+	// Strategy 2: unexpected tool (minor, non-strict) — sanitize args, keep tool
+	if sev == "minor" {
+		var args map[string]interface{}
+		if json.Unmarshal([]byte(toolArgs), &args) != nil {
+			return RepairResult{Reason: "cannot parse args"}
+		}
+		args["_repaired"] = true
+		args["_repair_reason"] = eval.Violation.Expected
+		repaired, _ := json.Marshal(args)
+		return RepairResult{
+			Success: true,
+			Tool:    "", // keep original tool
+			Args:    string(repaired),
+			Reason:  fmt.Sprintf("args sanitized for %s", toolName),
+		}
+	}
+
+	return RepairResult{Reason: fmt.Sprintf("no repair strategy for match=%s sev=%s", sm, sev)}
 }
 
 func (dd *DeviationDetector) recordDeviation(dev *Deviation) {
 	if dd.db == nil {
 		return
 	}
-	_, err := dd.db.Exec("INSERT INTO plan_deviations (id,trace_id,type,tool_name,expected,actual,severity,repaired,repaired_args,decision) VALUES(?,?,?,?,?,?,?,?,?,?)",
+	_, err := dd.db.Exec("INSERT INTO plan_deviations (id,trace_id,type,tool_name,expected,actual,severity,repaired,repaired_tool,repaired_args,decision) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
 		dev.ID, dev.TraceID, dev.Type, dev.ToolName, dev.Expected, dev.Actual, dev.Severity,
-		boolToInt(dev.Repaired), dev.RepairedArgs, dev.Decision)
+		boolToInt(dev.Repaired), dev.RepairedTool, dev.RepairedArgs, dev.Decision)
 	if err != nil {
 		log.Printf("[Deviation] DB write failed: %v", err)
 	}
@@ -253,7 +297,7 @@ func (dd *DeviationDetector) QueryDeviations(traceID, severity string, limit int
 	if limit <= 0 {
 		limit = 50
 	}
-	q := "SELECT id,trace_id,type,tool_name,COALESCE(expected,''),COALESCE(actual,''),severity,repaired,COALESCE(repaired_args,''),decision,COALESCE(created_at,'') FROM plan_deviations WHERE 1=1"
+	q := "SELECT id,trace_id,type,tool_name,COALESCE(expected,''),COALESCE(actual,''),severity,repaired,COALESCE(repaired_tool,''),COALESCE(repaired_args,''),decision,COALESCE(created_at,'') FROM plan_deviations WHERE 1=1"
 	var args []interface{}
 	if traceID != "" {
 		q += " AND trace_id=?"
@@ -276,7 +320,7 @@ func (dd *DeviationDetector) QueryDeviations(traceID, severity string, limit int
 		var d Deviation
 		var rep int
 		var ca string
-		rows.Scan(&d.ID, &d.TraceID, &d.Type, &d.ToolName, &d.Expected, &d.Actual, &d.Severity, &rep, &d.RepairedArgs, &d.Decision, &ca)
+		rows.Scan(&d.ID, &d.TraceID, &d.Type, &d.ToolName, &d.Expected, &d.Actual, &d.Severity, &rep, &d.RepairedTool, &d.RepairedArgs, &d.Decision, &ca)
 		d.Repaired = rep != 0
 		result = append(result, d)
 	}

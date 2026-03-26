@@ -181,10 +181,57 @@ func TestAutoRepair_Enabled(t *testing.T) {
 	if r.Deviation.Decision != "allow" {
 		t.Errorf("expected allow after repair, got %s", r.Deviation.Decision)
 	}
+	// Check DeviationResult-level repair fields
+	if !r.Repaired {
+		t.Error("expected DeviationResult.Repaired=true")
+	}
+	if r.RepairedArgs == "" {
+		t.Error("expected DeviationResult.RepairedArgs non-empty")
+	}
 	if dd.GetStats().RepairsApplied < 1 {
 		t.Error("expected >=1 repairs_applied")
 	}
-	t.Logf("✅ Auto-repair enabled: args=%s", r.Deviation.RepairedArgs)
+	t.Logf("✅ Auto-repair enabled (minor/args): args=%s", r.Deviation.RepairedArgs)
+}
+
+func TestAutoRepair_OutOfOrder(t *testing.T) {
+	noAuto := &PlanConfig{
+		Enabled: true, StrictMode: false, MaxStepsPerPlan: 20, DefaultTimeout: 300,
+		AutoComplete: false, ViolationAction: "warn", MatchThreshold: 0.1,
+		MaxActivePlans: 100, RetentionDays: 30,
+	}
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, AutoRepair: true, MaxRepairs: 5}, noAuto)
+	plan := dd.planCompiler.CompileIntent("trace-oor", "search for golang and find information")
+	if plan == nil || plan.TotalSteps < 2 {
+		t.Skipf("need >=2 steps, got %d", plan.TotalSteps)
+	}
+	dd.planCompiler.mu.Lock()
+	tpl := dd.planCompiler.templates[plan.TemplateID]
+	first := tpl.Steps[0].ToolName
+	second := tpl.Steps[1].ToolName
+	dd.planCompiler.mu.Unlock()
+
+	// Call the second tool first → out_of_order
+	r := dd.Detect("trace-oor", second, `{"q":"test"}`)
+	if !r.HasDeviation {
+		t.Fatal("expected order violation")
+	}
+	if r.Deviation.Severity != "moderate" {
+		t.Skipf("severity=%s (not moderate), skip", r.Deviation.Severity)
+	}
+	if !r.Repaired {
+		t.Fatal("expected DeviationResult.Repaired=true for out_of_order")
+	}
+	if r.RepairedTool != first {
+		t.Errorf("expected RepairedTool=%s, got %s", first, r.RepairedTool)
+	}
+	if r.Deviation.RepairedTool != first {
+		t.Errorf("expected Deviation.RepairedTool=%s, got %s", first, r.Deviation.RepairedTool)
+	}
+	if r.Decision != "allow" {
+		t.Errorf("expected allow after repair, got %s", r.Decision)
+	}
+	t.Logf("✅ Auto-repair out_of_order: %s → %s", second, r.RepairedTool)
 }
 
 func TestAutoRepair_MaxRepairs(t *testing.T) {
@@ -342,7 +389,7 @@ func TestDeviationDB_RecordAndQuery(t *testing.T) {
 	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true, MaxRepairs: 5}, nil, nil)
 	dd.recordDeviation(&Deviation{ID: "d1", TraceID: "t1", Type: "forbidden_tool", ToolName: "x", Severity: "critical", Decision: "block"})
 	dd.recordDeviation(&Deviation{ID: "d2", TraceID: "t1", Type: "sequence_violation", ToolName: "y", Severity: "moderate", Decision: "warn"})
-	dd.recordDeviation(&Deviation{ID: "d3", TraceID: "t2", Type: "unknown_tool", ToolName: "z", Severity: "minor", Decision: "allow", Repaired: true, RepairedArgs: `{"_repaired":true}`})
+	dd.recordDeviation(&Deviation{ID: "d3", TraceID: "t2", Type: "unknown_tool", ToolName: "z", Severity: "minor", Decision: "allow", Repaired: true, RepairedTool: "expected_tool", RepairedArgs: `{"_repaired":true}`})
 	byTrace := dd.QueryDeviations("t1", "", 50)
 	if len(byTrace) != 2 {
 		t.Errorf("expected 2 for t1, got %d", len(byTrace))
@@ -355,12 +402,15 @@ func TestDeviationDB_RecordAndQuery(t *testing.T) {
 	if len(all) != 3 {
 		t.Errorf("expected 3 total, got %d", len(all))
 	}
-	// Check repaired round-trip
+	// Check repaired round-trip (including repaired_tool)
 	t2 := dd.QueryDeviations("t2", "", 50)
 	if len(t2) != 1 || !t2[0].Repaired {
 		t.Error("repaired field lost in DB round-trip")
 	}
-	t.Logf("✅ DB record+query: trace=%d sev=%d all=%d repaired=%v", len(byTrace), len(bySev), len(all), t2[0].Repaired)
+	if t2[0].RepairedTool != "expected_tool" {
+		t.Errorf("repaired_tool lost in DB round-trip: got %q", t2[0].RepairedTool)
+	}
+	t.Logf("✅ DB record+query: trace=%d sev=%d all=%d repaired=%v tool=%s", len(byTrace), len(bySev), len(all), t2[0].Repaired, t2[0].RepairedTool)
 }
 
 func TestDeviationDB_NilSafe(t *testing.T) {

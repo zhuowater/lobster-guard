@@ -645,7 +645,17 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 									fmt.Sprintf("[Deviation] %s: %s", devResult.Deviation.Type, devResult.Reason),
 									fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
 							}
-							if devResult.Decision == "block" {
+							// v28: 如果修复成功，替换工具名和参数
+							if devResult.Repaired {
+								if devResult.RepairedTool != "" {
+									log.Printf("[Deviation] 自动修复: %s → %s trace=%s", tcName25, devResult.RepairedTool, traceID)
+									tcName25 = devResult.RepairedTool
+								}
+								if devResult.RepairedArgs != "" {
+									tcArgs25 = devResult.RepairedArgs
+								}
+								// 修复后继续执行，不 block
+							} else if devResult.Decision == "block" {
 								w.Header().Set("Content-Type", "application/json")
 								w.WriteHeader(403)
 								fmt.Fprintf(w, `{"error":"Tool call blocked by deviation detector","tool":"%s","reason":"%s"}`,
@@ -871,8 +881,12 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 					if lp.deviationDetector != nil {
 						devResult := lp.deviationDetector.Detect(auditCtx.TraceID, tcName, tcArgs)
 						if devResult.HasDeviation {
-							log.Printf("[Deviation] SSE 偏差: tool=%s type=%s severity=%s trace=%s (流式仅记录)",
-								tcName, devResult.Deviation.Type, devResult.Deviation.Severity, auditCtx.TraceID)
+							repairNote := ""
+							if devResult.Repaired {
+								repairNote = fmt.Sprintf(" (建议修复: %s→%s)", tcName, devResult.RepairedTool)
+							}
+							log.Printf("[Deviation] SSE 偏差: tool=%s severity=%s%s trace=%s (流式仅记录)",
+								tcName, devResult.Deviation.Severity, repairNote, auditCtx.TraceID)
 						}
 					}
 				}
