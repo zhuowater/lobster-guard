@@ -17,28 +17,36 @@
 <table class="data-table" v-if="mappings.length"><thead><tr><th>工具</th><th>分类</th><th>级别</th><th>允许能力</th><th>拒绝能力</th><th>信任度</th></tr></thead>
 <tbody><tr v-for="m in mappings" :key="m.tool_name"><td class="mono">{{ m.tool_name }}</td><td>{{ m.category }}</td><td><span class="badge" :class="'lvl-'+m.default_level">{{ m.default_level }}</span></td>
 <td>{{ (m.allowed_caps||[]).join(', ')||'-' }}</td><td>{{ (m.denied_caps||[]).join(', ')||'-' }}</td><td>{{ (m.trust_factor||0).toFixed(2) }}</td></tr></tbody></table>
-<div v-else class="empty">暂无工具映射配置</div>
+<EmptyState v-else :iconSvg="emptyIcons.mappings" title="暂无工具映射配置" description="配置工具的能力标签来追踪数据源允许的操作" />
 </div>
 
 <div v-if="tab==='contexts'" class="section">
 <table class="data-table" v-if="contexts.length"><thead><tr><th>Trace ID</th><th>用户</th><th>状态</th><th>创建时间</th></tr></thead>
 <tbody><tr v-for="c in contexts" :key="c.trace_id"><td class="mono">{{ c.trace_id }}</td><td>{{ c.user_id||'-' }}</td><td><span class="badge" :class="'st-'+c.status">{{ c.status }}</span></td><td class="mono">{{ c.created_at }}</td></tr></tbody></table>
-<div v-else class="empty">暂无活跃上下文</div>
+<EmptyState v-else :iconSvg="emptyIcons.contexts" title="暂无活跃上下文" description="活跃的能力评估上下文将显示在这里" />
 </div>
 
 <div v-if="tab==='evals'" class="section">
 <table class="data-table" v-if="evals.length"><thead><tr><th>时间</th><th>工具</th><th>动作</th><th>决策</th><th>原因</th><th>Trace</th></tr></thead>
 <tbody><tr v-for="e in evals" :key="e.created_at+e.tool_name"><td class="mono">{{ e.created_at }}</td><td class="mono">{{ e.tool_name }}</td><td>{{ e.action }}</td>
 <td><span class="badge" :class="'dec-'+e.decision">{{ e.decision }}</span></td><td>{{ e.reason||'-' }}</td><td class="mono">{{ (e.trace_id||'').substring(0,12) }}</td></tr></tbody></table>
-<div v-else class="empty">暂无评估记录</div>
+<EmptyState v-else :iconSvg="emptyIcons.evals" title="暂无评估记录" description="工具调用的能力评估记录将显示在这里" />
 </div>
 </div>
 </template>
 <script>
 import { api } from '../api.js'
+import EmptyState from '../components/EmptyState.vue'
 export default {
   name: 'Capability',
-  data() { return { tab: 'mappings', mappings: [], contexts: [], evals: [], stats: {} } },
+  components: { EmptyState },
+  data() { return { tab: 'mappings', mappings: [], contexts: [], evals: [], stats: {},
+    emptyIcons: {
+      mappings: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78m0 0L12 16m0 0l3-3m-3 3l-3 3m9-15l2 2m-2-2v3.5m0 0h3.5"/></svg>',
+      contexts: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+      evals: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>'
+    }
+  } },
   computed: {
     statCards() { const s = this.stats; return [
       {label:'工具映射', value: s.tool_mapping_count??0}, {label:'活跃上下文', value: s.total_contexts??0},

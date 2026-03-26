@@ -18,6 +18,7 @@
             <component :is="Component" />
           </transition>
         </router-view>
+        <Footer />
       </div>
     </div>
     <Toast />
@@ -32,6 +33,7 @@ import { updateHealth, setDisconnected } from './stores/app.js'
 import Sidebar from './components/Sidebar.vue'
 import Topbar from './components/Topbar.vue'
 import Toast from './components/Toast.vue'
+import Footer from './components/Footer.vue'
 import NarrativeMode from './components/NarrativeMode.vue'
 import { navStore } from './stores/navigation.js'
 

@@ -92,13 +92,13 @@
     <!-- 指标卡片 -->
     <div class="ov-cards" v-if="loaded">
       <StatCard :iconSvg="svgGlobe" :value="stats.total" label="总请求" :badge="timeRange" color="blue" :change="stats.totalChange" :changeUp="stats.totalUp" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { since: timeRange } })"/>
-      <StatCard :iconSvg="svgShieldX" :value="stats.blocked" label="拦截数" :badge="timeRange" color="red" :change="stats.blockedChange" :changeUp="false" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { action: 'block', since: timeRange } })"/>
+      <StatCard :iconSvg="svgShieldX" :value="stats.blocked" label="拦截数" :badge="timeRange" color="indigo" :change="stats.blockedChange" :changeUp="false" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { action: 'block', since: timeRange } })"/>
       <StatCard :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" :badge="timeRange" color="yellow" :change="stats.warnedChange" :changeUp="false" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { action: 'warn', since: timeRange } })"/>
-      <StatCard :iconSvg="svgPercent" :value="stats.rate" label="拦截率" :badge="timeRange" color="green" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/rules' })"/>
+      <StatCard :iconSvg="svgPercent" :value="stats.rate" label="拦截率" :badge="timeRange" color="indigo" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/rules' })"/>
       <StatCard :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" badge="30d" color="red" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/user-profiles')"/>
-      <StatCard :iconSvg="svgIFC" :value="ifcStats ? ifcStats.total_violations : '--'" label="IFC Violations" badge="all" color="purple" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/ifc')"/>
-      <StatCard :iconSvg="svgDeviation" :value="deviationStats ? deviationStats.total_deviations : '--'" label="Plan Deviations" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/deviations')"/>
-      <StatCard :iconSvg="svgCapDeny" :value="capabilityStats ? capabilityStats.deny_count : '--'" label="Capability Denials" badge="all" color="red" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/capability')"/>
+      <StatCard :iconSvg="svgIFC" :value="ifcStats ? ifcStats.total_violations : '--'" label="IFC 违规" badge="all" color="purple" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/ifc')"/>
+      <StatCard :iconSvg="svgDeviation" :value="deviationStats ? deviationStats.total_deviations : '--'" label="计划偏差" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/deviations')"/>
+      <StatCard :iconSvg="svgCapDeny" :value="capabilityStats ? capabilityStats.deny_count : '--'" label="能力拒绝" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/capability')"/>
     </div>
     <div class="ov-cards" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
 

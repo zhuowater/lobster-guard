@@ -13,14 +13,15 @@
 </div>
 
 <div v-if="tab==='list'" class="section">
-<table class="data-table" v-if="deviations.length"><thead><tr><th>ID</th><th>类型</th><th>工具</th><th>严重度</th><th>决策</th><th>已修复</th><th>Trace</th></tr></thead>
+<table class="data-table" v-if="deviations.length"><thead><tr><th>ID</th><th>类型</th><th>工具</th><th>严重度</th><th>决策</th><th>已修复</th><th>Trace</th><th>操作</th></tr></thead>
 <tbody><tr v-for="d in deviations" :key="d.id"><td class="mono">{{ (d.id||'').substring(0,12) }}</td>
 <td><span class="type-badge">{{ d.type }}</span></td><td class="mono">{{ d.tool_name }}</td>
 <td><span class="badge" :class="'sev-'+d.severity">{{ d.severity }}</span></td>
 <td><span class="badge" :class="'dec-'+d.decision">{{ d.decision }}</span></td>
 <td>{{ d.repaired ? '是' : '-' }}</td>
-<td class="mono">{{ (d.trace_id||'').substring(0,12) }}</td></tr></tbody></table>
-<div v-else class="empty">暂无偏差检测</div>
+<td class="mono">{{ (d.trace_id||'').substring(0,12) }}</td>
+<td><button v-if="d.trace_id" class="link-btn" @click="$router.push('/audit?trace_id=' + d.trace_id)">📋 查看审计日志</button></td></tr></tbody></table>
+<EmptyState v-else :iconSvg="emptyIcon" title="暂无偏差检测" description="当检测到执行计划偏差时将显示在这里" />
 </div>
 
 <div v-if="tab==='config'" class="section">
@@ -35,9 +36,13 @@
 </template>
 <script>
 import { api, apiPut } from '../api.js'
+import EmptyState from '../components/EmptyState.vue'
 export default {
   name: 'PlanDeviation',
-  data() { return { tab: 'list', deviations: [], stats: {}, configForm: { enabled: false, auto_repair: false, max_repairs: 5 }, saving: false } },
+  components: { EmptyState },
+  data() { return { tab: 'list', deviations: [], stats: {}, configForm: { enabled: false, auto_repair: false, max_repairs: 5 }, saving: false,
+    emptyIcon: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+  } },
   computed: {
     statCards() { const s = this.stats; return [
       {label:'总检查数', value: s.total_checks??0, color:'#6366F1'},
@@ -96,4 +101,6 @@ export default {
 .btn { display:inline-flex; align-items:center; gap:var(--space-1); padding:var(--space-2) var(--space-4); border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:var(--bg-card); cursor:pointer; font-size:var(--text-sm); margin-top:var(--space-4); }
 .btn-primary { background:#6366F1; color:#fff; border-color:#6366F1; }
 .empty { text-align:center; padding:var(--space-8); color:var(--text-tertiary); }
+.link-btn { background:none; border:1px solid var(--border-subtle); border-radius:var(--radius-md); cursor:pointer; padding:2px 8px; font-size:11px; color:#6366F1; transition:all .2s; white-space:nowrap; }
+.link-btn:hover { background:rgba(99,102,241,0.08); border-color:#6366F1; }
 </style>

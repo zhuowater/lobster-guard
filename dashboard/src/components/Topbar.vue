@@ -4,9 +4,11 @@
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <div class="topbar-breadcrumb">
-      <span class="topbar-breadcrumb-root">龙虾卫士</span>
+      <router-link to="/overview" class="topbar-breadcrumb-root topbar-breadcrumb-link">龙虾卫士</router-link>
       <span class="topbar-breadcrumb-sep">/</span>
-      <span class="topbar-breadcrumb-current">{{ currentTitle }}</span>
+      <router-link :to="tabFirstRoute" class="topbar-breadcrumb-tab topbar-breadcrumb-link">{{ currentTabLabel }}</router-link>
+      <span class="topbar-breadcrumb-sep">/</span>
+      <span class="topbar-breadcrumb-current">{{ currentPageLabel }}</span>
     </div>
     <!-- v15.0: 顶部 Tab 导航 -->
     <div class="topnav-tabs" v-if="navStore.mode === 'classic'">
@@ -210,6 +212,71 @@ function onClickOutside(e) { if (notifWrap.value && !notifWrap.value.contains(e.
 let notifTimer = null
 
 const currentTitle = computed(() => route.meta?.title || '概览')
+
+// v18.0: 三级面包屑 — 龙虾卫士 > Tab名 > 页面名
+const allNavItems = {
+  'overview':          { label: '概览（驾驶舱）' },
+  'custom-dashboard':  { label: '自定义大屏' },
+  'anomaly':           { label: '异常检测' },
+  'monitor':           { label: '监控指标' },
+  'audit':             { label: '审计日志' },
+  'sessions':          { label: '会话回放' },
+  'session-detail':    { label: '会话详情' },
+  'attack-chains':     { label: '攻击链分析' },
+  'user-profiles':     { label: '用户画像' },
+  'user-detail':       { label: '用户详情' },
+  'behavior':          { label: '行为画像' },
+  'honeypot':          { label: 'Agent 蜜罐' },
+  'singularity':       { label: '奇点蜜罐' },
+  'prompts':           { label: 'Prompt 追踪' },
+  'taint':             { label: '污染追踪' },
+  'redteam':           { label: 'Red Team' },
+  'semantic':          { label: '语义检测' },
+  'rules':             { label: '入站规则' },
+  'llm-rules':         { label: 'LLM 规则' },
+  'llm-targets':       { label: 'LLM 目标' },
+  'tools':             { label: '工具策略' },
+  'evolution':         { label: '自进化' },
+  'cache':             { label: '响应缓存' },
+  'gateway':           { label: 'API 网关' },
+  'routes':            { label: '路由策略' },
+  'envelopes':         { label: '执行信封' },
+  'events':            { label: '事件总线' },
+  'ab-testing':        { label: 'A/B 测试' },
+  'upstream':          { label: '上游管理' },
+  'plan-compiler':     { label: '执行计划' },
+  'agent':             { label: 'Agent 行为' },
+  'path-policy':       { label: '路径治理' },
+  'counterfactual':    { label: '反事实验证' },
+  'capability':        { label: '能力标签' },
+  'deviations':        { label: '偏差检测' },
+  'ifc':               { label: '信息流控制' },
+  'reports':           { label: '报告中心' },
+  'leaderboard':       { label: '排行榜' },
+  'tenants':           { label: '租户管理' },
+  'users':             { label: '用户管理' },
+  'llm':               { label: 'LLM 概览' },
+  'ops':               { label: '运维工具' },
+  'settings':          { label: '设置' },
+  'gateway-monitor':   { label: 'Gateway 监控' },
+}
+
+const currentTabKey = computed(() => navStore.getTabForRoute(route.name))
+const currentTabLabel = computed(() => {
+  const tab = navStore.tabs[currentTabKey.value]
+  return tab ? tab.label : '安全总览'
+})
+const tabFirstRoute = computed(() => {
+  const tab = navStore.tabs[currentTabKey.value]
+  if (!tab) return '/overview'
+  const firstName = tab.routes ? tab.routes[0] : (tab.groups ? tab.groups[0].routes[0] : 'overview')
+  return { name: firstName }
+})
+const currentPageLabel = computed(() => {
+  const name = route.name
+  if (allNavItems[name]) return allNavItems[name].label
+  return route.meta?.title || '概览'
+})
 const dotClass = computed(() => appState.connectionStatus === 'connected' ? 'dot-healthy' : 'dot-unhealthy')
 const statusLabel = computed(() => {
   const s = appState.connectionStatus
@@ -272,6 +339,9 @@ onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document
 }
 .topbar-breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); white-space: nowrap; }
 .topbar-breadcrumb-root { color: var(--text-tertiary); }
+.topbar-breadcrumb-tab { color: var(--text-secondary); }
+.topbar-breadcrumb-link { text-decoration: none; transition: color var(--transition-fast); cursor: pointer; }
+.topbar-breadcrumb-link:hover { color: var(--color-primary); }
 .topbar-breadcrumb-sep { color: var(--text-disabled); font-size: var(--text-xs); }
 .topbar-breadcrumb-current { color: var(--text-primary); font-weight: 500; }
 .topbar-search { flex: 1; max-width: 400px; margin: 0 auto; position: relative; }

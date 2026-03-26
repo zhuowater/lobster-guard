@@ -21,13 +21,14 @@
     </div>
     <div v-if="activeTab === 'verifications'" class="section">
       <div class="filter-row"><select v-model="verdictFilter" class="field-select" @change="loadVerifications"><option value="">全部判定</option><option value="USER_DRIVEN">USER_DRIVEN</option><option value="INJECTION_DRIVEN">INJECTION_DRIVEN</option><option value="INCONCLUSIVE">INCONCLUSIVE</option></select><input v-model="traceFilter" class="field-input" placeholder="Trace ID..." @keyup.enter="loadVerifications" /><button class="btn btn-sm btn-primary" @click="loadVerifications">查询</button></div>
-      <div class="data-table" v-if="verifications.length"><table><thead><tr><th>时间</th><th>Trace ID</th><th>工具名</th><th>判定</th><th>归因分数</th><th>延迟</th><th>缓存</th><th v-if="adaptiveConfig.feedback_enabled">反馈</th></tr></thead><tbody>
+      <div class="data-table" v-if="verifications.length"><table><thead><tr><th>时间</th><th>Trace ID</th><th>工具名</th><th>判定</th><th>归因分数</th><th>延迟</th><th>缓存</th><th v-if="adaptiveConfig.feedback_enabled">反馈</th><th>操作</th></tr></thead><tbody>
         <template v-for="v in verifications" :key="v.id">
           <tr @click="toggleExpand(v.id)" class="row-clickable"><td class="text-mono text-sm">{{ formatTime(v.created_at) }}</td><td class="text-mono text-sm">{{ (v.trace_id || '-').substring(0, 12) }}</td><td><span class="tool-badge">{{ v.tool_name }}</span></td><td><span class="verdict-badge" :class="verdictClass(v.verdict)">{{ v.verdict }}</span></td><td><div class="attr-bar-wrap"><div class="attr-bar" :style="{width: (v.attribution_score * 100) + '%', background: attrColor(v.attribution_score)}"></div><span class="attr-val">{{ v.attribution_score.toFixed(2) }}</span></div></td><td>{{ v.latency_ms }}ms</td><td><svg v-if="v.cached" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span v-else class="text-muted">-</span></td>
-            <td v-if="adaptiveConfig.feedback_enabled" @click.stop><div class="feedback-btns"><button class="fb-btn fb-correct" :class="{active: feedbackMap[v.id] === true}" @click="submitFeedback(v.id, true)" title="正确"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></button><button class="fb-btn fb-wrong" :class="{active: feedbackMap[v.id] === false}" @click="submitFeedback(v.id, false)" title="误报"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div></td></tr>
-          <tr v-if="expandedId === v.id" class="expand-row"><td :colspan="adaptiveConfig.feedback_enabled ? 8 : 7"><div class="diff-view"><div class="diff-panel"><div class="diff-title">原始 Messages</div><pre class="diff-pre diff-original">{{ formatJSON(v.original_messages) }}</pre></div><div class="diff-panel"><div class="diff-title">对照 Messages</div><pre class="diff-pre diff-control">{{ formatJSON(v.control_messages) }}</pre></div></div><div class="detail-row"><div class="detail-item"><strong>原始结果:</strong> <code>{{ v.original_result }}</code></div><div class="detail-item"><strong>对照结果:</strong> <code>{{ v.control_result }}</code></div><div class="detail-item"><strong>因果来源:</strong> {{ v.causal_driver || '-' }}</div><div class="detail-item"><strong>决策:</strong> <span :class="'decision-'+v.decision">{{ v.decision }}</span></div></div></td></tr>
+            <td v-if="adaptiveConfig.feedback_enabled" @click.stop><div class="feedback-btns"><button class="fb-btn fb-correct" :class="{active: feedbackMap[v.id] === true}" @click="submitFeedback(v.id, true)" title="正确"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></button><button class="fb-btn fb-wrong" :class="{active: feedbackMap[v.id] === false}" @click="submitFeedback(v.id, false)" title="误报"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div></td>
+            <td @click.stop><button v-if="v.trace_id" class="link-btn" @click="$router.push('/audit?trace_id=' + v.trace_id)">📋 查看原始事件</button></td></tr>
+          <tr v-if="expandedId === v.id" class="expand-row"><td :colspan="adaptiveConfig.feedback_enabled ? 9 : 8"><div class="diff-view"><div class="diff-panel"><div class="diff-title">原始 Messages</div><pre class="diff-pre diff-original">{{ formatJSON(v.original_messages) }}</pre></div><div class="diff-panel"><div class="diff-title">对照 Messages</div><pre class="diff-pre diff-control">{{ formatJSON(v.control_messages) }}</pre></div></div><div class="detail-row"><div class="detail-item"><strong>原始结果:</strong> <code>{{ v.original_result }}</code></div><div class="detail-item"><strong>对照结果:</strong> <code>{{ v.control_result }}</code></div><div class="detail-item"><strong>因果来源:</strong> {{ v.causal_driver || '-' }}</div><div class="detail-item"><strong>决策:</strong> <span :class="'decision-'+v.decision">{{ v.decision }}</span></div></div></td></tr>
         </template></tbody></table></div>
-      <div v-else class="empty-state"><p>暂无验证记录</p></div>
+      <EmptyState v-else :iconSvg="emptyIcons.verifications" title="暂无验证记录" description="当系统执行反事实验证时将显示在这里" />
     </div>
     <div v-if="activeTab === 'statistics'" class="section">
       <div class="chart-grid">
@@ -103,18 +104,17 @@
           </div>
         </div>
       </div>
-      <div v-else class="empty-state">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="1.5"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
-        <p>暂无因果归因事件</p>
-      </div>
+      <EmptyState v-else :iconSvg="emptyIcons.attribution" title="暂无因果归因事件" description="因果归因分析结果将显示在这里" />
     </div>
   </div>
 </template>
 
 <script>
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
+import EmptyState from '../components/EmptyState.vue'
 export default {
   name: 'Counterfactual',
+  components: { EmptyState },
   data() {
     return {
       activeTab: 'verifications',
@@ -126,6 +126,10 @@ export default {
       adaptiveForm: { enabled: false, monthly_budget_usd: 100, cost_per_verification: 0.05, priority_mode: 'hybrid', min_risk_for_sync: 80, feedback_enabled: true },
       savingAdaptive: false, adaptiveMsg: '', adaptiveMsgType: '', feedbackMap: {},
       timelineEvents: [], expandedTimelineId: null,
+      emptyIcons: {
+        verifications: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+        attribution: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>'
+      },
     }
   },
   computed: {
@@ -319,4 +323,6 @@ export default {
 .step-removed-badge { color: #DC2626; font-size: 0.7rem; display: inline-flex; align-items: center; gap: 2px; font-weight: 600; }
 .step-kept-badge { color: #059669; font-size: 0.7rem; display: inline-flex; align-items: center; gap: 2px; font-weight: 600; }
 .decision-info { margin-top: var(--space-2); font-size: 0.85rem; }
+.link-btn { background:none; border:1px solid var(--border, #e5e7eb); border-radius:8px; cursor:pointer; padding:2px 8px; font-size:11px; color:#6366F1; transition:all .2s; white-space:nowrap; }
+.link-btn:hover { background:rgba(99,102,241,0.08); border-color:#6366F1; }
 </style>

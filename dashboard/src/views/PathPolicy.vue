@@ -49,7 +49,7 @@
                 <button class="btn-icon btn-icon-danger" @click="confirmDeleteRule(r)" title="删除"><Icon name="trash" :size="14"/></button>
               </td>
             </tr>
-            <tr v-if="filteredRules.length===0"><td colspan="7" class="empty-row">暂无规则</td></tr>
+            <tr v-if="filteredRules.length===0"><td colspan="7"><EmptyState :iconSvg="svgRules" title="暂无规则" description="创建路径策略规则来约束 Agent 行为"/></td></tr>
           </tbody>
         </table>
       </div>
@@ -92,7 +92,7 @@
           </div>
         </div>
       </div>
-      <div v-else class="empty-state"><Icon name="git-branch" :size="48" color="#6366F1"/><p>暂无活跃路径</p></div>
+      <EmptyState v-else :iconSvg="svgPath" title="暂无活跃路径" description="当 Agent 会话产生路径时将显示在这里" />
     </div>
 
     <!-- Events Tab -->
@@ -122,7 +122,7 @@
               <td class="td-desc">{{ ev.reason }}</td>
               <td class="td-mono">{{ ev.path_length }}</td>
             </tr>
-            <tr v-if="filteredEvents.length===0"><td colspan="7" class="empty-row">暂无事件</td></tr>
+            <tr v-if="filteredEvents.length===0"><td colspan="7"><EmptyState :iconSvg="svgWarn" title="暂无事件" description="路径策略决策事件将记录在这里"/></td></tr>
           </tbody>
         </table>
       </div>
@@ -162,7 +162,7 @@
           <div class="gauge-last" v-if="g.last_action">最近: <span class="td-mono">{{ g.last_action }}</span></div>
         </div>
       </div>
-      <div v-else class="empty-state"><Icon name="activity" :size="48" color="#6366F1"/><p>暂无活跃会话</p></div>
+      <EmptyState v-else :iconSvg="svgPath" title="暂无活跃会话" description="活跃 Agent 会话的实时风险评分将显示在这里" />
     </div>
 
     <!-- Templates Tab (v23.2 CRUD) -->
@@ -196,7 +196,7 @@
           </div>
         </div>
       </div>
-      <div v-else class="empty-state"><Icon name="book" :size="48" color="#6366F1"/><p>暂无模板</p></div>
+      <EmptyState v-else :iconSvg="svgRules" title="暂无模板" description="创建策略模板来快速启用合规与安全规则" />
     </div>
 
     <!-- Template Modal -->
@@ -294,11 +294,12 @@
 import Icon from '../components/Icon.vue'
 import StatCard from '../components/StatCard.vue'
 import Skeleton from '../components/Skeleton.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 
 export default {
   name: 'PathPolicy',
-  components: { Icon, StatCard, Skeleton },
+  components: { Icon, StatCard, Skeleton, EmptyState },
   data() {
     return {
       activeTab: 'rules', initialLoading: true, stats: {}, rules: [], contexts: [], events: [],

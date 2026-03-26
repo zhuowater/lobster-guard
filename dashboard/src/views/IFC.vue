@@ -26,7 +26,7 @@
 <td><span class="badge" :class="'integ-'+r.label.integrity">{{ integLabel(r.label.integrity) }}</span></td>
 <td><button class="btn-icon" @click="editSource(r)" title="编辑">✏️</button>
 <button class="btn-icon" @click="deleteSource(r.source)" title="删除">🗑️</button></td></tr></tbody></table>
-<div v-else class="empty">暂无来源规则</div>
+<EmptyState v-else :iconSvg="emptyIcons.sourceRules" title="暂无来源规则" description="添加来源规则来定义数据的机密性和完整性标签" />
 
 <!-- Add/Edit Source Rule Modal -->
 <div v-if="showAddSource" class="modal-overlay" @click.self="showAddSource=false"><div class="modal">
@@ -47,7 +47,7 @@
 <td><span class="badge" :class="'conf-'+r.max_confidentiality">{{ confLabel(r.max_confidentiality) }}</span></td>
 <td><button class="btn-icon" @click="editTool(r)" title="编辑">✏️</button>
 <button class="btn-icon" @click="deleteTool(r.tool)" title="删除">🗑️</button></td></tr></tbody></table>
-<div v-else class="empty">暂无工具要求</div>
+<EmptyState v-else :iconSvg="emptyIcons.toolReqs" title="暂无工具要求" description="添加工具要求来限制工具可处理的数据级别" />
 
 <!-- Add/Edit Tool Modal -->
 <div v-if="showAddTool" class="modal-overlay" @click.self="showAddTool=false"><div class="modal">
@@ -69,20 +69,22 @@
 <td><span class="badge" :class="'conf-'+v.label.confidentiality">{{ confLabel(v.label.confidentiality) }}</span></td>
 <td><span class="badge" :class="'integ-'+v.label.integrity">{{ integLabel(v.label.integrity) }}</span></td>
 <td class="mono">{{ (v.parents||[]).map(p=>p.substring(0,8)).join(', ') || '-' }}</td></tr></tbody></table>
-<div v-else class="empty">输入 trace_id 搜索变量</div>
+<EmptyState v-else :iconSvg="emptyIcons.variables" title="暂无变量数据" description="输入 trace_id 搜索变量" />
 </div>
 
 <!-- Violations Tab -->
 <div v-if="tab==='violations'" class="section">
-<table class="data-table" v-if="violations.length"><thead><tr><th>类型</th><th>变量</th><th>工具</th><th>标签</th><th>动作</th><th>时间</th></tr></thead>
+<table class="data-table" v-if="violations.length"><thead><tr><th>类型</th><th>变量</th><th>工具</th><th>标签</th><th>动作</th><th>时间</th><th>关联</th></tr></thead>
 <tbody><tr v-for="v in violations" :key="v.id">
 <td><span class="badge" :class="'viol-'+v.type">{{ v.type }}</span></td>
 <td class="mono">{{ (v.variable||'').substring(0,12) }}</td>
 <td class="mono">{{ v.tool }}</td>
 <td>机密={{ confLabel(v.var_label.confidentiality) }}, 完整={{ integLabel(v.var_label.integrity) }}</td>
 <td><span class="badge" :class="'dec-'+v.action">{{ v.action }}</span></td>
-<td>{{ formatTime(v.timestamp) }}</td></tr></tbody></table>
-<div v-else class="empty">暂无违规记录</div>
+<td>{{ formatTime(v.timestamp) }}</td>
+<td class="td-links"><button v-if="v.variable" class="link-btn" @click="$router.push('/user-profiles/' + encodeURIComponent(v.variable))" title="查看用户">🔗 查看用户</button>
+<button v-if="v.trace_id" class="link-btn" @click="$router.push('/audit?trace_id=' + v.trace_id)" title="查看审计">📋 查看审计</button></td></tr></tbody></table>
+<EmptyState v-else :iconSvg="emptyIcons.violations" title="暂无违规记录" description="当检测到信息流违规时将显示在这里" />
 </div>
 
 <!-- Live Check Tab -->
@@ -121,7 +123,7 @@
 <td class="mono">{{ s.output_var ? s.output_var.substring(0,12) : '-' }}</td>
 <td>{{ formatTime(s.start_time) }}</td>
 <td>{{ formatTime(s.end_time) }}</td></tr></tbody></table>
-<div v-else class="empty">暂无隔离会话</div>
+<EmptyState v-else :iconSvg="emptyIcons.quarantine" title="暂无隔离会话" description="当数据被隔离处理时将显示在这里" />
 </div>
 
 <!-- v26.2: Data Flow Tab -->
@@ -142,7 +144,7 @@
 <td><span class="badge" :class="'integ-'+v.label.integrity">{{ integLabel(v.label.integrity) }}</span></td>
 <td class="mono">{{ (v.parents||[]).length > 0 ? (v.parents||[]).map(p=>p.substring(0,8)).join(' → ') : '(root)' }}</td></tr></tbody></table>
 </div>
-<div v-else class="empty">输入 trace_id 探索数据流</div>
+<EmptyState v-else :iconSvg="emptyIcons.dataflow" title="暂无数据流" description="输入 trace_id 探索数据流传播链" />
 
 <!-- DOE Events from Stats -->
 <div class="doe-section" v-if="stats.total_doe > 0">
@@ -155,8 +157,10 @@
 </template>
 <script>
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
+import EmptyState from '../components/EmptyState.vue'
 export default {
   name: 'IFC',
+  components: { EmptyState },
   data() { return {
     tab: 'source-rules', stats: {}, sourceRules: [], toolReqs: [], variables: [], violations: [],
     varTraceId: '', showAddSource: false, showAddTool: false, editingSource: null, editingTool: null,
@@ -167,7 +171,16 @@ export default {
     // v26.1: Quarantine
     quarantineSessions: [], quarantineStats: {},
     // v26.2: Data Flow
-    dfTraceId: '', dfVariables: []
+    dfTraceId: '', dfVariables: [],
+    // Empty state icons
+    emptyIcons: {
+      sourceRules: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      toolReqs: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+      variables: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+      violations: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+      quarantine: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><line x1="12" y1="15" x2="12" y2="19"/></svg>',
+      dataflow: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+    }
   }},
   computed: {
     statCards() { const s = this.stats; return [
@@ -299,4 +312,7 @@ export default {
 .doe-section { margin-top:var(--space-6); }
 .doe-section h4 { font-size:var(--text-base); font-weight:600; margin-bottom:var(--space-3); }
 .doe-alert { background:rgba(249,115,22,0.08); border:1px solid rgba(249,115,22,0.2); border-radius:var(--radius-md); padding:var(--space-3) var(--space-4); color:#EA580C; font-size:var(--text-sm); }
+.td-links { display:flex; gap:var(--space-1); flex-wrap:wrap; }
+.link-btn { background:none; border:1px solid var(--border-subtle); border-radius:var(--radius-md); cursor:pointer; padding:2px 8px; font-size:11px; color:#6366F1; transition:all .2s; white-space:nowrap; }
+.link-btn:hover { background:rgba(99,102,241,0.08); border-color:#6366F1; }
 </style>
