@@ -94,3 +94,36 @@ envelope_secret_key: "your-hmac-secret-key-change-me"
 # conf.d/ 目录下每个 .yaml/.yml 文件按字母序加载，合并到此配置。
 # 不存在时静默跳过，单文件配置模式完全向后兼容。
 # 示例文件见 conf.d/ 目录。
+
+# v23.0 路径级策略引擎
+path_policy:
+  enabled: true
+
+# v24.0 反事实验证
+counterfactual:
+  enabled: false
+  mode: "async"              # sync | async
+  max_per_hour: 100          # 每小时最大验证次数
+  risk_threshold: 0.7        # 风险阈值
+  cache_ttl_sec: 300         # 缓存 TTL
+  timeout_sec: 5             # 单次验证超时
+  fuzzy_match: true          # 模糊匹配
+
+# v25.0 执行计划编译器 (CaMeL)
+plan_compiler:
+  enabled: true
+  match_threshold: 0.3       # 模板匹配阈值 (0-1)
+  max_active_plans: 1000     # 最大活跃计划数
+  strict_mode: false         # 严格模式(true=block, false=warn)
+  violation_action: warn     # 违规动作: warn | block | log
+
+# v25.1 Capability 权限系统
+capability:
+  enabled: true
+  default_policy: allow      # 默认策略: allow | deny
+
+# v25.2 偏差检测
+deviation:
+  enabled: true
+  auto_repair: false         # 自动修复
+  max_repairs: 5             # 最大修复次数

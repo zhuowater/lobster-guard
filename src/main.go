@@ -605,10 +605,18 @@ func main() {
 	// v23.0: 路径级策略引擎
 	pathPolicyEngine := NewPathPolicyEngine(logger.DB())
 	pathPolicyEngine.SetUserProfileEngine(mgmtAPI.userProfileEng) // v23.1: 攻击者画像联动
-	fmt.Println("[初始化] ✅ 路径级策略引擎已就绪 (路径追踪 + 序列/累计/降级规则 + 画像联动)")
+	if cfg.PathPolicy.Enabled {
+		fmt.Println("[初始化] ✅ 路径级策略引擎已启用 (路径追踪 + 序列/累计/降级规则 + 画像联动)")
+	} else {
+		fmt.Println("[初始化] ✅ 路径级策略引擎已就绪 (路径追踪 + 序列/累计/降级规则 + 画像联动)")
+	}
 
 	// v24.0: 反事实验证引擎
-	cfVerifier := NewCounterfactualVerifier(logger.DB(), defaultCFConfig, nil)
+	cfConfig := defaultCFConfig
+	if cfg.Counterfactual.Enabled {
+		cfConfig = cfg.Counterfactual
+	}
+	cfVerifier := NewCounterfactualVerifier(logger.DB(), cfConfig, nil)
 	cfVerifier.SetPathPolicy(pathPolicyEngine)
 	mgmtAPI.cfVerifier = cfVerifier
 	if llmProxy != nil {
@@ -623,7 +631,11 @@ func main() {
 	fmt.Println("[初始化] ✅ 自适应验证策略引擎已就绪 (成本控制 + 优先级调度 + 效果追踪)")
 
 	// v25.0: 执行计划编译器
-	planCompiler := NewPlanCompiler(logger.DB(), defaultPlanConfig)
+	planCfg := defaultPlanConfig
+	if cfg.PlanCompiler.Enabled {
+		planCfg = cfg.PlanCompiler
+	}
+	planCompiler := NewPlanCompiler(logger.DB(), planCfg)
 	mgmtAPI.planCompiler = planCompiler
 	if llmProxy != nil {
 		llmProxy.planCompiler = planCompiler
@@ -631,7 +643,11 @@ func main() {
 	fmt.Println("[初始化] ✅ 执行计划编译器已就绪 (CaMeL 网关级程序解释器, 20+ 内置模板)")
 
 	// v25.1: Capability 权限系统
-	capEngine := NewCapabilityEngine(logger.DB(), CapConfig{Enabled: false, DefaultPolicy: "allow"})
+	capCfg := cfg.Capability
+	if capCfg.DefaultPolicy == "" {
+		capCfg.DefaultPolicy = "allow"
+	}
+	capEngine := NewCapabilityEngine(logger.DB(), capCfg)
 	mgmtAPI.capabilityEngine = capEngine
 	if llmProxy != nil {
 		llmProxy.capabilityEngine = capEngine
@@ -639,7 +655,11 @@ func main() {
 	fmt.Println("[初始化] ✅ Capability 权限系统已就绪")
 
 	// v25.2: Plan 偏差检测器
-	devDetector := NewDeviationDetector(logger.DB(), defaultDeviationConfig, planCompiler, capEngine)
+	devCfg := cfg.Deviation
+	if devCfg.MaxRepairs == 0 {
+		devCfg.MaxRepairs = 5
+	}
+	devDetector := NewDeviationDetector(logger.DB(), devCfg, planCompiler, capEngine)
 	mgmtAPI.deviationDetector = devDetector
 	if llmProxy != nil {
 		llmProxy.deviationDetector = devDetector

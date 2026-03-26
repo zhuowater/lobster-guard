@@ -239,6 +239,17 @@ type Config struct {
 	Discovery DiscoveryConfig `yaml:"discovery" json:"discovery"`
 	// v20.6 模块配置目录（分层配置）
 	ConfDir string `yaml:"conf_dir" json:"conf_dir"` // 模块配置目录，默认 "conf.d"（相对于主配置文件）
+
+	// v23.0 路径级策略引擎
+	PathPolicy PathPolicyConfig `yaml:"path_policy" json:"path_policy"`
+	// v24.0 反事实验证
+	Counterfactual CFConfig `yaml:"counterfactual" json:"counterfactual"`
+	// v25.0 执行计划编译器
+	PlanCompiler PlanConfig `yaml:"plan_compiler" json:"plan_compiler"`
+	// v25.1 Capability 权限系统
+	Capability CapConfig `yaml:"capability" json:"capability"`
+	// v25.2 偏差检测
+	Deviation DeviationConfig `yaml:"deviation" json:"deviation"`
 }
 
 // DiscoveryConfig K8s 服务发现配置（v21.0）
@@ -656,3 +667,10 @@ func validateConfig(cfg *Config) []string {
 
 	return errs
 }
+
+// PathPolicyConfig v23.0 路径策略引擎配置
+type PathPolicyConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
+// (CounterfactualYAMLConfig removed: using CFConfig directly)
