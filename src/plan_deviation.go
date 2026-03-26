@@ -15,18 +15,32 @@ import (
 )
 
 type DeviationDetector struct {
-	db           *sql.DB
-	mu           sync.RWMutex
-	config       DeviationConfig
-	planCompiler *PlanCompiler
-	capEngine    *CapabilityEngine
-	stats        DeviationStats
+	db              *sql.DB
+	mu              sync.RWMutex
+	config          DeviationConfig
+	planCompiler    *PlanCompiler
+	capEngine       *CapabilityEngine
+	stats           DeviationStats
+	repairPolicies  []RepairPolicy
 }
 
 type DeviationConfig struct {
-	Enabled    bool `json:"enabled" yaml:"enabled"`
-	AutoRepair bool `json:"auto_repair" yaml:"auto_repair"`
-	MaxRepairs int  `json:"max_repairs" yaml:"max_repairs"` // per trace
+	Enabled        bool            `json:"enabled" yaml:"enabled"`
+	AutoRepair     bool            `json:"auto_repair" yaml:"auto_repair"`
+	MaxRepairs     int             `json:"max_repairs" yaml:"max_repairs"` // per trace
+	RepairPolicies []RepairPolicy  `json:"repair_policies" yaml:"repair_policies"`
+}
+
+// RepairPolicy 定义特定偏差类型/严重度的修复策略
+type RepairPolicy struct {
+	ID          string `json:"id" yaml:"id"`
+	Name        string `json:"name" yaml:"name"`
+	DeviationType string `json:"deviation_type" yaml:"deviation_type"` // out_of_order / unexpected / capability_violation / * (all)
+	Severity    string `json:"severity" yaml:"severity"`               // minor / moderate / critical / * (all)
+	Action      string `json:"action" yaml:"action"`                   // replace_tool / sanitize_args / block / skip / log
+	Description string `json:"description" yaml:"description"`
+	Enabled     bool   `json:"enabled" yaml:"enabled"`
+	Builtin     bool   `json:"builtin" yaml:"builtin"`
 }
 
 type Deviation struct {
@@ -88,7 +102,9 @@ func NewDeviationDetector(db *sql.DB, config DeviationConfig, pc *PlanCompiler, 
 		capEngine:    ce,
 	}
 	dd.initDeviationDB()
-	log.Printf("[Deviation] Detector initialized: enabled=%v auto_repair=%v max_repairs=%d", config.Enabled, config.AutoRepair, config.MaxRepairs)
+	dd.initRepairPolicies()
+	log.Printf("[Deviation] Detector initialized: enabled=%v auto_repair=%v max_repairs=%d policies=%d",
+		config.Enabled, config.AutoRepair, config.MaxRepairs, len(dd.repairPolicies))
 	return dd
 }
 
@@ -118,6 +134,132 @@ func (dd *DeviationDetector) initDeviationDB() {
 	atomic.StoreInt64(&dd.stats.ModerateCount, moderate)
 	atomic.StoreInt64(&dd.stats.MinorCount, minor)
 	atomic.StoreInt64(&dd.stats.RepairsApplied, repaired)
+}
+
+func (dd *DeviationDetector) initRepairPolicies() {
+	if dd.db == nil {
+		return
+	}
+	dd.db.Exec(`CREATE TABLE IF NOT EXISTS repair_policies (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL, deviation_type TEXT NOT NULL,
+		severity TEXT NOT NULL, action TEXT NOT NULL, description TEXT DEFAULT '',
+		enabled INTEGER DEFAULT 1, builtin INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
+
+	defaults := getDefaultRepairPolicies()
+	for _, p := range defaults {
+		dd.db.Exec(`INSERT OR IGNORE INTO repair_policies (id, name, deviation_type, severity, action, description, enabled, builtin) VALUES (?,?,?,?,?,?,?,?)`,
+			p.ID, p.Name, p.DeviationType, p.Severity, p.Action, p.Description, p.Enabled, true)
+		dd.db.Exec(`UPDATE repair_policies SET name=?, description=? WHERE id=? AND builtin=1`,
+			p.Name, p.Description, p.ID)
+	}
+	dd.loadRepairPolicies()
+}
+
+func (dd *DeviationDetector) loadRepairPolicies() {
+	if dd.db == nil {
+		return
+	}
+	rows, err := dd.db.Query("SELECT id, name, deviation_type, severity, action, description, enabled, builtin FROM repair_policies ORDER BY id")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	var policies []RepairPolicy
+	for rows.Next() {
+		var p RepairPolicy
+		var enabled, builtin int
+		rows.Scan(&p.ID, &p.Name, &p.DeviationType, &p.Severity, &p.Action, &p.Description, &enabled, &builtin)
+		p.Enabled = enabled == 1
+		p.Builtin = builtin == 1
+		policies = append(policies, p)
+	}
+	dd.mu.Lock()
+	dd.repairPolicies = policies
+	dd.mu.Unlock()
+}
+
+func getDefaultRepairPolicies() []RepairPolicy {
+	return []RepairPolicy{
+		{ID: "rp-001", Name: "乱序工具替换", DeviationType: "out_of_order", Severity: "moderate", Action: "replace_tool", Description: "工具调用顺序不符时，替换为计划期望的工具", Enabled: true},
+		{ID: "rp-002", Name: "意外工具参数修正", DeviationType: "unexpected", Severity: "minor", Action: "sanitize_args", Description: "未知工具调用时，清理参数中的敏感信息", Enabled: true},
+		{ID: "rp-003", Name: "权限违规阻断", DeviationType: "capability_violation", Severity: "critical", Action: "block", Description: "能力标签不足时直接阻断", Enabled: true},
+		{ID: "rp-004", Name: "严格模式未知工具", DeviationType: "unexpected", Severity: "critical", Action: "block", Description: "严格模式下未匹配的工具直接阻断", Enabled: true},
+		{ID: "rp-005", Name: "乱序仅记录", DeviationType: "out_of_order", Severity: "moderate", Action: "log", Description: "乱序调用仅记录不修复（保守策略）", Enabled: false},
+	}
+}
+
+// GetRepairPolicies 返回所有修复策略
+func (dd *DeviationDetector) GetRepairPolicies() []RepairPolicy {
+	dd.mu.RLock()
+	defer dd.mu.RUnlock()
+	out := make([]RepairPolicy, len(dd.repairPolicies))
+	copy(out, dd.repairPolicies)
+	return out
+}
+
+// CreateRepairPolicy 创建自定义修复策略
+func (dd *DeviationDetector) CreateRepairPolicy(p RepairPolicy) error {
+	if p.ID == "" || p.Name == "" || p.Action == "" {
+		return fmt.Errorf("id, name and action required")
+	}
+	if dd.db != nil {
+		_, err := dd.db.Exec(`INSERT INTO repair_policies (id, name, deviation_type, severity, action, description, enabled, builtin) VALUES (?,?,?,?,?,?,?,0)`,
+			p.ID, p.Name, p.DeviationType, p.Severity, p.Action, p.Description, p.Enabled)
+		if err != nil {
+			return fmt.Errorf("create policy: %w", err)
+		}
+	}
+	dd.loadRepairPolicies()
+	return nil
+}
+
+// UpdateRepairPolicy 更新修复策略
+func (dd *DeviationDetector) UpdateRepairPolicy(id string, p RepairPolicy) error {
+	if dd.db != nil {
+		res, err := dd.db.Exec(`UPDATE repair_policies SET name=?, deviation_type=?, severity=?, action=?, description=?, enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+			p.Name, p.DeviationType, p.Severity, p.Action, p.Description, p.Enabled, id)
+		if err != nil {
+			return fmt.Errorf("update policy: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("policy %s not found", id)
+		}
+	}
+	dd.loadRepairPolicies()
+	return nil
+}
+
+// DeleteRepairPolicy 删除自定义修复策略（内置不可删）
+func (dd *DeviationDetector) DeleteRepairPolicy(id string) error {
+	if dd.db != nil {
+		res, err := dd.db.Exec("DELETE FROM repair_policies WHERE id=? AND builtin=0", id)
+		if err != nil {
+			return fmt.Errorf("delete policy: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("policy %s not found or is builtin", id)
+		}
+	}
+	dd.loadRepairPolicies()
+	return nil
+}
+
+// findRepairPolicy 查找匹配偏差类型和严重度的第一个已启用策略
+func (dd *DeviationDetector) findRepairPolicy(devType, severity string) *RepairPolicy {
+	dd.mu.RLock()
+	defer dd.mu.RUnlock()
+	for _, p := range dd.repairPolicies {
+		if !p.Enabled {
+			continue
+		}
+		typeMatch := p.DeviationType == devType || p.DeviationType == "*"
+		sevMatch := p.Severity == severity || p.Severity == "*"
+		if typeMatch && sevMatch {
+			return &p
+		}
+	}
+	return nil
 }
 
 func generateDevID() string {
@@ -194,7 +336,10 @@ func (dd *DeviationDetector) Detect(traceID, toolName, toolArgs string) *Deviati
 
 	// Check 2: Capability compliance (if CapabilityEngine available)
 	if dd.capEngine != nil {
-		capEval := dd.capEngine.Evaluate(traceID, "", "execute", toolName)
+		// 注册工具结果并用真实 dataID 做评估（修复之前传空 dataID 的问题）
+		dataID := fmt.Sprintf("dev-tool-%s-%d", toolName, time.Now().UnixNano())
+		dd.capEngine.RegisterToolResult(traceID, toolName, dataID)
+		capEval := dd.capEngine.Evaluate(traceID, dataID, "execute", toolName)
 		if capEval != nil && capEval.Decision == "block" {
 			dev := &Deviation{
 				ID:        generateDevID(),
@@ -228,12 +373,26 @@ func (dd *DeviationDetector) attemptRepair(traceID, toolName, toolArgs string, e
 	}
 
 	sev := eval.Violation.Severity
-	// Only repair minor and moderate; critical is never auto-repaired
-	if sev != "minor" && sev != "moderate" {
-		return RepairResult{Reason: fmt.Sprintf("severity %s not repairable", sev)}
+	sm := eval.StepMatch
+
+	// 确定偏差类型
+	devType := "unexpected"
+	if sm == "out_of_order" {
+		devType = "out_of_order"
 	}
 
-	// Check repair budget
+	// 查找匹配的修复策略
+	policy := dd.findRepairPolicy(devType, sev)
+	if policy == nil {
+		return RepairResult{Reason: fmt.Sprintf("no repair policy for type=%s sev=%s", devType, sev)}
+	}
+
+	// 策略动作为 block/skip/log 时不修复
+	if policy.Action == "block" || policy.Action == "skip" || policy.Action == "log" {
+		return RepairResult{Reason: fmt.Sprintf("policy %s: action=%s (no repair)", policy.ID, policy.Action)}
+	}
+
+	// 检查修复预算
 	dd.mu.RLock()
 	maxRepairs := dd.config.MaxRepairs
 	dd.mu.RUnlock()
@@ -246,36 +405,40 @@ func (dd *DeviationDetector) attemptRepair(traceID, toolName, toolArgs string, e
 		}
 	}
 
-	sm := eval.StepMatch
-
-	// Strategy 1: out_of_order (moderate) — replace tool with expected tool, keep args
-	if sm == "out_of_order" && eval.Violation.Expected != "" {
-		return RepairResult{
-			Success: true,
-			Tool:    eval.Violation.Expected,
-			Args:    "", // keep original args
-			Reason:  fmt.Sprintf("tool replaced: %s → %s", toolName, eval.Violation.Expected),
+	// 按策略执行修复
+	switch policy.Action {
+	case "replace_tool":
+		// 工具替换：用计划期望的工具替换
+		if eval.Violation.Expected != "" {
+			return RepairResult{
+				Success: true,
+				Tool:    eval.Violation.Expected,
+				Args:    "",
+				Reason:  fmt.Sprintf("[%s] 工具替换: %s → %s", policy.ID, toolName, eval.Violation.Expected),
+			}
 		}
-	}
+		return RepairResult{Reason: fmt.Sprintf("[%s] replace_tool: no expected tool", policy.ID)}
 
-	// Strategy 2: unexpected tool (minor, non-strict) — sanitize args, keep tool
-	if sev == "minor" {
+	case "sanitize_args":
+		// 参数修正：清理参数
 		var args map[string]interface{}
 		if json.Unmarshal([]byte(toolArgs), &args) != nil {
 			return RepairResult{Reason: "cannot parse args"}
 		}
 		args["_repaired"] = true
 		args["_repair_reason"] = eval.Violation.Expected
+		args["_repair_policy"] = policy.ID
 		repaired, _ := json.Marshal(args)
 		return RepairResult{
 			Success: true,
-			Tool:    "", // keep original tool
+			Tool:    "",
 			Args:    string(repaired),
-			Reason:  fmt.Sprintf("args sanitized for %s", toolName),
+			Reason:  fmt.Sprintf("[%s] 参数修正: %s", policy.ID, toolName),
 		}
-	}
 
-	return RepairResult{Reason: fmt.Sprintf("no repair strategy for match=%s sev=%s", sm, sev)}
+	default:
+		return RepairResult{Reason: fmt.Sprintf("unknown action: %s", policy.Action)}
+	}
 }
 
 func (dd *DeviationDetector) recordDeviation(dev *Deviation) {

@@ -1209,6 +1209,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDeviationsConfigGet(w, r)
 	case path == "/api/v1/deviations/config" && method == "PUT":
 		api.handleDeviationsConfigUpdate(w, r)
+	case path == "/api/v1/deviations/repair-policies" && method == "GET":
+		api.handleRepairPoliciesList(w, r)
+	case path == "/api/v1/deviations/repair-policies" && method == "POST":
+		api.handleRepairPoliciesCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/deviations/repair-policies/") && method == "PUT":
+		api.handleRepairPoliciesUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/deviations/repair-policies/") && method == "DELETE":
+		api.handleRepairPoliciesDelete(w, r)
 	case strings.HasPrefix(path, "/api/v1/deviations/") && method == "GET":
 		api.handleDeviationsDetail(w, r)
 
