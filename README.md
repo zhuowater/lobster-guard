@@ -11,14 +11,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v22.4-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v25.2-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-1006_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-290+_routes-purple?style=flat-square" alt="API Routes">
-  <img src="https://img.shields.io/badge/dashboard-39_pages-orange?style=flat-square" alt="Dashboard">
+  <img src="https://img.shields.io/badge/tests-1151_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-256+_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/dashboard-46_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
 
@@ -62,27 +62,31 @@
 | ☣️ **污染追踪** | 12 PII 模式 · 三端传播 · 血缘阻断 · 逆转引擎 · IM↔LLM trace 关联 · SSE 流式逆转 |
 | 💾 **响应缓存** | TF-IDF 语义匹配 · 租户隔离 · 污染跳过 |
 | 🚪 **API 网关** | JWT + APIKey · 路由优先级 · 灰度发布 |
-| 🖥️ **管理后台** | Vue 3 Dashboard · 38 页面 · 21 组件 · 5 组侧边栏 |
+| 🛤️ **路径策略** | v23 PathPolicyEngine · 序列/累计/降级规则 · 执行历史感知安全决策 |
+| 🔬 **反事实验证** | v24 AttriGuard 对照验证 · 因果归因 · 4 级归因评分 · 预算控制 |
+| 🧩 **CaMeL 计划编译** | v25 PlanCompiler · Capability 权限 · 偏差检测 · 20 模板 · 自动修复 |
+| 🖥️ **管理后台** | Vue 3 Dashboard · 46 页面 · 21 组件 · 5 组侧边栏 |
 
 ### 🏗️ 设计哲学
 
-- **单二进制部署** — 125 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
+- **单二进制部署** — 85 个源文件编译出一个二进制（含 Dashboard + 规则模板），扔上去就跑
 - **Fail-Open** — 检测异常不阻塞业务，宁可漏检不可误杀
-- **零外部依赖** — 只依赖 SQLite + YAML 解析 + WebSocket + x/crypto（4 个依赖），不引入 Redis/MQ/K8s
+- **零外部依赖** — 只依赖 SQLite + YAML 解析 + UUID + WebSocket + x/crypto（5 个依赖），不引入 Redis/MQ/K8s
 - **向后兼容** — 不配多容器就自动退化为单上游模式，平滑升级
 
 ### 📊 项目统计
 
 | 指标 | 数值 |
 |------|------|
-| Go 源文件 | 125 个 |
-| Go 测试文件 | 55 个 |
-| Go 代码行数 | ~75,000 行 |
-| Vue 前端 | 38 页面 + 21 组件，~23,300 行 |
-| API 路由 | ~280+ 个 |
-| 测试函数 | 1112 个（全部通过）|
-| Git Commit | 197 个 |
-| 外部依赖 | 4 个（sqlite3 + yaml.v3 + gorilla/websocket + x/crypto）|
+| Go 源文件 | 85 个 |
+| Go 测试文件 | 61 个 |
+| Go 代码行数 | ~86,300 行（源）+ ~33,600 行（测试）|
+| Vue 前端 | 46 页面 + 组件，72 文件 ~27,300 行 |
+| API 路由 | ~256+ 个 |
+| 测试函数 | 1151 个（全部通过）|
+| 引擎/组件 | 53 个 |
+| Git Commit | 242 个 |
+| 外部依赖 | 5 个（sqlite3 + yaml.v3 + uuid + gorilla/websocket + x/crypto）|
 
 ---
 
@@ -90,8 +94,8 @@
 
 ### 管理后台全览
 
-> Vue 3 深色科技主题 · Indigo 配色 · 38 页面 · 5 组侧边栏
-> 含事件总线、语义检测、污染追踪、API 网关、LLM 缓存等新管理页面
+> Vue 3 深色科技主题 · Indigo 配色 · 46 页面 · 5 组侧边栏
+> 含路径策略、反事实验证、CaMeL 计划编译、事件总线、语义检测、污染追踪等管理页面
 
 ![Dashboard Overview](docs/screenshots/dashboard-overview-v17.png)
 
@@ -169,11 +173,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v22.4 .
+docker build -t lobster-guard:v25.2 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v22.4
+  lobster-guard:v25.2
 ```
 
 ### 6. Kubernetes 部署
@@ -206,13 +210,13 @@ open http://localhost:9090/
 | [🏛️ 架构说明](docs/architecture.md) | 架构图 · 4 端口 · 数据流 · 插件架构 · Taint 全链路 |
 | [🔌 多通道配置](docs/channels.md) | 5 通道配置示例 · Bridge Mode WSS 长连接 |
 | [🛡️ 安全检测能力](docs/detection.md) | 规则体系 · 检测管线 · 规则模板库 |
-| [📡 API 参考](docs/api-reference.md) | ~280+ 路由完整列表 · 调用示例 |
+| [📡 API 参考](docs/api-reference.md) | ~256+ 路由完整列表 · 调用示例 |
 | [📦 部署指南](docs/deployment.md) | 直接运行 · Systemd · Docker · K8s · Make |
 | [☸️ K8s 服务发现](docs/k8s-discovery.md) | InCluster/Kubeconfig · 自动注册 · RBAC · 零依赖 |
 | [🔀 上游管理](docs/upstream-management.md) | CRUD API · 四种来源 · 路由策略 · Dashboard |
-| [🧪 测试说明](docs/testing.md) | 1112 用例 · 端到端模拟 · 性能指标 |
+| [🧪 测试说明](docs/testing.md) | 1151 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 完整配置项 · 出站规则合并机制 |
-| [🖥️ 管理后台](docs/dashboard.md) | 38 页面详情 · 组件库 · 截图集合 |
+| [🖥️ 管理后台](docs/dashboard.md) | 46 页面详情 · 组件库 · 截图集合 |
 
 ### 其他文档
 
@@ -244,13 +248,13 @@ Skill 文件位于 `skills/lobster-guard/SKILL.md`。
 
 ```
 lobster-guard/
-├── src/                    # Go 源代码（125 源 + 55 测试 = 180 个文件）
+├── src/                    # Go 源代码（85 源 + 61 测试 = 146 个文件）
 │   ├── main.go             #   入口 + CLI 参数 + 启动流程
 │   ├── config.go           #   配置加载 + 验证器
 │   ├── plugin.go           #   ChannelPlugin 接口 + 5 通道插件
 │   ├── detect.go           #   RuleEngine (AC自动机 + 正则)
 │   ├── proxy.go            #   入站/出站 HTTP 代理
-│   ├── api.go              #   管理 API (~275 路由)
+│   ├── api.go              #   管理 API (~256 路由)
 │   ├── llm_proxy.go        #   LLM 反向代理
 │   ├── envelope.go         #   密码学执行信封
 │   ├── event_bus.go        #   事件总线 + ActionChain
@@ -260,9 +264,9 @@ lobster-guard/
 │   ├── llm_cache.go        #   LLM 响应缓存
 │   ├── api_gateway.go      #   API 网关
 │   └── ...                 #   其余源文件
-├── dashboard/              # Vue 3 前端 (38 页面 + 21 组件)
-│   ├── src/views/          #   38 个页面
-│   └── src/components/     #   21 个组件
+├── dashboard/              # Vue 3 前端 (46 页面 + 组件, 72 文件)
+│   ├── src/views/          #   46 个页面
+│   └── src/components/     #   组件
 ├── rules/                  # 规则模板库 (64 条, 4 场景)
 │   ├── general.yaml        #   通用 (越狱/注入/社工)
 │   ├── financial.yaml      #   金融
@@ -291,7 +295,7 @@ lobster-guard/
 ├── config.yaml.example     # 核心配置模板（~70 行，必填项）
 ├── Makefile                # 编译/测试/部署
 ├── ROADMAP.md              # 版本路线图
-└── go.mod / go.sum         # Go 依赖 (4 个)
+└── go.mod / go.sum         # Go 依赖 (5 个)
 ```
 
 ---
@@ -326,6 +330,11 @@ lobster-guard/
 | **v22.2** | 👥 **Agent 运营中心** — 5 视图(仪表盘/卡片/协作/用户/Skill) · Token 饼图 · 上下文使用率 · Skill 目录扫描(54 skills) |
 | **v22.3** | 🎯 **Per-Upstream AOC** — AOC 从全局移入上游展开行 · 威胁地图回连路径修复(Claude→LLM检测→OpenClaw) |
 | **v22.4** | 🎨 **SVG 图标统一** — 9 处 emoji→feather SVG · tab/AOC/操作/渠道/会话/Skill 全覆盖 |
+| **v23.0-v23.2** | 🛤️ **PathPolicyEngine** — 路径级策略引擎 · 序列/累计/降级规则 · 风险评分 · 策略模板 CRUD |
+| **v24.0-v24.2** | 🔬 **Counterfactual Verifier** — AttriGuard 反事实验证 · 因果归因 · 自适应策略 · 预算控制 |
+| **v25.0** | 🧩 **CaMeL PlanCompiler** — 执行计划编译器 · 20 模板(6 类) · 中文 i18n · tool_call 评估 |
+| **v25.1** | 🔐 **Capability Engine** — 数据级 capability 标签 · 权限传播 · 污染联动 |
+| **v25.2** | 📐 **Deviation Detector** — 计划偏差检测 · 自动修复 · Minor/Moderate/Critical 分级 |
 
 详细版本历史参见 [ROADMAP.md](ROADMAP.md)。
 
@@ -338,5 +347,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v22.4 · 71 Go files · 76K lines · 1006 tests · 290+ APIs · 61 Vue components</sub>
+  <sub>🦞 Built with Go, secured with care. v25.2 · 85 Go files · 86K lines · 1151 tests · 256+ APIs · 46 Dashboard pages · 53 engines</sub>
 </p>

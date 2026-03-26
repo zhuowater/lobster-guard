@@ -1,5 +1,58 @@
 # Changelog
 
+## Fixes (2026-03-26)
+- Dashboard field binding: 6 pages, 8 mismatches fixed
+- Deviation/Taint counters: restored from DB on restart
+- PlanCompiler: total_evaluations counter added
+- ToolPolicy: loadStats() now uses /api/v1/tools/stats
+- config.yaml support for v23-v25 engines (was hardcoded defaults)
+- 7 bypassed E2E gaps closed (taint/envelope/simulate/LLM proxy)
+- i18n template matching: Chinese keywords for all 20 templates
+- LLM Proxy: X-Trace-Id header propagation
+
+## v25.2 (2026-03-26) — CaMeL Plan Deviation Detection
+- DeviationDetector: plan deviation detection + auto-repair
+- Dashboard: PlanDeviation.vue
+- 5 API endpoints, 11 tests
+
+## v25.1 (2026-03-26) — Capability Engine
+- CapabilityEngine: data-level capability tagging
+- Dashboard: Capability.vue
+- 7 API endpoints, 17 tests
+
+## v25.0 (2026-03-26) — CaMeL PlanCompiler
+- PlanCompiler: intent→template matching, tool_call evaluation
+- 20 built-in templates (6 categories), Chinese keyword i18n
+- Dashboard: PlanCompiler.vue
+- 12 API endpoints, 18+ tests
+
+## v24.2 (2026-03-25) — Adaptive Verification Strategy
+- AdaptiveStrategy + CostTracker + EffectTracker
+- 29 tests
+
+## v24.1 (2026-03-25) — Attribution Audit
+- AttributionReport + CausalChain + EvidenceSummary
+
+## v24.0 (2026-03-25) — Counterfactual Verifier
+- AttriGuard-inspired counterfactual verification
+- 4-level attribution, sync/async modes, budget control
+- Dashboard: Counterfactual.vue
+- 15 API endpoints, 24 tests
+
+## v23.2 (2026-03-25) — Strategy Template CRUD
+- Full CRUD for policy templates, 8 built-in templates
+- 35 tests
+
+## v23.1 (2026-03-25) — Path Risk Scoring
+- UserProfileEngine linkage, risk gauge API
+
+## v23.0 (2026-03-25) — PathPolicyEngine
+- Runtime path-level governance: sequence, cumulative, degradation rules
+- Dashboard: PathPolicy.vue
+- 10 API endpoints
+
+---
+
 ## v22.4 (2026-03-24) — Gateway 监控 + Agent 运营中心 + SVG 统一
 
 > 71 Go 源文件 · 61 Vue 文件 · ~76,400 行 Go · ~25,500 行 Vue · 1006 测试全部通过 · 212 commits
