@@ -795,3 +795,83 @@ func TestIFC_FidesExplicitSecrecy(t *testing.T) {
 		t.Error("P-F should block: SECRET data → PUBLIC-only tool")
 	}
 }
+
+func TestIFC_SelectiveHide(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+	e := NewIFCEngine(db, IFCConfig{
+		Enabled:     true,
+		DefaultConf: ConfPublic,
+		DefaultInteg: IntegHigh,
+		SourceRules: []IFCSourceRule{
+			{Source: "tool:web_fetch", Label: IFCLabel{Confidentiality: ConfPublic, Integrity: IntegTaint}},
+			{Source: "tool:read_secret", Label: IFCLabel{Confidentiality: ConfSecret, Integrity: IntegHigh}},
+			{Source: "tool:calculator", Label: IFCLabel{Confidentiality: ConfPublic, Integrity: IntegHigh}},
+		},
+	})
+	traceID := "test-selective-hide"
+	contextLabel := IFCLabel{Confidentiality: ConfInternal, Integrity: IntegMedium}
+
+	// Case 1: calculator (PUBLIC, HIGH) — within context bounds → no hiding
+	r1 := e.SelectiveHide(traceID, "calculator", "42", contextLabel)
+	if r1.Hidden {
+		t.Error("calculator should NOT be hidden — label within context")
+	}
+	if r1.Modified != "42" {
+		t.Errorf("content should be unchanged, got: %s", r1.Modified)
+	}
+
+	// Case 2: web_fetch (PUBLIC, TAINT) — would lower integrity (TAINT < MEDIUM) → HIDE
+	r2 := e.SelectiveHide(traceID, "web_fetch", "untrusted web content here", contextLabel)
+	if !r2.Hidden {
+		t.Error("web_fetch should be hidden — integrity TAINT < context MEDIUM")
+	}
+	if len(r2.VarIDs) != 1 {
+		t.Errorf("expected 1 var, got %d", len(r2.VarIDs))
+	}
+	if !strings.Contains(r2.Modified, "IFC_VAR:") {
+		t.Errorf("modified should contain IFC_VAR placeholder, got: %s", r2.Modified)
+	}
+	if !strings.Contains(r2.Reason, "integ") {
+		t.Errorf("reason should mention integ, got: %s", r2.Reason)
+	}
+
+	// Case 3: read_secret (SECRET, HIGH) — would raise conf (SECRET > INTERNAL) → HIDE
+	r3 := e.SelectiveHide(traceID, "read_secret", "password=hunter2", contextLabel)
+	if !r3.Hidden {
+		t.Error("read_secret should be hidden — conf SECRET > context INTERNAL")
+	}
+	if !strings.Contains(r3.Reason, "conf") {
+		t.Errorf("reason should mention conf, got: %s", r3.Reason)
+	}
+
+	// Verify content is stored and expandable
+	content, label, ok := e.ExpandVariable(traceID, r3.VarIDs[0])
+	if !ok {
+		t.Error("ExpandVariable should find the hidden content")
+	}
+	if content != "password=hunter2" {
+		t.Errorf("expanded content mismatch: got %s", content)
+	}
+	if label.Confidentiality != ConfSecret {
+		t.Errorf("expanded label conf should be SECRET, got %v", label.Confidentiality)
+	}
+}
+
+func TestIFC_SelectiveHide_NoSourceRule(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+	e := NewIFCEngine(db, IFCConfig{
+		Enabled:      true,
+		DefaultConf:  ConfPublic,
+		DefaultInteg: IntegMedium,
+	})
+	traceID := "test-sh-default"
+	ctx := IFCLabel{Confidentiality: ConfPublic, Integrity: IntegMedium}
+
+	// Unknown tool → uses defaults (PUBLIC, MEDIUM) → same as context → no hiding
+	r := e.SelectiveHide(traceID, "unknown_tool", "some data", ctx)
+	if r.Hidden {
+		t.Error("unknown tool with default label matching context should not hide")
+	}
+}

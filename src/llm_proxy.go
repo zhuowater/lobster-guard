@@ -389,13 +389,18 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestPath = stripped
 	}
 
-	// v26.2: 选择性隐藏 — 向上游发送前替换高机密字段
+	// v26.2: PII 隐藏 — 向上游发送前替换高机密字段
 	if lp.ifcEngine != nil && lp.ifcEngine.config.HidingEnabled {
 		hideResult := lp.ifcEngine.HideContent(traceID, string(bodyBytes), lp.ifcEngine.config.HidingThreshold)
 		if hideResult != nil && hideResult.HiddenCount > 0 {
 			log.Printf("[IFC-Hiding] 隐藏了 %d 个字段 trace=%s", hideResult.HiddenCount, traceID)
 			bodyBytes = []byte(hideResult.Redacted)
 		}
+	}
+
+	// v28.0i: Fides Selective Hide — scan tool messages in request, hide content that would raise context label
+	if lp.ifcEngine != nil && lp.ifcEngine.config.Enabled {
+		bodyBytes = lp.applySelectiveHide(traceID, bodyBytes)
 	}
 
 	upstreamURL := strings.TrimRight(target.Upstream, "/") + requestPath
@@ -1088,4 +1093,126 @@ func isToolBlacklisted(toolName, blacklistCSV string) bool {
 		}
 	}
 	return false
+}
+
+// ============================================================
+// Fides Selective Hide — scan messages for tool results, replace high-label content
+// ============================================================
+// Algorithm 7 HIDE: for each node in tool result, if label ⋢ context label,
+// store in variable and replace with reference.
+
+func (lp *LLMProxy) applySelectiveHide(traceID string, body []byte) []byte {
+	if lp.ifcEngine == nil {
+		return body
+	}
+
+	// Parse messages array from request body
+	var reqObj map[string]interface{}
+	if err := json.Unmarshal(body, &reqObj); err != nil {
+		return body
+	}
+	messages, ok := reqObj["messages"].([]interface{})
+	if !ok || len(messages) == 0 {
+		return body
+	}
+
+	// Compute current context label: join of all messages' labels seen so far
+	// For simplicity, we track context as the join of all previous tool result labels
+	contextLabel := IFCLabel{
+		Confidentiality: lp.ifcEngine.config.DefaultConf,
+		Integrity:       lp.ifcEngine.config.DefaultInteg,
+	}
+
+	// First pass: determine the "safe" context label from system+user messages
+	// System and user messages are trusted (⊥ in Fides)
+	for _, msg := range messages {
+		m, ok := msg.(map[string]interface{})
+		if !ok { continue }
+		role, _ := m["role"].(string)
+		if role == "system" || role == "user" {
+			// These don't raise context — they are trusted/public
+			continue
+		}
+	}
+
+	modified := false
+	hiddenCount := 0
+
+	// Second pass: check tool messages and selectively hide
+	for i, msg := range messages {
+		m, ok := msg.(map[string]interface{})
+		if !ok { continue }
+		role, _ := m["role"].(string)
+		if role != "tool" { continue }
+
+		content, _ := m["content"].(string)
+		if content == "" { continue }
+
+		// Infer tool name from context (previous assistant message's tool_call)
+		toolName := lp.inferToolNameFromMessages(messages, i)
+		if toolName == "" {
+			toolName = "unknown_tool"
+		}
+
+		hideResult := lp.ifcEngine.SelectiveHide(traceID, toolName, content, contextLabel)
+		if hideResult.Hidden {
+			m["content"] = hideResult.Modified
+			messages[i] = m
+			hiddenCount++
+			modified = true
+		} else {
+			// This tool result is safe — join its label into context
+			if hideResult.OrigLabel.Confidentiality > contextLabel.Confidentiality {
+				contextLabel.Confidentiality = hideResult.OrigLabel.Confidentiality
+			}
+			if hideResult.OrigLabel.Integrity < contextLabel.Integrity {
+				contextLabel.Integrity = hideResult.OrigLabel.Integrity
+			}
+		}
+	}
+
+	if !modified {
+		return body
+	}
+
+	log.Printf("[IFC:SelectiveHide] trace=%s hidden=%d tool results to preserve context label", traceID, hiddenCount)
+
+	reqObj["messages"] = messages
+	newBody, err := json.Marshal(reqObj)
+	if err != nil {
+		return body
+	}
+	return newBody
+}
+
+// inferToolNameFromMessages — look backward from a tool message to find the tool_call that produced it
+func (lp *LLMProxy) inferToolNameFromMessages(messages []interface{}, toolMsgIdx int) string {
+	// Tool message usually has a "tool_call_id" matching an assistant message's tool_call
+	toolMsg, ok := messages[toolMsgIdx].(map[string]interface{})
+	if !ok { return "" }
+	toolCallID, _ := toolMsg["tool_call_id"].(string)
+
+	// Walk backwards to find matching assistant tool_call
+	for i := toolMsgIdx - 1; i >= 0; i-- {
+		m, ok := messages[i].(map[string]interface{})
+		if !ok { continue }
+		role, _ := m["role"].(string)
+		if role != "assistant" { continue }
+
+		toolCalls, ok := m["tool_calls"].([]interface{})
+		if !ok { continue }
+		for _, tc := range toolCalls {
+			tcMap, ok := tc.(map[string]interface{})
+			if !ok { continue }
+			id, _ := tcMap["id"].(string)
+			if id == toolCallID || toolCallID == "" {
+				fn, ok := tcMap["function"].(map[string]interface{})
+				if ok {
+					name, _ := fn["name"].(string)
+					return name
+				}
+			}
+		}
+	}
+	return ""
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -347,6 +348,18 @@ func (e *IFCEngine) initDB() {
 		required_integ INTEGER NOT NULL DEFAULT 0,
 		max_conf INTEGER NOT NULL DEFAULT 0
 	)`)
+
+	// Fides SelectiveHide: store original content of hidden variables
+	e.db.Exec(`CREATE TABLE IF NOT EXISTS ifc_hidden_content (
+		var_id TEXT PRIMARY KEY,
+		trace_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL DEFAULT '',
+		content TEXT NOT NULL DEFAULT '',
+		conf INTEGER NOT NULL DEFAULT 0,
+		integ INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_ifc_hidden_trace ON ifc_hidden_content(trace_id)`)
 }
 
 func (e *IFCEngine) restoreCounters() {
@@ -655,6 +668,116 @@ func (e *IFCEngine) createViolation(traceID, toolName, violationType string, agg
 			violationType, toolName, aggLabel.Confidentiality, aggLabel.Integrity,
 			reqLabel.Confidentiality, reqLabel.Integrity),
 	}
+}
+
+// ============================================================
+// SelectiveHide — Fides-style: hide tool results that would raise context label
+// ============================================================
+// When a tool result's label would upgrade the current conversation context
+// (higher conf or lower integ), replace the content with a variable reference
+// and store the original in IFC variable memory. The LLM sees only the
+// reference, preserving context label so subsequent tool calls remain allowed.
+//
+// Returns: modified content (with placeholders), list of created variable IDs,
+// and whether any hiding was performed.
+
+type IFCSelectiveHideResult struct {
+	Modified    string   `json:"modified"`
+	Hidden      bool     `json:"hidden"`
+	VarIDs      []string `json:"var_ids"`
+	Reason      string   `json:"reason"`
+	OrigLabel   IFCLabel `json:"orig_label"`
+	ContextLabel IFCLabel `json:"context_label"`
+}
+
+func (e *IFCEngine) SelectiveHide(traceID, toolName, content string, contextLabel IFCLabel) *IFCSelectiveHideResult {
+	result := &IFCSelectiveHideResult{
+		Modified:     content,
+		Hidden:       false,
+		VarIDs:       []string{},
+		ContextLabel: contextLabel,
+	}
+
+	// Determine the tool result's label from source rules
+	toolLabel := IFCLabel{
+		Confidentiality: e.config.DefaultConf,
+		Integrity:       e.config.DefaultInteg,
+	}
+	e.mu.RLock()
+	if l, ok := e.sourceRules["tool:"+toolName]; ok {
+		toolLabel = l
+	} else if l, ok := e.sourceRules[toolName]; ok {
+		toolLabel = l
+	}
+	e.mu.RUnlock()
+	result.OrigLabel = toolLabel
+
+	// Fides HIDE decision: would this data raise the context label?
+	// Context label rises if: tool_conf > ctx_conf OR tool_integ < ctx_integ
+	wouldRaiseConf := toolLabel.Confidentiality > contextLabel.Confidentiality
+	wouldLowerInteg := toolLabel.Integrity < contextLabel.Integrity
+
+	if !wouldRaiseConf && !wouldLowerInteg {
+		result.Reason = "label within context bounds, no hiding needed"
+		return result
+	}
+
+	// Store content in IFC variable
+	v := e.RegisterVariable(traceID, fmt.Sprintf("hidden:%s", toolName), "tool:"+toolName, content)
+
+	// Persist original content for later expansion
+	if e.db != nil {
+		e.db.Exec(`INSERT OR REPLACE INTO ifc_hidden_content (var_id, trace_id, tool_name, content, conf, integ, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			v.ID, traceID, toolName, content, int(toolLabel.Confidentiality), int(toolLabel.Integrity), time.Now().UTC().Format(time.RFC3339))
+	}
+
+	// Replace content with variable reference
+	placeholder := fmt.Sprintf("[IFC_VAR:%s | tool=%s, conf=%s, integ=%s — content hidden to preserve context label]",
+		v.ID, toolName, toolLabel.Confidentiality, toolLabel.Integrity)
+	result.Modified = placeholder
+	result.Hidden = true
+	result.VarIDs = append(result.VarIDs, v.ID)
+
+	reasons := []string{}
+	if wouldRaiseConf {
+		reasons = append(reasons, fmt.Sprintf("conf %s→%s would raise context", contextLabel.Confidentiality, toolLabel.Confidentiality))
+	}
+	if wouldLowerInteg {
+		reasons = append(reasons, fmt.Sprintf("integ %s→%s would taint context", contextLabel.Integrity, toolLabel.Integrity))
+	}
+	result.Reason = strings.Join(reasons, "; ")
+
+	atomic.AddInt64(&e.totalHidden, 1)
+
+	log.Printf("[IFC:SelectiveHide] trace=%s tool=%s hidden=true vars=[%s] reason=%s",
+		traceID, toolName, v.ID, result.Reason)
+
+	return result
+}
+
+// ExpandVariable — retrieve hidden variable content for tool_call argument expansion.
+// Called when proxy needs to restore the original data before forwarding to the tool.
+func (e *IFCEngine) ExpandVariable(traceID, varID string) (string, *IFCLabel, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	traceVars := e.variables[traceID]
+	if traceVars == nil {
+		return "", nil, false
+	}
+	v, ok := traceVars[varID]
+	if !ok {
+		return "", nil, false
+	}
+	// Content was stored in RegisterVariable but we need a way to retrieve it.
+	// Look up from DB since in-memory IFCVariable doesn't store content.
+	if e.db != nil {
+		var content string
+		err := e.db.QueryRow("SELECT content FROM ifc_hidden_content WHERE var_id = ?", varID).Scan(&content)
+		if err == nil {
+			return content, &v.Label, true
+		}
+	}
+	return "", &v.Label, false
 }
 
 // ============================================================
