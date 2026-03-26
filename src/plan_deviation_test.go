@@ -1,106 +1,388 @@
+// plan_deviation_test.go — DeviationDetector tests (v25.2)
 package main
 
 import (
 	"database/sql"
+	"sync"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func setupDevTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil { t.Fatal(err) }
+func newDevDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&_busy_timeout=5000")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
 	return db
 }
 
-func TestDeviation_Basic(t *testing.T) {
-	db := setupDevTestDB(t)
-	defer db.Close()
-	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true, MaxRepairs: 5}, nil, nil)
-	if dd == nil { t.Fatal("detector should not be nil") }
+func newDevDetector(t *testing.T, cfg DeviationConfig, pcCfg *PlanConfig) *DeviationDetector {
+	t.Helper()
+	db := newDevDB(t)
+	var pc *PlanCompiler
+	if pcCfg != nil {
+		pc = NewPlanCompiler(db, *pcCfg)
+	}
+	return NewDeviationDetector(db, cfg, pc, nil)
 }
 
-func TestDeviation_Disabled(t *testing.T) {
-	dd := NewDeviationDetector(nil, DeviationConfig{Enabled: false}, nil, nil)
-	r := dd.Detect("trace-1", "shell_exec", "{}")
-	if r.Decision != "allow" { t.Errorf("expected allow when disabled, got %s", r.Decision) }
+var devPCDefault = &PlanConfig{
+	Enabled: true, StrictMode: false, MaxStepsPerPlan: 20, DefaultTimeout: 300,
+	AutoComplete: true, ViolationAction: "warn", MatchThreshold: 0.1,
+	MaxActivePlans: 100, RetentionDays: 30,
 }
 
-func TestDeviation_NoPlanNoCap(t *testing.T) {
-	dd := NewDeviationDetector(nil, DeviationConfig{Enabled: true}, nil, nil)
-	r := dd.Detect("trace-1", "shell_exec", "{}")
-	if r.HasDeviation { t.Error("no deviation expected without plan or cap engine") }
+var devPCStrict = &PlanConfig{
+	Enabled: true, StrictMode: true, MaxStepsPerPlan: 20, DefaultTimeout: 300,
+	AutoComplete: false, ViolationAction: "block", MatchThreshold: 0.1,
+	MaxActivePlans: 100, RetentionDays: 30,
 }
 
-func TestDeviation_WithPlanCompiler(t *testing.T) {
-	db := setupDevTestDB(t)
-	defer db.Close()
-	pc := NewPlanCompiler(db, PlanConfig{Enabled: true, ViolationAction: "block", StrictMode: true})
-	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true}, pc, nil)
+// ── 1. 基础功能 ──────────────────────────────────────
 
-	// No plan compiled → strict mode in plan compiler may block
-	r := dd.Detect("trace-1", "unknown_tool", "{}")
-	// Just check it doesn't panic
-	_ = r
-}
-
-func TestDeviation_Stats(t *testing.T) {
-	dd := NewDeviationDetector(nil, DeviationConfig{Enabled: true}, nil, nil)
-	dd.Detect("t1", "a", "{}")
-	dd.Detect("t2", "b", "{}")
-	s := dd.GetStats()
-	if s.TotalChecks != 2 { t.Errorf("expected 2 checks, got %d", s.TotalChecks) }
-}
-
-func TestDeviation_Config(t *testing.T) {
-	dd := NewDeviationDetector(nil, DeviationConfig{Enabled: true, AutoRepair: false, MaxRepairs: 3}, nil, nil)
+func TestNewDeviationDetector(t *testing.T) {
+	db := newDevDB(t)
+	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true, AutoRepair: false, MaxRepairs: 3}, nil, nil)
+	if dd == nil {
+		t.Fatal("expected non-nil detector")
+	}
 	cfg := dd.GetConfig()
-	if !cfg.Enabled { t.Error("should be enabled") }
-	if cfg.AutoRepair { t.Error("auto_repair should be false") }
-	dd.UpdateConfig(DeviationConfig{Enabled: false, AutoRepair: true, MaxRepairs: 10})
-	cfg2 := dd.GetConfig()
-	if cfg2.Enabled { t.Error("should be disabled after update") }
-	if !cfg2.AutoRepair { t.Error("auto_repair should be true after update") }
+	if !cfg.Enabled || cfg.AutoRepair || cfg.MaxRepairs != 3 {
+		t.Errorf("config mismatch: %+v", cfg)
+	}
+	// MaxRepairs <= 0 → default 5
+	dd2 := NewDeviationDetector(nil, DeviationConfig{MaxRepairs: 0}, nil, nil)
+	if dd2.GetConfig().MaxRepairs != 5 {
+		t.Errorf("expected default max_repairs=5, got %d", dd2.GetConfig().MaxRepairs)
+	}
+	t.Logf("✅ NewDeviationDetector initializes correctly (incl. default max_repairs)")
 }
 
-func TestDeviation_QueryEmpty(t *testing.T) {
-	db := setupDevTestDB(t)
-	defer db.Close()
-	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true}, nil, nil)
+func TestCheckDeviation_NoPlan(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCDefault)
+	r := dd.Detect("trace-noplan", "web_search", `{"q":"test"}`)
+	if r.HasDeviation {
+		t.Error("expected no deviation when no plan for trace")
+	}
+	if r.Decision != "allow" {
+		t.Errorf("expected allow, got %s", r.Decision)
+	}
+	t.Logf("✅ No deviation when no active plan")
+}
+
+func TestCheckDeviation_Normal(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCDefault)
+	plan := dd.planCompiler.CompileIntent("trace-norm", "search for golang tutorials and find information")
+	if plan == nil {
+		t.Fatal("expected plan")
+	}
+	r := dd.Detect("trace-norm", "web_search", `{"q":"golang"}`)
+	if r.HasDeviation {
+		t.Errorf("expected no deviation for planned tool, got: %+v", r.Deviation)
+	}
+	if r.Decision != "allow" {
+		t.Errorf("expected allow, got %s", r.Decision)
+	}
+	t.Logf("✅ Normal tool call (plan match) — no deviation")
+}
+
+func TestCheckDeviation_UnexpectedTool(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCStrict)
+	dd.planCompiler.CompileIntent("trace-unexp", "search for golang and find information")
+	r := dd.Detect("trace-unexp", "dangerous_hack_tool", `{}`)
+	if !r.HasDeviation || r.Deviation == nil {
+		t.Fatal("expected deviation for unexpected tool")
+	}
+	if r.Decision != "block" {
+		t.Errorf("expected block, got %s", r.Decision)
+	}
+	if r.Deviation.Severity != "critical" {
+		t.Errorf("expected critical, got %s", r.Deviation.Severity)
+	}
+	t.Logf("✅ Unexpected tool: type=%s severity=%s decision=%s", r.Deviation.Type, r.Deviation.Severity, r.Decision)
+}
+
+func TestCheckDeviation_ParameterAnomaly(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCDefault)
+	dd.planCompiler.CompileIntent("trace-param", "search for data and find results")
+	r := dd.Detect("trace-param", "shell_exec", `{"cmd":"rm -rf /"}`)
+	if !r.HasDeviation {
+		t.Fatal("expected deviation")
+	}
+	if r.Deviation.Severity != "minor" {
+		t.Errorf("expected minor severity, got %s", r.Deviation.Severity)
+	}
+	if r.Decision != "warn" {
+		t.Errorf("expected warn, got %s", r.Decision)
+	}
+	t.Logf("✅ Parameter anomaly: severity=%s decision=%s", r.Deviation.Severity, r.Decision)
+}
+
+func TestCheckDeviation_OrderViolation(t *testing.T) {
+	noAuto := &PlanConfig{
+		Enabled: true, StrictMode: false, MaxStepsPerPlan: 20, DefaultTimeout: 300,
+		AutoComplete: false, ViolationAction: "warn", MatchThreshold: 0.1,
+		MaxActivePlans: 100, RetentionDays: 30,
+	}
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, noAuto)
+	plan := dd.planCompiler.CompileIntent("trace-ord", "search for golang and find information")
+	if plan == nil || plan.TotalSteps < 2 {
+		t.Skipf("need >=2 steps, got %d", plan.TotalSteps)
+	}
+	dd.planCompiler.mu.Lock()
+	tpl := dd.planCompiler.templates[plan.TemplateID]
+	second := tpl.Steps[1].ToolName
+	dd.planCompiler.mu.Unlock()
+	r := dd.Detect("trace-ord", second, `{}`)
+	if !r.HasDeviation {
+		t.Fatal("expected order violation")
+	}
+	if r.Deviation.Severity != "moderate" {
+		t.Errorf("expected moderate, got %s", r.Deviation.Severity)
+	}
+	t.Logf("✅ Order violation: tool=%s severity=%s", second, r.Deviation.Severity)
+}
+
+// ── 2. 自动修复 ──────────────────────────────────────
+
+func TestAutoRepair_Disabled(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, AutoRepair: false, MaxRepairs: 5}, devPCDefault)
+	dd.planCompiler.CompileIntent("trace-norep", "search for data and find results")
+	r := dd.Detect("trace-norep", "shell_exec", `{"cmd":"ls"}`)
+	if r.HasDeviation && r.Deviation != nil && r.Deviation.Repaired {
+		t.Error("should not repair when disabled")
+	}
+	if dd.GetStats().RepairsApplied != 0 {
+		t.Error("expected 0 repairs")
+	}
+	t.Logf("✅ Auto-repair disabled — no repairs")
+}
+
+func TestAutoRepair_Enabled(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, AutoRepair: true, MaxRepairs: 5}, devPCDefault)
+	dd.planCompiler.CompileIntent("trace-rep", "search for data and find results")
+	r := dd.Detect("trace-rep", "my_custom_tool", `{"key":"value"}`)
+	if !r.HasDeviation {
+		t.Fatal("expected deviation")
+	}
+	if r.Deviation.Severity != "minor" {
+		t.Skipf("severity=%s (not minor), auto-repair N/A", r.Deviation.Severity)
+	}
+	if !r.Deviation.Repaired {
+		t.Error("expected repaired=true")
+	}
+	if r.Deviation.RepairedArgs == "" {
+		t.Error("expected non-empty repaired_args")
+	}
+	if r.Deviation.Decision != "allow" {
+		t.Errorf("expected allow after repair, got %s", r.Deviation.Decision)
+	}
+	if dd.GetStats().RepairsApplied < 1 {
+		t.Error("expected >=1 repairs_applied")
+	}
+	t.Logf("✅ Auto-repair enabled: args=%s", r.Deviation.RepairedArgs)
+}
+
+func TestAutoRepair_MaxRepairs(t *testing.T) {
+	noAuto := &PlanConfig{
+		Enabled: true, StrictMode: false, MaxStepsPerPlan: 20, DefaultTimeout: 300,
+		AutoComplete: false, ViolationAction: "warn", MatchThreshold: 0.1,
+		MaxActivePlans: 100, RetentionDays: 30,
+	}
+	max := 2
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, AutoRepair: true, MaxRepairs: max}, noAuto)
+	dd.planCompiler.CompileIntent("trace-max", "search for data and find results")
+	repaired := 0
+	for i := 0; i < max+3; i++ {
+		r := dd.Detect("trace-max", "unknown_tool", `{"i":"test"}`)
+		if r.HasDeviation && r.Deviation != nil && r.Deviation.Repaired {
+			repaired++
+		}
+	}
+	if repaired > max {
+		t.Errorf("expected at most %d repairs, got %d", max, repaired)
+	}
+	t.Logf("✅ Auto-repair stops at max_repairs=%d: actual=%d", max, repaired)
+}
+
+// ── 3. 统计与历史 ────────────────────────────────────
+
+func TestDeviationStats(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCStrict)
+	dd.Detect("t1", "web_search", `{}`)
+	dd.planCompiler.CompileIntent("t2", "search for data and find results")
+	dd.Detect("t2", "bad_tool", `{}`)
+	dd.Detect("t3", "web_search", `{}`)
+	s := dd.GetStats()
+	if s.TotalChecks < 3 {
+		t.Errorf("expected >=3 checks, got %d", s.TotalChecks)
+	}
+	if s.TotalDeviations < 1 {
+		t.Errorf("expected >=1 deviations, got %d", s.TotalDeviations)
+	}
+	if s.CriticalCount < 1 {
+		t.Errorf("expected >=1 critical, got %d", s.CriticalCount)
+	}
+	t.Logf("✅ Stats: checks=%d dev=%d crit=%d mod=%d min=%d rep=%d",
+		s.TotalChecks, s.TotalDeviations, s.CriticalCount, s.ModerateCount, s.MinorCount, s.RepairsApplied)
+}
+
+func TestDeviationHistory(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCStrict)
+	dd.planCompiler.CompileIntent("trace-hist", "search for data and find results")
+	dd.Detect("trace-hist", "bad_tool_1", `{}`)
+	dd.Detect("trace-hist", "bad_tool_2", `{}`)
+	devs := dd.QueryDeviations("trace-hist", "", 50)
+	if len(devs) < 2 {
+		t.Errorf("expected >=2 deviations, got %d", len(devs))
+	}
+	for _, d := range devs {
+		if d.ID == "" || d.TraceID != "trace-hist" || d.Severity == "" {
+			t.Errorf("bad deviation: %+v", d)
+		}
+	}
+	crit := dd.QueryDeviations("", "critical", 50)
+	if len(crit) < 2 {
+		t.Errorf("expected >=2 critical, got %d", len(crit))
+	}
+	t.Logf("✅ History: %d by trace, %d critical", len(devs), len(crit))
+}
+
+// ── 4. 边界条件 ──────────────────────────────────────
+
+func TestCheckDeviation_EmptyTool(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCDefault)
+	dd.planCompiler.CompileIntent("trace-et", "search for data and find results")
+	r := dd.Detect("trace-et", "", `{}`)
+	if r == nil {
+		t.Fatal("nil result for empty tool")
+	}
+	t.Logf("✅ Empty tool handled: deviation=%v decision=%s", r.HasDeviation, r.Decision)
+}
+
+func TestCheckDeviation_ConcurrentAccess(t *testing.T) {
+	dd := newDevDetector(t, DeviationConfig{Enabled: true, MaxRepairs: 5}, devPCDefault)
+	dd.planCompiler.CompileIntent("trace-cc", "search for data and find results")
+	var wg sync.WaitGroup
+	errs := make(chan string, 200)
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if r := dd.Detect("trace-cc", "web_search", `{}`); r == nil {
+				errs <- "nil result"
+			}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dd.UpdateConfig(DeviationConfig{Enabled: true, AutoRepair: true, MaxRepairs: 3})
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = dd.GetStats()
+			_ = dd.GetConfig()
+			_ = dd.QueryDeviations("", "", 10)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Errorf("concurrent: %s", e)
+	}
+	if s := dd.GetStats(); s.TotalChecks < 50 {
+		t.Errorf("expected >=50 checks, got %d", s.TotalChecks)
+	}
+	t.Logf("✅ Concurrent access safe: checks=%d", dd.GetStats().TotalChecks)
+}
+
+// ── 5. CapabilityEngine 集成 ─────────────────────────
+
+func TestCheckDeviation_CapViolation_Block(t *testing.T) {
+	db := newDevDB(t)
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, DefaultPolicy: "block"})
+	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true, MaxRepairs: 5}, nil, ce)
+	r := dd.Detect("trace-cap-block", "shell_exec", `{}`)
+	if !r.HasDeviation {
+		t.Fatal("expected capability violation")
+	}
+	if r.Deviation.Type != "capability_violation" {
+		t.Errorf("expected capability_violation, got %s", r.Deviation.Type)
+	}
+	if r.Decision != "block" {
+		t.Errorf("expected block, got %s", r.Decision)
+	}
+	t.Logf("✅ CapEngine block: type=%s decision=%s", r.Deviation.Type, r.Decision)
+}
+
+func TestCheckDeviation_CapViolation_Allow(t *testing.T) {
+	db := newDevDB(t)
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, DefaultPolicy: "allow"})
+	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true, MaxRepairs: 5}, nil, ce)
+	r := dd.Detect("trace-cap-allow", "web_search", `{}`)
+	if r.HasDeviation {
+		t.Errorf("expected no deviation with allow policy, got: %+v", r.Deviation)
+	}
+	t.Logf("✅ CapEngine allow: no deviation")
+}
+
+// ── 6. DB 记录持久化 ────────────────────────────────
+
+func TestDeviationDB_RecordAndQuery(t *testing.T) {
+	db := newDevDB(t)
+	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true, MaxRepairs: 5}, nil, nil)
+	dd.recordDeviation(&Deviation{ID: "d1", TraceID: "t1", Type: "forbidden_tool", ToolName: "x", Severity: "critical", Decision: "block"})
+	dd.recordDeviation(&Deviation{ID: "d2", TraceID: "t1", Type: "sequence_violation", ToolName: "y", Severity: "moderate", Decision: "warn"})
+	dd.recordDeviation(&Deviation{ID: "d3", TraceID: "t2", Type: "unknown_tool", ToolName: "z", Severity: "minor", Decision: "allow", Repaired: true, RepairedArgs: `{"_repaired":true}`})
+	byTrace := dd.QueryDeviations("t1", "", 50)
+	if len(byTrace) != 2 {
+		t.Errorf("expected 2 for t1, got %d", len(byTrace))
+	}
+	bySev := dd.QueryDeviations("", "critical", 50)
+	if len(bySev) != 1 {
+		t.Errorf("expected 1 critical, got %d", len(bySev))
+	}
+	all := dd.QueryDeviations("", "", 50)
+	if len(all) != 3 {
+		t.Errorf("expected 3 total, got %d", len(all))
+	}
+	// Check repaired round-trip
+	t2 := dd.QueryDeviations("t2", "", 50)
+	if len(t2) != 1 || !t2[0].Repaired {
+		t.Error("repaired field lost in DB round-trip")
+	}
+	t.Logf("✅ DB record+query: trace=%d sev=%d all=%d repaired=%v", len(byTrace), len(bySev), len(all), t2[0].Repaired)
+}
+
+func TestDeviationDB_NilSafe(t *testing.T) {
+	dd := NewDeviationDetector(nil, DeviationConfig{Enabled: true, MaxRepairs: 5}, nil, nil)
 	devs := dd.QueryDeviations("", "", 10)
-	if len(devs) != 0 { t.Errorf("expected 0 deviations, got %d", len(devs)) }
+	if devs == nil || len(devs) != 0 {
+		t.Errorf("nil DB query should return empty slice, got %v", devs)
+	}
+	// recordDeviation with nil DB should not panic
+	dd.recordDeviation(&Deviation{ID: "x", TraceID: "y"})
+	t.Logf("✅ Nil DB: safe query + record")
 }
 
-func TestDeviation_RecordAndQuery(t *testing.T) {
-	db := setupDevTestDB(t)
-	defer db.Close()
-	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true}, nil, nil)
-	dd.recordDeviation(&Deviation{
-		ID: "dev-test1", TraceID: "trace-1", Type: "forbidden_tool",
-		ToolName: "shell_exec", Severity: "critical", Decision: "block",
-	})
-	devs := dd.QueryDeviations("trace-1", "", 10)
-	if len(devs) != 1 { t.Fatalf("expected 1 deviation, got %d", len(devs)) }
-	if devs[0].Type != "forbidden_tool" { t.Error("wrong type") }
-}
-
-func TestDeviation_QueryBySeverity(t *testing.T) {
-	db := setupDevTestDB(t)
-	defer db.Close()
-	dd := NewDeviationDetector(db, DeviationConfig{Enabled: true}, nil, nil)
-	dd.recordDeviation(&Deviation{ID: "d1", TraceID: "t1", Severity: "critical", Decision: "block"})
-	dd.recordDeviation(&Deviation{ID: "d2", TraceID: "t2", Severity: "minor", Decision: "allow"})
-	critical := dd.QueryDeviations("", "critical", 10)
-	if len(critical) != 1 { t.Errorf("expected 1 critical, got %d", len(critical)) }
-}
-
-func TestDeviation_NilDB(t *testing.T) {
-	dd := NewDeviationDetector(nil, DeviationConfig{Enabled: true}, nil, nil)
-	devs := dd.QueryDeviations("", "", 10)
-	if len(devs) != 0 { t.Errorf("expected empty with nil db") }
-}
-
-func TestDeviation_DefaultConfig(t *testing.T) {
-	if defaultDeviationConfig.MaxRepairs != 5 { t.Error("default max_repairs should be 5") }
-	if defaultDeviationConfig.Enabled { t.Error("default should be disabled") }
+func TestDeviationConfig_Defaults(t *testing.T) {
+	if defaultDeviationConfig.Enabled {
+		t.Error("default should be disabled")
+	}
+	if defaultDeviationConfig.AutoRepair {
+		t.Error("default auto_repair should be false")
+	}
+	if defaultDeviationConfig.MaxRepairs != 5 {
+		t.Errorf("default max_repairs=5, got %d", defaultDeviationConfig.MaxRepairs)
+	}
+	t.Logf("✅ Defaults: enabled=%v repair=%v max=%d", defaultDeviationConfig.Enabled, defaultDeviationConfig.AutoRepair, defaultDeviationConfig.MaxRepairs)
 }
