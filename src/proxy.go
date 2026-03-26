@@ -1176,10 +1176,25 @@ func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID stri
 				}
 			}
 		}
+		// v27.1: 追加租户专属入站规则检测
+		if tenantID != "" && tenantID != "default" {
+			tenantResult := ip.engine.DetectTenantRules(tenantID, msgText)
+			if tenantResult.Action != "pass" {
+				dr = mergeDetectResults(dr, tenantResult)
+			}
+		}
 		return dr
 	}
 	// 回退: 直接调用引擎（带排除）
-	return ip.engine.DetectWithExclusions(msgText, appID, excludeRules)
+	result := ip.engine.DetectWithExclusions(msgText, appID, excludeRules)
+	// v27.1: 追加租户专属入站规则检测
+	if tenantID != "" && tenantID != "default" {
+		tenantResult := ip.engine.DetectTenantRules(tenantID, msgText)
+		if tenantResult.Action != "pass" {
+			result = mergeDetectResults(result, tenantResult)
+		}
+	}
+	return result
 }
 
 // filterExcludedRules 从检测结果中移除被租户禁用的规则（v27.0）

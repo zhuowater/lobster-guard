@@ -67,6 +67,11 @@ type RuleEngine struct {
 	ruleConfigs      []InboundRuleConfig // 保存原始配置用于 API 展示
 	regexRules       []RegexRule         // v3.11 正则规则列表
 	ruleBindings     []RuleBindingConfig // v3.11 规则绑定配置
+	// v27.1 租户专属入站规则
+	tenantRules    map[string][]InboundRuleConfig // tenantID -> extra rules
+	tenantAC       map[string]*AhoCorasick        // tenantID -> compiled AC for tenant rules
+	tenantRuleList map[string][]Rule              // tenantID -> Rule metadata
+	tenantRegex    map[string][]RegexRule          // tenantID -> regex rules
 }
 
 // actionToLevel 将 action 字符串映射到 RuleLevel
@@ -644,6 +649,205 @@ func (re *RuleEngine) DetectWithExclusions(text, appID string, excludeRules []st
 	result.MatchedRules = filteredRules
 	result.Reasons = filteredReasons
 	return result
+}
+
+// ============================================================
+// v27.1 租户专属入站规则（行业模板绑定）
+// ============================================================
+
+// SetTenantRules 设置租户专属入站规则并编译 AC 自动机
+func (re *RuleEngine) SetTenantRules(tenantID string, rules []InboundRuleConfig) {
+	ac, ruleList := buildACFromConfigs(rules)
+	regexRules := buildRegexRules(rules)
+	re.mu.Lock()
+	if re.tenantRules == nil {
+		re.tenantRules = make(map[string][]InboundRuleConfig)
+		re.tenantAC = make(map[string]*AhoCorasick)
+		re.tenantRuleList = make(map[string][]Rule)
+		re.tenantRegex = make(map[string][]RegexRule)
+	}
+	re.tenantRules[tenantID] = rules
+	re.tenantAC[tenantID] = ac
+	re.tenantRuleList[tenantID] = ruleList
+	re.tenantRegex[tenantID] = regexRules
+	re.mu.Unlock()
+	log.Printf("[入站规则] 设置租户 %s 专属规则: %d 条规则, %d 个 pattern, %d 条正则",
+		tenantID, len(rules), countPatterns(rules), len(regexRules))
+}
+
+// RemoveTenantRules 移除租户专属入站规则
+func (re *RuleEngine) RemoveTenantRules(tenantID string) {
+	re.mu.Lock()
+	delete(re.tenantRules, tenantID)
+	delete(re.tenantAC, tenantID)
+	delete(re.tenantRuleList, tenantID)
+	delete(re.tenantRegex, tenantID)
+	re.mu.Unlock()
+	log.Printf("[入站规则] 移除租户 %s 专属规则", tenantID)
+}
+
+// GetTenantRules 获取租户专属入站规则配置
+func (re *RuleEngine) GetTenantRules(tenantID string) []InboundRuleConfig {
+	re.mu.RLock()
+	defer re.mu.RUnlock()
+	rules := re.tenantRules[tenantID]
+	if rules == nil {
+		return nil
+	}
+	cp := make([]InboundRuleConfig, len(rules))
+	for i, c := range rules {
+		rc := InboundRuleConfig{
+			Name:     c.Name,
+			Patterns: make([]string, len(c.Patterns)),
+			Action:   c.Action,
+			Category: c.Category,
+			Priority: c.Priority,
+			Message:  c.Message,
+			Type:     c.Type,
+			Group:    c.Group,
+		}
+		copy(rc.Patterns, c.Patterns)
+		cp[i] = rc
+	}
+	return cp
+}
+
+// ListInboundTemplates 返回所有入站规则行业模板
+func (re *RuleEngine) ListInboundTemplates() []InboundRuleTemplate {
+	return getDefaultInboundTemplates()
+}
+
+// DetectTenantRules 对指定租户的专属规则进行检测
+func (re *RuleEngine) DetectTenantRules(tenantID, text string) DetectResult {
+	r := DetectResult{Action: "pass"}
+	if text == "" || tenantID == "" {
+		return r
+	}
+	re.mu.RLock()
+	ac := re.tenantAC[tenantID]
+	rules := re.tenantRuleList[tenantID]
+	regexRules := re.tenantRegex[tenantID]
+	re.mu.RUnlock()
+
+	if ac == nil && len(regexRules) == 0 {
+		return r
+	}
+
+	type matchedRule struct {
+		Name     string
+		Level    RuleLevel
+		Priority int
+		Message  string
+		Action   string
+	}
+	matchesByName := make(map[string]*matchedRule)
+
+	// AC 自动机匹配
+	if ac != nil && rules != nil {
+		for _, idx := range ac.Search(text) {
+			if idx < 0 || idx >= len(rules) {
+				continue
+			}
+			rule := rules[idx]
+			action := levelToAction(rule.Level)
+			if existing, ok := matchesByName[rule.Name]; ok {
+				if rule.Priority > existing.Priority ||
+					(rule.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
+					existing.Level = rule.Level
+					existing.Priority = rule.Priority
+					existing.Message = rule.Message
+					existing.Action = action
+				}
+			} else {
+				matchesByName[rule.Name] = &matchedRule{
+					Name: rule.Name, Level: rule.Level,
+					Priority: rule.Priority, Message: rule.Message,
+					Action: action,
+				}
+			}
+		}
+	}
+
+	// 正则规则匹配
+	for _, rr := range regexRules {
+		matched := false
+		done := make(chan bool, 1)
+		go func() {
+			defer func() {
+				if rv := recover(); rv != nil {
+					done <- false
+				}
+			}()
+			done <- rr.Pattern.MatchString(text)
+		}()
+		select {
+		case matched = <-done:
+		case <-time.After(100 * time.Millisecond):
+			log.Printf("[入站规则] 租户 %s 正则匹配超时 rule=%s（100ms），跳过", tenantID, rr.Name)
+			continue
+		}
+		if !matched {
+			continue
+		}
+		action := levelToAction(rr.Level)
+		if existing, ok := matchesByName[rr.Name]; ok {
+			if rr.Priority > existing.Priority ||
+				(rr.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
+				existing.Level = rr.Level
+				existing.Priority = rr.Priority
+				existing.Message = rr.Message
+				existing.Action = action
+			}
+		} else {
+			matchesByName[rr.Name] = &matchedRule{
+				Name: rr.Name, Level: rr.Level,
+				Priority: rr.Priority, Message: rr.Message,
+				Action: action,
+			}
+		}
+	}
+
+	if len(matchesByName) > 0 {
+		var matches []*matchedRule
+		for _, m := range matchesByName {
+			matches = append(matches, m)
+		}
+		sort.Slice(matches, func(i, j int) bool {
+			if matches[i].Priority != matches[j].Priority {
+				return matches[i].Priority > matches[j].Priority
+			}
+			return actionWeight(matches[i].Action) > actionWeight(matches[j].Action)
+		})
+		winner := matches[0]
+		r.Action = winner.Action
+		r.Message = winner.Message
+		for _, m := range matches {
+			r.Reasons = append(r.Reasons, m.Name)
+			r.MatchedRules = append(r.MatchedRules, m.Name)
+		}
+	}
+	return r
+}
+
+// mergeDetectResults 合并两个检测结果，取更严格的 action
+func mergeDetectResults(base, extra DetectResult) DetectResult {
+	if extra.Action == "pass" {
+		return base
+	}
+	if base.Action == "pass" {
+		return extra
+	}
+	// 合并: 取更严格的 action
+	if actionWeight(extra.Action) > actionWeight(base.Action) {
+		base.Action = extra.Action
+	}
+	if extra.Message != "" && base.Message == "" {
+		base.Message = extra.Message
+	}
+	base.Reasons = append(base.Reasons, extra.Reasons...)
+	base.MatchedRules = append(base.MatchedRules, extra.MatchedRules...)
+	base.PIIs = append(base.PIIs, extra.PIIs...)
+	return base
 }
 
 // ============================================================

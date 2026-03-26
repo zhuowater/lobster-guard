@@ -110,6 +110,15 @@ type InboundRulesFileConfig struct {
 	Rules []InboundRuleConfig `yaml:"rules"`
 }
 
+// InboundRuleTemplate 入站规则行业模板（v27.1）
+type InboundRuleTemplate struct {
+	ID          string              `json:"id" yaml:"id"`
+	Name        string              `json:"name" yaml:"name"`
+	Description string              `json:"description" yaml:"description"`
+	Category    string              `json:"category" yaml:"category"` // industry / security / compliance
+	Rules       []InboundRuleConfig `json:"rules" yaml:"rules"`
+}
+
 type Config struct {
 	Channel              string               `yaml:"channel"` // "lanxin" (default) | "feishu" | "generic"
 	Mode                 string               `yaml:"mode"`    // "webhook" (default) | "bridge"
@@ -544,6 +553,54 @@ func getDefaultInboundRules() []InboundRuleConfig {
 	}
 }
 
+// getDefaultInboundTemplates 返回入站规则行业模板（v27.1）
+func getDefaultInboundTemplates() []InboundRuleTemplate {
+	return []InboundRuleTemplate{
+		{
+			ID:          "tpl-inbound-semiconductor",
+			Name:        "芯片行业入站规则",
+			Description: "芯片/半导体行业专属检测规则，覆盖 IP 保护和出口管制",
+			Category:    "industry",
+			Rules: []InboundRuleConfig{
+				{Name: "chip_ip_keyword_cn", Patterns: []string{"RTL代码", "Verilog", "GDSII", "流片", "光罩", "制程节点", "晶圆", "EDA工具", "IP核", "芯片版图"}, Action: "warn", Category: "ip_protection"},
+				{Name: "chip_ip_keyword_en", Patterns: []string{"tape-out", "tapeout", "GDSII", "netlist", "RTL source", "HDL code", "design rule check", "layout versus schematic", "foundry process"}, Action: "warn", Category: "ip_protection"},
+				{Name: "chip_export_control", Patterns: []string{"EAR", "ITAR", "export control", "出口管制", "瓦森纳", "实体清单", "entity list"}, Action: "block", Category: "export_control"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-financial",
+			Name:        "金融行业入站规则",
+			Description: "金融行业专属检测规则，覆盖账户数据和合规交易",
+			Category:    "industry",
+			Rules: []InboundRuleConfig{
+				{Name: "fin_account_cn", Patterns: []string{"账户余额", "交易流水", "银行卡号", "信用卡号", "贷款审批", "授信额度", "征信报告"}, Action: "warn", Category: "financial_data"},
+				{Name: "fin_account_en", Patterns: []string{"account balance", "transaction history", "credit score", "loan approval", "swift code", "routing number"}, Action: "warn", Category: "financial_data"},
+				{Name: "fin_trading", Patterns: []string{"内幕交易", "insider trading", "material non-public", "MNPI", "front running", "抢先交易"}, Action: "block", Category: "compliance"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-healthcare",
+			Name:        "医疗行业入站规则",
+			Description: "医疗行业专属检测规则，覆盖患者隐私和药品安全",
+			Category:    "industry",
+			Rules: []InboundRuleConfig{
+				{Name: "health_phi_cn", Patterns: []string{"病历", "诊断报告", "处方", "医嘱", "化验单", "影像报告", "手术记录", "出院小结"}, Action: "warn", Category: "phi"},
+				{Name: "health_phi_en", Patterns: []string{"patient record", "diagnosis", "prescription", "medical history", "lab result", "HIPAA", "protected health information"}, Action: "warn", Category: "phi"},
+				{Name: "health_drug", Patterns: []string{"处方药", "管制药品", "麻醉药品", "精神药品", "controlled substance"}, Action: "block", Category: "drug_safety"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-compliance",
+			Name:        "AI 合规入站规则",
+			Description: "AI 法规合规检测规则，覆盖 EU AI Act 禁止/高风险类别",
+			Category:    "compliance",
+			Rules: []InboundRuleConfig{
+				{Name: "ai_act_prohibited", Patterns: []string{"social scoring", "社会信用评分", "subliminal manipulation", "潜意识操纵", "biometric surveillance", "实时生物识别"}, Action: "block", Category: "ai_act"},
+				{Name: "ai_act_high_risk", Patterns: []string{"automated decision", "自动化决策", "credit scoring", "信用评分", "recruitment AI", "招聘AI", "predictive policing"}, Action: "warn", Category: "ai_act"},
+			},
+		},
+	}
+}
 
 // validateConfig v4.0 配置验证器 — 启动时检查配置完整性和一致性
 func validateConfig(cfg *Config) []string {

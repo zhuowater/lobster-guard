@@ -515,6 +515,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDemoClear(w, r)
 	case path == "/api/v1/simulate/traffic" && method == "POST":
 		api.handleSimulateTraffic(w, r)
+	// v27.1 入站规则行业模板 API
+	case path == "/api/v1/inbound-templates" && method == "GET":
+		api.handleInboundTemplateList(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "GET":
+		api.handleInboundTemplateGet(w, r)
+
 	// v14.0 租户管理 API
 	case path == "/api/v1/tenants" && method == "GET":
 		api.handleTenantList(w, r)
@@ -537,6 +543,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v27.0: 租户策略模板绑定 API
 	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/bind-template") && method == "POST":
 		api.handleTenantBindTemplate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/bind-inbound-template") && method == "POST":
+		api.handleTenantBindInboundTemplate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/inbound-rules") && method == "GET":
+		api.handleTenantInboundRules(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/inbound-rules") && method == "DELETE":
+		api.handleTenantDeleteInboundRules(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/policies") && method == "GET":
 		api.handleTenantPolicies(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "GET":
@@ -8944,4 +8956,118 @@ func (api *ManagementAPI) handleTenantPolicies(w http.ResponseWriter, r *http.Re
 		rules = []PathPolicyRule{}
 	}
 	jsonResponse(w, 200, map[string]interface{}{"tenant_id": tenantID, "rules": rules, "total": len(rules)})
+}
+
+// ============================================================
+// v27.1 入站规则行业模板 API
+// ============================================================
+
+// handleInboundTemplateList GET /api/v1/inbound-templates — 列出所有入站规则模板
+func (api *ManagementAPI) handleInboundTemplateList(w http.ResponseWriter, r *http.Request) {
+	templates := api.inboundEngine.ListInboundTemplates()
+	jsonResponse(w, 200, map[string]interface{}{"templates": templates, "total": len(templates)})
+}
+
+// handleInboundTemplateGet GET /api/v1/inbound-templates/:id — 获取单个模板详情
+func (api *ManagementAPI) handleInboundTemplateGet(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/inbound-templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	templates := api.inboundEngine.ListInboundTemplates()
+	for _, tpl := range templates {
+		if tpl.ID == id {
+			jsonResponse(w, 200, tpl)
+			return
+		}
+	}
+	jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("template %q not found", id)})
+}
+
+// handleTenantBindInboundTemplate POST /api/v1/tenants/:tid/bind-inbound-template — 绑定入站模板到租户
+func (api *ManagementAPI) handleTenantBindInboundTemplate(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/bind-inbound-template")
+	if tenantID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tenant_id required"})
+		return
+	}
+	if api.tenantMgr != nil && !api.tenantMgr.Exists(tenantID) {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("租户 %q 不存在", tenantID)})
+		return
+	}
+	var req struct {
+		TemplateID string `json:"template_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.TemplateID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template_id required"})
+		return
+	}
+	// 查找模板
+	templates := api.inboundEngine.ListInboundTemplates()
+	var found *InboundRuleTemplate
+	for i, tpl := range templates {
+		if tpl.ID == req.TemplateID {
+			found = &templates[i]
+			break
+		}
+	}
+	if found == nil {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("inbound template %q not found", req.TemplateID)})
+		return
+	}
+	// 复制规则并添加租户后缀
+	tenantRules := make([]InboundRuleConfig, len(found.Rules))
+	for i, rule := range found.Rules {
+		tenantRules[i] = InboundRuleConfig{
+			Name:     rule.Name + "-" + tenantID,
+			Patterns: make([]string, len(rule.Patterns)),
+			Action:   rule.Action,
+			Category: rule.Category,
+			Priority: rule.Priority,
+			Message:  rule.Message,
+			Type:     rule.Type,
+			Group:    rule.Group,
+		}
+		copy(tenantRules[i].Patterns, rule.Patterns)
+	}
+	// 获取已有规则并追加（支持多次绑定不同模板）
+	existing := api.inboundEngine.GetTenantRules(tenantID)
+	merged := append(existing, tenantRules...)
+	api.inboundEngine.SetTenantRules(tenantID, merged)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":      "bound",
+		"tenant_id":   tenantID,
+		"template_id": req.TemplateID,
+		"rules_bound": len(tenantRules),
+		"total_rules": len(merged),
+	})
+}
+
+// handleTenantInboundRules GET /api/v1/tenants/:tid/inbound-rules — 获取租户的入站规则列表
+func (api *ManagementAPI) handleTenantInboundRules(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/inbound-rules")
+	rules := api.inboundEngine.GetTenantRules(tenantID)
+	if rules == nil {
+		rules = []InboundRuleConfig{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"tenant_id": tenantID, "rules": rules, "total": len(rules)})
+}
+
+// handleTenantDeleteInboundRules DELETE /api/v1/tenants/:tid/inbound-rules — 清除租户的入站规则
+func (api *ManagementAPI) handleTenantDeleteInboundRules(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/inbound-rules")
+	if tenantID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tenant_id required"})
+		return
+	}
+	api.inboundEngine.RemoveTenantRules(tenantID)
+	jsonResponse(w, 200, map[string]interface{}{"status": "cleared", "tenant_id": tenantID})
 }

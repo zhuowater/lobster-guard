@@ -127,6 +127,53 @@
               </div>
             </div>
 
+            <!-- v27.1: 入站规则模板绑定 -->
+            <div class="config-group">
+              <div class="config-group-title"><Icon name="zap" :size="12" /> 入站规则模板</div>
+              <div class="template-bind-row">
+                <select class="form-input template-select" v-model="selectedInboundTemplate[t.id]">
+                  <option value="">选择入站规则模板...</option>
+                  <option v-for="tpl in allInboundTemplates" :key="tpl.id" :value="tpl.id">
+                    {{ tpl.name }} ({{ tpl.category }}) — {{ tpl.rules?.length || 0 }} 条规则
+                  </option>
+                </select>
+                <button class="btn-sm btn-primary" @click="bindInboundTemplate(t.id)" :disabled="!selectedInboundTemplate[t.id] || bindingInboundTemplate[t.id]">
+                  {{ bindingInboundTemplate[t.id] ? '绑定中...' : '绑定' }}
+                </button>
+              </div>
+              <div class="field-hint">选择入站规则行业模板，绑定后模板中的检测规则将作为此租户的专属入站规则</div>
+              <!-- 模板简介 -->
+              <div class="template-preview" v-if="selectedInboundTemplate[t.id] && inboundTemplateInfo(selectedInboundTemplate[t.id])">
+                <div class="tpl-preview-name">{{ inboundTemplateInfo(selectedInboundTemplate[t.id]).name }}</div>
+                <div class="tpl-preview-desc">{{ inboundTemplateInfo(selectedInboundTemplate[t.id]).description }}</div>
+                <div class="tpl-preview-rules">
+                  包含规则: <span class="tpl-rule-tag" v-for="r in inboundTemplateInfo(selectedInboundTemplate[t.id]).rules" :key="r.name">{{ r.name }} ({{ r.action }})</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- v27.1: 已绑定的入站规则 -->
+            <div class="config-group">
+              <div class="config-group-title">
+                <Icon name="shield" :size="12" /> 已绑定入站规则
+                <button class="btn-xs btn-outline refresh-btn" @click="loadTenantInboundRules(t.id)">刷新</button>
+                <button class="btn-xs btn-danger refresh-btn" v-if="tenantInboundRules[t.id] && tenantInboundRules[t.id].length > 0" @click="clearTenantInboundRules(t.id)">清除全部</button>
+              </div>
+              <div v-if="tenantInboundRules[t.id] && tenantInboundRules[t.id].length > 0">
+                <div class="bound-rule" v-for="rule in tenantInboundRules[t.id]" :key="rule.name">
+                  <div class="rule-info">
+                    <span class="rule-name">{{ rule.name }}</span>
+                    <span class="rule-type-badge badge-inbound">{{ rule.category }}</span>
+                    <span class="rule-action-badge" :class="'action-'+rule.action">{{ rule.action }}</span>
+                  </div>
+                  <div class="rule-desc">{{ rule.patterns?.length || 0 }} 个关键词/模式</div>
+                </div>
+              </div>
+              <div v-else class="empty-hint">
+                此租户尚未绑定入站规则模板。选择上方模板进行绑定。
+              </div>
+            </div>
+
             <div class="config-group">
               <div class="config-group-title"><Icon name="shield" :size="12" /> 检测规则（入站）</div>
               <div class="config-field">
@@ -275,6 +322,12 @@ const selectedTemplate = reactive({})
 const bindingTemplate = reactive({})
 const tenantPolicies = reactive({})
 
+// v27.1: 入站规则模板绑定
+const allInboundTemplates = ref([])
+const selectedInboundTemplate = reactive({})
+const bindingInboundTemplate = reactive({})
+const tenantInboundRules = reactive({})
+
 // Modal state
 const showCreateModal = ref(false), showEditModal = ref(false), showMemberModal = ref(false)
 const submitting = ref(false), formError = ref(''), memberError = ref(''), formErrors = ref({})
@@ -326,6 +379,9 @@ async function loadTenantConfig(tid) {
   // v27.0: 同时加载模板列表和租户策略
   if (allTemplates.value.length === 0) loadAllTemplates()
   loadTenantPolicies(tid)
+  // v27.1: 加载入站规则模板和租户入站规则
+  if (allInboundTemplates.value.length === 0) loadAllInboundTemplates()
+  loadTenantInboundRules(tid)
 }
 
 async function saveTenantConfig(tid) {
@@ -363,6 +419,44 @@ async function bindTemplate(tid) {
     loadTenantPolicies(tid)
   } catch(e) { showToast('绑定失败: ' + e.message, 'error') }
   bindingTemplate[tid] = false
+}
+
+// v27.1: 入站规则模板管理
+async function loadAllInboundTemplates() {
+  try {
+    const d = await api('/api/v1/inbound-templates')
+    allInboundTemplates.value = Array.isArray(d) ? d : (d.templates || [])
+  } catch { allInboundTemplates.value = [] }
+}
+
+function inboundTemplateInfo(tplId) { return allInboundTemplates.value.find(t => t.id === tplId) }
+
+async function loadTenantInboundRules(tid) {
+  try {
+    const d = await api('/api/v1/tenants/' + tid + '/inbound-rules')
+    tenantInboundRules[tid] = d.rules || []
+  } catch { tenantInboundRules[tid] = [] }
+}
+
+async function bindInboundTemplate(tid) {
+  const tplId = selectedInboundTemplate[tid]
+  if (!tplId) return
+  bindingInboundTemplate[tid] = true
+  try {
+    const d = await apiPost('/api/v1/tenants/' + tid + '/bind-inbound-template', { template_id: tplId })
+    showToast('入站规则模板绑定成功，' + (d.rules_bound || 0) + ' 条规则已添加', 'success')
+    selectedInboundTemplate[tid] = ''
+    loadTenantInboundRules(tid)
+  } catch(e) { showToast('绑定失败: ' + e.message, 'error') }
+  bindingInboundTemplate[tid] = false
+}
+
+async function clearTenantInboundRules(tid) {
+  try {
+    await apiDelete('/api/v1/tenants/' + tid + '/inbound-rules')
+    showToast('入站规则已清除', 'success')
+    loadTenantInboundRules(tid)
+  } catch(e) { showToast('清除失败: ' + e.message, 'error') }
 }
 
 function setTab(tid, tab) { activeTab[tid] = tab }
@@ -617,6 +711,7 @@ onMounted(loadTenants)
 .badge-cumulative { background: rgba(245, 158, 11, 0.1); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.3); }
 .badge-sequence { background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3); }
 .badge-degradation { background: rgba(168, 85, 247, 0.1); color: #A855F7; border: 1px solid rgba(168, 85, 247, 0.3); }
+.badge-inbound { background: rgba(59, 130, 246, 0.1); color: #3B82F6; border: 1px solid rgba(59, 130, 246, 0.3); }
 .rule-action-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 700; }
 .action-block { background: rgba(239, 68, 68, 0.15); color: #EF4444; }
 .action-warn { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
