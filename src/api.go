@@ -1096,7 +1096,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1/plans/") && method == "GET":
 		api.handlePlanGet(w, r)
 
+	// v25.0: PlanCompiler 手动操作
+	case path == "/api/v1/plans/compile" && method == "POST":
+		api.handlePlanCompile(w, r)
+	case path == "/api/v1/plans/evaluate" && method == "POST":
+		api.handlePlanEvaluate(w, r)
+
 	// v25.1: Capability 权限系统
+	case path == "/api/v1/capabilities/contexts" && method == "POST":
+		api.handleCapInitContext(w, r)
 	case path == "/api/v1/capabilities/mappings" && method == "GET":
 		api.handleCapMappingsList(w, r)
 	case strings.HasPrefix(path, "/api/v1/capabilities/mappings/") && method == "PUT":
@@ -1111,6 +1119,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCapStats(w, r)
 
 	// v25.2: Plan 偏差检测
+	case path == "/api/v1/deviations/check" && method == "POST":
+		api.handleDeviationsCheck(w, r)
 	case path == "/api/v1/deviations" && method == "GET":
 		api.handleDeviationsList(w, r)
 	case path == "/api/v1/deviations/stats" && method == "GET":

@@ -56,3 +56,22 @@ func (api *ManagementAPI) handleDeviationsDetail(w http.ResponseWriter, r *http.
 	devs := api.deviationDetector.QueryDeviations(traceID, "", 100)
 	jsonResponse(w, 200, map[string]interface{}{"trace_id": traceID, "deviations": devs, "total": len(devs)})
 }
+
+// handleDeviationsCheck POST /api/v1/deviations/check — 手动偏差检测
+func (api *ManagementAPI) handleDeviationsCheck(w http.ResponseWriter, r *http.Request) {
+	if api.deviationDetector == nil {
+		jsonResponse(w, 503, map[string]string{"error": "deviation detector not enabled"})
+		return
+	}
+	var req struct {
+		TraceID string `json:"trace_id"`
+		Tool    string `json:"tool"`
+		Args    string `json:"args"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	result := api.deviationDetector.Detect(req.TraceID, req.Tool, req.Args)
+	jsonResponse(w, 200, result)
+}

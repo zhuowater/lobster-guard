@@ -153,3 +153,52 @@ func (api *ManagementAPI) handlePlanConfigUpdate(w http.ResponseWriter, r *http.
 	api.planCompiler.UpdateConfig(cfg)
 	jsonResponse(w, 200, map[string]string{"status": "updated"})
 }
+
+// handlePlanCompile POST /api/v1/plans/compile — 手动编译执行计划
+func (api *ManagementAPI) handlePlanCompile(w http.ResponseWriter, r *http.Request) {
+	if api.planCompiler == nil {
+		jsonResponse(w, 503, map[string]string{"error": "plan compiler not enabled"})
+		return
+	}
+	var req struct {
+		TraceID string `json:"trace_id"`
+		Query   string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.TraceID == "" || req.Query == "" {
+		jsonResponse(w, 400, map[string]string{"error": "trace_id and query required"})
+		return
+	}
+	plan := api.planCompiler.CompileIntent(req.TraceID, req.Query)
+	if plan == nil {
+		jsonResponse(w, 200, map[string]interface{}{"matched": false, "plan_id": "", "message": "no matching template"})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"matched": true, "plan_id": plan.ID, "template": plan.TemplateName, "total_steps": plan.TotalSteps})
+}
+
+// handlePlanEvaluate POST /api/v1/plans/evaluate — 手动评估 tool_call
+func (api *ManagementAPI) handlePlanEvaluate(w http.ResponseWriter, r *http.Request) {
+	if api.planCompiler == nil {
+		jsonResponse(w, 503, map[string]string{"error": "plan compiler not enabled"})
+		return
+	}
+	var req struct {
+		TraceID string `json:"trace_id"`
+		Tool    string `json:"tool"`
+		Args    string `json:"args"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	eval := api.planCompiler.EvaluateToolCall(req.TraceID, req.Tool, req.Args)
+	if eval == nil {
+		jsonResponse(w, 200, map[string]interface{}{"decision": "allow", "reason": "no active plan"})
+		return
+	}
+	jsonResponse(w, 200, eval)
+}

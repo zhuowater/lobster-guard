@@ -97,3 +97,37 @@ func (api *ManagementAPI) handleCapStats(w http.ResponseWriter, r *http.Request)
 	stats := api.capabilityEngine.GetStats()
 	jsonResponse(w, 200, stats)
 }
+
+// handleCapInitContext POST /api/v1/capabilities/contexts — 手动初始化 capability 上下文
+func (api *ManagementAPI) handleCapInitContext(w http.ResponseWriter, r *http.Request) {
+	if api.capabilityEngine == nil {
+		jsonResponse(w, 503, map[string]string{"error": "capability engine not enabled"})
+		return
+	}
+	var req struct {
+		TraceID  string     `json:"trace_id"`
+		UserID   string     `json:"user_id"`
+		UserCaps []CapLabel `json:"user_caps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.TraceID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "trace_id required"})
+		return
+	}
+	if req.UserCaps == nil {
+		req.UserCaps = []CapLabel{
+			{Name: "read", Source: "api", Level: "read", Granted: true},
+			{Name: "write", Source: "api", Level: "write", Granted: true},
+			{Name: "execute", Source: "api", Level: "execute", Granted: true},
+		}
+	}
+	ctx := api.capabilityEngine.InitContext(req.TraceID, req.UserID, req.UserCaps)
+	if ctx == nil {
+		jsonResponse(w, 500, map[string]string{"error": "failed to create context"})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"trace_id": ctx.TraceID, "user_id": ctx.UserID, "status": ctx.Status, "caps": len(ctx.UserCaps)})
+}
