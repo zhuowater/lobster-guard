@@ -676,6 +676,19 @@ func main() {
 		len(ifcEngine.ListSourceRules()), len(ifcEngine.ListToolRequirements()),
 		cfg.IFC.QuarantineEnabled, cfg.IFC.HidingEnabled)
 
+	// v26.1: 隔离LLM
+	var ifcQuarantine *IFCQuarantine
+	if cfg.IFC.QuarantineEnabled {
+		ifcQuarantine = NewIFCQuarantine(ifcEngine, pool)
+		if llmProxy != nil {
+			llmProxy.ifcQuarantine = ifcQuarantine
+		}
+		mgmtAPI.ifcQuarantine = ifcQuarantine
+		fmt.Printf("[初始化] ✅ IFC 隔离LLM已启用 (上游=%s)\n", cfg.IFC.QuarantineUpstream)
+	} else {
+		fmt.Printf("[初始化] ℹ️  IFC 隔离LLM未启用\n")
+	}
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {

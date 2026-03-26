@@ -262,5 +262,88 @@ func (api *ManagementAPI) handleIFC(w http.ResponseWriter, r *http.Request, path
 		return true
 	}
 
+	// ============================================================
+	// v26.1: Quarantine API
+	// ============================================================
+
+	// GET /api/v1/ifc/quarantine/sessions?limit=20
+	if path == "/api/v1/ifc/quarantine/sessions" && method == "GET" {
+		if api.ifcQuarantine == nil {
+			jsonResponse(w, 200, map[string]interface{}{"sessions": []QuarantineSession{}, "total": 0})
+			return true
+		}
+		limit := 20
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if n, err := strconv.Atoi(l); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		sessions := api.ifcQuarantine.GetSessions(limit)
+		if sessions == nil {
+			sessions = []QuarantineSession{}
+		}
+		jsonResponse(w, 200, map[string]interface{}{"sessions": sessions, "total": len(sessions)})
+		return true
+	}
+
+	// GET /api/v1/ifc/quarantine/stats
+	if path == "/api/v1/ifc/quarantine/stats" && method == "GET" {
+		if api.ifcQuarantine == nil {
+			jsonResponse(w, 200, IFCQuarantineStats{})
+			return true
+		}
+		jsonResponse(w, 200, api.ifcQuarantine.GetStats())
+		return true
+	}
+
+	// POST /api/v1/ifc/quarantine/route — 手动触发隔离路由
+	if path == "/api/v1/ifc/quarantine/route" && method == "POST" {
+		if api.ifcQuarantine == nil {
+			jsonResponse(w, 400, map[string]string{"error": "quarantine not enabled"})
+			return true
+		}
+		var req struct {
+			TraceID     string   `json:"trace_id"`
+			InputVarIDs []string `json:"input_var_ids"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.TraceID == "" {
+			jsonResponse(w, 400, map[string]string{"error": "trace_id required"})
+			return true
+		}
+		url, sessionID, err := api.ifcQuarantine.Route(req.TraceID, req.InputVarIDs)
+		if err != nil {
+			jsonResponse(w, 500, map[string]string{"error": err.Error()})
+			return true
+		}
+		jsonResponse(w, 200, map[string]interface{}{
+			"upstream_url": url, "session_id": sessionID,
+		})
+		return true
+	}
+
+	// POST /api/v1/ifc/quarantine/complete
+	if path == "/api/v1/ifc/quarantine/complete" && method == "POST" {
+		if api.ifcQuarantine == nil {
+			jsonResponse(w, 400, map[string]string{"error": "quarantine not enabled"})
+			return true
+		}
+		var req struct {
+			TraceID       string `json:"trace_id"`
+			SessionID     string `json:"session_id"`
+			OutputContent string `json:"output_content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+			return true
+		}
+		v := api.ifcQuarantine.CompleteSession(req.TraceID, req.SessionID, req.OutputContent)
+		if v == nil {
+			jsonResponse(w, 404, map[string]string{"error": "session not found"})
+			return true
+		}
+		jsonResponse(w, 200, map[string]interface{}{"status": "completed", "output_variable": v})
+		return true
+	}
+
 	return false
 }

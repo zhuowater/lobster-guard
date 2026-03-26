@@ -161,6 +161,8 @@ type ManagementAPI struct {
 	deviationDetector *DeviationDetector
 	// v26.0 信息流控制
 	ifcEngine *IFCEngine
+	// v26.1 隔离LLM
+	ifcQuarantine *IFCQuarantine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -4311,6 +4313,24 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 			events = append(events, fmt.Sprintf("ifc_check: tool=send_email decision=%s", decision.Decision))
 			if decision.Violation != nil {
 				events = append(events, fmt.Sprintf("ifc_violation: type=%s", decision.Violation.Type))
+			}
+
+			// v26.1: 隔离判断
+			if api.ifcQuarantine != nil {
+				shouldQ := api.ifcQuarantine.ShouldRoute(traceID, []string{iv2.ID})
+				events = append(events, fmt.Sprintf("ifc_quarantine: should_route=%v (iv2.integ=%s)", shouldQ, iv2.Label.Integrity))
+			}
+
+			// v26.2: 隐藏
+			if api.ifcEngine.config.HidingEnabled {
+				hr := api.ifcEngine.HideContent(traceID, "张三手机13900001234身份证320101199001012345", api.ifcEngine.config.HidingThreshold)
+				events = append(events, fmt.Sprintf("ifc_hide: hidden=%d", hr.HiddenCount))
+			}
+
+			// v26.2: DOE
+			doeResult := api.ifcEngine.DetectDOE(traceID, "send_email", []string{"name", "phone", "id_card", "address", "blood_type"}, nil)
+			if doeResult != nil {
+				events = append(events, fmt.Sprintf("ifc_doe: severity=%s excess=%d", doeResult.Severity, len(doeResult.ExcessFields)))
 			}
 		}
 

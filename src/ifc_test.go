@@ -1,8 +1,10 @@
-// ifc_test.go — IFC engine tests (v26.0)
+// ifc_test.go — IFC engine tests (v26.0 + v26.1 + v26.2)
 package main
 
 import (
 	"database/sql"
+	"sort"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -450,5 +452,246 @@ func TestIFCDefaultToolRequirements(t *testing.T) {
 		for _, r := range reqs {
 			t.Logf("  %s → required_integ=%s max_conf=%s", r.Tool, r.RequiredInteg, r.MaxConf)
 		}
+	}
+}
+
+// ============================================================
+// v26.1: Quarantine Tests
+// ============================================================
+
+func TestIFCQuarantineShouldRoute(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+
+	e := NewIFCEngine(db, IFCConfig{Enabled: true, QuarantineEnabled: true, QuarantineUpstream: "http://quarantine:8080"})
+	q := NewIFCQuarantine(e, nil)
+
+	traceID := "trace-qsr-1"
+
+	// Register a TAINT variable (from web_fetch)
+	v1 := e.RegisterVariable(traceID, "tainted_data", "tool:web_fetch", "untrusted data")
+
+	// ShouldRoute should be true for TAINT
+	if !q.ShouldRoute(traceID, []string{v1.ID}) {
+		t.Error("expected ShouldRoute=true for TAINT variable")
+	}
+
+	// Register a HIGH integrity variable
+	e.mu.Lock()
+	e.sourceRules["safe_src"] = IFCLabel{Confidentiality: ConfPublic, Integrity: IntegHigh}
+	e.mu.Unlock()
+	v2 := e.RegisterVariable(traceID, "safe_data", "safe_src", "trusted data")
+
+	// ShouldRoute should be false for HIGH
+	if q.ShouldRoute(traceID, []string{v2.ID}) {
+		t.Error("expected ShouldRoute=false for HIGH integrity variable")
+	}
+
+	// Mixed: one TAINT + one HIGH → should route (any TAINT triggers)
+	if !q.ShouldRoute(traceID, []string{v1.ID, v2.ID}) {
+		t.Error("expected ShouldRoute=true when any input is TAINT")
+	}
+}
+
+func TestIFCQuarantineRoute(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+
+	e := NewIFCEngine(db, IFCConfig{Enabled: true, QuarantineEnabled: true, QuarantineUpstream: "http://quarantine-llm:8080"})
+	q := NewIFCQuarantine(e, nil)
+
+	traceID := "trace-qr-1"
+
+	// Register TAINT variable
+	v1 := e.RegisterVariable(traceID, "tainted_data", "tool:web_fetch", "untrusted")
+
+	// Route
+	upstreamURL, sessionID, err := q.Route(traceID, []string{v1.ID})
+	if err != nil {
+		t.Fatalf("Route failed: %v", err)
+	}
+	if upstreamURL != "http://quarantine-llm:8080" {
+		t.Errorf("expected upstream=http://quarantine-llm:8080, got %s", upstreamURL)
+	}
+	if sessionID == "" {
+		t.Error("expected non-empty sessionID")
+	}
+
+	// Verify session exists
+	sessions := q.GetSessions(10)
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].Status != "processing" {
+		t.Errorf("expected status=processing, got %s", sessions[0].Status)
+	}
+
+	// CompleteSession → verify depurified variable has integ=MEDIUM
+	outputVar := q.CompleteSession(traceID, sessionID, "cleaned output")
+	if outputVar == nil {
+		t.Fatal("CompleteSession returned nil")
+	}
+	if outputVar.Label.Integrity != IntegMedium {
+		t.Errorf("expected depurified integ=MEDIUM, got %s", outputVar.Label.Integrity)
+	}
+	if outputVar.Source != "quarantine" {
+		t.Errorf("expected source=quarantine, got %s", outputVar.Source)
+	}
+
+	// Verify session is completed
+	sessions = q.GetSessions(10)
+	found := false
+	for _, s := range sessions {
+		if s.SessionID == sessionID && s.Status == "completed" {
+			found = true
+			if s.OutputVar != outputVar.ID {
+				t.Errorf("expected output_var=%s, got %s", outputVar.ID, s.OutputVar)
+			}
+		}
+	}
+	if !found {
+		t.Error("session not found as completed")
+	}
+}
+
+func TestIFCQuarantineStats(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+
+	e := NewIFCEngine(db, IFCConfig{Enabled: true, QuarantineEnabled: true, QuarantineUpstream: "http://quarantine:8080"})
+	q := NewIFCQuarantine(e, nil)
+
+	traceID := "trace-qs-1"
+	v := e.RegisterVariable(traceID, "data", "tool:web_fetch", "untrusted")
+
+	// Route 3 times
+	_, sid1, _ := q.Route(traceID, []string{v.ID})
+	_, sid2, _ := q.Route(traceID, []string{v.ID})
+	_, sid3, _ := q.Route(traceID, []string{v.ID})
+
+	stats := q.GetStats()
+	if stats.TotalRouted != 3 {
+		t.Errorf("expected TotalRouted=3, got %d", stats.TotalRouted)
+	}
+	if stats.ActiveSessions != 3 {
+		t.Errorf("expected ActiveSessions=3, got %d", stats.ActiveSessions)
+	}
+
+	// Complete 2 sessions
+	q.CompleteSession(traceID, sid1, "output1")
+	q.CompleteSession(traceID, sid2, "output2")
+
+	// Fail 1 session
+	q.FailSession(sid3)
+
+	stats = q.GetStats()
+	if stats.TotalDepurified != 2 {
+		t.Errorf("expected TotalDepurified=2, got %d", stats.TotalDepurified)
+	}
+	if stats.TotalFailed != 1 {
+		t.Errorf("expected TotalFailed=1, got %d", stats.TotalFailed)
+	}
+	if stats.ActiveSessions != 0 {
+		t.Errorf("expected ActiveSessions=0, got %d", stats.ActiveSessions)
+	}
+}
+
+// ============================================================
+// v26.2: Hiding + DOE Proxy Tests
+// ============================================================
+
+func TestIFCHidingProxy(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+
+	e := NewIFCEngine(db, IFCConfig{Enabled: true, HidingEnabled: true, HidingThreshold: ConfConfidential})
+
+	// Text with PII
+	text := "用户张三手机号13900001234，身份证号码320101199001012345，请处理"
+	result := e.HideContent("trace-hiding-proxy", text, ConfConfidential)
+
+	if result.HiddenCount == 0 {
+		t.Error("expected hidden count > 0")
+	}
+	if strings.Contains(result.Redacted, "13900001234") {
+		t.Error("expected phone number to be redacted")
+	}
+	if strings.Contains(result.Redacted, "320101199001012345") {
+		t.Error("expected ID card to be redacted")
+	}
+	if !strings.Contains(result.Redacted, "[REDACTED:conf=CONFIDENTIAL]") {
+		t.Error("expected [REDACTED:conf=CONFIDENTIAL] in output")
+	}
+	if len(result.HiddenFields) == 0 {
+		t.Error("expected hidden field names")
+	}
+}
+
+func TestIFCDOEProxy(t *testing.T) {
+	db := newTestIFCDB(t)
+	defer db.Close()
+
+	e := NewIFCEngine(db, IFCConfig{Enabled: true})
+
+	// With plan template defining required fields
+	template := &PlanTemplate{
+		Steps: []PlanStep{
+			{ToolName: "send_email", AllowedArgs: []string{"to", "subject"}},
+		},
+	}
+
+	// Expose excess fields
+	result := e.DetectDOE("trace-doe-proxy", "send_email", []string{"to", "subject", "password", "secret_key", "cc", "bcc"}, template)
+
+	if result.Severity != "critical" {
+		t.Errorf("expected severity=critical, got %s", result.Severity)
+	}
+	if len(result.ExcessFields) != 4 {
+		t.Errorf("expected 4 excess fields, got %d: %v", len(result.ExcessFields), result.ExcessFields)
+	}
+
+	// Exact fields → no excess
+	result2 := e.DetectDOE("trace-doe-proxy-2", "send_email", []string{"to", "subject"}, template)
+	if result2.Severity != "info" {
+		t.Errorf("expected severity=info for exact fields, got %s", result2.Severity)
+	}
+
+	// Warning level (1-3 excess)
+	result3 := e.DetectDOE("trace-doe-proxy-3", "send_email", []string{"to", "subject", "cc"}, template)
+	if result3.Severity != "warning" {
+		t.Errorf("expected severity=warning, got %s", result3.Severity)
+	}
+}
+
+func TestExtractFieldNames(t *testing.T) {
+	// Valid JSON
+	keys := extractFieldNames(`{"name":"张三","phone":"13800138000","age":30}`)
+	sort.Strings(keys)
+	if len(keys) != 3 {
+		t.Fatalf("expected 3 keys, got %d: %v", len(keys), keys)
+	}
+	expected := []string{"age", "name", "phone"}
+	for i, k := range keys {
+		if k != expected[i] {
+			t.Errorf("key[%d] expected %s, got %s", i, expected[i], k)
+		}
+	}
+
+	// Invalid JSON → nil
+	keys2 := extractFieldNames("not json")
+	if keys2 != nil {
+		t.Errorf("expected nil for invalid JSON, got %v", keys2)
+	}
+
+	// Empty object
+	keys3 := extractFieldNames("{}")
+	if len(keys3) != 0 {
+		t.Errorf("expected 0 keys for empty object, got %d", len(keys3))
+	}
+
+	// Array (not object) → nil
+	keys4 := extractFieldNames(`[1,2,3]`)
+	if keys4 != nil {
+		t.Errorf("expected nil for array JSON, got %v", keys4)
 	}
 }

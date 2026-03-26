@@ -13,6 +13,8 @@
 <button class="tab-btn" :class="{active:tab==='variables'}" @click="tab='variables'">Variables</button>
 <button class="tab-btn" :class="{active:tab==='violations'}" @click="tab='violations'">Violations ({{ violations.length }})</button>
 <button class="tab-btn" :class="{active:tab==='check'}" @click="tab='check'">Live Check</button>
+<button class="tab-btn" :class="{active:tab==='quarantine'}" @click="tab='quarantine'; loadQuarantine()">🔒 Quarantine</button>
+<button class="tab-btn" :class="{active:tab==='dataflow'}" @click="tab='dataflow'">📊 Data Flow</button>
 </div>
 
 <!-- Source Rules Tab -->
@@ -98,6 +100,57 @@
 <pre v-if="checkResult.violation" class="result-violation">{{ JSON.stringify(checkResult.violation, null, 2) }}</pre>
 </div>
 </div>
+
+<!-- v26.1: Quarantine Tab -->
+<div v-if="tab==='quarantine'" class="section">
+<div class="section-header"><h3>🔒 Quarantine Sessions</h3>
+<button class="btn btn-sm" @click="loadQuarantine">Refresh</button></div>
+
+<div class="stats-grid quarantine-stats">
+<div class="stat-card"><div class="stat-val" style="color:#6366F1">{{ quarantineStats.total_routed??0 }}</div><div class="stat-label">Total Routed</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#22C55E">{{ quarantineStats.total_depurified??0 }}</div><div class="stat-label">Depurified</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#EF4444">{{ quarantineStats.total_failed??0 }}</div><div class="stat-label">Failed</div></div>
+<div class="stat-card"><div class="stat-val" style="color:#F59E0B">{{ quarantineStats.active_sessions??0 }}</div><div class="stat-label">Active Sessions</div></div>
+</div>
+
+<table class="data-table" v-if="quarantineSessions.length"><thead><tr><th>Trace ID</th><th>Status</th><th>Input Vars</th><th>Output Var</th><th>Start</th><th>End</th></tr></thead>
+<tbody><tr v-for="s in quarantineSessions" :key="s.session_id">
+<td class="mono">{{ (s.trace_id||'').substring(0,16) }}</td>
+<td><span class="badge" :class="'qs-'+s.status">{{ s.status }}</span></td>
+<td class="mono">{{ (s.input_vars||[]).map(v=>v.substring(0,8)).join(', ') || '-' }}</td>
+<td class="mono">{{ s.output_var ? s.output_var.substring(0,12) : '-' }}</td>
+<td>{{ formatTime(s.start_time) }}</td>
+<td>{{ formatTime(s.end_time) }}</td></tr></tbody></table>
+<div v-else class="empty">No quarantine sessions</div>
+</div>
+
+<!-- v26.2: Data Flow Tab -->
+<div v-if="tab==='dataflow'" class="section">
+<div class="section-header"><h3>📊 Data Flow Explorer</h3>
+<div class="inline-form"><input v-model="dfTraceId" placeholder="trace_id" class="field-input" @keyup.enter="loadDataFlow"/>
+<button class="btn btn-sm" @click="loadDataFlow">Search</button></div></div>
+
+<!-- Propagation Chain -->
+<div v-if="dfVariables.length" class="dataflow-chain">
+<h4>Variable Propagation Chain</h4>
+<table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Source</th><th>Conf</th><th>Integ</th><th>Parents →</th></tr></thead>
+<tbody><tr v-for="v in dfVariables" :key="v.id" :class="{'taint-row': v.label.integrity===0}">
+<td class="mono">{{ (v.id||'').substring(0,16) }}</td>
+<td>{{ v.name }}</td>
+<td class="mono">{{ v.source }}</td>
+<td><span class="badge" :class="'conf-'+v.label.confidentiality">{{ confLabel(v.label.confidentiality) }}</span></td>
+<td><span class="badge" :class="'integ-'+v.label.integrity">{{ integLabel(v.label.integrity) }}</span></td>
+<td class="mono">{{ (v.parents||[]).length > 0 ? (v.parents||[]).map(p=>p.substring(0,8)).join(' → ') : '(root)' }}</td></tr></tbody></table>
+</div>
+<div v-else class="empty">Enter a trace_id to explore data flow</div>
+
+<!-- DOE Events from Stats -->
+<div class="doe-section" v-if="stats.total_doe > 0">
+<h4>⚠️ Data Over-Exposure Events</h4>
+<div class="doe-alert">Total DOE detections: <strong>{{ stats.total_doe }}</strong></div>
+</div>
+</div>
+
 </div>
 </template>
 <script>
@@ -110,21 +163,27 @@ export default {
     sourceForm: { source: '', confidentiality: 1, integrity: 2 },
     toolForm: { tool: '', required_integrity: 2, max_confidentiality: 1 },
     checkForm: { trace_id: '', tool: '', var_ids_str: '' },
-    checkResult: null, checking: false
+    checkResult: null, checking: false,
+    // v26.1: Quarantine
+    quarantineSessions: [], quarantineStats: {},
+    // v26.2: Data Flow
+    dfTraceId: '', dfVariables: []
   }},
   computed: {
     statCards() { const s = this.stats; return [
       {label:'Total Variables', value: s.total_variables??0, color:'#6366F1'},
       {label:'Active Traces', value: s.active_traces??0, color:'#8B5CF6'},
       {label:'Violations', value: s.total_violations??0, color:'#F59E0B'},
-      {label:'Blocked', value: s.total_blocked??0, color:'#EF4444'}
+      {label:'Blocked', value: s.total_blocked??0, color:'#EF4444'},
+      {label:'Hidden', value: s.total_hidden??0, color:'#8B5CF6'},
+      {label:'DOE', value: s.total_doe??0, color:'#F97316'}
     ]}
   },
   mounted() { this.loadAll() },
   methods: {
     confLabel(v) { return ['PUBLIC','INTERNAL','CONFIDENTIAL','SECRET'][v]||'?' },
     integLabel(v) { return ['TAINT','LOW','MEDIUM','HIGH'][v]||'?' },
-    formatTime(t) { if(!t) return '-'; return new Date(t).toLocaleString() },
+    formatTime(t) { if(!t || t==='0001-01-01T00:00:00Z') return '-'; return new Date(t).toLocaleString() },
     async loadAll() {
       try { this.stats = await api('/api/v1/ifc/stats') } catch(e){}
       try { const d = await api('/api/v1/ifc/source-rules'); this.sourceRules = d.rules||[] } catch(e){}
@@ -160,6 +219,16 @@ export default {
         this.checkResult = await apiPost('/api/v1/ifc/check', { trace_id: this.checkForm.trace_id, tool: this.checkForm.tool, input_var_ids: ids })
       } catch(e) { alert(e.message||e) }
       this.checking = false
+    },
+    // v26.1: Quarantine
+    async loadQuarantine() {
+      try { const d = await api('/api/v1/ifc/quarantine/sessions?limit=50'); this.quarantineSessions = d.sessions||[] } catch(e){}
+      try { this.quarantineStats = await api('/api/v1/ifc/quarantine/stats') } catch(e){}
+    },
+    // v26.2: Data Flow
+    async loadDataFlow() {
+      if(!this.dfTraceId) return
+      try { const d = await api('/api/v1/ifc/variables?trace_id='+encodeURIComponent(this.dfTraceId)); this.dfVariables = d.variables||[] } catch(e){ alert(e.message||e) }
     }
   }
 }
@@ -169,11 +238,12 @@ export default {
 .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-6); }
 .page-title { font-size:var(--text-xl); font-weight:700; display:flex; align-items:center; gap:var(--space-2); }
 .page-subtitle { font-size:var(--text-sm); color:var(--text-secondary); margin-top:var(--space-1); }
-.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-4); margin-bottom:var(--space-6); }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:var(--space-4); margin-bottom:var(--space-6); }
+.quarantine-stats { margin-top:var(--space-4); margin-bottom:var(--space-4); }
 .stat-card { background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:var(--space-4); }
 .stat-val { font-size:var(--text-2xl); font-weight:700; }
 .stat-label { font-size:var(--text-xs); color:var(--text-tertiary); margin-top:var(--space-1); }
-.tab-bar { display:flex; gap:var(--space-1); margin-bottom:var(--space-4); border-bottom:1px solid var(--border-subtle); padding-bottom:var(--space-2); }
+.tab-bar { display:flex; gap:var(--space-1); margin-bottom:var(--space-4); border-bottom:1px solid var(--border-subtle); padding-bottom:var(--space-2); flex-wrap:wrap; }
 .tab-btn { padding:var(--space-2) var(--space-3); border:none; background:none; cursor:pointer; font-size:var(--text-sm); color:var(--text-secondary); border-radius:var(--radius-md); }
 .tab-btn.active { color:#6366F1; background:rgba(99,102,241,0.08); font-weight:600; }
 .section { margin-top:var(--space-4); }
@@ -198,6 +268,10 @@ export default {
 .dec-warn { background:rgba(245,158,11,0.1); color:#D97706; }
 .dec-allow { background:rgba(34,197,94,0.1); color:#16A34A; }
 .dec-log { background:rgba(99,102,241,0.08); color:#6366F1; }
+.qs-processing { background:rgba(245,158,11,0.1); color:#D97706; }
+.qs-completed { background:rgba(34,197,94,0.1); color:#16A34A; }
+.qs-failed { background:rgba(239,68,68,0.1); color:#EF4444; }
+.qs-pending { background:rgba(99,102,241,0.08); color:#6366F1; }
 .btn { display:inline-flex; align-items:center; gap:var(--space-1); padding:var(--space-2) var(--space-4); border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:var(--bg-card); cursor:pointer; font-size:var(--text-sm); }
 .btn-sm { padding:var(--space-1) var(--space-3); font-size:var(--text-xs); }
 .btn-primary { background:#6366F1; color:#fff; border-color:#6366F1; }
@@ -219,4 +293,10 @@ export default {
 .result-header { display:flex; align-items:center; gap:var(--space-2); font-size:var(--text-lg); font-weight:700; margin-bottom:var(--space-2); }
 .result-reason { font-size:var(--text-sm); color:var(--text-secondary); }
 .result-violation { margin-top:var(--space-3); font-size:var(--text-xs); background:var(--bg-muted,#f1f5f9); padding:var(--space-3); border-radius:var(--radius-md); overflow-x:auto; }
+.taint-row { background:rgba(239,68,68,0.04); }
+.dataflow-chain { margin-bottom:var(--space-6); }
+.dataflow-chain h4 { font-size:var(--text-base); font-weight:600; margin-bottom:var(--space-3); }
+.doe-section { margin-top:var(--space-6); }
+.doe-section h4 { font-size:var(--text-base); font-weight:600; margin-bottom:var(--space-3); }
+.doe-alert { background:rgba(249,115,22,0.08); border:1px solid rgba(249,115,22,0.2); border-radius:var(--radius-md); padding:var(--space-3) var(--space-4); color:#EA580C; font-size:var(--text-sm); }
 </style>

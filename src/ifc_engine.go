@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1021,4 +1022,21 @@ func (e *IFCEngine) DeleteToolRequirement(tool string) error {
 		e.db.Exec(`DELETE FROM ifc_tool_requirements WHERE tool=?`, tool)
 	}
 	return nil
+}
+
+// ============================================================
+// v26.2: extractFieldNames — 从 JSON 字符串提取顶层 key
+// ============================================================
+
+func extractFieldNames(jsonStr string) []string {
+	var m map[string]interface{}
+	if json.Unmarshal([]byte(jsonStr), &m) != nil {
+		return nil
+	}
+	var keys []string
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // 确保顺序稳定
+	return keys
 }

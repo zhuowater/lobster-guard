@@ -59,6 +59,8 @@ type LLMProxy struct {
 	deviationDetector *DeviationDetector
 	// v26.0 信息流控制引擎
 	ifcEngine *IFCEngine
+	// v26.1 隔离LLM
+	ifcQuarantine *IFCQuarantine
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -335,6 +337,16 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		requestPath = stripped
 	}
+
+	// v26.2: 选择性隐藏 — 向上游发送前替换高机密字段
+	if lp.ifcEngine != nil && lp.ifcEngine.config.HidingEnabled {
+		hideResult := lp.ifcEngine.HideContent(traceID, string(bodyBytes), lp.ifcEngine.config.HidingThreshold)
+		if hideResult != nil && hideResult.HiddenCount > 0 {
+			log.Printf("[IFC-Hiding] 隐藏了 %d 个字段 trace=%s", hideResult.HiddenCount, traceID)
+			bodyBytes = []byte(hideResult.Redacted)
+		}
+	}
+
 	upstreamURL := strings.TrimRight(target.Upstream, "/") + requestPath
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -593,6 +605,27 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 								return
 							} else if ifcDecision != nil && ifcDecision.Decision == "warn" {
 								log.Printf("[IFC] 信息流告警: tool=%s reason=%s trace=%s", tcName25, ifcDecision.Reason, traceID)
+							}
+
+							// v26.1: IFC 隔离路由
+							if lp.ifcQuarantine != nil && lp.ifcEngine.config.QuarantineEnabled {
+								if lp.ifcQuarantine.ShouldRoute(traceID, varIDs) {
+									quarantineURL, sessionID, qErr := lp.ifcQuarantine.Route(traceID, varIDs)
+									if qErr == nil && quarantineURL != "" {
+										log.Printf("[IFC-Quarantine] 被污染数据路由到隔离LLM: trace=%s upstream=%s session=%s", traceID, quarantineURL, sessionID)
+									}
+								}
+							}
+
+							// v26.2: DOE 数据过度暴露检测
+							fields := extractFieldNames(tcArgs25)
+							if len(fields) > 0 {
+								doeResult := lp.ifcEngine.DetectDOE(traceID, tcName25, fields, nil)
+								if doeResult != nil && doeResult.Severity == "critical" {
+									log.Printf("[IFC-DOE] 严重数据过度暴露: tool=%s excess=%v trace=%s", tcName25, doeResult.ExcessFields, traceID)
+								} else if doeResult != nil && doeResult.Severity == "warning" {
+									log.Printf("[IFC-DOE] 数据过度暴露告警: tool=%s excess=%v trace=%s", tcName25, doeResult.ExcessFields, traceID)
+								}
 							}
 						}
 					}
