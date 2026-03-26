@@ -22,7 +22,7 @@
       <div class="card-header">
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="card-title">规则管理</span>
         <div class="card-actions">
-          <template v-if="activeTab !== 'templates'">
+          <template v-if="activeTab === 'rules'">
             <button class="btn btn-sm" @click="openCreateEditor">新建规则</button>
             <button class="btn btn-ghost btn-sm" @click="exportRules" title="导出规则为 YAML">导出</button>
             <button class="btn btn-ghost btn-sm" @click="showImport = true" title="从 YAML 导入规则">导入</button>
@@ -34,34 +34,35 @@
         </div>
       </div>
       <div class="tab-header">
-        <button class="tab-btn" :class="{ active: activeTab === 'inbound' }" @click="activeTab = 'inbound'">入站规则<span class="tab-badge" v-if="inboundRules.length">{{ filteredInboundRules.length }}</span></button>
-        <button class="tab-btn" :class="{ active: activeTab === 'outbound' }" @click="activeTab = 'outbound'">出站规则<span class="tab-badge" v-if="outboundRules.length">{{ filteredOutboundRules.length }}</span></button>
+        <button class="tab-btn" :class="{ active: activeTab === 'rules' }" @click="activeTab = 'rules'">规则管理<span class="tab-badge">{{ filteredAllRules.length }}</span></button>
         <button class="tab-btn" :class="{ active: activeTab === 'templates' }" @click="activeTab = 'templates'">规则模板<span class="tab-badge" v-if="inboundTemplates.length">{{ inboundTemplates.length }}</span></button>
       </div>
 
-      <!-- ========== Inbound Tab ========== -->
-      <div v-show="activeTab === 'inbound'">
+      <!-- ========== Rules Tab (Merged Inbound + Outbound) ========== -->
+      <div v-show="activeTab === 'rules'">
         <div class="filter-bar">
           <div class="filter-search">
             <Icon name="search" :size="14" color="var(--text-tertiary)" />
-            <input type="text" v-model="inboundSearch" placeholder="搜索规则名称或模式..." class="filter-input" />
-            <button v-if="inboundSearch" class="filter-clear" @click="inboundSearch = ''">✕</button>
+            <input type="text" v-model="ruleSearch" placeholder="搜索规则名称或模式..." class="filter-input" />
+            <button v-if="ruleSearch" class="filter-clear" @click="ruleSearch = ''">✕</button>
           </div>
           <div class="filter-group">
-            <select v-model="inboundActionFilter" class="filter-select"><option value="">所有动作</option><option value="block">block</option><option value="warn">warn</option><option value="log">log</option></select>
-            <select v-model="inboundGroupFilter" class="filter-select"><option value="">所有分组</option><option v-for="g in inboundGroups" :key="g" :value="g">{{ g }}</option></select>
+            <select v-model="filterDirection" class="filter-select"><option value="">全部方向</option><option value="inbound">入站</option><option value="outbound">出站</option></select>
+            <select v-model="filterAction" class="filter-select"><option value="">所有动作</option><option value="block">block</option><option value="warn">warn</option><option value="log">log</option></select>
+            <select v-model="filterGroup" class="filter-select"><option value="">所有分组</option><option v-for="g in allGroups" :key="g" :value="g">{{ g }}</option></select>
           </div>
         </div>
-        <div class="batch-bar" v-if="selectedInbound.length > 0">
-          <span class="batch-info">已选 <b>{{ selectedInbound.length }}</b> 条</span>
-          <button class="btn btn-ghost btn-sm" @click="batchActionInbound('block')">批量拦截</button>
-          <button class="btn btn-ghost btn-sm" @click="batchActionInbound('warn')">批量警告</button>
-          <button class="btn btn-ghost btn-sm" @click="batchActionInbound('log')">批量记录</button>
-          <button class="btn btn-danger btn-sm" @click="confirmBatchDeleteInbound">批量删除</button>
-          <button class="btn btn-ghost btn-sm" @click="selectedInbound = []">取消</button>
+        <div class="batch-bar" v-if="selectedRules.length > 0">
+          <span class="batch-info">已选 <b>{{ selectedRules.length }}</b> 条</span>
+          <button class="btn btn-ghost btn-sm" @click="batchAction('block')">批量拦截</button>
+          <button class="btn btn-ghost btn-sm" @click="batchAction('warn')">批量警告</button>
+          <button class="btn btn-ghost btn-sm" @click="batchAction('log')">批量记录</button>
+          <button class="btn btn-danger btn-sm" @click="confirmBatchDelete">批量删除</button>
+          <button class="btn btn-ghost btn-sm" @click="selectedRules = []">取消</button>
         </div>
-        <DataTable :columns="inboundColumns" :data="filteredInboundRules" :loading="inboundLoading" empty-text="暂无入站规则" empty-desc="点击「新建规则」创建第一条入站规则" :expandable="true" :row-class="inboundRowClass">
-          <template #cell-select="{ row }"><input type="checkbox" class="rule-checkbox" :checked="selectedInbound.includes(row.name)" @click.stop="toggleSelectInbound(row.name)" /></template>
+        <DataTable :columns="allColumns" :data="filteredAllRules" :loading="inboundLoading || outboundLoading" empty-text="暂无规则" empty-desc="点击「新建规则」创建第一条规则" :expandable="true" :row-class="ruleRowClass">
+          <template #cell-select="{ row }"><input type="checkbox" class="rule-checkbox" :checked="selectedRules.includes(row._key)" @click.stop="toggleSelectRule(row._key)" /></template>
+          <template #cell-direction="{ row }"><span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span></template>
           <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span></template>
           <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
           <template #cell-type="{ value }"><span class="tag tag-info">{{ value || 'keyword' }}</span></template>
@@ -70,58 +71,22 @@
           <template #expand="{ row }">
             <div class="rule-expand-detail">
               <div class="expand-row"><b>名称:</b> {{ row.name }}</div>
-              <div class="expand-row"><b>类型:</b> {{ row.type || 'keyword' }} | <b>动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> | <b>优先级:</b> {{ row.priority ?? '--' }}</div>
+              <div class="expand-row"><b>方向:</b> <span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'" style="font-size:.72rem">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span> | <b>类型:</b> {{ row.type || 'keyword' }} | <b>动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> | <b>优先级:</b> {{ row.priority ?? '--' }}</div>
               <div class="expand-row" v-if="row.message"><b>自定义消息:</b> {{ row.message }}</div>
               <div v-if="row.patterns && row.patterns.length" class="expand-row"><b>模式 ({{ row.patterns.length }}):</b><pre class="pattern-pre">{{ row.patterns.join('\n') }}</pre></div>
             </div>
           </template>
           <template #actions="{ row }">
-            <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row, 'inbound')" title="编辑"><Icon name="edit" :size="12" /></button>
-            <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row, 'inbound')" style="margin-left:4px" title="删除"><Icon name="trash" :size="12" /></button>
+            <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row, row._direction)" title="编辑"><Icon name="edit" :size="12" /></button>
+            <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row, row._direction)" style="margin-left:4px" title="删除"><Icon name="trash" :size="12" /></button>
           </template>
         </DataTable>
         <div class="rule-meta" v-if="inboundMeta">版本: {{ inboundMeta.version }} 来源: {{ inboundMeta.source }} 加载: {{ fmtTime(inboundMeta.loaded_at) }}</div>
-        <div style="margin-top:12px"><button class="btn btn-sm" @click="reloadInbound" :disabled="reloadingInbound">{{ reloadingInbound ? '更新中...' : '热更新入站规则' }}</button></div>
-      </div>
-
-      <!-- ========== Outbound Tab ========== -->
-      <div v-show="activeTab === 'outbound'">
-        <div class="filter-bar">
-          <div class="filter-search">
-            <Icon name="search" :size="14" color="var(--text-tertiary)" />
-            <input type="text" v-model="outboundSearch" placeholder="搜索规则名称或模式..." class="filter-input" />
-            <button v-if="outboundSearch" class="filter-clear" @click="outboundSearch = ''">✕</button>
-          </div>
-          <div class="filter-group">
-            <select v-model="outboundActionFilter" class="filter-select"><option value="">所有动作</option><option value="block">block</option><option value="warn">warn</option><option value="log">log</option></select>
-          </div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-sm" @click="reloadInbound" :disabled="reloadingInbound">{{ reloadingInbound ? '更新中...' : '热更新入站规则' }}</button>
+          <button class="btn btn-sm" @click="reloadOutbound" :disabled="reloadingOutbound">{{ reloadingOutbound ? '更新中...' : '热更新出站规则' }}</button>
         </div>
-        <div class="batch-bar" v-if="selectedOutbound.length > 0">
-          <span class="batch-info">已选 <b>{{ selectedOutbound.length }}</b> 条</span>
-          <button class="btn btn-danger btn-sm" @click="confirmBatchDeleteOutbound">批量删除</button>
-          <button class="btn btn-ghost btn-sm" @click="selectedOutbound = []">取消</button>
-        </div>
-        <DataTable :columns="outboundColumns" :data="filteredOutboundRules" :loading="outboundLoading" empty-text="暂无出站规则" empty-desc="点击「新建规则」创建出站规则" :expandable="true">
-          <template #cell-select="{ row }"><input type="checkbox" class="rule-checkbox" :checked="selectedOutbound.includes(row.name)" @click.stop="toggleSelectOutbound(row.name)" /></template>
-          <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span></template>
-          <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
-          <template #cell-priority="{ row }"><span class="priority-num" :class="priorityClass(row.priority)">{{ row.priority ?? '--' }}</span></template>
-          <template #expand="{ row }">
-            <div class="rule-expand-detail">
-              <div class="expand-row"><b>名称:</b> {{ row.name }}</div>
-              <div class="expand-row"><b>动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> | <b>优先级:</b> {{ row.priority ?? 0 }}</div>
-              <div class="expand-row" v-if="row.message"><b>自定义消息:</b> {{ row.message }}</div>
-              <div v-if="row.patterns && row.patterns.length" class="expand-row"><b>模式 ({{ row.patterns.length }}):</b><pre class="pattern-pre">{{ row.patterns.join('\n') }}</pre></div>
-            </div>
-          </template>
-          <template #actions="{ row }">
-            <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row, 'outbound')" title="编辑"><Icon name="edit" :size="12" /></button>
-            <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row, 'outbound')" style="margin-left:4px" title="删除"><Icon name="trash" :size="12" /></button>
-          </template>
-        </DataTable>
-        <div style="margin-top:12px"><button class="btn btn-sm" @click="reloadOutbound" :disabled="reloadingOutbound">{{ reloadingOutbound ? '更新中...' : '热更新出站规则' }}</button></div>
       </div>
-
       <!-- ========== Templates Tab ========== -->
       <div v-show="activeTab === 'templates'">
         <div class="tpl-stat-row">
@@ -262,7 +227,7 @@ import Icon from '../components/Icon.vue'
 import RuleEditor from '../components/RuleEditor.vue'
 import RegexTester from '../components/RegexTester.vue'
 
-const activeTab = ref('inbound')
+const activeTab = ref('rules')
 
 // ==================== Rule Hits ====================
 const ruleHits = ref([])
@@ -343,6 +308,54 @@ const filteredOutboundRules = computed(() => {
   if (outboundActionFilter.value) list = list.filter(r => r.action === outboundActionFilter.value)
   return list
 })
+
+// ==================== Unified Rules (Merged) ====================
+const ruleSearch = ref('')
+const filterDirection = ref('')
+const filterAction = ref('')
+const filterGroup = ref('')
+const selectedRules = ref([])
+
+const allColumns = [
+  { key: 'select', label: '', sortable: false, width: '36px' },
+  { key: 'direction', label: '方向', sortable: true, width: '72px' },
+  { key: 'name', label: '名称', sortable: true },
+  { key: 'action', label: '动作', sortable: true },
+  { key: 'type', label: '类型', sortable: true },
+  { key: 'priority', label: '优先级', sortable: true },
+  { key: 'patterns_count', label: '模式数', sortable: true },
+  { key: 'group', label: '分组', sortable: true },
+]
+
+const allRules = computed(() => {
+  const inList = inboundRules.value.map(r => ({ ...r, _direction: 'inbound', _key: 'in_' + r.name }))
+  const outList = outboundRules.value.map(r => ({ ...r, _direction: 'outbound', _key: 'out_' + r.name }))
+  return [...inList, ...outList]
+})
+
+const allGroups = computed(() => {
+  const groups = new Set()
+  allRules.value.forEach(r => { if (r.group) groups.add(r.group) })
+  return [...groups].sort()
+})
+
+const filteredAllRules = computed(() => {
+  let list = allRules.value
+  const q = ruleSearch.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter(r =>
+      (r.name || '').toLowerCase().includes(q) ||
+      (r.patterns || []).some(p => p.toLowerCase().includes(q))
+    )
+  }
+  if (filterDirection.value) list = list.filter(r => r._direction === filterDirection.value)
+  if (filterAction.value) list = list.filter(r => r.action === filterAction.value)
+  if (filterGroup.value) list = list.filter(r => r.group === filterGroup.value)
+  return list
+})
+
+function ruleRowClass(row) { return (row.priority || 0) >= 80 ? 'row-high-priority' : '' }
+function toggleSelectRule(key) { const idx = selectedRules.value.indexOf(key); if (idx >= 0) selectedRules.value.splice(idx, 1); else selectedRules.value.push(key) }
 
 // ==================== Inbound Templates ====================
 const inboundTemplates = ref([])
@@ -482,7 +495,7 @@ async function loadInboundTemplates() {
 }
 
 // ==================== Editor ====================
-function openCreateEditor() { editingRule.value = null; editingDirection.value = activeTab.value; editorErrors.value = {}; editorVisible.value = true }
+function openCreateEditor() { editingRule.value = null; editingDirection.value = 'inbound'; editorErrors.value = {}; editorVisible.value = true }
 function openEditEditor(row, direction) { editingRule.value = row; editingDirection.value = direction; editorErrors.value = {}; editorVisible.value = true }
 function closeEditor() { editorVisible.value = false; editorErrors.value = {} }
 
@@ -544,6 +557,34 @@ function confirmBatchDeleteOutbound() {
   const names = [...selectedOutbound.value]
   confirmTitle.value = '批量删除规则'; confirmMessage.value = '确认删除 ' + names.length + ' 条出站规则？此操作不可恢复。'; confirmType.value = 'danger'
   confirmAction = async () => { let success = 0, failed = 0; for (const name of names) { try { await apiDelete('/api/v1/outbound-rules/delete', { name }); success++ } catch { failed++ } }; showToast('批量删除: 成功 ' + success + ' 条' + (failed ? ', 失败 ' + failed + ' 条' : ''), failed ? 'error' : 'success'); selectedOutbound.value = []; loadOutbound() }
+  confirmVisible.value = true
+}
+
+// ==================== Unified Batch Operations ====================
+async function batchAction(action) {
+  const keys = [...selectedRules.value]; if (!keys.length) return; let success = 0; let failed = 0
+  for (const key of keys) {
+    const rule = allRules.value.find(r => r._key === key); if (!rule) continue
+    const basePath = rule._direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
+    try { await apiPut(basePath + '/update', { ...rule, action }); success++ } catch { failed++ }
+  }
+  showToast('批量设为 ' + action + ': 成功 ' + success + ' 条' + (failed ? ', 失败 ' + failed + ' 条' : ''), failed ? 'error' : 'success')
+  selectedRules.value = []; loadInbound(); loadOutbound()
+}
+
+function confirmBatchDelete() {
+  const keys = [...selectedRules.value]
+  confirmTitle.value = '批量删除规则'; confirmMessage.value = '确认删除 ' + keys.length + ' 条规则？此操作不可恢复。'; confirmType.value = 'danger'
+  confirmAction = async () => {
+    let success = 0, failed = 0
+    for (const key of keys) {
+      const rule = allRules.value.find(r => r._key === key); if (!rule) continue
+      const basePath = rule._direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
+      try { await apiDelete(basePath + '/delete', { name: rule.name }); success++ } catch { failed++ }
+    }
+    showToast('批量删除: 成功 ' + success + ' 条' + (failed ? ', 失败 ' + failed + ' 条' : ''), failed ? 'error' : 'success')
+    selectedRules.value = []; loadInbound(); loadOutbound()
+  }
   confirmVisible.value = true
 }
 
@@ -623,6 +664,8 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadInboundTemp
 .tag-warn { background: rgba(255, 169, 77, 0.15); color: #ffa94d; border: 1px solid rgba(255, 169, 77, 0.3); }
 .tag-log { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
 .tag-pass { background: rgba(148, 163, 184, 0.1); color: #64748b; }
+.tag-success { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+.tag-info { background: rgba(99, 102, 241, 0.15); color: #6366f1; border: 1px solid rgba(99, 102, 241, 0.3); }
 .text-muted { color: var(--text-tertiary); }
 
 /* ==================== Templates Tab ==================== */
