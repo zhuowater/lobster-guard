@@ -3,6 +3,8 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -72,6 +74,7 @@ type RuleEngine struct {
 	tenantAC       map[string]*AhoCorasick        // tenantID -> compiled AC for tenant rules
 	tenantRuleList map[string][]Rule              // tenantID -> Rule metadata
 	tenantRegex    map[string][]RegexRule          // tenantID -> regex rules
+	tenantDB       *sql.DB                        // v27.2: 持久化存储
 }
 
 // actionToLevel 将 action 字符串映射到 RuleLevel
@@ -656,6 +659,92 @@ func (re *RuleEngine) DetectWithExclusions(text, appID string, excludeRules []st
 // ============================================================
 
 // SetTenantRules 设置租户专属入站规则并编译 AC 自动机
+// SetTenantDB 设置持久化 DB 并加载已保存的租户规则
+func (re *RuleEngine) SetTenantDB(db *sql.DB) {
+	re.tenantDB = db
+	if db == nil {
+		return
+	}
+	// 建表
+	db.Exec(`CREATE TABLE IF NOT EXISTS tenant_inbound_rules (
+		tenant_id TEXT NOT NULL,
+		rules_json TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (tenant_id)
+	)`)
+	// 从 DB 重建内存
+	re.loadTenantRulesFromDB()
+}
+
+// loadTenantRulesFromDB 启动时从 DB 重建租户入站规则
+func (re *RuleEngine) loadTenantRulesFromDB() {
+	if re.tenantDB == nil {
+		return
+	}
+	rows, err := re.tenantDB.Query(`SELECT tenant_id, rules_json FROM tenant_inbound_rules`)
+	if err != nil {
+		log.Printf("[入站规则] 加载持久化租户规则失败: %v", err)
+		return
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var tid, rulesJSON string
+		if rows.Scan(&tid, &rulesJSON) != nil {
+			continue
+		}
+		var rules []InboundRuleConfig
+		if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
+			continue
+		}
+		if len(rules) == 0 {
+			continue
+		}
+		// 重建 AC 自动机（不走 SetTenantRules 避免重复写 DB）
+		ac, ruleList := buildACFromConfigs(rules)
+		regexRules := buildRegexRules(rules)
+		re.mu.Lock()
+		if re.tenantRules == nil {
+			re.tenantRules = make(map[string][]InboundRuleConfig)
+			re.tenantAC = make(map[string]*AhoCorasick)
+			re.tenantRuleList = make(map[string][]Rule)
+			re.tenantRegex = make(map[string][]RegexRule)
+		}
+		re.tenantRules[tid] = rules
+		re.tenantAC[tid] = ac
+		re.tenantRuleList[tid] = ruleList
+		re.tenantRegex[tid] = regexRules
+		re.mu.Unlock()
+		count++
+	}
+	if count > 0 {
+		log.Printf("[入站规则] ✅ 从 DB 恢复了 %d 个租户的入站规则", count)
+	}
+}
+
+// persistTenantRules 持久化租户入站规则到 DB
+func (re *RuleEngine) persistTenantRules(tenantID string, rules []InboundRuleConfig) {
+	if re.tenantDB == nil {
+		return
+	}
+	rulesJSON, err := json.Marshal(rules)
+	if err != nil {
+		log.Printf("[入站规则] 序列化失败: %v", err)
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	re.tenantDB.Exec(`INSERT OR REPLACE INTO tenant_inbound_rules (tenant_id, rules_json, updated_at) VALUES (?,?,?)`,
+		tenantID, string(rulesJSON), now)
+}
+
+// removePersistTenantRules 从 DB 删除租户入站规则
+func (re *RuleEngine) removePersistTenantRules(tenantID string) {
+	if re.tenantDB == nil {
+		return
+	}
+	re.tenantDB.Exec(`DELETE FROM tenant_inbound_rules WHERE tenant_id=?`, tenantID)
+}
+
 func (re *RuleEngine) SetTenantRules(tenantID string, rules []InboundRuleConfig) {
 	ac, ruleList := buildACFromConfigs(rules)
 	regexRules := buildRegexRules(rules)
@@ -671,6 +760,8 @@ func (re *RuleEngine) SetTenantRules(tenantID string, rules []InboundRuleConfig)
 	re.tenantRuleList[tenantID] = ruleList
 	re.tenantRegex[tenantID] = regexRules
 	re.mu.Unlock()
+	// v27.2: 持久化到 DB
+	re.persistTenantRules(tenantID, rules)
 	log.Printf("[入站规则] 设置租户 %s 专属规则: %d 条规则, %d 个 pattern, %d 条正则",
 		tenantID, len(rules), countPatterns(rules), len(regexRules))
 }
@@ -683,6 +774,8 @@ func (re *RuleEngine) RemoveTenantRules(tenantID string) {
 	delete(re.tenantRuleList, tenantID)
 	delete(re.tenantRegex, tenantID)
 	re.mu.Unlock()
+	// v27.2: 从 DB 删除
+	re.removePersistTenantRules(tenantID)
 	log.Printf("[入站规则] 移除租户 %s 专属规则", tenantID)
 }
 

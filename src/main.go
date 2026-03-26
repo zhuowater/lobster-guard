@@ -217,6 +217,9 @@ func main() {
 	// v14.0: 初始化租户管理器
 	tenantMgr := NewTenantManager(db)
 
+	// v27.2: 入站规则持久化（重启后从 DB 恢复租户入站规则）
+	engine.SetTenantDB(db)
+
 	// v14.1: 初始化认证管理器
 	authMgr := NewAuthManager(db, &cfg.Auth)
 	if cfg.Auth.Enabled {
