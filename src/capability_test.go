@@ -4,6 +4,7 @@ package main
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -343,4 +344,170 @@ func TestCapabilityViolationStatus(t *testing.T) {
 	if ctx.Status != "violated" {
 		t.Errorf("expected violated after deny, got %s", ctx.Status)
 	}
+}
+
+// ============================================================
+// CaMeL Source Propagation + Label Propagation Tests
+// ============================================================
+
+func TestCapability_SourcePropagation(t *testing.T) {
+	db := setupCapTestDB(t); defer db.Close()
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, DefaultPolicy: "deny", TrustThreshold: 0.5, EnforceIntersect: true})
+	traceID := "test-propagation-" + capGenID()
+
+	// 1. Init context — user input is trusted
+	ce.InitContext(traceID, "user1", nil)
+
+	// 2. Register tool results
+	ce.RegisterToolResult(traceID, "web_fetch", "data-web-1")
+	ce.RegisterToolResult(traceID, "database_query", "data-db-1")
+
+	// 3. Propagate: llm_summary depends on web_fetch + database_query
+	item := ce.PropagateData(traceID, "data-summary-1", "llm_summary", []string{"data-web-1", "data-db-1"})
+	if item == nil { t.Fatal("PropagateData returned nil") }
+
+	// Check sources are union of parents
+	sourceSet := map[string]bool{}
+	for _, s := range item.Sources { sourceSet[s] = true }
+	if !sourceSet["tool:web_fetch"] { t.Error("missing source tool:web_fetch") }
+	if !sourceSet["tool:database_query"] { t.Error("missing source tool:database_query") }
+	if !sourceSet["llm_summary"] { t.Error("missing own source llm_summary") }
+
+	// Check parentIDs
+	if len(item.ParentIDs) != 2 { t.Errorf("expected 2 parents, got %d", len(item.ParentIDs)) }
+
+	// 4. Chain propagation: another tool depends on summary
+	item2 := ce.PropagateData(traceID, "data-tool2-1", "tool:send_email", []string{"data-summary-1"})
+	if item2 == nil { t.Fatal("second PropagateData returned nil") }
+	sourceSet2 := map[string]bool{}
+	for _, s := range item2.Sources { sourceSet2[s] = true }
+	// Should recursively include web_fetch and database_query sources
+	if !sourceSet2["tool:web_fetch"] { t.Error("chain: missing source tool:web_fetch") }
+	if !sourceSet2["tool:database_query"] { t.Error("chain: missing source tool:database_query") }
+	if !sourceSet2["tool:send_email"] { t.Error("chain: missing own source tool:send_email") }
+}
+
+func TestCapability_IsTrusted(t *testing.T) {
+	db := setupCapTestDB(t); defer db.Close()
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true})
+
+	// Trusted sources
+	if !ce.capIsTrusted([]string{"user_input"}) { t.Error("user_input should be trusted") }
+	if !ce.capIsTrusted([]string{"user_input", "system", "assistant"}) { t.Error("user+system+assistant should be trusted") }
+
+	// Untrusted sources
+	if ce.capIsTrusted([]string{"tool:web_fetch"}) { t.Error("tool:web_fetch should be untrusted") }
+	if ce.capIsTrusted([]string{"user_input", "tool:web_fetch"}) { t.Error("mixed with tool should be untrusted") }
+
+	// Empty
+	if ce.capIsTrusted([]string{}) { t.Error("empty sources should be untrusted") }
+}
+
+func TestCapability_EvaluateWithProvenance(t *testing.T) {
+	db := setupCapTestDB(t); defer db.Close()
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, DefaultPolicy: "deny", TrustThreshold: 0.1, EnforceIntersect: true})
+	traceID := "test-provenance-" + capGenID()
+
+	ce.InitContext(traceID, "user1", nil)
+
+	// Register a tool result from untrusted source
+	ce.RegisterToolResult(traceID, "web_fetch", "data-web-1")
+
+	// Propagate: summary depends on web_fetch result
+	ce.PropagateData(traceID, "data-summary", "llm_summary", []string{"data-web-1"})
+
+	// Now a send_email tool wants to use that summary — should get "warn" due to untrusted lineage
+	ce.RegisterToolResult(traceID, "send_email", "data-email-1")
+	ce.PropagateData(traceID, "data-email-1", "tool:send_email", []string{"data-summary"})
+
+	// Add tool mapping so basic eval passes
+	ce.mu.Lock()
+	ce.toolMappings["send_email"] = &CapToolMapping{
+		ToolName: "send_email", AllowedCaps: []string{"execute"}, TrustFactor: 0.9,
+	}
+	ce.mu.Unlock()
+
+	eval := ce.EvaluateWithProvenance(traceID, "data-email-1", "execute", "send_email")
+	if eval == nil { t.Fatal("eval returned nil") }
+	// Should warn because lineage includes tool:web_fetch (untrusted)
+	if eval.Decision != "warn" {
+		t.Errorf("expected 'warn' for untrusted lineage, got '%s' reason='%s'", eval.Decision, eval.Reason)
+	}
+	if !strings.Contains(eval.Reason, "untrusted sources") {
+		t.Errorf("reason should mention untrusted sources, got: %s", eval.Reason)
+	}
+}
+
+func TestCapability_TrustScorePropagation(t *testing.T) {
+	db := setupCapTestDB(t); defer db.Close()
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, TrustThreshold: 0.5})
+	traceID := "test-trust-" + capGenID()
+
+	ce.InitContext(traceID, "user1", nil)
+
+	// web_fetch has 0 trust
+	ce.RegisterToolResult(traceID, "web_fetch", "data-web-1")
+	// database has high trust
+	ce.mu.Lock()
+	ce.toolMappings["database_query"] = &CapToolMapping{ToolName: "database_query", TrustFactor: 0.95}
+	ce.mu.Unlock()
+	ce.RegisterToolResult(traceID, "database_query", "data-db-1")
+
+	// Propagate — should take min trust
+	item := ce.PropagateData(traceID, "data-merged", "llm_summary", []string{"data-web-1", "data-db-1"})
+	if item == nil { t.Fatal("PropagateData nil") }
+	if item.TrustScore >= 0.5 { t.Errorf("expected trust < 0.5 (min of web_fetch), got %.2f", item.TrustScore) }
+}
+
+func TestCapability_LabelIntersection(t *testing.T) {
+	db := setupCapTestDB(t); defer db.Close()
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, EnforceIntersect: true})
+	traceID := "test-intersect-" + capGenID()
+
+	ctx := ce.InitContext(traceID, "user1", []CapLabel{
+		{Name: "read", Level: "read", Granted: true},
+		{Name: "write", Level: "write", Granted: true},
+		{Name: "execute", Level: "execute", Granted: true},
+	})
+
+	// Manually set different labels on two items
+	ce.mu.Lock()
+	ctx.DataItems["item-a"] = &CapDataItem{
+		DataID: "item-a", Source: "tool_result:safe_tool",
+		Sources: []string{"tool:safe_tool"},
+		Labels: []CapLabel{
+			{Name: "read", Level: "read", Granted: true},
+			{Name: "write", Level: "write", Granted: true},
+		},
+		TrustScore: 0.8,
+	}
+	ctx.DataItems["item-b"] = &CapDataItem{
+		DataID: "item-b", Source: "tool_result:risky_tool",
+		Sources: []string{"tool:risky_tool"},
+		Labels: []CapLabel{
+			{Name: "read", Level: "read", Granted: true},
+			// No write — intersection should lose write
+		},
+		TrustScore: 0.3,
+	}
+	ce.mu.Unlock()
+
+	// Propagate — intersection should only have "read"
+	item := ce.PropagateData(traceID, "merged", "llm_summary", []string{"item-a", "item-b"})
+	if item == nil { t.Fatal("nil") }
+	hasRead, hasWrite := false, false
+	for _, l := range item.Labels {
+		if l.Level == "read" { hasRead = true }
+		if l.Level == "write" { hasWrite = true }
+	}
+	if !hasRead { t.Error("intersection should include 'read'") }
+	if hasWrite { t.Error("intersection should NOT include 'write' (item-b lacks it)") }
+
+	// Trust should be min = 0.3
+	if item.TrustScore != 0.3 { t.Errorf("expected trust 0.3, got %.2f", item.TrustScore) }
+
+	// Sources should be union
+	srcSet := map[string]bool{}
+	for _, s := range item.Sources { srcSet[s] = true }
+	if !srcSet["tool:safe_tool"] || !srcSet["tool:risky_tool"] { t.Error("sources union missing") }
 }

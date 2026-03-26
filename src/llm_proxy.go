@@ -608,22 +608,40 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 
-					// v25.1: CapabilityEngine — 数据级权限检查
+					// v25.1+v28.0g: CapabilityEngine — 数据级权限检查 + CaMeL source propagation
 					if lp.capabilityEngine != nil {
-						lp.capabilityEngine.RegisterToolResult(traceID, tcName25, fmt.Sprintf("tool-%s-%d", tcName25, i25))
-						capEval := lp.capabilityEngine.Evaluate(traceID, fmt.Sprintf("tool-%s-%d", tcName25, i25), "execute", tcName25)
-						if capEval != nil && capEval.Decision == "deny" {
-							log.Printf("[Capability] 权限不足: tool=%s reason=%s trace=%s", tcName25, capEval.Reason, traceID)
-							if lp.eventBus != nil {
+						toolDataID := fmt.Sprintf("tool-%s-%d", tcName25, i25)
+						lp.capabilityEngine.RegisterToolResult(traceID, tcName25, toolDataID)
+
+						// CaMeL: propagate sources from prior tool results in this trace
+						// If previous tool outputs feed into this tool, the lineage carries forward
+						if i25 > 0 {
+							var parentIDs []string
+							for j := 0; j < i25; j++ {
+								parentIDs = append(parentIDs, fmt.Sprintf("tool-%s-%d", info25.ToolNames[j], j))
+							}
+							lp.capabilityEngine.PropagateData(traceID, toolDataID, "tool:"+tcName25, parentIDs)
+						}
+
+						capEval := lp.capabilityEngine.EvaluateWithProvenance(traceID, toolDataID, "execute", tcName25)
+						if capEval != nil && (capEval.Decision == "deny" || capEval.Decision == "warn") {
+							log.Printf("[Capability] %s: tool=%s reason=%s trace=%s", capEval.Decision, tcName25, capEval.Reason, traceID)
+							if capEval.Decision == "deny" && lp.eventBus != nil {
 								lp.eventBus.Emit(&SecurityEvent{
 									Type: "capability_deny", Severity: "high", Domain: "llm", TraceID: traceID,
 									Summary: fmt.Sprintf("Capability denied: %s (%s)", tcName25, capEval.Reason),
 								})
 							}
+							if capEval.Decision == "warn" && lp.eventBus != nil {
+								lp.eventBus.Emit(&SecurityEvent{
+									Type: "capability_warn", Severity: "medium", Domain: "llm", TraceID: traceID,
+									Summary: fmt.Sprintf("Capability warn (untrusted lineage): %s (%s)", tcName25, capEval.Reason),
+								})
+							}
 							// v26.3: 写入审计日志
 							if lp.auditLogger != nil {
-								lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, "warn",
-									fmt.Sprintf("[Capability] 权限不足: %s", capEval.Reason),
+								lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, capEval.Decision,
+									fmt.Sprintf("[Capability] %s: %s", capEval.Decision, capEval.Reason),
 									fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
 							}
 						}
@@ -873,9 +891,22 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 								tcName, planEval.Violation.Severity, auditCtx.TraceID)
 						}
 					}
-					// v25.1: CapabilityEngine — SSE 模式下注册 tool 结果
+					// v25.1+v28.0g: CapabilityEngine — SSE 模式下注册 tool 结果 + source propagation
 					if lp.capabilityEngine != nil {
-						lp.capabilityEngine.RegisterToolResult(auditCtx.TraceID, tcName, fmt.Sprintf("sse-tool-%s-%d", tcName, i))
+						sseDataID := fmt.Sprintf("sse-tool-%s-%d", tcName, i)
+						lp.capabilityEngine.RegisterToolResult(auditCtx.TraceID, tcName, sseDataID)
+						// CaMeL: propagate sources from prior tools in this SSE batch
+						if i > 0 {
+							var parentIDs []string
+							for j := 0; j < i; j++ {
+								parentIDs = append(parentIDs, fmt.Sprintf("sse-tool-%s-%d", info.ToolNames[j], j))
+							}
+							lp.capabilityEngine.PropagateData(auditCtx.TraceID, sseDataID, "tool:"+tcName, parentIDs)
+						}
+						capEval := lp.capabilityEngine.EvaluateWithProvenance(auditCtx.TraceID, sseDataID, "execute", tcName)
+						if capEval != nil && (capEval.Decision == "deny" || capEval.Decision == "warn") {
+							log.Printf("[Capability] SSE %s: tool=%s reason=%s trace=%s (流式仅记录)", capEval.Decision, tcName, capEval.Reason, auditCtx.TraceID)
+						}
 					}
 					// v25.2: DeviationDetector — SSE 模式下检测偏差
 					if lp.deviationDetector != nil {

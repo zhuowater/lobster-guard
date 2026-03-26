@@ -37,6 +37,8 @@ type CapDataItem struct {
 	DataID     string     `json:"data_id"`
 	Content    string     `json:"content"`
 	Source     string     `json:"source"`
+	Sources    []string   `json:"sources"`    // CaMeL: accumulated source set (union of all ancestors)
+	ParentIDs  []string   `json:"parent_ids"` // CaMeL: dependency tracking for propagation
 	Labels     []CapLabel `json:"labels"`
 	TrustScore float64   `json:"trust_score"`
 	CreatedAt  string     `json:"created_at"`
@@ -214,7 +216,7 @@ func (ce *CapabilityEngine) InitContext(traceID, userID string, userCaps []CapLa
 		UserCaps: userCaps, ToolResults: []CapToolResult{}, Intersections: []CapIntersection{},
 		Evaluations: []CapEvaluation{}, DataItems: make(map[string]*CapDataItem), CreatedAt: now, UpdatedAt: now}
 	uid := "user_input_" + capGenID()
-	ctx.DataItems[uid] = &CapDataItem{DataID: uid, Source: "user_input", Labels: userCaps, TrustScore: 1.0, CreatedAt: now}
+	ctx.DataItems[uid] = &CapDataItem{DataID: uid, Source: "user_input", Sources: []string{"user_input"}, Labels: userCaps, TrustScore: 1.0, CreatedAt: now}
 	ce.mu.Lock(); ce.contexts[traceID] = ctx; ce.mu.Unlock()
 	ce.capPersistCtx(ctx)
 	return ctx
@@ -236,7 +238,7 @@ func (ce *CapabilityEngine) RegisterToolResult(traceID, toolName, dataID string)
 	tr := CapToolResult{ToolName: toolName, DataID: dataID, RawCaps: rawCaps, MappedCaps: mappedCaps, Timestamp: now}
 	tf := 0.0; if mp != nil { tf = mp.TrustFactor }
 	ctx.ToolResults = append(ctx.ToolResults, tr)
-	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "tool_result:" + toolName, Labels: rawCaps, TrustScore: tf, CreatedAt: now}
+	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "tool_result:" + toolName, Sources: []string{"tool:" + toolName}, Labels: rawCaps, TrustScore: tf, CreatedAt: now}
 	ctx.UpdatedAt = now
 	ce.mu.Unlock()
 	ce.capPersistCtx(ctx)
@@ -263,7 +265,7 @@ func (ce *CapabilityEngine) Evaluate(traceID, dataID, action, toolName string) *
 	}
 	if di.Source == "user_input" {
 		eval.Decision = "allow"; eval.Reason = "user input, full cap"; eval.TrustScore = 1.0
-	} else if strings.HasPrefix(di.Source, "tool_result:") {
+	} else if strings.HasPrefix(di.Source, "tool_result:") || strings.HasPrefix(di.Source, "tool:") {
 		if !userHas {
 			eval.Decision = "deny"; eval.Reason = fmt.Sprintf("user lacks '%s' cap", action)
 		} else {
@@ -307,9 +309,11 @@ func (ce *CapabilityEngine) RegisterLLMSummary(traceID, dataID string, sourceDat
 	intersected := ce.capComputeIntersectLocked(ctx, sourceDataIDs)
 	minTrust := 1.0
 	for _, sid := range sourceDataIDs { if item, ok := ctx.DataItems[sid]; ok && item.TrustScore < minTrust { minTrust = item.TrustScore } }
+	// CaMeL: compute source union from all parent data items
+	mergedSources := ce.capCollectSourcesLocked(ctx, sourceDataIDs)
 	inter := CapIntersection{SourceDataIDs: sourceDataIDs, ResultLabels: intersected, Context: "llm_summary", Timestamp: now}
 	ctx.Intersections = append(ctx.Intersections, inter)
-	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "llm_summary", Labels: intersected, TrustScore: minTrust, CreatedAt: now}
+	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "llm_summary", Sources: mergedSources, ParentIDs: sourceDataIDs, Labels: intersected, TrustScore: minTrust, CreatedAt: now}
 	ctx.UpdatedAt = now
 	ce.mu.Unlock()
 	ce.capPersistCtx(ctx)
@@ -335,6 +339,113 @@ func (ce *CapabilityEngine) capComputeIntersectLocked(ctx *CapContext, dataIDs [
 	total := len(sets); var result []CapLabel
 	for lv, c := range counts { if c == total { result = append(result, CapLabel{Name: lv, Source: "intersection", Level: lv, Granted: true}) } }
 	if result == nil { result = []CapLabel{} }; return result
+}
+
+// ============================================================
+// CaMeL: Source propagation (union) + Label propagation (intersection)
+// ============================================================
+
+// capCollectSourcesLocked — collect all sources from given data items, recursively following ParentIDs.
+// Returns deduplicated union. Caller must hold at least RLock.
+func (ce *CapabilityEngine) capCollectSourcesLocked(ctx *CapContext, dataIDs []string) []string {
+	seen := map[string]bool{}
+	visited := map[string]bool{}
+	var collect func(ids []string)
+	collect = func(ids []string) {
+		for _, did := range ids {
+			if visited[did] { continue }
+			visited[did] = true
+			item, ok := ctx.DataItems[did]
+			if !ok { continue }
+			for _, s := range item.Sources { seen[s] = true }
+			if len(item.ParentIDs) > 0 { collect(item.ParentIDs) }
+		}
+	}
+	collect(dataIDs)
+	result := make([]string, 0, len(seen))
+	for s := range seen { result = append(result, s) }
+	return result
+}
+
+// capIsTrusted — CaMeL-style: check if all accumulated sources are trusted.
+// Trusted sources: user_input, system, assistant; untrusted: any tool:* source
+func (ce *CapabilityEngine) capIsTrusted(sources []string) bool {
+	trustedSet := map[string]bool{
+		"user_input": true,
+		"system":     true,
+		"assistant":  true,
+	}
+	for _, s := range sources {
+		if !trustedSet[s] { return false }
+	}
+	return len(sources) > 0
+}
+
+// PropagateData — generic data flow propagation (CaMeL-style).
+// Creates new data item with:
+//   - Sources: union of all parent sources (recursive)
+//   - Labels: intersection of all parent labels
+//   - TrustScore: min of all parent trust scores
+//   - ParentIDs: the input data IDs
+func (ce *CapabilityEngine) PropagateData(traceID, outputDataID, outputSource string, inputDataIDs []string) *CapDataItem {
+	now := time.Now().UTC().Format(time.RFC3339)
+	ce.mu.Lock()
+	ctx := ce.contexts[traceID]
+	if ctx == nil { ce.mu.Unlock(); return nil }
+
+	// Labels: intersection
+	intersected := ce.capComputeIntersectLocked(ctx, inputDataIDs)
+
+	// TrustScore: min
+	minTrust := 1.0
+	for _, sid := range inputDataIDs {
+		if item, ok := ctx.DataItems[sid]; ok && item.TrustScore < minTrust { minTrust = item.TrustScore }
+	}
+
+	// Sources: recursive union
+	mergedSources := ce.capCollectSourcesLocked(ctx, inputDataIDs)
+	// Add own source
+	found := false
+	for _, s := range mergedSources { if s == outputSource { found = true; break } }
+	if !found { mergedSources = append(mergedSources, outputSource) }
+
+	item := &CapDataItem{
+		DataID: outputDataID, Source: outputSource,
+		Sources: mergedSources, ParentIDs: inputDataIDs,
+		Labels: intersected, TrustScore: minTrust, CreatedAt: now,
+	}
+	ctx.DataItems[outputDataID] = item
+	ctx.UpdatedAt = now
+	ce.mu.Unlock()
+	ce.capPersistCtx(ctx)
+	return item
+}
+
+// EvaluateWithProvenance — enhanced evaluation that also checks source trustworthiness (CaMeL is_trusted).
+// If data has untrusted sources, downgrades to "warn" for write/execute/admin actions.
+func (ce *CapabilityEngine) EvaluateWithProvenance(traceID, dataID, action, toolName string) *CapEvaluation {
+	eval := ce.Evaluate(traceID, dataID, action, toolName)
+	if eval == nil || eval.Decision == "deny" { return eval }
+
+	// Additional provenance check
+	ce.mu.RLock()
+	ctx := ce.contexts[traceID]
+	var sources []string
+	if ctx != nil {
+		if di, ok := ctx.DataItems[dataID]; ok {
+			sources = di.Sources
+		}
+	}
+	ce.mu.RUnlock()
+
+	if len(sources) > 0 && !ce.capIsTrusted(sources) {
+		// Untrusted sources in lineage — for dangerous actions, downgrade to warn
+		if action == "write" || action == "execute" || action == "admin" {
+			eval.Decision = "warn"
+			eval.Reason = fmt.Sprintf("untrusted sources in lineage: %v (original: %s)", sources, eval.Reason)
+		}
+	}
+	return eval
 }
 
 func (ce *CapabilityEngine) GetContext(traceID string) *CapContext {
