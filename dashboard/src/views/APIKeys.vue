@@ -11,9 +11,25 @@
     <!-- 统计卡片 -->
     <div class="stat-row">
       <div class="stat-card"><span class="stat-value">{{ keys.length }}</span><span class="stat-label">总密钥数</span></div>
-      <div class="stat-card"><span class="stat-value accent">{{ keys.filter(k=>k.enabled).length }}</span><span class="stat-label">已启用</span></div>
-      <div class="stat-card"><span class="stat-value warn">{{ keys.filter(k=>!k.enabled).length }}</span><span class="stat-label">已禁用</span></div>
+      <div class="stat-card"><span class="stat-value accent">{{ keys.filter(k=>k.status==='active'||(!k.status&&k.enabled)).length }}</span><span class="stat-label">已绑定</span></div>
+      <div class="stat-card"><span class="stat-value pending-val">{{ pendingKeys.length }}</span><span class="stat-label">待绑定</span></div>
       <div class="stat-card"><span class="stat-value">{{ uniqueDepts }}</span><span class="stat-label">覆盖部门</span></div>
+    </div>
+
+    <!-- 🔍 待绑定 API Key -->
+    <div class="pending-section" v-if="pendingKeys.length">
+      <div class="pending-header"><span class="pending-icon">🔍</span> 自动发现的 API Key（待绑定）<span class="pending-count">{{ pendingKeys.length }}</span></div>
+      <div class="pending-list">
+        <div class="pending-card" v-for="pk in pendingKeys" :key="pk.id">
+          <div class="pending-info">
+            <code class="key-prefix">{{ pk.key_prefix }}...</code>
+            <span class="pending-meta">发现于 {{ fmtTime(pk.discovered_at||pk.created_at) }}</span>
+            <span class="pending-meta">{{ pk.request_count||0 }} 次请求</span>
+            <span class="pending-meta" v-if="pk.last_seen_at">最后活动 {{ fmtTime(pk.last_seen_at) }}</span>
+          </div>
+          <button class="btn-primary btn-sm" @click="openBind(pk)">绑定用户</button>
+        </div>
+      </div>
     </div>
 
     <!-- 搜索与筛选 -->
@@ -37,7 +53,7 @@
             <td><span class="badge-tenant">{{ k.tenant_id }}</span></td>
             <td>{{ k.quota_daily || '∞' }}</td>
             <td><span :class="quotaClass(k)">{{ k.used_today || 0 }}</span></td>
-            <td><span :class="k.enabled?'badge-on':'badge-off'">{{ k.enabled?'启用':'禁用' }}</span></td>
+            <td><span v-if="k.status==='pending'" class="badge-pending">待绑定</span><span v-else :class="k.enabled?'badge-on':'badge-off'">{{ k.enabled?'启用':'禁用' }}</span></td>
             <td class="td-time">{{ fmtTime(k.last_used_at) }}</td>
             <td class="td-actions">
               <button class="btn-xs btn-outline" @click="openEdit(k)">编辑</button>
@@ -92,6 +108,26 @@
         </div>
       </div>
     </div>
+    <!-- 绑定弹窗 -->
+    <div class="modal-overlay" v-if="showBind" @click.self="showBind=false">
+      <div class="modal">
+        <h2>🔗 绑定 API Key 到用户</h2>
+        <div class="bind-key-info"><code>{{ bindForm.key_prefix }}...</code> — 已发出 {{ bindForm.request_count||0 }} 次请求</div>
+        <div class="form-group"><label>用户 ID *</label><input v-model="bindForm.user_id" placeholder="工号或邮箱" /></div>
+        <div class="form-group"><label>用户名</label><input v-model="bindForm.user_name" placeholder="姓名" /></div>
+        <div class="form-group"><label>部门</label><input v-model="bindForm.department" placeholder="所属部门" /></div>
+        <div class="form-group"><label>租户</label>
+          <select v-model="bindForm.tenant_id" class="form-select">
+            <option value="default">默认租户</option>
+            <option v-for="t in allTenants" :key="t.id" :value="t.id">{{ t.name }} ({{ t.id }})</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-outline" @click="showBind=false">取消</button>
+          <button class="btn-primary" @click="doBind" :disabled="!bindForm.user_id||binding">{{ binding?'绑定中...':'确认绑定' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -111,6 +147,14 @@ const newRawKey = ref('')
 const form = ref({ user_id:'', user_name:'', department:'', tenant_id:'default', quota_daily:0, expires_at:'' })
 const editForm = ref({})
 let editingId = ''
+
+// v27.1: 自动发现绑定
+const showBind = ref(false)
+const binding = ref(false)
+const bindForm = ref({ id:'', key_prefix:'', request_count:0, user_id:'', user_name:'', department:'', tenant_id:'default' })
+const allTenants = ref([])
+
+const pendingKeys = computed(()=>keys.value.filter(k=>k.status==='pending'))
 
 const tenants = computed(()=>[...new Set(keys.value.map(k=>k.tenant_id))])
 const uniqueDepts = computed(()=>new Set(keys.value.map(k=>k.department).filter(Boolean)).size)
@@ -161,7 +205,25 @@ async function deleteKey(k) {
 
 function copyKey() { navigator.clipboard.writeText(newRawKey.value).then(()=>alert('已复制到剪贴板')) }
 
-onMounted(loadKeys)
+// v27.1: 绑定逻辑
+function openBind(pk) {
+  bindForm.value = { id:pk.id, key_prefix:pk.key_prefix, request_count:pk.request_count||0, user_id:'', user_name:'', department:'', tenant_id:'default' }
+  showBind.value = true
+}
+async function doBind() {
+  binding.value = true
+  try {
+    await apiPost('/api/v1/apikeys/'+bindForm.value.id+'/bind', {
+      user_id: bindForm.value.user_id, user_name: bindForm.value.user_name,
+      department: bindForm.value.department, tenant_id: bindForm.value.tenant_id
+    })
+    showBind.value = false; loadKeys()
+  } catch(e) { alert('绑定失败: '+e.message) }
+  binding.value = false
+}
+async function loadTenantList() { try { const d=await api('/api/v1/tenants'); allTenants.value=d.tenants||[] } catch{} }
+
+onMounted(()=>{ loadKeys(); loadTenantList() })
 </script>
 
 <style scoped>
@@ -211,4 +273,17 @@ onMounted(loadKeys)
 .btn-xs { padding:4px 8px; font-size:0.75rem; border-radius:4px; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--text-primary); }
 .btn-warn { border-color:var(--warning); color:var(--warning); }
 .btn-danger { border-color:var(--danger); color:var(--danger); }
+.btn-sm { padding:6px 12px; font-size:0.8rem; }
+.pending-val { color:#F59E0B; }
+.badge-pending { color:#F59E0B; font-weight:700; background:rgba(245,158,11,0.1); padding:2px 8px; border-radius:10px; font-size:0.75rem; }
+.pending-section { margin-bottom:var(--space-4); background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.3); border-radius:var(--radius-lg,12px); padding:var(--space-3); }
+.pending-header { font-size:1rem; font-weight:700; color:#F59E0B; display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-2); }
+.pending-icon { font-size:1.2em; }
+.pending-count { background:#F59E0B; color:#000; font-size:0.75rem; padding:2px 8px; border-radius:10px; font-weight:700; }
+.pending-list { display:flex; flex-direction:column; gap:var(--space-2); }
+.pending-card { display:flex; align-items:center; justify-content:space-between; padding:var(--space-2) var(--space-3); background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); border-left:3px solid #F59E0B; }
+.pending-info { display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; }
+.pending-meta { font-size:0.75rem; color:var(--text-secondary); }
+.bind-key-info { padding:var(--space-2); background:var(--bg-muted); border-radius:var(--radius); margin-bottom:var(--space-3); font-size:0.85rem; color:var(--text-secondary); }
+.form-select { width:100%; padding:var(--space-2); border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-main); color:var(--text-primary); }
 </style>

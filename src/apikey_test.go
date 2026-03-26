@@ -93,10 +93,16 @@ func TestAPIKeyResolve(t *testing.T) {
 		t.Fatalf("Bearer 模式 UserID 不匹配: got %s", resolved2.UserID)
 	}
 
-	// 不存在的 Key
-	_, err = mgr.Resolve("sk-nonexistent1234567890")
-	if err == nil {
-		t.Fatal("不存在的 Key 应返回错误")
+	// 不存在的 Key → 自动发现为 pending（不再返回错误）
+	discovered, err := mgr.Resolve("sk-nonexistent1234567890")
+	if err != nil {
+		t.Fatalf("Resolve 应自动发现未知 Key，但报错: %v", err)
+	}
+	if discovered.Status != "pending" {
+		t.Fatalf("自动发现的 Key 应为 pending，got %s", discovered.Status)
+	}
+	if discovered.UserID != "unknown" {
+		t.Fatalf("自动发现的 Key UserID 应为 unknown，got %s", discovered.UserID)
 	}
 
 	// 空 Key
@@ -212,10 +218,13 @@ func TestAPIKeyRotate(t *testing.T) {
 		t.Fatal("轮换后 KeyPrefix 不应为空")
 	}
 
-	// 旧 Key 应失效
-	_, err = mgr.Resolve(oldKey)
-	if err == nil {
-		t.Fatal("旧 Key 应失效")
+	// 旧 Key 应不再解析为原用户（会被自动发现为 pending）
+	oldResolved, err := mgr.Resolve(oldKey)
+	if err != nil {
+		t.Fatalf("旧 Key Resolve 返回错误: %v（应被自动发现）", err)
+	}
+	if oldResolved.UserID == "rotate-user@test.com" && oldResolved.Status != "pending" {
+		t.Fatal("旧 Key 不应仍关联到原用户")
 	}
 
 	// 新 Key 应可用
@@ -228,4 +237,109 @@ func TestAPIKeyRotate(t *testing.T) {
 	}
 
 	t.Logf("✅ 轮换成功: old_prefix=%s new_prefix=%s", oldKey[:10], newKey[:10])
+}
+
+func TestAutoDiscover(t *testing.T) {
+	db := setupTestDB(t)
+	mgr := NewAPIKeyManager(db)
+
+	entry := mgr.AutoDiscover("Bearer sk-unknown-key-test-12345678")
+	if entry == nil {
+		t.Fatal("AutoDiscover 返回 nil")
+	}
+	if entry.Status != "pending" {
+		t.Fatalf("期望 pending，得到 %s", entry.Status)
+	}
+	if entry.UserID != "unknown" {
+		t.Fatalf("期望 unknown，得到 %s", entry.UserID)
+	}
+	if entry.RequestCount != 1 {
+		t.Fatalf("期望 request_count=1，得到 %d", entry.RequestCount)
+	}
+	t.Logf("✅ 自动发现: id=%s prefix=%s status=%s", entry.ID, entry.KeyPrefix, entry.Status)
+}
+
+func TestAutoDiscoverExisting(t *testing.T) {
+	db := setupTestDB(t)
+	mgr := NewAPIKeyManager(db)
+
+	key := "sk-existing-test-key-for-autodiscover"
+	e1 := mgr.AutoDiscover("Bearer " + key)
+	if e1.RequestCount != 1 {
+		t.Fatalf("首次发现期望 count=1，得到 %d", e1.RequestCount)
+	}
+
+	e2 := mgr.AutoDiscover("Bearer " + key)
+	if e2.RequestCount != 2 {
+		t.Fatalf("二次发现期望 count=2，得到 %d", e2.RequestCount)
+	}
+	t.Logf("✅ 重复发现: count 从 1 → %d", e2.RequestCount)
+}
+
+func TestBind(t *testing.T) {
+	db := setupTestDB(t)
+	mgr := NewAPIKeyManager(db)
+
+	entry := mgr.AutoDiscover("Bearer sk-bind-test-key-123456")
+	if entry.Status != "pending" {
+		t.Fatalf("绑定前期望 pending，得到 %s", entry.Status)
+	}
+
+	err := mgr.Bind(entry.ID, "zhangsan", "张三", "安全部", "chip-team")
+	if err != nil {
+		t.Fatalf("Bind 失败: %v", err)
+	}
+
+	// 验证绑定后状态
+	got, err := mgr.Get(entry.ID)
+	if err != nil {
+		t.Fatalf("Get 失败: %v", err)
+	}
+	if got.Status != "active" {
+		t.Fatalf("绑定后期望 active，得到 %s", got.Status)
+	}
+	if got.UserID != "zhangsan" {
+		t.Fatalf("UserID 不匹配: %s", got.UserID)
+	}
+	if got.TenantID != "chip-team" {
+		t.Fatalf("TenantID 不匹配: %s", got.TenantID)
+	}
+	t.Logf("✅ 绑定成功: %s → user=%s tenant=%s", entry.ID, got.UserID, got.TenantID)
+}
+
+func TestResolveAutoDiscover(t *testing.T) {
+	db := setupTestDB(t)
+	mgr := NewAPIKeyManager(db)
+
+	// Resolve 一个不存在的 key，应该自动发现
+	resolved, err := mgr.Resolve("Bearer sk-resolve-autodiscover-test")
+	if err != nil {
+		t.Fatalf("Resolve 应该自动发现而非报错: %v", err)
+	}
+	if resolved.Status != "pending" {
+		t.Fatalf("自动发现期望 pending，得到 %s", resolved.Status)
+	}
+	t.Logf("✅ Resolve 自动发现: id=%s status=%s", resolved.ID, resolved.Status)
+}
+
+func TestAPIKeyStats(t *testing.T) {
+	db := setupTestDB(t)
+	mgr := NewAPIKeyManager(db)
+
+	// 创建一个 active key
+	mgr.Create(&APIKeyEntry{UserID: "u1", TenantID: "default"})
+	// 自动发现一个 pending key
+	mgr.AutoDiscover("Bearer sk-stats-pending-key-test")
+
+	stats, err := mgr.Stats()
+	if err != nil {
+		t.Fatalf("Stats 失败: %v", err)
+	}
+	if stats.Total < 2 {
+		t.Fatalf("期望 total>=2，得到 %d", stats.Total)
+	}
+	if stats.Pending < 1 {
+		t.Fatalf("期望 pending>=1，得到 %d", stats.Pending)
+	}
+	t.Logf("✅ Stats: total=%d active=%d pending=%d", stats.Total, stats.Active, stats.Pending)
 }

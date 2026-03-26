@@ -562,6 +562,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAPIKeyList(w, r)
 	case path == "/api/v1/apikeys" && method == "POST":
 		api.handleAPIKeyCreate(w, r)
+	case path == "/api/v1/apikeys/pending" && method == "GET":
+		api.handleAPIKeyPendingList(w, r)
+	case path == "/api/v1/apikeys/stats" && method == "GET":
+		api.handleAPIKeyStats(w, r)
+	case strings.HasPrefix(path, "/api/v1/apikeys/") && strings.HasSuffix(path, "/bind") && method == "POST":
+		api.handleAPIKeyBind(w, r)
 	case strings.HasPrefix(path, "/api/v1/apikeys/") && strings.HasSuffix(path, "/rotate") && method == "POST":
 		api.handleAPIKeyRotate(w, r)
 	case strings.HasPrefix(path, "/api/v1/apikeys/") && method == "GET":
@@ -8795,7 +8801,8 @@ func (api *ManagementAPI) handleAPIKeyList(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	tenantID := r.URL.Query().Get("tenant")
-	list, err := api.apiKeyMgr.List(tenantID)
+	status := r.URL.Query().Get("status")
+	list, err := api.apiKeyMgr.List(tenantID, status)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -8900,6 +8907,67 @@ func (api *ManagementAPI) handleAPIKeyRotate(w http.ResponseWriter, r *http.Requ
 		"raw_key": rawKey,
 		"warning": "旧 Key 已失效，请使用新 Key",
 	})
+}
+
+// handleAPIKeyBind POST /api/v1/apikeys/:id/bind — 绑定用户信息到 key
+func (api *ManagementAPI) handleAPIKeyBind(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/apikeys/")
+	id := strings.TrimSuffix(trimmed, "/bind")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	var req struct {
+		UserID     string `json:"user_id"`
+		UserName   string `json:"user_name"`
+		Department string `json:"department"`
+		TenantID   string `json:"tenant_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.UserID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "user_id required"})
+		return
+	}
+	if err := api.apiKeyMgr.Bind(id, req.UserID, req.UserName, req.Department, req.TenantID); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "bound", "id": id, "user_id": req.UserID})
+}
+
+// handleAPIKeyPendingList GET /api/v1/apikeys/pending — 只列出待绑定的 key
+func (api *ManagementAPI) handleAPIKeyPendingList(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	list, err := api.apiKeyMgr.List("", "pending")
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"keys": list, "total": len(list)})
+}
+
+// handleAPIKeyStats GET /api/v1/apikeys/stats — key 统计
+func (api *ManagementAPI) handleAPIKeyStats(w http.ResponseWriter, r *http.Request) {
+	if api.apiKeyMgr == nil {
+		jsonResponse(w, 400, map[string]string{"error": "API Key manager not enabled"})
+		return
+	}
+	stats, err := api.apiKeyMgr.Stats()
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, stats)
 }
 
 // ============================================================

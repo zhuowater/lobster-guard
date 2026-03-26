@@ -330,7 +330,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if sessionLink == nil || sessionLink.SenderID == "" {
 					r.Header.Set("X-Sender-Id", keyEntry.UserID)
 				}
-				// 配额检查
+				// pending 状态处理：允许通行但标记 header
+				if keyEntry.Status == "pending" {
+					w.Header().Set("X-API-Key-Status", "pending")
+					log.Printf("[LLM代理] API Key 待绑定: prefix=%s (允许通行)", keyEntry.KeyPrefix)
+				}
+				// 配额检查（pending key 的 quota 默认为 0，不限）
 				if !lp.apiKeyMgr.CheckQuota(keyEntry.ID) {
 					log.Printf("[LLM代理] API Key 配额已用完: user=%s key_prefix=%s", keyEntry.UserID, keyEntry.KeyPrefix)
 					http.Error(w, `{"error":"API key daily quota exceeded"}`, 429)

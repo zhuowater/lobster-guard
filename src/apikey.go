@@ -15,19 +15,23 @@ import (
 
 // APIKeyEntry API Key 条目
 type APIKeyEntry struct {
-	ID         string `json:"id"`
-	Key        string `json:"key,omitempty"`  // API Key (hash存储，仅创建时返回明文)
-	KeyPrefix  string `json:"key_prefix"`     // 前8位明文，用于识别
-	UserID     string `json:"user_id"`        // 用户标识（工号/邮箱）
-	UserName   string `json:"user_name"`      // 用户名
-	Department string `json:"department"`     // 部门
-	TenantID   string `json:"tenant_id"`      // 归属租户
-	Enabled    bool   `json:"enabled"`
-	QuotaDaily int    `json:"quota_daily"`    // 日配额，0=不限
-	UsedToday  int    `json:"used_today"`     // 今日已用
-	ExpiresAt  string `json:"expires_at"`     // 过期时间，空=永不过期
-	CreatedAt  string `json:"created_at"`
-	LastUsedAt string `json:"last_used_at"`
+	ID           string `json:"id"`
+	Key          string `json:"key,omitempty"`    // API Key (hash存储，仅创建时返回明文)
+	KeyPrefix    string `json:"key_prefix"`       // 前10位明文，用于识别
+	UserID       string `json:"user_id"`          // 用户标识（工号/邮箱）
+	UserName     string `json:"user_name"`        // 用户名
+	Department   string `json:"department"`       // 部门
+	TenantID     string `json:"tenant_id"`        // 归属租户
+	Enabled      bool   `json:"enabled"`
+	QuotaDaily   int    `json:"quota_daily"`      // 日配额，0=不限
+	UsedToday    int    `json:"used_today"`       // 今日已用
+	ExpiresAt    string `json:"expires_at"`       // 过期时间，空=永不过期
+	CreatedAt    string `json:"created_at"`
+	LastUsedAt   string `json:"last_used_at"`
+	Status       string `json:"status"`           // "active"(已绑定) / "pending"(待绑定/自动发现)
+	DiscoveredAt string `json:"discovered_at"`    // 自动发现时间
+	RequestCount int    `json:"request_count"`    // 发现以来的请求次数
+	LastSeenAt   string `json:"last_seen_at"`     // 最后活动时间
 }
 
 // APIKeyManager API Key 管理器
@@ -68,6 +72,12 @@ func (m *APIKeyManager) initSchema() {
 	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)`)
 	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id)`)
 	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`)
+	// 兼容旧表: 新增列（列已存在时 SQLite 会报错，忽略即可）
+	m.db.Exec(`ALTER TABLE api_keys ADD COLUMN status TEXT DEFAULT 'active'`)
+	m.db.Exec(`ALTER TABLE api_keys ADD COLUMN discovered_at TEXT DEFAULT ''`)
+	m.db.Exec(`ALTER TABLE api_keys ADD COLUMN request_count INTEGER DEFAULT 0`)
+	m.db.Exec(`ALTER TABLE api_keys ADD COLUMN last_seen_at TEXT DEFAULT ''`)
+	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status)`)
 	log.Println("[APIKey] ✅ Schema 就绪")
 }
 
@@ -76,7 +86,7 @@ func (m *APIKeyManager) loadCache() {
 	if m.db == nil {
 		return
 	}
-	rows, err := m.db.Query(`SELECT id, key_hash, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, usage_date, expires_at, created_at, last_used_at FROM api_keys WHERE enabled=1`)
+	rows, err := m.db.Query(`SELECT id, key_hash, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, usage_date, expires_at, created_at, last_used_at, status, discovered_at, request_count, last_seen_at FROM api_keys WHERE enabled=1`)
 	if err != nil {
 		log.Printf("[APIKey] 加载缓存失败: %v", err)
 		return
@@ -91,10 +101,14 @@ func (m *APIKeyManager) loadCache() {
 		var enabled int
 		if rows.Scan(&entry.ID, &keyHash, &entry.KeyPrefix, &entry.UserID, &entry.UserName,
 			&entry.Department, &entry.TenantID, &enabled, &entry.QuotaDaily,
-			&entry.UsedToday, &usageDate, &entry.ExpiresAt, &entry.CreatedAt, &entry.LastUsedAt) != nil {
+			&entry.UsedToday, &usageDate, &entry.ExpiresAt, &entry.CreatedAt, &entry.LastUsedAt,
+			&entry.Status, &entry.DiscoveredAt, &entry.RequestCount, &entry.LastSeenAt) != nil {
 			continue
 		}
 		entry.Enabled = enabled != 0
+		if entry.Status == "" {
+			entry.Status = "active"
+		}
 		// 跨日重置用量
 		if usageDate != today {
 			entry.UsedToday = 0
@@ -154,19 +168,33 @@ func (m *APIKeyManager) Resolve(rawKey string) (*APIKeyEntry, error) {
 
 	// 查数据库
 	if m.db == nil {
+		// 无 DB 时自动发现
+		discovered := m.AutoDiscover(key)
+		if discovered != nil {
+			return discovered, nil
+		}
 		return nil, fmt.Errorf("API Key 不存在")
 	}
 	var entry APIKeyEntry
 	var enabled int
 	var usageDate string
-	err := m.db.QueryRow(`SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, usage_date, expires_at, created_at, last_used_at FROM api_keys WHERE key_hash=?`, keyHash).
+	err := m.db.QueryRow(`SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, usage_date, expires_at, created_at, last_used_at, status, discovered_at, request_count, last_seen_at FROM api_keys WHERE key_hash=?`, keyHash).
 		Scan(&entry.ID, &entry.KeyPrefix, &entry.UserID, &entry.UserName, &entry.Department,
 			&entry.TenantID, &enabled, &entry.QuotaDaily, &entry.UsedToday, &usageDate,
-			&entry.ExpiresAt, &entry.CreatedAt, &entry.LastUsedAt)
+			&entry.ExpiresAt, &entry.CreatedAt, &entry.LastUsedAt,
+			&entry.Status, &entry.DiscoveredAt, &entry.RequestCount, &entry.LastSeenAt)
 	if err != nil {
+		// Key 不在 DB 中 → 自动发现
+		discovered := m.AutoDiscover(key)
+		if discovered != nil {
+			return discovered, nil
+		}
 		return nil, fmt.Errorf("API Key 不存在")
 	}
 	entry.Enabled = enabled != 0
+	if entry.Status == "" {
+		entry.Status = "active"
+	}
 	// 跨日重置
 	today := time.Now().UTC().Format("2006-01-02")
 	if usageDate != today {
@@ -206,11 +234,14 @@ func (m *APIKeyManager) Create(entry *APIKeyEntry) (*APIKeyEntry, string, error)
 	entry.KeyPrefix = rawKey[:10] // "sk-" + 前7位
 	entry.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	entry.Enabled = true
+	if entry.Status == "" {
+		entry.Status = "active"
+	}
 
 	if m.db != nil {
-		_, err := m.db.Exec(`INSERT INTO api_keys (id, key_hash, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, expires_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err := m.db.Exec(`INSERT INTO api_keys (id, key_hash, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, expires_at, created_at, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			entry.ID, keyHash, entry.KeyPrefix, entry.UserID, entry.UserName, entry.Department,
-			entry.TenantID, boolToInt(entry.Enabled), entry.QuotaDaily, entry.ExpiresAt, entry.CreatedAt)
+			entry.TenantID, boolToInt(entry.Enabled), entry.QuotaDaily, entry.ExpiresAt, entry.CreatedAt, entry.Status)
 		if err != nil {
 			return nil, "", fmt.Errorf("创建 API Key 失败: %w", err)
 		}
@@ -223,15 +254,24 @@ func (m *APIKeyManager) Create(entry *APIKeyEntry) (*APIKeyEntry, string, error)
 }
 
 // List 列出所有 API Key（不含 hash）
-func (m *APIKeyManager) List(tenantID string) ([]*APIKeyEntry, error) {
+// tenantID 为空表示不过滤租户，status 为空表示不过滤状态
+func (m *APIKeyManager) List(tenantID, status string) ([]*APIKeyEntry, error) {
 	if m.db == nil {
 		return nil, nil
 	}
-	query := `SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, expires_at, created_at, last_used_at FROM api_keys`
+	query := `SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, expires_at, created_at, last_used_at, status, discovered_at, request_count, last_seen_at FROM api_keys`
 	var args []interface{}
+	var conditions []string
 	if tenantID != "" {
-		query += ` WHERE tenant_id=?`
+		conditions = append(conditions, `tenant_id=?`)
 		args = append(args, tenantID)
+	}
+	if status != "" {
+		conditions = append(conditions, `status=?`)
+		args = append(args, status)
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
 	query += ` ORDER BY created_at DESC`
 
@@ -247,10 +287,14 @@ func (m *APIKeyManager) List(tenantID string) ([]*APIKeyEntry, error) {
 		var enabled int
 		if rows.Scan(&e.ID, &e.KeyPrefix, &e.UserID, &e.UserName, &e.Department,
 			&e.TenantID, &enabled, &e.QuotaDaily, &e.UsedToday,
-			&e.ExpiresAt, &e.CreatedAt, &e.LastUsedAt) != nil {
+			&e.ExpiresAt, &e.CreatedAt, &e.LastUsedAt,
+			&e.Status, &e.DiscoveredAt, &e.RequestCount, &e.LastSeenAt) != nil {
 			continue
 		}
 		e.Enabled = enabled != 0
+		if e.Status == "" {
+			e.Status = "active"
+		}
 		list = append(list, &e)
 	}
 	if list == nil {
@@ -266,14 +310,18 @@ func (m *APIKeyManager) Get(id string) (*APIKeyEntry, error) {
 	}
 	var e APIKeyEntry
 	var enabled int
-	err := m.db.QueryRow(`SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, expires_at, created_at, last_used_at FROM api_keys WHERE id=?`, id).
+	err := m.db.QueryRow(`SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, expires_at, created_at, last_used_at, status, discovered_at, request_count, last_seen_at FROM api_keys WHERE id=?`, id).
 		Scan(&e.ID, &e.KeyPrefix, &e.UserID, &e.UserName, &e.Department,
 			&e.TenantID, &enabled, &e.QuotaDaily, &e.UsedToday,
-			&e.ExpiresAt, &e.CreatedAt, &e.LastUsedAt)
+			&e.ExpiresAt, &e.CreatedAt, &e.LastUsedAt,
+			&e.Status, &e.DiscoveredAt, &e.RequestCount, &e.LastSeenAt)
 	if err != nil {
 		return nil, fmt.Errorf("API Key %q 不存在", id)
 	}
 	e.Enabled = enabled != 0
+	if e.Status == "" {
+		e.Status = "active"
+	}
 	return &e, nil
 }
 
@@ -421,4 +469,175 @@ func (m *APIKeyManager) IncrUsage(keyID string) {
 		}
 		return true
 	})
+}
+
+// AutoDiscover 自动发现并注册未知 API Key
+// 如果 key 已存在则更新 last_seen_at 和 request_count，返回已有条目
+// 如果 key 不存在则创建 pending 条目
+func (m *APIKeyManager) AutoDiscover(rawKey string) *APIKeyEntry {
+	key := strings.TrimSpace(rawKey)
+	if strings.HasPrefix(strings.ToLower(key), "bearer ") {
+		key = strings.TrimSpace(key[7:])
+	}
+	if key == "" {
+		return nil
+	}
+
+	keyHash := hashKey(key)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// 查缓存 — 找到则更新 last_seen_at 和 request_count++
+	if val, ok := m.cache.Load(keyHash); ok {
+		entry := val.(*APIKeyEntry)
+		entry.LastSeenAt = now
+		entry.RequestCount++
+		// 异步更新 DB
+		if m.db != nil {
+			m.db.Exec(`UPDATE api_keys SET last_seen_at=?, request_count=request_count+1 WHERE key_hash=?`, now, keyHash)
+		}
+		return entry
+	}
+
+	// 查 DB（缓存没有但 DB 可能有）
+	if m.db != nil {
+		var entry APIKeyEntry
+		var enabled int
+		var usageDate string
+		err := m.db.QueryRow(`SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, usage_date, expires_at, created_at, last_used_at, status, discovered_at, request_count, last_seen_at FROM api_keys WHERE key_hash=?`, keyHash).
+			Scan(&entry.ID, &entry.KeyPrefix, &entry.UserID, &entry.UserName, &entry.Department,
+				&entry.TenantID, &enabled, &entry.QuotaDaily, &entry.UsedToday, &usageDate,
+				&entry.ExpiresAt, &entry.CreatedAt, &entry.LastUsedAt,
+				&entry.Status, &entry.DiscoveredAt, &entry.RequestCount, &entry.LastSeenAt)
+		if err == nil {
+			entry.Enabled = enabled != 0
+			if entry.Status == "" {
+				entry.Status = "active"
+			}
+			entry.LastSeenAt = now
+			entry.RequestCount++
+			m.db.Exec(`UPDATE api_keys SET last_seen_at=?, request_count=request_count+1 WHERE key_hash=?`, now, keyHash)
+			m.cache.Store(keyHash, &entry)
+			return &entry
+		}
+	}
+
+	// 没找到 → 创建新的 pending 条目
+	// key_prefix: 前10位（不足10位取全部）
+	prefix := key
+	if len(prefix) > 10 {
+		prefix = prefix[:10]
+	}
+
+	id := fmt.Sprintf("ak-disc-%d", time.Now().UnixNano())
+	entry := &APIKeyEntry{
+		ID:           id,
+		KeyPrefix:    prefix,
+		UserID:       "unknown",
+		UserName:     "",
+		Department:   "",
+		TenantID:     "default",
+		Enabled:      true,
+		QuotaDaily:   0,
+		Status:       "pending",
+		DiscoveredAt: now,
+		LastSeenAt:   now,
+		RequestCount: 1,
+		CreatedAt:    now,
+	}
+
+	if m.db != nil {
+		// 使用 INSERT OR IGNORE 防并发重复插入
+		m.db.Exec(`INSERT OR IGNORE INTO api_keys (id, key_hash, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, expires_at, created_at, status, discovered_at, request_count, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			entry.ID, keyHash, entry.KeyPrefix, entry.UserID, entry.UserName, entry.Department,
+			entry.TenantID, boolToInt(entry.Enabled), entry.QuotaDaily, "", entry.CreatedAt,
+			entry.Status, entry.DiscoveredAt, entry.RequestCount, entry.LastSeenAt)
+
+		// INSERT OR IGNORE 可能因为 key_hash UNIQUE 冲突而跳过（并发情况）
+		// 随后 SELECT 确保拿到正确数据
+		var existEntry APIKeyEntry
+		var enabled2 int
+		var usageDate2 string
+		err := m.db.QueryRow(`SELECT id, key_prefix, user_id, user_name, department, tenant_id, enabled, quota_daily, used_today, usage_date, expires_at, created_at, last_used_at, status, discovered_at, request_count, last_seen_at FROM api_keys WHERE key_hash=?`, keyHash).
+			Scan(&existEntry.ID, &existEntry.KeyPrefix, &existEntry.UserID, &existEntry.UserName, &existEntry.Department,
+				&existEntry.TenantID, &enabled2, &existEntry.QuotaDaily, &existEntry.UsedToday, &usageDate2,
+				&existEntry.ExpiresAt, &existEntry.CreatedAt, &existEntry.LastUsedAt,
+				&existEntry.Status, &existEntry.DiscoveredAt, &existEntry.RequestCount, &existEntry.LastSeenAt)
+		if err == nil {
+			existEntry.Enabled = enabled2 != 0
+			if existEntry.Status == "" {
+				existEntry.Status = "active"
+			}
+			m.cache.Store(keyHash, &existEntry)
+			log.Printf("[APIKey] 🔍 自动发现新 Key: prefix=%s (待绑定)", existEntry.KeyPrefix)
+			return &existEntry
+		}
+	}
+
+	// 无 DB 时仅缓存
+	m.cache.Store(keyHash, entry)
+	log.Printf("[APIKey] 🔍 自动发现新 Key: prefix=%s (待绑定)", entry.KeyPrefix)
+	return entry
+}
+
+// Bind 将待绑定的 API Key 绑定到具体用户
+func (m *APIKeyManager) Bind(id string, userID, userName, department, tenantID string) error {
+	if m.db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	if id == "" {
+		return fmt.Errorf("id 不能为空")
+	}
+	if userID == "" {
+		return fmt.Errorf("user_id 不能为空")
+	}
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	// 更新 DB
+	result, err := m.db.Exec(`UPDATE api_keys SET user_id=?, user_name=?, department=?, tenant_id=?, status='active' WHERE id=?`,
+		userID, userName, department, tenantID, id)
+	if err != nil {
+		return fmt.Errorf("绑定 API Key 失败: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("API Key %q 不存在", id)
+	}
+
+	// 更新缓存
+	m.cache.Range(func(key, value interface{}) bool {
+		e := value.(*APIKeyEntry)
+		if e.ID == id {
+			e.UserID = userID
+			e.UserName = userName
+			e.Department = department
+			e.TenantID = tenantID
+			e.Status = "active"
+			return false
+		}
+		return true
+	})
+
+	log.Printf("[APIKey] ✅ 绑定: id=%s → user=%s tenant=%s", id, userID, tenantID)
+	return nil
+}
+
+// APIKeyStats API Key 统计信息
+type APIKeyStats struct {
+	Total   int `json:"total"`
+	Active  int `json:"active"`
+	Pending int `json:"pending"`
+}
+
+// Stats 返回 API Key 统计
+func (m *APIKeyManager) Stats() (*APIKeyStats, error) {
+	if m.db == nil {
+		return &APIKeyStats{}, nil
+	}
+	stats := &APIKeyStats{}
+	m.db.QueryRow(`SELECT COUNT(*) FROM api_keys`).Scan(&stats.Total)
+	m.db.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE status='active' OR status='' OR status IS NULL`).Scan(&stats.Active)
+	m.db.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE status='pending'`).Scan(&stats.Pending)
+	return stats, nil
 }
