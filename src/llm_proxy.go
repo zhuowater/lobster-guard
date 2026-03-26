@@ -157,7 +157,15 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	start := time.Now()
-	traceID := GenerateTraceID()
+	// Prefer trace ID from upstream (InboundProxy sets X-Trace-Id),
+	// fallback to generating a new one for direct LLM calls
+	traceID := r.Header.Get("X-Trace-Id")
+	if traceID == "" {
+		traceID = r.Header.Get("X-Trace-ID")
+	}
+	if traceID == "" {
+		traceID = GenerateTraceID()
+	}
 
 	// 匹配上游
 	target := lp.matchTarget(r)

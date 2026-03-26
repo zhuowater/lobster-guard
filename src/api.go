@@ -4128,6 +4128,38 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 			api.traceCorrelator.Set(senderID, traceID)
 		}
 
+		// 1b+. 污染标记：用户输入
+		if api.taintTracker != nil {
+			api.taintTracker.MarkTainted(traceID, inText, "user_input")
+			events = append(events, "taint_marked: user_input")
+		}
+
+		// 1b++. 执行信封
+		if api.envelopeMgr != nil {
+			env := api.envelopeMgr.Seal(traceID, "inbound", inText, result.Action, result.Reasons, senderID)
+			if env != nil {
+				events = append(events, fmt.Sprintf("envelope_created: id=%s", env.ID[:8]))
+			}
+		}
+
+		// 1b+++. v25 PlanCompiler
+		if api.planCompiler != nil {
+			plan := api.planCompiler.CompileIntent(traceID, inText)
+			if plan != nil {
+				events = append(events, fmt.Sprintf("plan_compiled: %s steps=%d", plan.TemplateName, plan.TotalSteps))
+			}
+		}
+
+		// 1b++++. v25 Capability
+		if api.capabilityEngine != nil {
+			ctx := api.capabilityEngine.InitContext(traceID, senderID, []CapLabel{
+				{Name: "read", Source: "simulate", Level: "read", Granted: true},
+			})
+			if ctx != nil {
+				events = append(events, fmt.Sprintf("cap_context: trace=%s", traceID[:8]))
+			}
+		}
+
 		// 1c. LLM 调用
 		if api.llmAuditor != nil {
 			ts := now.Add(-1 * time.Second).Format(time.RFC3339)
@@ -4174,6 +4206,12 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 
 		if api.traceCorrelator != nil {
 			api.traceCorrelator.Set(senderID, traceID)
+		}
+
+		// 2a+. 污染标记：注入尝试标记 taint
+		if api.taintTracker != nil {
+			api.taintTracker.MarkTainted(traceID, inText, "prompt_injection")
+			events = append(events, fmt.Sprintf("taint_marked: trace=%s source=prompt_injection", traceID[:8]))
 		}
 
 		// 2b. 蜜罐触发检查
@@ -4237,6 +4275,14 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 		outTraceID := traceID
 		api.logger.LogWithTrace("outbound", senderID, outResult.Action, outResult.Reason, outText, "", 1.5, upstreamID, appID, outTraceID)
 		events = append(events, fmt.Sprintf("outbound: PII data → %s (rule=%s)", outResult.Action, outResult.RuleName))
+
+		// 3c+. 污染标记：出站 PII
+		if api.taintTracker != nil {
+			entry := api.taintTracker.MarkTainted(traceID, outText, "outbound_pii")
+			if entry != nil {
+				events = append(events, fmt.Sprintf("taint_marked: trace=%s labels=%v", traceID[:8], entry.Labels))
+			}
+		}
 
 		// 3d. 也用入站引擎做 PII 检测
 		piis := api.inboundEngine.DetectPII(outText)

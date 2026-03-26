@@ -232,7 +232,8 @@ func (em *EnvelopeManager) Seal(traceID, domain, requestContent, decision string
 
 // loadEnvelope 从数据库加载一个信封
 func (em *EnvelopeManager) loadEnvelope(envelopeID string) (*ExecutionEnvelope, error) {
-	row := em.db.QueryRow(`SELECT id, trace_id, timestamp, domain, request_hash, decision, rules_json, sender_id, nonce, prev_hash, content_hash, signature FROM execution_envelopes WHERE id = ?`, envelopeID)
+	// Try by ID first, then by trace_id for convenience
+	row := em.db.QueryRow(`SELECT id, trace_id, timestamp, domain, request_hash, decision, rules_json, sender_id, nonce, prev_hash, content_hash, signature FROM execution_envelopes WHERE id = ? OR trace_id = ? LIMIT 1`, envelopeID, envelopeID)
 	return scanEnvelope(row)
 }
 

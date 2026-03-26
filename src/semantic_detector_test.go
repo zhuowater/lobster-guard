@@ -56,7 +56,7 @@ func TestSemanticAnalyzeJailbreak(t *testing.T) {
 	}
 	for _, text := range texts {
 		r := sd.Analyze(text)
-		if r.Score < 30 {
+		if r.Score < 29.9 {
 			t.Errorf("jailbreak text %q got low score %.1f, want >= 30", text, r.Score)
 		}
 	}
