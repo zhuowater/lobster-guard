@@ -250,6 +250,8 @@ type Config struct {
 	Capability CapConfig `yaml:"capability" json:"capability"`
 	// v25.2 偏差检测
 	Deviation DeviationConfig `yaml:"deviation" json:"deviation"`
+	// v26.0 信息流控制
+	IFC IFCConfig `yaml:"ifc" json:"ifc"`
 }
 
 // DiscoveryConfig K8s 服务发现配置（v21.0）

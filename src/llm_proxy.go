@@ -57,6 +57,8 @@ type LLMProxy struct {
 	planCompiler      *PlanCompiler
 	capabilityEngine  *CapabilityEngine
 	deviationDetector *DeviationDetector
+	// v26.0 信息流控制引擎
+	ifcEngine *IFCEngine
 }
 
 // NewLLMProxy 创建 LLM 代理
@@ -563,6 +565,34 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 									tcName25, devResult.Reason)
 								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
 								return
+							}
+						}
+					}
+
+					// v26.0: IFC 信息流控制 — tool_call 安全检查
+					if lp.ifcEngine != nil && lp.ifcEngine.config.Enabled {
+						// 注册 tool result 变量
+						toolSource := "tool:" + tcName25
+						toolVar := lp.ifcEngine.RegisterVariable(traceID, "tool_result_"+tcName25, toolSource, tcArgs25)
+						// 获取该 trace 的所有变量 ID 作为输入
+						if toolVar != nil {
+							allVars := lp.ifcEngine.GetVariables(traceID)
+							var varIDs []string
+							for _, v := range allVars {
+								varIDs = append(varIDs, v.ID)
+							}
+							// 检查 tool call 是否违反 IFC 规则
+							ifcDecision := lp.ifcEngine.CheckToolCall(traceID, tcName25, varIDs)
+							if ifcDecision != nil && !ifcDecision.Allowed && ifcDecision.Decision == "block" {
+								log.Printf("[IFC] 信息流违规阻断: tool=%s type=%s trace=%s", tcName25, ifcDecision.Violation.Type, traceID)
+								w.Header().Set("Content-Type", "application/json")
+								w.WriteHeader(403)
+								fmt.Fprintf(w, `{"error":"Tool call blocked by IFC: %s","tool":"%s","type":"%s"}`,
+									ifcDecision.Reason, tcName25, ifcDecision.Violation.Type)
+								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+								return
+							} else if ifcDecision != nil && ifcDecision.Decision == "warn" {
+								log.Printf("[IFC] 信息流告警: tool=%s reason=%s trace=%s", tcName25, ifcDecision.Reason, traceID)
 							}
 						}
 					}

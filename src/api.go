@@ -159,6 +159,8 @@ type ManagementAPI struct {
 	planCompiler      *PlanCompiler
 	capabilityEngine  *CapabilityEngine
 	deviationDetector *DeviationDetector
+	// v26.0 信息流控制
+	ifcEngine *IFCEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -1133,6 +1135,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDeviationsDetail(w, r)
 
 	default:
+		// v26.0: IFC 信息流控制
+		if api.ifcEngine != nil && api.handleIFC(w, r, path, method) {
+			return
+		}
 		w.WriteHeader(404)
 	}
 }
@@ -4160,6 +4166,12 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 			}
 		}
 
+		// 1b+++++. v26 IFC
+		if api.ifcEngine != nil {
+			v1 := api.ifcEngine.RegisterVariable(traceID, "user_input", "user_input", inText)
+			events = append(events, fmt.Sprintf("ifc_var: id=%s label={conf=%s,integ=%s}", v1.ID[:12], v1.Label.Confidentiality, v1.Label.Integrity))
+		}
+
 		// 1c. LLM 调用
 		if api.llmAuditor != nil {
 			ts := now.Add(-1 * time.Second).Format(time.RFC3339)
@@ -4288,6 +4300,18 @@ func (api *ManagementAPI) handleSimulateTraffic(w http.ResponseWriter, r *http.R
 		piis := api.inboundEngine.DetectPII(outText)
 		if len(piis) > 0 {
 			events = append(events, fmt.Sprintf("pii_detected: %v", piis))
+		}
+
+		// 3e. v26 IFC 演示
+		if api.ifcEngine != nil {
+			iv1 := api.ifcEngine.RegisterVariable(traceID, "user_input", "user_input", inText)
+			iv2 := api.ifcEngine.RegisterVariable(traceID, "db_result", "tool:database_query", "张三,身份证320106199001011234,手机13800138000")
+			iv3 := api.ifcEngine.Propagate(traceID, "llm_summary", []string{iv1.ID, iv2.ID})
+			decision := api.ifcEngine.CheckToolCall(traceID, "send_email", []string{iv3.ID})
+			events = append(events, fmt.Sprintf("ifc_check: tool=send_email decision=%s", decision.Decision))
+			if decision.Violation != nil {
+				events = append(events, fmt.Sprintf("ifc_violation: type=%s", decision.Violation.Type))
+			}
 		}
 
 		s["events"] = events

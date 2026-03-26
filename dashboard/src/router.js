@@ -48,6 +48,7 @@ const routes = [
   { path: '/plan-compiler', name: 'plan-compiler', component: () => import('./views/PlanCompiler.vue'), meta: { title: '执行计划', icon: 'git-branch', group: 'llm' } },
     { path: '/capability', name: 'capability', component: () => import('./views/Capability.vue'), meta: { title: 'Capability', icon: 'key', group: 'govern' } },
     { path: '/deviations', name: 'deviations', component: () => import('./views/PlanDeviation.vue'), meta: { title: '偏差检测', icon: 'alert-triangle', group: 'govern' } },
+    { path: '/ifc', name: 'ifc', component: () => import('./views/IFC.vue'), meta: { title: '信息流控制', icon: 'shield', group: 'govern' } },
   { path: '/bigscreen', name: 'bigscreen', component: () => import('./views/BigScreen.vue'), meta: { title: '态势大屏', icon: 'layout', public: true, bigscreen: true } },
 ]
 

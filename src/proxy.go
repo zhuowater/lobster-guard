@@ -198,6 +198,8 @@ type InboundProxy struct {
 	planCompiler      *PlanCompiler
 	capabilityEngine  *CapabilityEngine
 	deviationDetector *DeviationDetector
+	// v26.0 信息流控制引擎
+	ifcEngine *IFCEngine
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -321,6 +323,11 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 				{Name: "execute", Source: "user_input", Level: "execute", Granted: true},
 			}
 			ip.capabilityEngine.InitContext(bridgeTraceID, senderID, userCaps)
+		}
+
+		// v26.0: IFC 入站标签 (Bridge)
+		if ip.ifcEngine != nil && ip.ifcEngine.config.Enabled {
+			ip.ifcEngine.RegisterVariable(bridgeTraceID, "user_input", "user_input", msgText)
 		}
 
 		// 审计日志
@@ -936,6 +943,14 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx := ip.capabilityEngine.InitContext(traceID, senderID, userCaps)
 		if ctx != nil {
 			log.Printf("[入站] 🔑 Capability 上下文已初始化 trace=%s user=%s caps=%d", traceID, senderID, len(userCaps))
+		}
+	}
+
+	// v26.0: IFC 入站标签 — 注册用户输入变量
+	if ip.ifcEngine != nil && ip.ifcEngine.config.Enabled {
+		v := ip.ifcEngine.RegisterVariable(traceID, "user_input", "user_input", msgText)
+		if v != nil {
+			log.Printf("[入站] 🏷️ IFC 变量已注册 trace=%s name=user_input conf=%s integ=%s", traceID, v.Label.Confidentiality, v.Label.Integrity)
 		}
 	}
 

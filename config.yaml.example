@@ -127,3 +127,14 @@ deviation:
   enabled: true
   auto_repair: false         # 自动修复
   max_repairs: 5             # 最大修复次数
+
+# v26.0 信息流控制 (Fides IFC)
+ifc:
+  enabled: true
+  default_confidentiality: 1    # INTERNAL
+  default_integrity: 2          # MEDIUM
+  violation_action: warn        # block / warn / log
+  quarantine_enabled: false
+  quarantine_upstream: ""
+  hiding_enabled: false
+  hiding_threshold: 2           # CONFIDENTIAL

@@ -666,6 +666,16 @@ func main() {
 	}
 	fmt.Println("[初始化] ✅ 偏差检测器已就绪")
 
+	// v26.0: 信息流控制引擎
+	ifcEngine := NewIFCEngine(logger.DB(), cfg.IFC)
+	mgmtAPI.ifcEngine = ifcEngine
+	if llmProxy != nil {
+		llmProxy.ifcEngine = ifcEngine
+	}
+	fmt.Printf("[初始化] ✅ IFC 信息流控制已就绪 (来源规则=%d, 工具要求=%d, 隔离=%v, 隐藏=%v)\n",
+		len(ifcEngine.ListSourceRules()), len(ifcEngine.ListToolRequirements()),
+		cfg.IFC.QuarantineEnabled, cfg.IFC.HidingEnabled)
+
 	// v20.0: 工具策略引擎
 	var toolPolicyEngine *ToolPolicyEngine
 	if cfg.ToolPolicy.Enabled {
@@ -694,6 +704,7 @@ func main() {
 	inbound.planCompiler = planCompiler          // v25.0
 	inbound.capabilityEngine = capEngine         // v25.1
 	inbound.deviationDetector = devDetector      // v25.2
+	inbound.ifcEngine = ifcEngine                // v26.0
 	inbound.taintTracker = taintTracker
 	outbound.taintTracker = taintTracker
 	if llmProxy != nil {
