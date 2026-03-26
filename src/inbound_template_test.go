@@ -1,8 +1,9 @@
-// inbound_template_test.go — 入站规则行业模板测试（v27.1）
+// inbound_template_test.go — 入站规则行业模板测试（v27.1 / v28.0 CRUD）
 package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -614,4 +615,196 @@ func TestInboundTemplateRouting(t *testing.T) {
 			t.Errorf("清除后期望 0 条规则，实际 %d", resp2.Total)
 		}
 	})
+}
+
+// ============================================================
+// v28.0 入站规则模板 CRUD 测试
+// ============================================================
+
+func TestInboundTemplateCRUD(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("打开内存 DB 失败: %v", err)
+	}
+	defer db.Close()
+
+	engine := NewRuleEngine()
+	engine.SetTenantDB(db)
+	engine.SetInboundTemplateDB(db)
+
+	// List: 应包含 4 个内置模板
+	templates := engine.ListInboundTemplates()
+	if len(templates) != 4 {
+		t.Fatalf("期望 4 个内置模板，实际 %d", len(templates))
+	}
+
+	// Get: 获取单个模板
+	tpl := engine.GetInboundTemplate("tpl-inbound-semiconductor")
+	if tpl == nil {
+		t.Fatal("应能获取芯片入站模板")
+	}
+	if tpl.Name != "芯片行业入站规则" {
+		t.Errorf("模板名称不匹配: %s", tpl.Name)
+	}
+	if !tpl.BuiltIn {
+		t.Error("应为内置模板")
+	}
+
+	// Get: 不存在的模板
+	tpl = engine.GetInboundTemplate("nonexistent")
+	if tpl != nil {
+		t.Error("不存在的模板应返回 nil")
+	}
+
+	// Create: 创建自定义模板
+	customTpl := InboundRuleTemplate{
+		ID:          "tpl-inbound-custom-001",
+		Name:        "自定义入站模板",
+		Description: "测试用自定义入站模板",
+		Category:    "security",
+		Rules: []InboundRuleConfig{
+			{Name: "custom_inbound_rule", Patterns: []string{"自定义入站关键词"}, Action: "warn", Category: "custom"},
+		},
+	}
+	if err := engine.CreateInboundTemplate(customTpl); err != nil {
+		t.Fatalf("创建自定义入站模板失败: %v", err)
+	}
+
+	// List 应变为 5
+	templates = engine.ListInboundTemplates()
+	if len(templates) != 5 {
+		t.Errorf("创建后期望 5 个模板，实际 %d", len(templates))
+	}
+
+	// Get 自定义模板
+	tpl = engine.GetInboundTemplate("tpl-inbound-custom-001")
+	if tpl == nil {
+		t.Fatal("应能获取自定义入站模板")
+	}
+	if tpl.BuiltIn {
+		t.Error("自定义模板不应为内置")
+	}
+
+	// Create 重复 ID 应失败
+	if err := engine.CreateInboundTemplate(customTpl); err == nil {
+		t.Error("创建重复 ID 入站模板应失败")
+	}
+
+	// Update: 更新自定义模板
+	customTpl.Name = "更新后的自定义入站模板"
+	customTpl.Rules = append(customTpl.Rules, InboundRuleConfig{
+		Name: "extra_rule", Patterns: []string{"额外关键词"}, Action: "block", Category: "custom",
+	})
+	if err := engine.UpdateInboundTemplate("tpl-inbound-custom-001", customTpl); err != nil {
+		t.Fatalf("更新入站模板失败: %v", err)
+	}
+	tpl = engine.GetInboundTemplate("tpl-inbound-custom-001")
+	if tpl.Name != "更新后的自定义入站模板" {
+		t.Errorf("更新后名称不匹配: %s", tpl.Name)
+	}
+	if len(tpl.Rules) != 2 {
+		t.Errorf("更新后应有 2 条规则，实际 %d", len(tpl.Rules))
+	}
+
+	// Update 不存在的模板应失败
+	if err := engine.UpdateInboundTemplate("nonexistent", customTpl); err == nil {
+		t.Error("更新不存在的入站模板应失败")
+	}
+
+	// Delete: 删除自定义模板
+	if err := engine.DeleteInboundTemplate("tpl-inbound-custom-001"); err != nil {
+		t.Fatalf("删除自定义入站模板失败: %v", err)
+	}
+	tpl = engine.GetInboundTemplate("tpl-inbound-custom-001")
+	if tpl != nil {
+		t.Error("删除后应获取不到入站模板")
+	}
+
+	// Delete 内置模板应失败
+	if err := engine.DeleteInboundTemplate("tpl-inbound-semiconductor"); err == nil {
+		t.Error("删除内置入站模板应失败")
+	}
+
+	// Delete 不存在的模板应失败
+	if err := engine.DeleteInboundTemplate("nonexistent"); err == nil {
+		t.Error("删除不存在的入站模板应失败")
+	}
+
+	// List 应回到 4
+	templates = engine.ListInboundTemplates()
+	if len(templates) != 4 {
+		t.Errorf("删除后期望 4 个模板，实际 %d", len(templates))
+	}
+}
+
+func TestInboundTemplateNoDBFallback(t *testing.T) {
+	engine := NewRuleEngine()
+	// 不设 DB
+
+	// List 应回退到内存
+	templates := engine.ListInboundTemplates()
+	if len(templates) != 4 {
+		t.Errorf("无 DB 时应回退到内存 4 个模板，实际 %d", len(templates))
+	}
+
+	// Get 应回退到内存
+	tpl := engine.GetInboundTemplate("tpl-inbound-financial")
+	if tpl == nil {
+		t.Error("无 DB 时 Get 应回退到内存")
+	}
+
+	// CRUD 操作应报错
+	err := engine.CreateInboundTemplate(InboundRuleTemplate{ID: "test"})
+	if err == nil {
+		t.Error("无 DB 时 Create 应报错")
+	}
+	err = engine.UpdateInboundTemplate("test", InboundRuleTemplate{})
+	if err == nil {
+		t.Error("无 DB 时 Update 应报错")
+	}
+	err = engine.DeleteInboundTemplate("test")
+	if err == nil {
+		t.Error("无 DB 时 Delete 应报错")
+	}
+}
+
+func TestInboundTemplateBuiltInField(t *testing.T) {
+	templates := getDefaultInboundTemplates()
+	for _, tpl := range templates {
+		if !tpl.BuiltIn {
+			t.Errorf("入站模板 %s 应为内置", tpl.ID)
+		}
+	}
+}
+
+func TestInboundTemplateDBPersistence(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("打开内存 DB 失败: %v", err)
+	}
+	defer db.Close()
+
+	// 第一个引擎创建模板
+	engine1 := NewRuleEngine()
+	engine1.SetTenantDB(db)
+	engine1.SetInboundTemplateDB(db)
+	engine1.CreateInboundTemplate(InboundRuleTemplate{
+		ID: "tpl-persist-test", Name: "持久化测试", Description: "test",
+		Category: "security",
+		Rules: []InboundRuleConfig{
+			{Name: "persist-rule", Patterns: []string{"test"}, Action: "warn", Category: "test"},
+		},
+	})
+
+	// 第二个引擎应能读取到
+	engine2 := NewRuleEngine()
+	engine2.SetTenantDB(db)
+	engine2.SetInboundTemplateDB(db)
+	tpl := engine2.GetInboundTemplate("tpl-persist-test")
+	if tpl == nil {
+		t.Fatal("第二个引擎应能读取持久化模板")
+	}
+	if tpl.Name != "持久化测试" {
+		t.Errorf("名称不匹配: %s", tpl.Name)
+	}
 }

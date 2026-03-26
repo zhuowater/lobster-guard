@@ -219,6 +219,8 @@ func main() {
 
 	// v27.2: 入站规则持久化（重启后从 DB 恢复租户入站规则）
 	engine.SetTenantDB(db)
+	// v28.0: 入站规则模板 DB 初始化
+	engine.SetInboundTemplateDB(db)
 
 	// v14.1: 初始化认证管理器
 	authMgr := NewAuthManager(db, &cfg.Auth)
@@ -242,6 +244,8 @@ func main() {
 		llmRules := mergeLLMRuleDefaults(cfg.LLMProxy.Rules)
 		llmRuleEngine = NewLLMRuleEngine(llmRules)
 		llmRuleEngine.SetDB(logger.DB()) // Issue #7 fix: 命中计数持久化
+		llmRuleEngine.SetTenantDB(logger.DB())   // v28.0: LLM 规则租户绑定持久化
+		llmRuleEngine.SetTemplateDB(logger.DB())  // v28.0: LLM 规则模板持久化
 		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则 (用户%d+默认补充)", len(llmRules), len(cfg.LLMProxy.Rules))
 
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)

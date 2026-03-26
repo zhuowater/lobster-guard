@@ -1,5 +1,5 @@
 // detect.go — RuleEngine（AC 自动机+正则）、OutboundRuleEngine、PII 检测、规则绑定
-// lobster-guard v4.0 代码拆分
+// lobster-guard v4.0 代码拆分 / v28.0 入站模板 CRUD
 package main
 
 import (
@@ -805,9 +805,204 @@ func (re *RuleEngine) GetTenantRules(tenantID string) []InboundRuleConfig {
 	return cp
 }
 
+// ============================================================
+// v28.0 入站规则模板 CRUD（DB 持久化）
+// ============================================================
+
+// SetInboundTemplateDB 设置入站规则模板 DB 并加载内置模板
+// 如果 RuleEngine 已有 tenantDB 可复用
+func (re *RuleEngine) SetInboundTemplateDB(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	// 建表
+	db.Exec(`CREATE TABLE IF NOT EXISTS inbound_rule_templates (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT,
+		category TEXT,
+		rules_json TEXT NOT NULL,
+		built_in INTEGER DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	// 加载内置模板
+	re.loadBuiltinInboundTemplates(db)
+}
+
+// loadBuiltinInboundTemplates 启动时加载内置入站模板到 DB
+func (re *RuleEngine) loadBuiltinInboundTemplates(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	builtins := getDefaultInboundTemplates()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, tpl := range builtins {
+		rulesJSON, err := json.Marshal(tpl.Rules)
+		if err != nil {
+			continue
+		}
+		db.Exec(`INSERT OR IGNORE INTO inbound_rule_templates (id, name, description, category, rules_json, built_in, created_at, updated_at)
+			VALUES (?,?,?,?,?,1,?,?)`,
+			tpl.ID, tpl.Name, tpl.Description, tpl.Category, string(rulesJSON), now, now)
+		// 同步更新
+		db.Exec(`UPDATE inbound_rule_templates SET name=?, description=?, category=?, rules_json=?, updated_at=?
+			WHERE id=? AND built_in=1`,
+			tpl.Name, tpl.Description, tpl.Category, string(rulesJSON), now, tpl.ID)
+	}
+	log.Printf("[入站规则] 加载 %d 个内置入站规则模板", len(builtins))
+}
+
 // ListInboundTemplates 返回所有入站规则行业模板
 func (re *RuleEngine) ListInboundTemplates() []InboundRuleTemplate {
-	return getDefaultInboundTemplates()
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+
+	if db == nil {
+		return getDefaultInboundTemplates()
+	}
+
+	rows, err := db.Query(`SELECT id, name, description, category, rules_json, built_in FROM inbound_rule_templates ORDER BY id`)
+	if err != nil {
+		return getDefaultInboundTemplates()
+	}
+	defer rows.Close()
+
+	var templates []InboundRuleTemplate
+	for rows.Next() {
+		var tpl InboundRuleTemplate
+		var rulesJSON string
+		var builtIn int
+		if rows.Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn) != nil {
+			continue
+		}
+		tpl.BuiltIn = builtIn == 1
+		if json.Unmarshal([]byte(rulesJSON), &tpl.Rules) != nil {
+			continue
+		}
+		templates = append(templates, tpl)
+	}
+	if len(templates) == 0 {
+		return getDefaultInboundTemplates()
+	}
+	return templates
+}
+
+// GetInboundTemplate 获取单个入站规则模板
+func (re *RuleEngine) GetInboundTemplate(id string) *InboundRuleTemplate {
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+
+	if db == nil {
+		// 无 DB 回退到内存
+		for _, tpl := range getDefaultInboundTemplates() {
+			if tpl.ID == id {
+				return &tpl
+			}
+		}
+		return nil
+	}
+
+	var tpl InboundRuleTemplate
+	var rulesJSON string
+	var builtIn int
+	err := db.QueryRow(`SELECT id, name, description, category, rules_json, built_in FROM inbound_rule_templates WHERE id=?`, id).
+		Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn)
+	if err != nil {
+		return nil
+	}
+	tpl.BuiltIn = builtIn == 1
+	if json.Unmarshal([]byte(rulesJSON), &tpl.Rules) != nil {
+		return nil
+	}
+	return &tpl
+}
+
+// CreateInboundTemplate 创建自定义入站规则模板
+func (re *RuleEngine) CreateInboundTemplate(tpl InboundRuleTemplate) error {
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+
+	if db == nil {
+		return fmt.Errorf("模板 DB 未初始化")
+	}
+	if tpl.ID == "" {
+		return fmt.Errorf("模板 ID 不能为空")
+	}
+	existing := re.GetInboundTemplate(tpl.ID)
+	if existing != nil {
+		return fmt.Errorf("模板 %q 已存在", tpl.ID)
+	}
+
+	rulesJSON, err := json.Marshal(tpl.Rules)
+	if err != nil {
+		return fmt.Errorf("序列化规则失败: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	builtIn := 0
+	if tpl.BuiltIn {
+		builtIn = 1
+	}
+	_, err = db.Exec(`INSERT INTO inbound_rule_templates (id, name, description, category, rules_json, built_in, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		tpl.ID, tpl.Name, tpl.Description, tpl.Category, string(rulesJSON), builtIn, now, now)
+	if err != nil {
+		return fmt.Errorf("创建模板失败: %w", err)
+	}
+	return nil
+}
+
+// UpdateInboundTemplate 更新入站规则模板
+func (re *RuleEngine) UpdateInboundTemplate(id string, tpl InboundRuleTemplate) error {
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+
+	if db == nil {
+		return fmt.Errorf("模板 DB 未初始化")
+	}
+	existing := re.GetInboundTemplate(id)
+	if existing == nil {
+		return fmt.Errorf("模板 %q 不存在", id)
+	}
+
+	rulesJSON, err := json.Marshal(tpl.Rules)
+	if err != nil {
+		return fmt.Errorf("序列化规则失败: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = db.Exec(`UPDATE inbound_rule_templates SET name=?, description=?, category=?, rules_json=?, updated_at=? WHERE id=?`,
+		tpl.Name, tpl.Description, tpl.Category, string(rulesJSON), now, id)
+	if err != nil {
+		return fmt.Errorf("更新模板失败: %w", err)
+	}
+	return nil
+}
+
+// DeleteInboundTemplate 删除入站规则模板（内置模板不可删）
+func (re *RuleEngine) DeleteInboundTemplate(id string) error {
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+
+	if db == nil {
+		return fmt.Errorf("模板 DB 未初始化")
+	}
+	existing := re.GetInboundTemplate(id)
+	if existing == nil {
+		return fmt.Errorf("模板 %q 不存在", id)
+	}
+	if existing.BuiltIn {
+		return fmt.Errorf("内置模板 %q 不可删除", id)
+	}
+	_, err := db.Exec(`DELETE FROM inbound_rule_templates WHERE id=? AND built_in=0`, id)
+	if err != nil {
+		return fmt.Errorf("删除模板失败: %w", err)
+	}
+	return nil
 }
 
 // DetectTenantRules 对指定租户的专属规则进行检测

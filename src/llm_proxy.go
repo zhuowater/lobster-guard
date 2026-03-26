@@ -214,11 +214,24 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, activeCanaryToken = lp.injectCanaryToken(bodyBytes)
 	}
 
-	// v10.0: 请求侧规则检测
+	// v28.0: 提前解析租户 ID（供规则引擎使用租户专属规则）
+	earlyTenantID := r.Header.Get("X-Tenant-Id")
+	if earlyTenantID == "" && lp.apiKeyMgr != nil {
+		if authH := r.Header.Get("Authorization"); authH != "" && strings.HasPrefix(authH, "Bearer sk-") {
+			if ke, err := lp.apiKeyMgr.Resolve(authH); err == nil {
+				earlyTenantID = ke.TenantID
+			}
+		}
+	}
+	if earlyTenantID == "" {
+		earlyTenantID = "default"
+	}
+
+	// v10.0: 请求侧规则检测（v28.0: 使用租户感知版本）
 	var llmReqDecision string
 	var llmReqRules []string
 	if lp.ruleEngine != nil && len(bodyBytes) > 0 {
-		reqMatches := lp.ruleEngine.CheckRequest(string(bodyBytes))
+		reqMatches := lp.ruleEngine.CheckRequestWithTenant(string(bodyBytes), earlyTenantID)
 		if len(reqMatches) > 0 {
 			action, topMatch := HighestPriorityAction(reqMatches)
 			llmReqDecision = action
@@ -452,11 +465,11 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// v10.0: 响应侧规则检测
+		// v10.0: 响应侧规则检测（v28.0: 使用租户感知版本）
 		var llmRespDecision string
 		var llmRespRules []string
 		if lp.ruleEngine != nil && len(respBody) > 0 {
-			respMatches := lp.ruleEngine.CheckResponse(string(respBody))
+			respMatches := lp.ruleEngine.CheckResponseWithTenant(string(respBody), auditCtx.TenantID)
 			if len(respMatches) > 0 {
 				action, topMatch := HighestPriorityAction(respMatches)
 				llmRespDecision = action
@@ -778,10 +791,11 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 	eventData := make([]byte, eventBuf.Len())
 	copy(eventData, eventBuf.Bytes())
 
-	// v10.0: SSE 流式响应的规则检测（仅 log/warn，数据已推送给客户端）
+	// v10.0: SSE 流式响应的规则检测（v28.0: 使用租户感知版本，仅 log/warn，数据已推送给客户端）
 	if lp.ruleEngine != nil && len(eventData) > 0 {
+		sseTenantID := auditCtx.TenantID
 		go func() {
-			respMatches := lp.ruleEngine.CheckResponse(string(eventData))
+			respMatches := lp.ruleEngine.CheckResponseWithTenant(string(eventData), sseTenantID)
 			if len(respMatches) > 0 {
 				action, topMatch := HighestPriorityAction(respMatches)
 				if topMatch != nil {

@@ -518,8 +518,26 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// v27.1 入站规则行业模板 API
 	case path == "/api/v1/inbound-templates" && method == "GET":
 		api.handleInboundTemplateList(w, r)
+	case path == "/api/v1/inbound-templates" && method == "POST":
+		api.handleInboundTemplateCreate(w, r)
 	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "GET":
 		api.handleInboundTemplateGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "PUT":
+		api.handleInboundTemplateUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "DELETE":
+		api.handleInboundTemplateDelete(w, r)
+
+	// v28.0 LLM 规则模板 API
+	case path == "/api/v1/llm/templates" && method == "GET":
+		api.handleLLMTemplateList(w, r)
+	case path == "/api/v1/llm/templates" && method == "POST":
+		api.handleLLMTemplateCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "GET":
+		api.handleLLMTemplateGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "PUT":
+		api.handleLLMTemplateUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "DELETE":
+		api.handleLLMTemplateDelete(w, r)
 
 	// v14.0 租户管理 API
 	case path == "/api/v1/tenants" && method == "GET":
@@ -549,6 +567,13 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleTenantInboundRules(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/inbound-rules") && method == "DELETE":
 		api.handleTenantDeleteInboundRules(w, r)
+	// v28.0: 租户 LLM 规则模板绑定 API
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/bind-llm-template") && method == "POST":
+		api.handleTenantBindLLMTemplate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/llm-rules") && method == "GET":
+		api.handleTenantLLMRules(w, r)
+	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/llm-rules") && method == "DELETE":
+		api.handleTenantDeleteLLMRules(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && strings.HasSuffix(path, "/policies") && method == "GET":
 		api.handleTenantPolicies(w, r)
 	case strings.HasPrefix(path, "/api/v1/tenants/") && method == "GET":
@@ -9137,5 +9162,245 @@ func (api *ManagementAPI) handleTenantDeleteInboundRules(w http.ResponseWriter, 
 		return
 	}
 	api.inboundEngine.RemoveTenantRules(tenantID)
+	jsonResponse(w, 200, map[string]interface{}{"status": "cleared", "tenant_id": tenantID})
+}
+
+// ============================================================
+// v28.0 入站规则模板 CRUD API（POST/PUT/DELETE）
+// ============================================================
+
+// handleInboundTemplateCreate POST /api/v1/inbound-templates — 创建自定义入站规则模板
+func (api *ManagementAPI) handleInboundTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	var tpl InboundRuleTemplate
+	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "无效的 JSON: " + err.Error()})
+		return
+	}
+	if tpl.ID == "" || tpl.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id 和 name 不能为空"})
+		return
+	}
+	tpl.BuiltIn = false // 用户创建的模板不是内置的
+	if err := api.inboundEngine.CreateInboundTemplate(tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 201, map[string]interface{}{"status": "created", "template": tpl})
+}
+
+// handleInboundTemplateUpdate PUT /api/v1/inbound-templates/:id — 更新入站规则模板
+func (api *ManagementAPI) handleInboundTemplateUpdate(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/inbound-templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	var tpl InboundRuleTemplate
+	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "无效的 JSON: " + err.Error()})
+		return
+	}
+	if err := api.inboundEngine.UpdateInboundTemplate(id, tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "id": id})
+}
+
+// handleInboundTemplateDelete DELETE /api/v1/inbound-templates/:id — 删除入站规则模板（内置不可删）
+func (api *ManagementAPI) handleInboundTemplateDelete(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/inbound-templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	if err := api.inboundEngine.DeleteInboundTemplate(id); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// ============================================================
+// v28.0 LLM 规则模板 CRUD API
+// ============================================================
+
+// handleLLMTemplateList GET /api/v1/llm/templates — 列出所有 LLM 规则模板
+func (api *ManagementAPI) handleLLMTemplateList(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 200, map[string]interface{}{"templates": []LLMRuleTemplate{}, "total": 0})
+		return
+	}
+	templates := api.llmRuleEngine.ListLLMTemplates()
+	jsonResponse(w, 200, map[string]interface{}{"templates": templates, "total": len(templates)})
+}
+
+// handleLLMTemplateGet GET /api/v1/llm/templates/:id — 获取单个 LLM 规则模板
+func (api *ManagementAPI) handleLLMTemplateGet(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 404, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	tpl := api.llmRuleEngine.GetLLMTemplate(id)
+	if tpl == nil {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("LLM 模板 %q 不存在", id)})
+		return
+	}
+	jsonResponse(w, 200, tpl)
+}
+
+// handleLLMTemplateCreate POST /api/v1/llm/templates — 创建自定义 LLM 规则模板
+func (api *ManagementAPI) handleLLMTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	var tpl LLMRuleTemplate
+	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "无效的 JSON: " + err.Error()})
+		return
+	}
+	if tpl.ID == "" || tpl.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id 和 name 不能为空"})
+		return
+	}
+	tpl.BuiltIn = false
+	if err := api.llmRuleEngine.CreateLLMTemplate(tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 201, map[string]interface{}{"status": "created", "template": tpl})
+}
+
+// handleLLMTemplateUpdate PUT /api/v1/llm/templates/:id — 更新 LLM 规则模板
+func (api *ManagementAPI) handleLLMTemplateUpdate(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	var tpl LLMRuleTemplate
+	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "无效的 JSON: " + err.Error()})
+		return
+	}
+	if err := api.llmRuleEngine.UpdateLLMTemplate(id, tpl); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "id": id})
+}
+
+// handleLLMTemplateDelete DELETE /api/v1/llm/templates/:id — 删除 LLM 规则模板（内置不可删）
+func (api *ManagementAPI) handleLLMTemplateDelete(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/templates/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	if err := api.llmRuleEngine.DeleteLLMTemplate(id); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// ============================================================
+// v28.0 租户 LLM 规则绑定 API
+// ============================================================
+
+// handleTenantBindLLMTemplate POST /api/v1/tenants/:tid/bind-llm-template — 绑定 LLM 规则模板到租户
+func (api *ManagementAPI) handleTenantBindLLMTemplate(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/bind-llm-template")
+	if tenantID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tenant_id required"})
+		return
+	}
+	if api.tenantMgr != nil && !api.tenantMgr.Exists(tenantID) {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("租户 %q 不存在", tenantID)})
+		return
+	}
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	var req struct {
+		TemplateID string `json:"template_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "无效的 JSON: " + err.Error()})
+		return
+	}
+	if req.TemplateID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template_id required"})
+		return
+	}
+	// 查找模板
+	tpl := api.llmRuleEngine.GetLLMTemplate(req.TemplateID)
+	if tpl == nil {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("LLM 模板 %q 不存在", req.TemplateID)})
+		return
+	}
+	// 复制规则并添加租户后缀
+	tenantRules := make([]LLMRule, len(tpl.Rules))
+	for i, rule := range tpl.Rules {
+		tenantRules[i] = rule
+		tenantRules[i].Name = rule.Name + "-" + tenantID
+	}
+	// 获取已有规则并追加（支持多次绑定不同模板）
+	existing := api.llmRuleEngine.GetTenantLLMRules(tenantID)
+	merged := append(existing, tenantRules...)
+	api.llmRuleEngine.SetTenantLLMRules(tenantID, merged)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status":      "bound",
+		"tenant_id":   tenantID,
+		"template_id": req.TemplateID,
+		"rules_bound": len(tenantRules),
+		"total_rules": len(merged),
+	})
+}
+
+// handleTenantLLMRules GET /api/v1/tenants/:tid/llm-rules — 获取租户的 LLM 规则列表
+func (api *ManagementAPI) handleTenantLLMRules(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/llm-rules")
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 200, map[string]interface{}{"tenant_id": tenantID, "rules": []LLMRule{}, "total": 0})
+		return
+	}
+	rules := api.llmRuleEngine.GetTenantLLMRules(tenantID)
+	if rules == nil {
+		rules = []LLMRule{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{"tenant_id": tenantID, "rules": rules, "total": len(rules)})
+}
+
+// handleTenantDeleteLLMRules DELETE /api/v1/tenants/:tid/llm-rules — 清除租户的 LLM 规则
+func (api *ManagementAPI) handleTenantDeleteLLMRules(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	tenantID := strings.TrimSuffix(trimmed, "/llm-rules")
+	if tenantID == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tenant_id required"})
+		return
+	}
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	api.llmRuleEngine.RemoveTenantLLMRules(tenantID)
 	jsonResponse(w, 200, map[string]interface{}{"status": "cleared", "tenant_id": tenantID})
 }

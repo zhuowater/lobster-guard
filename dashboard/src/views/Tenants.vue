@@ -174,6 +174,53 @@
               </div>
             </div>
 
+            <!-- v28.0: LLM 规则模板绑定 -->
+            <div class="config-group">
+              <div class="config-group-title"><Icon name="shield" :size="12" /> LLM 规则模板</div>
+              <div class="template-bind-row">
+                <select class="form-input template-select" v-model="selectedLLMTemplate[t.id]">
+                  <option value="">选择 LLM 规则模板...</option>
+                  <option v-for="tpl in allLLMTemplates" :key="tpl.id" :value="tpl.id">
+                    {{ tpl.name }} ({{ tpl.category }}) — {{ tpl.rules?.length || 0 }} 条规则
+                  </option>
+                </select>
+                <button class="btn-sm btn-primary" @click="bindLLMTemplate(t.id)" :disabled="!selectedLLMTemplate[t.id] || bindingLLMTemplate[t.id]">
+                  {{ bindingLLMTemplate[t.id] ? '绑定中...' : '绑定' }}
+                </button>
+              </div>
+              <div class="field-hint">选择 LLM 规则模板，绑定后模板中的检测规则将作为此租户的专属 LLM 规则</div>
+              <!-- 模板简介 -->
+              <div class="template-preview" v-if="selectedLLMTemplate[t.id] && llmTemplateInfo(selectedLLMTemplate[t.id])">
+                <div class="tpl-preview-name">{{ llmTemplateInfo(selectedLLMTemplate[t.id]).name }}</div>
+                <div class="tpl-preview-desc">{{ llmTemplateInfo(selectedLLMTemplate[t.id]).description }}</div>
+                <div class="tpl-preview-rules">
+                  包含规则: <span class="tpl-rule-tag" v-for="r in llmTemplateInfo(selectedLLMTemplate[t.id]).rules" :key="r.name || r.id">{{ r.name || r.id }} ({{ r.action }})</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- v28.0: 已绑定的 LLM 规则 -->
+            <div class="config-group">
+              <div class="config-group-title">
+                <Icon name="shield" :size="12" /> 已绑定 LLM 规则
+                <button class="btn-xs btn-outline refresh-btn" @click="loadTenantLLMRules(t.id)">刷新</button>
+                <button class="btn-xs btn-danger refresh-btn" v-if="tenantLLMRules[t.id] && tenantLLMRules[t.id].length > 0" @click="clearTenantLLMRules(t.id)">清除全部</button>
+              </div>
+              <div v-if="tenantLLMRules[t.id] && tenantLLMRules[t.id].length > 0">
+                <div class="bound-rule" v-for="rule in tenantLLMRules[t.id]" :key="rule.name || rule.id">
+                  <div class="rule-info">
+                    <span class="rule-name">{{ rule.name }}</span>
+                    <span class="rule-type-badge badge-llm">{{ rule.category }}</span>
+                    <span class="rule-action-badge" :class="'action-'+rule.action">{{ rule.action }}</span>
+                  </div>
+                  <div class="rule-desc">{{ rule.direction || 'both' }} · {{ (rule.patterns || []).length }} 个模式</div>
+                </div>
+              </div>
+              <div v-else class="empty-hint">
+                此租户尚未绑定 LLM 规则模板。选择上方模板进行绑定。
+              </div>
+            </div>
+
             <div class="config-group">
               <div class="config-group-title"><Icon name="shield" :size="12" /> 检测规则（入站）</div>
               <div class="config-field">
@@ -328,6 +375,12 @@ const selectedInboundTemplate = reactive({})
 const bindingInboundTemplate = reactive({})
 const tenantInboundRules = reactive({})
 
+// v28.0: LLM 规则模板绑定
+const allLLMTemplates = ref([])
+const selectedLLMTemplate = reactive({})
+const bindingLLMTemplate = reactive({})
+const tenantLLMRules = reactive({})
+
 // Modal state
 const showCreateModal = ref(false), showEditModal = ref(false), showMemberModal = ref(false)
 const submitting = ref(false), formError = ref(''), memberError = ref(''), formErrors = ref({})
@@ -382,6 +435,9 @@ async function loadTenantConfig(tid) {
   // v27.1: 加载入站规则模板和租户入站规则
   if (allInboundTemplates.value.length === 0) loadAllInboundTemplates()
   loadTenantInboundRules(tid)
+  // v28.0: 加载 LLM 规则模板和租户 LLM 规则
+  if (allLLMTemplates.value.length === 0) loadAllLLMTemplates()
+  loadTenantLLMRules(tid)
 }
 
 async function saveTenantConfig(tid) {
@@ -456,6 +512,44 @@ async function clearTenantInboundRules(tid) {
     await apiDelete('/api/v1/tenants/' + tid + '/inbound-rules')
     showToast('入站规则已清除', 'success')
     loadTenantInboundRules(tid)
+  } catch(e) { showToast('清除失败: ' + e.message, 'error') }
+}
+
+// v28.0: LLM 规则模板管理
+async function loadAllLLMTemplates() {
+  try {
+    const d = await api('/api/v1/llm/templates')
+    allLLMTemplates.value = Array.isArray(d) ? d : (d.templates || [])
+  } catch { allLLMTemplates.value = [] }
+}
+
+function llmTemplateInfo(tplId) { return allLLMTemplates.value.find(t => t.id === tplId) }
+
+async function loadTenantLLMRules(tid) {
+  try {
+    const d = await api('/api/v1/tenants/' + tid + '/llm-rules')
+    tenantLLMRules[tid] = d.rules || []
+  } catch { tenantLLMRules[tid] = [] }
+}
+
+async function bindLLMTemplate(tid) {
+  const tplId = selectedLLMTemplate[tid]
+  if (!tplId) return
+  bindingLLMTemplate[tid] = true
+  try {
+    const d = await apiPost('/api/v1/tenants/' + tid + '/bind-llm-template', { template_id: tplId })
+    showToast('LLM 规则模板绑定成功，' + (d.rules_bound || 0) + ' 条规则已添加', 'success')
+    selectedLLMTemplate[tid] = ''
+    loadTenantLLMRules(tid)
+  } catch(e) { showToast('绑定失败: ' + e.message, 'error') }
+  bindingLLMTemplate[tid] = false
+}
+
+async function clearTenantLLMRules(tid) {
+  try {
+    await apiDelete('/api/v1/tenants/' + tid + '/llm-rules')
+    showToast('LLM 规则已清除', 'success')
+    loadTenantLLMRules(tid)
   } catch(e) { showToast('清除失败: ' + e.message, 'error') }
 }
 
@@ -712,6 +806,7 @@ onMounted(loadTenants)
 .badge-sequence { background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3); }
 .badge-degradation { background: rgba(168, 85, 247, 0.1); color: #A855F7; border: 1px solid rgba(168, 85, 247, 0.3); }
 .badge-inbound { background: rgba(59, 130, 246, 0.1); color: #3B82F6; border: 1px solid rgba(59, 130, 246, 0.3); }
+.badge-llm { background: rgba(139, 92, 246, 0.1); color: #8B5CF6; border: 1px solid rgba(139, 92, 246, 0.3); }
 .rule-action-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 700; }
 .action-block { background: rgba(239, 68, 68, 0.15); color: #EF4444; }
 .action-warn { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }

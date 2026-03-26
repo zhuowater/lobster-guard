@@ -110,13 +110,14 @@ type InboundRulesFileConfig struct {
 	Rules []InboundRuleConfig `yaml:"rules"`
 }
 
-// InboundRuleTemplate 入站规则行业模板（v27.1）
+// InboundRuleTemplate 入站规则行业模板（v27.1 / v28.0 增加 BuiltIn）
 type InboundRuleTemplate struct {
 	ID          string              `json:"id" yaml:"id"`
 	Name        string              `json:"name" yaml:"name"`
 	Description string              `json:"description" yaml:"description"`
 	Category    string              `json:"category" yaml:"category"` // industry / security / compliance
 	Rules       []InboundRuleConfig `json:"rules" yaml:"rules"`
+	BuiltIn     bool                `json:"built_in" yaml:"built_in"`
 }
 
 type Config struct {
@@ -561,6 +562,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			Name:        "芯片行业入站规则",
 			Description: "芯片/半导体行业专属检测规则，覆盖 IP 保护和出口管制",
 			Category:    "industry",
+			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "chip_ip_keyword_cn", Patterns: []string{"RTL代码", "Verilog", "GDSII", "流片", "光罩", "制程节点", "晶圆", "EDA工具", "IP核", "芯片版图"}, Action: "warn", Category: "ip_protection"},
 				{Name: "chip_ip_keyword_en", Patterns: []string{"tape-out", "tapeout", "GDSII", "netlist", "RTL source", "HDL code", "design rule check", "layout versus schematic", "foundry process"}, Action: "warn", Category: "ip_protection"},
@@ -572,6 +574,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			Name:        "金融行业入站规则",
 			Description: "金融行业专属检测规则，覆盖账户数据和合规交易",
 			Category:    "industry",
+			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "fin_account_cn", Patterns: []string{"账户余额", "交易流水", "银行卡号", "信用卡号", "贷款审批", "授信额度", "征信报告"}, Action: "warn", Category: "financial_data"},
 				{Name: "fin_account_en", Patterns: []string{"account balance", "transaction history", "credit score", "loan approval", "swift code", "routing number"}, Action: "warn", Category: "financial_data"},
@@ -583,6 +586,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			Name:        "医疗行业入站规则",
 			Description: "医疗行业专属检测规则，覆盖患者隐私和药品安全",
 			Category:    "industry",
+			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "health_phi_cn", Patterns: []string{"病历", "诊断报告", "处方", "医嘱", "化验单", "影像报告", "手术记录", "出院小结"}, Action: "warn", Category: "phi"},
 				{Name: "health_phi_en", Patterns: []string{"patient record", "diagnosis", "prescription", "medical history", "lab result", "HIPAA", "protected health information"}, Action: "warn", Category: "phi"},
@@ -594,6 +598,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			Name:        "AI 合规入站规则",
 			Description: "AI 法规合规检测规则，覆盖 EU AI Act 禁止/高风险类别",
 			Category:    "compliance",
+			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "ai_act_prohibited", Patterns: []string{"social scoring", "社会信用评分", "subliminal manipulation", "潜意识操纵", "biometric surveillance", "实时生物识别"}, Action: "block", Category: "ai_act"},
 				{Name: "ai_act_high_risk", Patterns: []string{"automated decision", "自动化决策", "credit scoring", "信用评分", "recruitment AI", "招聘AI", "predictive policing"}, Action: "warn", Category: "ai_act"},
