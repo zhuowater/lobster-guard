@@ -156,7 +156,9 @@ const allNavItems = {
   'semantic':          { path: '/semantic',        label: '语义检测',       icon: 'microscope' },
   // 策略引擎
   'rules':             { path: '/rules',          label: '入站规则',       icon: 'shield' },
+  'inbound-templates': { path: '/inbound-templates', label: '入站规则模板', icon: 'layers' },
   'llm-rules':         { path: '/llm-rules',      label: 'LLM 规则',      icon: 'shield-check' },
+  'llm-templates':     { path: '/llm-templates',  label: 'LLM 规则模板',  icon: 'layers' },
   'llm-targets':       { path: '/llm-targets',    label: 'LLM 目标',      icon: 'globe' },
   'tools':             { path: '/tools',          label: '工具策略',       icon: 'wrench' },
   'evolution':         { path: '/evolution',      label: '自进化',         icon: 'dna' },
