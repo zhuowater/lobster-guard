@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // handleCFStats GET /api/v1/counterfactual/stats — 验证统计
@@ -80,7 +81,14 @@ func (api *ManagementAPI) handleCFVerificationGet(w http.ResponseWriter, r *http
 // handleCFConfigGet GET /api/v1/counterfactual/config — 获取配置
 func (api *ManagementAPI) handleCFConfigGet(w http.ResponseWriter, r *http.Request) {
 	if api.cfVerifier == nil {
-		jsonResponse(w, 200, defaultCFConfig)
+		cfg := defaultCFConfig
+		// 返回默认高风险工具列表
+		tools := make([]string, 0, len(defaultHighRiskTools))
+		for k := range defaultHighRiskTools {
+			tools = append(tools, k)
+		}
+		cfg.HighRiskTools = tools
+		jsonResponse(w, 200, cfg)
 		return
 	}
 	jsonResponse(w, 200, api.cfVerifier.GetConfig())
@@ -98,6 +106,10 @@ func (api *ManagementAPI) handleCFConfigUpdate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	api.cfVerifier.UpdateConfig(cfg)
+	// 如果请求中包含 high_risk_tools 字段，批量设置
+	if cfg.HighRiskTools != nil {
+		api.cfVerifier.SetHighRiskTools(cfg.HighRiskTools)
+	}
 	jsonResponse(w, 200, map[string]interface{}{
 		"status": "updated",
 		"config": api.cfVerifier.GetConfig(),
@@ -209,5 +221,71 @@ func (api *ManagementAPI) handleCFTimeline(w http.ResponseWriter, r *http.Reques
 	jsonResponse(w, 200, map[string]interface{}{
 		"events": events,
 		"total":  len(events),
+	})
+}
+
+// ============================================================
+// 高风险工具 CRUD API
+// ============================================================
+
+// handleCFHighRiskToolsList GET /api/v1/counterfactual/high-risk-tools — 列出高风险工具
+func (api *ManagementAPI) handleCFHighRiskToolsList(w http.ResponseWriter, r *http.Request) {
+	if api.cfVerifier == nil {
+		// 返回默认列表
+		tools := make([]string, 0, len(defaultHighRiskTools))
+		for k := range defaultHighRiskTools {
+			tools = append(tools, k)
+		}
+		jsonResponse(w, 200, map[string]interface{}{
+			"tools": tools,
+			"total": len(tools),
+		})
+		return
+	}
+	tools := api.cfVerifier.GetHighRiskTools()
+	jsonResponse(w, 200, map[string]interface{}{
+		"tools": tools,
+		"total": len(tools),
+	})
+}
+
+// handleCFHighRiskToolsAdd POST /api/v1/counterfactual/high-risk-tools — 添加高风险工具
+func (api *ManagementAPI) handleCFHighRiskToolsAdd(w http.ResponseWriter, r *http.Request) {
+	if api.cfVerifier == nil {
+		jsonResponse(w, 400, map[string]string{"error": "counterfactual verifier not initialized"})
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || strings.TrimSpace(req.Name) == "" {
+		jsonResponse(w, 400, map[string]string{"error": "name is required"})
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	api.cfVerifier.AddHighRiskTool(name)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "added",
+		"name":   name,
+		"tools":  api.cfVerifier.GetHighRiskTools(),
+	})
+}
+
+// handleCFHighRiskToolsDelete DELETE /api/v1/counterfactual/high-risk-tools/:name — 删除高风险工具
+func (api *ManagementAPI) handleCFHighRiskToolsDelete(w http.ResponseWriter, r *http.Request) {
+	if api.cfVerifier == nil {
+		jsonResponse(w, 400, map[string]string{"error": "counterfactual verifier not initialized"})
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/counterfactual/high-risk-tools/")
+	if name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "tool name required"})
+		return
+	}
+	api.cfVerifier.RemoveHighRiskTool(name)
+	jsonResponse(w, 200, map[string]interface{}{
+		"status": "removed",
+		"name":   name,
+		"tools":  api.cfVerifier.GetHighRiskTools(),
 	})
 }

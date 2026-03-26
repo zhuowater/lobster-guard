@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,13 +24,14 @@ import (
 
 // CFConfig 反事实验证配置
 type CFConfig struct {
-	Enabled       bool    `yaml:"enabled" json:"enabled"`
-	Mode          string  `yaml:"mode" json:"mode"`
-	MaxPerHour    int     `yaml:"max_per_hour" json:"max_per_hour"`
-	RiskThreshold float64 `yaml:"risk_threshold" json:"risk_threshold"`
-	CacheTTLSec   int     `yaml:"cache_ttl_sec" json:"cache_ttl_sec"`
-	TimeoutSec    int     `yaml:"timeout_sec" json:"timeout_sec"`
-	FuzzyMatch    bool    `yaml:"fuzzy_match" json:"fuzzy_match"`
+	Enabled       bool     `yaml:"enabled" json:"enabled"`
+	Mode          string   `yaml:"mode" json:"mode"`
+	MaxPerHour    int      `yaml:"max_per_hour" json:"max_per_hour"`
+	RiskThreshold float64  `yaml:"risk_threshold" json:"risk_threshold"`
+	CacheTTLSec   int      `yaml:"cache_ttl_sec" json:"cache_ttl_sec"`
+	TimeoutSec    int      `yaml:"timeout_sec" json:"timeout_sec"`
+	FuzzyMatch    bool     `yaml:"fuzzy_match" json:"fuzzy_match"`
+	HighRiskTools []string `yaml:"high_risk_tools" json:"high_risk_tools"`
 }
 
 // CFVerification 一次验证记录
@@ -119,6 +121,9 @@ type CounterfactualVerifier struct {
 	pathPolicy       *PathPolicyEngine
 	adaptiveStrategy *AdaptiveStrategy // v24.2
 
+	// 可配置的高风险工具列表（锁保护 via mu）
+	customHighRiskTools map[string]bool
+
 	// v24.1 归因报告联动
 	envelopeMgr    *EnvelopeManager
 	userProfileEng *UserProfileEngine
@@ -145,7 +150,7 @@ var defaultCFConfig = CFConfig{
 	FuzzyMatch:    true,
 }
 
-var highRiskTools = map[string]bool{
+var defaultHighRiskTools = map[string]bool{
 	"shell_exec": true, "execute_command": true, "run_command": true,
 	"send_email": true, "send_message": true,
 	"file_write": true, "write_file": true, "create_file": true,
@@ -174,12 +179,25 @@ func NewCounterfactualVerifier(db *sql.DB, config CFConfig, client *http.Client)
 	if client == nil {
 		client = &http.Client{Timeout: time.Duration(config.TimeoutSec) * time.Second}
 	}
+	// 初始化高风险工具列表
+	customTools := make(map[string]bool)
+	if len(config.HighRiskTools) > 0 {
+		for _, t := range config.HighRiskTools {
+			customTools[t] = true
+		}
+	} else {
+		for k, v := range defaultHighRiskTools {
+			customTools[k] = v
+		}
+	}
+
 	v := &CounterfactualVerifier{
-		db:           db,
-		config:       config,
-		client:       client,
-		cache:        make(map[string]*CFCacheEntry),
-		hourlyWindow: make([]time.Time, 0, config.MaxPerHour),
+		db:                  db,
+		config:              config,
+		client:              client,
+		cache:               make(map[string]*CFCacheEntry),
+		customHighRiskTools: customTools,
+		hourlyWindow:        make([]time.Time, 0, config.MaxPerHour),
 	}
 	v.stats.HourlyBudget = config.MaxPerHour
 	if db != nil {
@@ -273,7 +291,7 @@ func (v *CounterfactualVerifier) ShouldVerify(toolName, toolArgs, traceID string
 	if !cfg.Enabled {
 		return false
 	}
-	isHighRisk := highRiskTools[toolName]
+	isHighRisk := v.isHighRiskTool(toolName)
 	aboveThreshold := riskScore >= cfg.RiskThreshold
 	if !isHighRisk && !aboveThreshold {
 		return false
@@ -829,7 +847,62 @@ func (v *CounterfactualVerifier) UpdateConfig(cfg CFConfig) {
 func (v *CounterfactualVerifier) GetConfig() CFConfig {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return v.config
+	cfg := v.config
+	// 同步 HighRiskTools 字段
+	cfg.HighRiskTools = v.getHighRiskToolsLocked()
+	return cfg
+}
+
+// isHighRiskTool 内部查询工具是否为高风险（调用方需持有锁或方法内部加锁）
+func (v *CounterfactualVerifier) isHighRiskTool(name string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.customHighRiskTools[name]
+}
+
+// GetHighRiskTools 返回当前高风险工具列表
+func (v *CounterfactualVerifier) GetHighRiskTools() []string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.getHighRiskToolsLocked()
+}
+
+// getHighRiskToolsLocked 内部方法，调用方需持有读锁
+func (v *CounterfactualVerifier) getHighRiskToolsLocked() []string {
+	tools := make([]string, 0, len(v.customHighRiskTools))
+	for k := range v.customHighRiskTools {
+		tools = append(tools, k)
+	}
+	// 排序以保证顺序稳定
+	sort.Strings(tools)
+	return tools
+}
+
+// AddHighRiskTool 添加一个高风险工具
+func (v *CounterfactualVerifier) AddHighRiskTool(name string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.customHighRiskTools[name] = true
+	log.Printf("[Counterfactual] 添加高风险工具: %s (total=%d)", name, len(v.customHighRiskTools))
+}
+
+// RemoveHighRiskTool 删除一个高风险工具
+func (v *CounterfactualVerifier) RemoveHighRiskTool(name string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.customHighRiskTools, name)
+	log.Printf("[Counterfactual] 移除高风险工具: %s (total=%d)", name, len(v.customHighRiskTools))
+}
+
+// SetHighRiskTools 批量设置高风险工具列表
+func (v *CounterfactualVerifier) SetHighRiskTools(tools []string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.customHighRiskTools = make(map[string]bool, len(tools))
+	for _, t := range tools {
+		v.customHighRiskTools[t] = true
+	}
+	log.Printf("[Counterfactual] 批量设置高风险工具: %d 个", len(tools))
 }
 
 // GetCacheStats 获取缓存状态

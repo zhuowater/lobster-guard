@@ -1119,6 +1119,13 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCFCacheGet(w, r)
 	case path == "/api/v1/counterfactual/cache" && method == "DELETE":
 		api.handleCFCacheClear(w, r)
+	// 高风险工具 CRUD API
+	case path == "/api/v1/counterfactual/high-risk-tools" && method == "GET":
+		api.handleCFHighRiskToolsList(w, r)
+	case path == "/api/v1/counterfactual/high-risk-tools" && method == "POST":
+		api.handleCFHighRiskToolsAdd(w, r)
+	case strings.HasPrefix(path, "/api/v1/counterfactual/high-risk-tools/") && method == "DELETE":
+		api.handleCFHighRiskToolsDelete(w, r)
 	// v24.1: 归因报告 API
 	case path == "/api/v1/counterfactual/reports" && method == "GET":
 		api.handleCFReports(w, r)

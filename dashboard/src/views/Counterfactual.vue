@@ -50,6 +50,21 @@
         <div class="config-actions"><button class="btn btn-primary" @click="saveConfig" :disabled="saving">{{ saving ? '保存中...' : '保存配置' }}</button><button class="btn btn-ghost" @click="clearCache" :disabled="clearingCache">{{ clearingCache ? '清除中...' : '清除缓存' }}</button></div>
         <div v-if="configMsg" class="config-msg" :class="configMsgType">{{ configMsg }}</div>
       </div>
+      <div class="config-form high-risk-config"><h3 class="config-section-title">高风险工具</h3>
+        <div class="high-risk-tools-section">
+          <div class="tool-tags" v-if="highRiskTools.length">
+            <span class="tool-tag" v-for="tool in highRiskTools" :key="tool">
+              <span class="tool-tag-name">{{ tool }}</span>
+              <button class="tool-tag-remove" @click="removeHighRiskTool(tool)" title="移除">&times;</button>
+            </span>
+          </div>
+          <div v-else class="empty-tools-hint">暂无自定义高风险工具，将使用系统默认列表</div>
+          <div class="add-tool-row">
+            <input v-model="newToolName" class="field-input add-tool-input" placeholder="输入工具名称..." @keyup.enter="addHighRiskTool" />
+            <button class="btn btn-primary btn-sm" @click="addHighRiskTool" :disabled="!newToolName.trim()">添加</button>
+          </div>
+        </div>
+      </div>
       <div class="config-form adaptive-config"><h3 class="config-section-title">自适应策略</h3>
         <div class="config-row"><label class="config-label">启用</label><label class="toggle"><input type="checkbox" v-model="adaptiveForm.enabled" /><span class="toggle-slider"></span></label></div>
         <div class="config-row"><label class="config-label">月预算 (USD)</label><input v-model.number="adaptiveForm.monthly_budget_usd" type="number" class="field-input" min="0" step="10" /></div>
@@ -126,6 +141,8 @@ export default {
       adaptiveForm: { enabled: false, monthly_budget_usd: 100, cost_per_verification: 0.05, priority_mode: 'hybrid', min_risk_for_sync: 80, feedback_enabled: true },
       savingAdaptive: false, adaptiveMsg: '', adaptiveMsgType: '', feedbackMap: {},
       timelineEvents: [], expandedTimelineId: null,
+      highRiskTools: [],
+      newToolName: '',
       emptyIcons: {
         verifications: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         attribution: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>'
@@ -141,10 +158,13 @@ export default {
     },
   },
   methods: {
-    async loadAll() { await Promise.all([this.loadStats(), this.loadVerifications(), this.loadConfig(), this.loadCost(), this.loadEffectiveness(), this.loadAdaptiveConfig()]) },
+    async loadAll() { await Promise.all([this.loadStats(), this.loadVerifications(), this.loadConfig(), this.loadHighRiskTools(), this.loadCost(), this.loadEffectiveness(), this.loadAdaptiveConfig()]) },
     async loadStats() { try { const d = await api('/api/v1/counterfactual/stats'); if (d.stats) this.stats = d.stats; if (d.mode) this.mode = d.mode } catch(e) {} },
     async loadVerifications() { try { let q = '/api/v1/counterfactual/verifications?limit=100'; if (this.verdictFilter) q += '&verdict=' + this.verdictFilter; if (this.traceFilter) q += '&trace_id=' + encodeURIComponent(this.traceFilter); const d = await api(q); this.verifications = d.verifications || [] } catch(e) {} },
     async loadConfig() { try { const d = await api('/api/v1/counterfactual/config'); this.configForm = { ...d } } catch(e) {} },
+    async loadHighRiskTools() { try { const d = await api('/api/v1/counterfactual/high-risk-tools'); this.highRiskTools = d.tools || [] } catch(e) {} },
+    async addHighRiskTool() { const name = this.newToolName.trim(); if (!name) return; try { await apiPost('/api/v1/counterfactual/high-risk-tools', { name }); this.newToolName = ''; this.configMsg = '已添加: ' + name; this.configMsgType = 'msg-success'; await this.loadHighRiskTools() } catch(e) { this.configMsg = '添加失败: ' + e.message; this.configMsgType = 'msg-error' } },
+    async removeHighRiskTool(name) { try { await apiDelete('/api/v1/counterfactual/high-risk-tools/' + encodeURIComponent(name)); this.configMsg = '已移除: ' + name; this.configMsgType = 'msg-success'; await this.loadHighRiskTools() } catch(e) { this.configMsg = '移除失败: ' + e.message; this.configMsgType = 'msg-error' } },
     async loadCost() { try { this.costSummary = await api('/api/v1/counterfactual/cost') } catch(e) {} },
     async loadEffectiveness() { try { this.effectMetrics = await api('/api/v1/counterfactual/effectiveness') } catch(e) {} },
     async loadAdaptiveConfig() { try { const d = await api('/api/v1/counterfactual/adaptive-config'); this.adaptiveConfig = d; this.adaptiveForm = { ...d } } catch(e) {} },
@@ -281,6 +301,17 @@ export default {
 .effect-section { margin-top: var(--space-3); grid-column: 1 / -1; }
 .effect-detail { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .effect-item { font-size: 0.8rem; color: var(--text-secondary); background: var(--bg-hover); padding: 4px 10px; border-radius: 6px; }
+.high-risk-config { margin-top: var(--space-3); }
+.high-risk-tools-section { margin-top: var(--space-2); }
+.tool-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--space-3); }
+.tool-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: #EEF2FF; color: #6366F1; border-radius: 16px; font-size: 0.8rem; font-family: var(--font-mono, monospace); border: 1px solid #C7D2FE; transition: all 0.2s; }
+.tool-tag:hover { background: #E0E7FF; border-color: #A5B4FC; }
+.tool-tag-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-tag-remove { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: none; background: transparent; color: #6366F1; cursor: pointer; border-radius: 50%; font-size: 14px; line-height: 1; padding: 0; transition: all 0.2s; }
+.tool-tag-remove:hover { background: #6366F1; color: white; }
+.empty-tools-hint { padding: var(--space-3); text-align: center; color: var(--text-secondary); font-size: 0.85rem; background: var(--bg-hover); border-radius: 8px; margin-bottom: var(--space-3); }
+.add-tool-row { display: flex; gap: var(--space-2); }
+.add-tool-input { flex: 1; }
 .adaptive-config { margin-top: var(--space-3); }
 .feedback-btns { display: flex; gap: 4px; }
 .fb-btn { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; display: flex; align-items: center; }
