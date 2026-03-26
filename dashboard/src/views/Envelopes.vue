@@ -12,8 +12,8 @@
     </div>
 
     <div class="stats-grid">
-      <StatCard :iconSvg="svgEnvelope" label="总信封数" :value="stats.total_envelopes ?? 0" color="indigo" />
-      <StatCard :iconSvg="svgTree" label="Merkle 批次" :value="stats.total_batches ?? 0" color="blue" />
+      <StatCard :iconSvg="svgEnvelope" label="总信封数" :value="stats.total ?? 0" color="indigo" />
+      <StatCard :iconSvg="svgTree" label="Merkle 批次" :value="stats.merkle_batches ?? 0" color="blue" />
       <StatCard :iconSvg="svgLeaf" label="待处理叶子" :value="stats.pending_leaves ?? 0" color="yellow" :badge="stats.batch_size ? '批次: '+stats.batch_size : ''" />
       <StatCard :iconSvg="svgCheck" label="验证通过" :value="verifiedCount" color="green" />
     </div>

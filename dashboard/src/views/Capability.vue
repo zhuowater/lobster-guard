@@ -42,7 +42,7 @@ export default {
   computed: {
     statCards() { const s = this.stats; return [
       {label:'Tool Mappings', value: s.tool_mapping_count??0}, {label:'Total Contexts', value: s.total_contexts??0},
-      {label:'Active Contexts', value: s.active_contexts??0}, {label:'Blocked', value: s.blocked_count??0}
+      {label:'Active Contexts', value: s.active_contexts??0}, {label:'Blocked', value: s.deny_count??0}
     ]}
   },
   mounted() { this.loadAll() },

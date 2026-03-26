@@ -92,6 +92,20 @@ func (dd *DeviationDetector) initDeviationDB() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
 	dd.db.Exec(`CREATE INDEX IF NOT EXISTS idx_dev_trace ON plan_deviations(trace_id)`)
 	dd.db.Exec(`CREATE INDEX IF NOT EXISTS idx_dev_severity ON plan_deviations(severity)`)
+
+	// Restore counters from DB
+	var total, critical, moderate, minor, repaired int64
+	dd.db.QueryRow("SELECT COUNT(*) FROM plan_deviations").Scan(&total)
+	dd.db.QueryRow("SELECT COUNT(*) FROM plan_deviations WHERE severity='critical'").Scan(&critical)
+	dd.db.QueryRow("SELECT COUNT(*) FROM plan_deviations WHERE severity='moderate'").Scan(&moderate)
+	dd.db.QueryRow("SELECT COUNT(*) FROM plan_deviations WHERE severity='minor'").Scan(&minor)
+	dd.db.QueryRow("SELECT COUNT(*) FROM plan_deviations WHERE repaired=1").Scan(&repaired)
+	atomic.StoreInt64(&dd.stats.TotalDeviations, total)
+	atomic.StoreInt64(&dd.stats.TotalChecks, total) // at minimum, each deviation was a check
+	atomic.StoreInt64(&dd.stats.CriticalCount, critical)
+	atomic.StoreInt64(&dd.stats.ModerateCount, moderate)
+	atomic.StoreInt64(&dd.stats.MinorCount, minor)
+	atomic.StoreInt64(&dd.stats.RepairsApplied, repaired)
 }
 
 func generateDevID() string {

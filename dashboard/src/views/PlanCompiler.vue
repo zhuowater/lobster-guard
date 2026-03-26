@@ -9,9 +9,9 @@
     </div>
 
     <div class="stats-grid" v-if="!initialLoading">
-      <StatCard :iconSvg="svgTemplate" :value="stats.total_templates??'-'" label="模板数" color="blue" />
+      <StatCard :iconSvg="svgTemplate" :value="stats.template_count??'-'" label="模板数" color="blue" />
       <StatCard :iconSvg="svgActive" :value="stats.active_plans??'-'" label="活跃计划" color="green" />
-      <StatCard :iconSvg="svgCheck" :value="stats.total_evaluated??'-'" label="总评估" color="indigo" />
+      <StatCard :iconSvg="svgCheck" :value="stats.total_evaluations??'-'" label="总评估" color="indigo" />
       <StatCard :iconSvg="svgAlert" :value="stats.total_violations??'-'" label="总违规" color="red" />
     </div>
     <div class="stats-grid" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
@@ -100,7 +100,7 @@
       <div class="stats-detail">
         <div class="stat-block">
           <h3 class="section-title">评估统计</h3>
-          <div class="stat-row"><span>总评估</span><span class="stat-val">{{ stats.total_evaluated??0 }}</span></div>
+          <div class="stat-row"><span>总评估</span><span class="stat-val">{{ stats.total_evaluations??0 }}</span></div>
           <div class="stat-row"><span>允许</span><span class="stat-val text-green">{{ stats.total_allowed??0 }}</span></div>
           <div class="stat-row"><span>告警</span><span class="stat-val text-yellow">{{ stats.total_warned??0 }}</span></div>
           <div class="stat-row"><span>阻断</span><span class="stat-val text-red">{{ stats.total_blocked??0 }}</span></div>

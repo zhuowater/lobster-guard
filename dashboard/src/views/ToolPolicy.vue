@@ -181,7 +181,15 @@ function toggleExpandRule(id) { expandedRuleId.value=expandedRuleId.value===id?n
 async function loadStats() {
   try {
     const d=await api('/api/v1/tools/rules'); const r=d.rules||d||[]
-    rules.value=r; stats.value={rule_count:r.length,total_evaluations:d.total_evaluations,blocked:d.blocked,warned:d.warned}
+    rules.value=r
+    // Load stats from dedicated stats endpoint
+    try {
+      const s=await api('/api/v1/tools/stats')
+      const bd=s.by_decision||{}
+      stats.value={rule_count:r.length,total_evaluations:s.total_events||0,blocked:bd.block||s.blocked_24h||0,warned:bd.warn||s.warned_24h||0}
+    } catch(e2) {
+      stats.value={rule_count:r.length,total_evaluations:'-',blocked:'-',warned:'-'}
+    }
   } catch(e){ error.value='加载规则失败: '+e.message }
 }
 async function loadEvents() { try{const d=await api('/api/v1/tools/events?limit=50');events.value=d.events||d||[]}catch(e){error.value='加载事件失败: '+e.message} }

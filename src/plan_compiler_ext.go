@@ -2,7 +2,10 @@
 // lobster-guard v25.0
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sync/atomic"
+)
 
 // defaultPlanConfig is the default plan config used in main.go
 var defaultPlanConfig = PlanConfig{
@@ -172,6 +175,7 @@ func (pc *PlanCompiler) GetStats() PlanStats {
 	pc.db.QueryRow("SELECT COUNT(*) FROM plan_violations_log").Scan(&s.TotalViolations)
 	pc.db.QueryRow("SELECT COALESCE(AVG(score),0) FROM plan_executions").Scan(&s.AvgScore)
 
+	s.TotalEvaluations = atomic.LoadInt64(&pc.totalEvaluations)
 	pc.mu.RLock()
 	s.TemplateCount = len(pc.templates)
 	for _, t := range pc.templates {

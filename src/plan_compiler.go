@@ -11,6 +11,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -113,6 +114,7 @@ type PlanStats struct {
 	CompletedPlans    int64                    `json:"completed_plans"`
 	ViolatedPlans     int64                    `json:"violated_plans"`
 	TotalViolations   int64                    `json:"total_violations"`
+	TotalEvaluations  int64                    `json:"total_evaluations"`
 	AvgScore          float64                  `json:"avg_score"`
 	TemplateCount     int                      `json:"template_count"`
 	TopTemplates      []map[string]interface{} `json:"top_templates"`
@@ -122,11 +124,12 @@ type PlanStats struct {
 
 // PlanCompiler is the core engine
 type PlanCompiler struct {
-	db          *sql.DB
-	config      PlanConfig
-	mu          sync.RWMutex
-	templates   map[string]*PlanTemplate
-	activePlans map[string]*ActivePlan
+	db               *sql.DB
+	config           PlanConfig
+	mu               sync.RWMutex
+	templates        map[string]*PlanTemplate
+	activePlans      map[string]*ActivePlan
+	totalEvaluations int64
 }
 
 func planGenID() string {
@@ -378,6 +381,7 @@ func keywordMatches(qLow, kwLow string) bool {
 
 // EvaluateToolCall checks if a tool call conforms to the active plan
 func (pc *PlanCompiler) EvaluateToolCall(traceID, toolName, toolArgs string) *PlanEvaluation {
+	atomic.AddInt64(&pc.totalEvaluations, 1)
 	if !pc.config.Enabled {
 		return &PlanEvaluation{Allowed: true, Decision: "allow", ToolName: toolName, StepMatch: "none", Reason: "disabled"}
 	}

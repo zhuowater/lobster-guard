@@ -211,6 +211,12 @@ func (tt *TaintTracker) loadActive() {
 	if count > 0 {
 		log.Printf("[TaintTracker] 已加载 %d 条活跃污染条目", count)
 	}
+
+	// Restore totalMarked from DB (all entries, not just active)
+	var totalHistoric int64
+	if tt.db.QueryRow("SELECT COUNT(*) FROM taint_entries").Scan(&totalHistoric) == nil && totalHistoric > 0 {
+		tt.totalMarked = totalHistoric
+	}
 }
 
 // ============================================================
