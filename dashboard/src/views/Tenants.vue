@@ -79,12 +79,60 @@
         <div class="card-section" v-if="activeTab[t.id]==='security'">
           <div class="config-section" v-if="tenantConfigs[t.id]">
             <div class="config-inherit-hint"><Icon name="info" :size="12" /> 租户配置覆盖全局配置。未设置的项将使用全局默认值。</div>
+
+            <!-- v27.0: 策略模板绑定 -->
             <div class="config-group">
-              <div class="config-group-title"><Icon name="shield" :size="12" /> 检测规则</div>
+              <div class="config-group-title"><Icon name="target" :size="12" /> 策略模板</div>
+              <div class="template-bind-row">
+                <select class="form-input template-select" v-model="selectedTemplate[t.id]">
+                  <option value="">选择模板...</option>
+                  <option v-for="tpl in allTemplates" :key="tpl.id" :value="tpl.id">
+                    {{ tpl.name }} ({{ tpl.category }}) — {{ tpl.rule_ids?.length || 0 }} 条规则
+                  </option>
+                </select>
+                <button class="btn-sm btn-primary" @click="bindTemplate(t.id)" :disabled="!selectedTemplate[t.id] || bindingTemplate[t.id]">
+                  {{ bindingTemplate[t.id] ? '绑定中...' : '绑定模板' }}
+                </button>
+              </div>
+              <div class="field-hint">选择策略模板后点击"绑定"，模板中的规则将复制为此租户的专属规则</div>
+              <!-- 模板简介 -->
+              <div class="template-preview" v-if="selectedTemplate[t.id] && templateInfo(selectedTemplate[t.id])">
+                <div class="tpl-preview-name">{{ templateInfo(selectedTemplate[t.id]).name }}</div>
+                <div class="tpl-preview-desc">{{ templateInfo(selectedTemplate[t.id]).description }}</div>
+                <div class="tpl-preview-rules">
+                  包含规则: <span class="tpl-rule-tag" v-for="rid in templateInfo(selectedTemplate[t.id]).rule_ids" :key="rid">{{ rid }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- v27.0: 已绑定的租户专属规则 -->
+            <div class="config-group">
+              <div class="config-group-title">
+                <Icon name="shield" :size="12" /> 已绑定规则
+                <button class="btn-xs btn-outline refresh-btn" @click="loadTenantPolicies(t.id)">刷新</button>
+              </div>
+              <div v-if="tenantPolicies[t.id] && tenantPolicies[t.id].length > 0">
+                <div class="bound-rule" v-for="rule in tenantPolicies[t.id]" :key="rule.id" :class="{'rule-disabled': !rule.enabled}">
+                  <div class="rule-info">
+                    <span class="rule-name">{{ rule.name }}</span>
+                    <span class="rule-type-badge" :class="'badge-'+rule.rule_type">{{ rule.rule_type }}</span>
+                    <span class="rule-action-badge" :class="'action-'+rule.action">{{ rule.action }}</span>
+                  </div>
+                  <div class="rule-desc">{{ rule.description }}</div>
+                </div>
+              </div>
+              <div v-else class="empty-hint">
+                此租户尚未绑定专属规则。选择上方模板进行绑定，或在
+                <a href="#/path-policy" class="link-accent">路径治理</a> 页面手动创建规则。
+              </div>
+            </div>
+
+            <div class="config-group">
+              <div class="config-group-title"><Icon name="shield" :size="12" /> 检测规则（入站）</div>
               <div class="config-field">
                 <label>禁用的规则</label>
                 <input class="form-input" v-model="tenantConfigs[t.id].disabled_rules" placeholder="逗号分隔，如 roleplay_cn,roleplay_en" />
-                <div class="field-hint">这些全局规则将对此租户禁用</div>
+                <div class="field-hint">这些全局规则将对此租户禁用（运行时生效）</div>
               </div>
             </div>
             <div class="config-group">
@@ -108,7 +156,6 @@
             </div>
             <div class="config-actions">
               <button class="btn-sm btn-primary" @click="saveTenantConfig(t.id)" :disabled="savingConfig[t.id]">{{ savingConfig[t.id] ? '保存中...' : '保存配置' }}</button>
-              <span class="save-hint">运行时联动 v14.1 实施</span>
             </div>
           </div>
           <div class="empty-hint" v-else>加载中...</div>
@@ -222,6 +269,12 @@ const memberSearch = reactive({})
 const memberSelectMode = reactive({})
 const memberSelected = reactive({})
 
+// v27.0: 策略模板绑定
+const allTemplates = ref([])
+const selectedTemplate = reactive({})
+const bindingTemplate = reactive({})
+const tenantPolicies = reactive({})
+
 // Modal state
 const showCreateModal = ref(false), showEditModal = ref(false), showMemberModal = ref(false)
 const submitting = ref(false), formError = ref(''), memberError = ref(''), formErrors = ref({})
@@ -270,12 +323,46 @@ async function loadTenantConfig(tid) {
   if (tenantConfigs[tid]) return
   try { const d = await api('/api/v1/tenants/' + tid + '/config'); tenantConfigs[tid] = d.config || {} }
   catch { tenantConfigs[tid] = { canary_enabled: true, budget_enabled: true, alert_level: 'high' } }
+  // v27.0: 同时加载模板列表和租户策略
+  if (allTemplates.value.length === 0) loadAllTemplates()
+  loadTenantPolicies(tid)
 }
 
 async function saveTenantConfig(tid) {
   savingConfig[tid] = true
   try { await apiPut('/api/v1/tenants/' + tid + '/config', tenantConfigs[tid]); showToast('安全配置已保存') }
   catch(e) { showToast('保存失败: ' + e.message) } finally { savingConfig[tid] = false }
+}
+
+// v27.0: 策略模板管理
+async function loadAllTemplates() {
+  try {
+    const d = await api('/api/v1/path-policies/templates')
+    allTemplates.value = Array.isArray(d) ? d : (d.templates || [])
+  } catch { allTemplates.value = [] }
+}
+
+function templateInfo(tplId) { return allTemplates.value.find(t => t.id === tplId) }
+
+async function loadTenantPolicies(tid) {
+  try {
+    const d = await api('/api/v1/tenants/' + tid + '/policies')
+    // 只显示该租户专属的规则（排除 default）
+    tenantPolicies[tid] = (d.rules || []).filter(r => r.tenant_id === tid)
+  } catch { tenantPolicies[tid] = [] }
+}
+
+async function bindTemplate(tid) {
+  const tplId = selectedTemplate[tid]
+  if (!tplId) return
+  bindingTemplate[tid] = true
+  try {
+    const d = await apiPost('/api/v1/tenants/' + tid + '/bind-template', { template_id: tplId })
+    showToast('模板绑定成功，' + (d.rules_bound || 0) + ' 条规则已添加', 'success')
+    selectedTemplate[tid] = ''
+    loadTenantPolicies(tid)
+  } catch(e) { showToast('绑定失败: ' + e.message, 'error') }
+  bindingTemplate[tid] = false
 }
 
 function setTab(tid, tab) { activeTab[tid] = tab }
@@ -512,4 +599,28 @@ onMounted(loadTenants)
 .modal-fade-leave-active { transition: all .2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 .modal-fade-enter-from .modal-content { transform: scale(0.95); }
+
+/* v27.0: 模板绑定 */
+.template-bind-row { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
+.template-select { flex: 1; }
+.template-preview { margin-top: var(--space-2); padding: 8px 12px; background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.15); border-radius: var(--radius-sm); }
+.tpl-preview-name { font-size: var(--text-sm); font-weight: 700; color: var(--color-primary); }
+.tpl-preview-desc { font-size: 11px; color: var(--text-secondary); margin: 2px 0 4px; }
+.tpl-preview-rules { font-size: 10px; color: var(--text-tertiary); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tpl-rule-tag { background: var(--bg-elevated); border: 1px solid var(--border-subtle); padding: 1px 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
+.refresh-btn { margin-left: auto; }
+.bound-rule { padding: 6px 10px; background: var(--bg-elevated); border-radius: var(--radius-sm); margin-bottom: 4px; border-left: 3px solid var(--color-primary); }
+.bound-rule.rule-disabled { opacity: 0.5; border-left-color: var(--text-tertiary); }
+.rule-info { display: flex; align-items: center; gap: var(--space-2); }
+.rule-name { font-size: var(--text-xs); font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); }
+.rule-type-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; }
+.badge-cumulative { background: rgba(245, 158, 11, 0.1); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.3); }
+.badge-sequence { background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+.badge-degradation { background: rgba(168, 85, 247, 0.1); color: #A855F7; border: 1px solid rgba(168, 85, 247, 0.3); }
+.rule-action-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 700; }
+.action-block { background: rgba(239, 68, 68, 0.15); color: #EF4444; }
+.action-warn { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
+.action-log { background: rgba(16, 185, 129, 0.15); color: #10B981; }
+.rule-desc { font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
+.link-accent { color: var(--color-primary); text-decoration: underline; }
 </style>
