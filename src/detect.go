@@ -625,6 +625,8 @@ func (re *RuleEngine) GetRuleConfigs() []InboundRuleConfig {
 			Message:     c.Message,
 			Type:        c.Type,
 			Group:       c.Group,
+			ShadowMode:  c.ShadowMode,
+			Enabled:     c.Enabled,
 		}
 		// 如果没有 DisplayName，从全局映射表查找（兼容旧配置）
 		if rc.DisplayName == "" {
@@ -875,6 +877,8 @@ func (re *RuleEngine) GetTenantRules(tenantID string) []InboundRuleConfig {
 			Message:     c.Message,
 			Type:        c.Type,
 			Group:       c.Group,
+			ShadowMode:  c.ShadowMode,
+			Enabled:     c.Enabled,
 		}
 		if rc.DisplayName == "" {
 			rc.DisplayName = inboundRuleDisplayNames[rc.Name]
