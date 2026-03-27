@@ -717,41 +717,26 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				return
 			}
 
-			// 如果配置了 openclaw_config_path，优先直接扫描 agents/sessions
-			var directScan *openclawDirectScanResult
-			if u.OpenClawConfigPath != "" {
-				directScan = directScanOpenClaw(u.OpenClawConfigPath)
-			}
-
-			// 并行获取 status + cron（始终走 tools/invoke）
-			// sessions 和 agents：如果有 directScan 则用直接扫描结果，否则走 tools/invoke
+			// 远程监控优先走接口：sessions 用 Gateway RPC，status/cron/agents 先保留 tools/invoke
 			var (
-				sessResp   *toolsInvokeResponse
-				statusResp *toolsInvokeResponse
-				agentsResp *toolsInvokeResponse
-				cronResp   *toolsInvokeResponse
-				sessErr    error
-				statusErr  error
-				latency    int64
-				innerWg    sync.WaitGroup
+				sessResp    *toolsInvokeResponse
+				statusResp  *toolsInvokeResponse
+				agentsResp  *toolsInvokeResponse
+				cronResp    *toolsInvokeResponse
+				rpcSessions []map[string]interface{}
+				sessErr     error
+				statusErr   error
+				latency     int64
+				innerWg     sync.WaitGroup
 			)
 
-			invokeCount := 2 // status + cron 始终走 tools/invoke
-			if directScan == nil {
-				invokeCount = 4 // 没有直接扫描，sessions + agents 也走 tools/invoke
-			}
-			innerWg.Add(invokeCount)
+			innerWg.Add(4)
 
-			// sessions_list（仅在没有直接扫描时）
-			if directScan == nil {
-				go func() {
-					defer innerWg.Done()
-					sessResp, _, sessErr = gatewayToolsInvoke(
-						u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-						toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
-					)
-				}()
-			}
+			// sessions.list（Gateway RPC，复刻 Control UI）
+			go func() {
+				defer innerWg.Done()
+				rpcSessions, _, sessErr = gatewaySessionsList(u.Address, u.Port, u.GatewayToken)
+			}()
 
 			// session_status (ping)
 			go func() {
@@ -762,16 +747,14 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				)
 			}()
 
-			// agents_list（仅在没有直接扫描时）
-			if directScan == nil {
-				go func() {
-					defer innerWg.Done()
-					agentsResp, _, _ = gatewayToolsInvoke(
-						u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-						toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
-					)
-				}()
-			}
+			// agents_list（暂时保留 tools/invoke，后续再补 RPC/更准的控制面来源）
+			go func() {
+				defer innerWg.Done()
+				agentsResp, _, _ = gatewayToolsInvoke(
+					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+					toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
+				)
+			}()
 
 			// cron list
 			go func() {
@@ -795,14 +778,11 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 					result.GatewayStatus = "unreachable"
 					result.Error = errStr
 				}
-				// 即使 tools/invoke 不通，直接扫描的数据仍然有效
-				if directScan != nil && directScan.Error == "" {
-					agents, sessions := directScanToOverviewData(directScan)
-					result.Agents = agents
-					result.AgentCount = len(agents)
-					result.Sessions = sessions
-					result.SessionCount = len(sessions)
-					result.GatewayStatus = "partial" // 有文件系统数据但 API 不通
+				// 如果 status 不通但 sessions.list 成功，仍返回 partial 结果
+				if sessErr == nil && len(rpcSessions) > 0 {
+					result.Sessions = rpcSessions
+					result.SessionCount = len(rpcSessions)
+					result.GatewayStatus = "partial"
 				}
 				mu.Lock()
 				results = append(results, result)
@@ -830,48 +810,47 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 			}
 
 			// 提取 sessions 和 agents
-			if directScan != nil && directScan.Error == "" {
-				// 使用直接扫描结果（完整数据）
-				agents, sessions := directScanToOverviewData(directScan)
-				result.Agents = agents
-				result.AgentCount = len(agents)
+			if sessErr == nil && len(rpcSessions) > 0 {
+				result.Sessions = rpcSessions
+				result.SessionCount = len(rpcSessions)
+				now := time.Now().UnixMilli()
+				for _, s := range rpcSessions {
+					if state, ok := s["state"].(string); ok {
+						if isActiveSessionState(state) {
+							result.ActiveSessions++
+							continue
+						}
+					}
+					if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
+						if now-updatedAt < 30*60*1000 {
+							result.ActiveSessions++
+						}
+					}
+				}
+			} else if sessResp != nil && sessResp.OK {
+				// Fallback: tools/invoke sessions_list
+				sessions := extractSessionsFromResponse(sessResp)
 				result.Sessions = sessions
 				result.SessionCount = len(sessions)
-				// 用最近 30 分钟内有活动的 session 算活跃
 				now := time.Now().UnixMilli()
-				for _, s := range directScan.Sessions {
-					if now-s.LastModifiedAt < 30*60*1000 {
-						result.ActiveSessions++
-					}
-				}
-			} else {
-				// Fallback: tools/invoke 结果
-				if sessErr == nil && sessResp != nil && sessResp.OK {
-					sessions := extractSessionsFromResponse(sessResp)
-					result.Sessions = sessions
-					result.SessionCount = len(sessions)
-					now := time.Now().UnixMilli()
-					for _, s := range sessions {
-						// 方式1: 有 state 字段（容器 heartbeat 模式）
-						if state, ok := s["state"].(string); ok {
-							if isActiveSessionState(state) {
-								result.ActiveSessions++
-								continue
-							}
+				for _, s := range sessions {
+					if state, ok := s["state"].(string); ok {
+						if isActiveSessionState(state) {
+							result.ActiveSessions++
+							continue
 						}
-						// 方式2: 用 updatedAt 判断（OpenClaw sessions，最近30分钟内算活跃）
-						if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
-							if now-updatedAt < 30*60*1000 {
-								result.ActiveSessions++
-							}
+					}
+					if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
+						if now-updatedAt < 30*60*1000 {
+							result.ActiveSessions++
 						}
 					}
 				}
-				if agentsResp != nil && agentsResp.OK {
-					agents := extractAgentsFromResponse(agentsResp)
-					result.Agents = agents
-					result.AgentCount = len(agents)
-				}
+			}
+			if agentsResp != nil && agentsResp.OK {
+				agents := extractAgentsFromResponse(agentsResp)
+				result.Agents = agents
+				result.AgentCount = len(agents)
 			}
 
 			// 提取 cron
