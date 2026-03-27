@@ -1313,12 +1313,16 @@ func (ore *OutboundRuleEngine) GetRuleConfigs() []OutboundRuleConfig {
 		for _, re := range rule.Regexps {
 			patterns = append(patterns, re.String())
 		}
+		enabled := rule.Enabled
 		configs[i] = OutboundRuleConfig{
-			Name:     rule.Name,
-			Patterns: patterns,
-			Action:   rule.Action,
-			Priority: rule.Priority,
-			Message:  rule.Message,
+			Name:        rule.Name,
+			DisplayName: rule.DisplayName,
+			Patterns:    patterns,
+			Action:      rule.Action,
+			Priority:    rule.Priority,
+			Message:     rule.Message,
+			ShadowMode:  rule.ShadowMode,
+			Enabled:     &enabled,
 		}
 	}
 	return configs
