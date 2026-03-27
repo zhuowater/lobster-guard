@@ -769,9 +769,18 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 					sessions := extractSessionsFromResponse(sessResp)
 					result.Sessions = sessions
 					result.SessionCount = len(sessions)
+					now := time.Now().UnixMilli()
 					for _, s := range sessions {
+						// 方式1: 有 state 字段（容器 heartbeat 模式）
 						if state, ok := s["state"].(string); ok {
 							if isActiveSessionState(state) {
+								result.ActiveSessions++
+								continue
+							}
+						}
+						// 方式2: 用 updatedAt 判断（OpenClaw sessions，最近30分钟内算活跃）
+						if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
+							if now-updatedAt < 30*60*1000 {
 								result.ActiveSessions++
 							}
 						}
@@ -946,6 +955,27 @@ func interfaceSliceToMaps(arr []interface{}) []map[string]interface{} {
 		}
 	}
 	return result
+}
+
+// extractTimestampMs 从 map 中提取毫秒级时间戳，支持多种字段名和类型
+func extractTimestampMs(m map[string]interface{}, keys ...string) int64 {
+	for _, k := range keys {
+		v, ok := m[k]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case float64:
+			return int64(t)
+		case int64:
+			return t
+		case json.Number:
+			if n, err := t.Int64(); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // isActiveSessionState 判断会话是否处于活跃状态

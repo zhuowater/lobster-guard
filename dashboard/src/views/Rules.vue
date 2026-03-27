@@ -63,14 +63,14 @@
         <DataTable :columns="allColumns" :data="filteredAllRules" :loading="inboundLoading || outboundLoading" empty-text="暂无规则" empty-desc="点击「新建规则」创建第一条规则" :expandable="true" :row-class="ruleRowClass">
           <template #cell-select="{ row }"><input type="checkbox" class="rule-checkbox" :checked="selectedRules.includes(row._key)" @click.stop="toggleSelectRule(row._key)" /></template>
           <template #cell-direction="{ row }"><span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span></template>
-          <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span></template>
+          <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.display_name || row.name }}</span><span v-if="row.display_name" class="rule-id-hint" :title="row.name">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span></template>
           <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
           <template #cell-type="{ value }"><span class="tag tag-info">{{ value || 'keyword' }}</span></template>
           <template #cell-priority="{ row }"><span class="priority-num" :class="priorityClass(row.priority)">{{ row.priority ?? '--' }}</span></template>
           <template #cell-group="{ value }"><span v-if="value" class="tag" :style="{ background: groupColor(value), color: '#fff' }">{{ value }}</span><span v-else class="text-muted">--</span></template>
           <template #expand="{ row }">
             <div class="rule-expand-detail">
-              <div class="expand-row"><b>名称:</b> {{ row.name }}</div>
+              <div class="expand-row"><b>名称:</b> {{ row.display_name || row.name }}<span v-if="row.display_name" style="color:var(--text-secondary);font-size:.75rem;margin-left:8px">({{ row.name }})</span></div>
               <div class="expand-row"><b>方向:</b> <span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'" style="font-size:.72rem">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span> | <b>类型:</b> {{ row.type || 'keyword' }} | <b>动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> | <b>优先级:</b> {{ row.priority ?? '--' }}</div>
               <div class="expand-row" v-if="row.message"><b>自定义消息:</b> {{ row.message }}</div>
               <div v-if="row.patterns && row.patterns.length" class="expand-row"><b>模式 ({{ row.patterns.length }}):</b><pre class="pattern-pre">{{ row.patterns.join('\n') }}</pre></div>
@@ -135,7 +135,7 @@
               <div v-if="!tpl.rules || tpl.rules.length === 0" style="padding:8px 0;color:var(--text-tertiary);font-size:.85rem">暂无规则</div>
               <div v-for="(rule, idx) in (tpl.rules || [])" :key="idx" class="tpl-rule-item">
                 <div class="tpl-rule-header">
-                  <span class="tpl-rule-name">{{ rule.name }}</span>
+                  <span class="tpl-rule-name">{{ rule.display_name || rule.name }}</span>
                   <span class="tag" :class="actTag(rule.action)" style="font-size:.7rem">{{ rule.action }}</span>
                   <span class="tag tag-info" style="font-size:.7rem">{{ rule.type || 'keyword' }}</span>
                   <span style="font-size:.7rem;color:var(--text-tertiary)">{{ rule.category }}</span>
@@ -647,6 +647,7 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadInboundTemp
 .priority-badge { margin-left: 4px; font-size: .75rem; }
 .rule-name { font-weight: 500; }
 .rule-name.high-priority { color: #ff6b6b; }
+.rule-id-hint { display: inline-block; margin-left: 6px; font-size: .72rem; color: var(--text-secondary); opacity: .6; font-family: var(--font-mono); }
 :deep(.row-high-priority) { background: rgba(255, 107, 107, 0.04) !important; }
 :deep(.row-high-priority:hover) { background: rgba(255, 107, 107, 0.08) !important; }
 

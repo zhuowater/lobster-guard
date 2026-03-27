@@ -38,6 +38,7 @@ type RuleVersion struct {
 // InboundRuleSummary 入站规则摘要（用于 API 返回）
 type InboundRuleSummary struct {
 	Name          string `json:"name"`
+	DisplayName   string `json:"display_name,omitempty"` // 中文显示名
 	PatternsCount int    `json:"patterns_count"`
 	Action        string `json:"action"`
 	Category      string `json:"category"`
@@ -386,7 +387,8 @@ func (re *RuleEngine) ListRules() []InboundRuleSummary {
 			ruleType = "keyword"
 		}
 		summaries[i] = InboundRuleSummary{
-			Name: cfg.Name, PatternsCount: len(cfg.Patterns),
+			Name: cfg.Name, DisplayName: cfg.DisplayName,
+			PatternsCount: len(cfg.Patterns),
 			Action: cfg.Action, Category: cfg.Category,
 			Priority: cfg.Priority, Message: cfg.Message,
 			Type: ruleType, Group: cfg.Group,
@@ -577,19 +579,56 @@ func (re *RuleEngine) GetRuleConfigs() []InboundRuleConfig {
 	cp := make([]InboundRuleConfig, len(re.ruleConfigs))
 	for i, c := range re.ruleConfigs {
 		rc := InboundRuleConfig{
-			Name:     c.Name,
-			Patterns: make([]string, len(c.Patterns)),
-			Action:   c.Action,
-			Category: c.Category,
-			Priority: c.Priority,
-			Message:  c.Message,
-			Type:     c.Type,
-			Group:    c.Group,
+			Name:        c.Name,
+			DisplayName: c.DisplayName,
+			Patterns:    make([]string, len(c.Patterns)),
+			Action:      c.Action,
+			Category:    c.Category,
+			Priority:    c.Priority,
+			Message:     c.Message,
+			Type:        c.Type,
+			Group:       c.Group,
+		}
+		// 如果没有 DisplayName，从全局映射表查找（兼容旧配置）
+		if rc.DisplayName == "" {
+			rc.DisplayName = inboundRuleDisplayNames[rc.Name]
 		}
 		copy(rc.Patterns, c.Patterns)
 		cp[i] = rc
 	}
 	return cp
+}
+
+// inboundRuleDisplayNames 入站规则中文显示名映射表（兼容旧配置中没有 display_name 的规则）
+var inboundRuleDisplayNames = map[string]string{
+	"prompt_injection_en":          "提示注入（英文）",
+	"prompt_injection_identity":    "身份伪造注入",
+	"prompt_injection_jailbreak":   "越狱攻击",
+	"credential_theft":             "凭据窃取",
+	"data_exfiltration":            "数据外泄",
+	"prompt_injection_system":      "系统提示词窃取",
+	"code_injection":               "代码注入",
+	"destructive_commands":         "破坏性命令",
+	"prompt_injection_cn":          "提示注入（中文）",
+	"prompt_injection_system_cn":   "系统提示词窃取（中文）",
+	"roleplay_cn":                  "角色扮演诱导（中文）",
+	"roleplay_en":                  "角色扮演诱导（英文）",
+	"prompt_injection_bypass":      "安全绕过",
+	"prompt_injection_cn_extra":    "提示注入（中文增强）",
+	"prompt_injection_role_inject": "角色注入",
+	"base64_injection":             "Base64 混淆注入",
+	"sensitive_keywords":           "敏感关键词",
+	"copyright_violation":          "版权侵犯",
+	"cross_border_data":            "跨境数据传输",
+	"confidential_document":        "机密文件",
+	// 旧版规则名映射（142 等旧部署兼容）
+	"custom_block":                    "自定义拦截",
+	"regex_base64_injection":          "Base64 注入（正则）",
+	"prompt_injection_ignore":         "提示注入（忽略指令）",
+	"prompt_injection_dan":            "DAN 越狱攻击",
+	"prompt_injection_role":           "角色注入",
+	"prompt_injection_cn_roleplay":    "角色扮演注入（中文）",
+	"regex_role_injection":            "角色注入（正则）",
 }
 
 // ListPIIPatterns 返回当前 PII 模式列表（v3.11 API 展示用）
@@ -790,14 +829,18 @@ func (re *RuleEngine) GetTenantRules(tenantID string) []InboundRuleConfig {
 	cp := make([]InboundRuleConfig, len(rules))
 	for i, c := range rules {
 		rc := InboundRuleConfig{
-			Name:     c.Name,
-			Patterns: make([]string, len(c.Patterns)),
-			Action:   c.Action,
-			Category: c.Category,
-			Priority: c.Priority,
-			Message:  c.Message,
-			Type:     c.Type,
-			Group:    c.Group,
+			Name:        c.Name,
+			DisplayName: c.DisplayName,
+			Patterns:    make([]string, len(c.Patterns)),
+			Action:      c.Action,
+			Category:    c.Category,
+			Priority:    c.Priority,
+			Message:     c.Message,
+			Type:        c.Type,
+			Group:       c.Group,
+		}
+		if rc.DisplayName == "" {
+			rc.DisplayName = inboundRuleDisplayNames[rc.Name]
 		}
 		copy(rc.Patterns, c.Patterns)
 		cp[i] = rc
@@ -1143,11 +1186,12 @@ func mergeDetectResults(base, extra DetectResult) DetectResult {
 // ============================================================
 
 type OutboundRule struct {
-	Name     string
-	Regexps  []*regexp.Regexp
-	Action   string
-	Priority int
-	Message  string
+	Name        string
+	DisplayName string
+	Regexps     []*regexp.Regexp
+	Action      string
+	Priority    int
+	Message     string
 }
 
 type OutboundRuleEngine struct {
@@ -1165,12 +1209,12 @@ func NewOutboundRuleEngine(configs []OutboundRuleConfig) *OutboundRuleEngine {
 func getDefaultOutboundRules() []OutboundRuleConfig {
 	return []OutboundRuleConfig{
 		// 默认规则 priority=0，用户自定义规则 priority>0 时自动优先
-		{Name: "pii_id_card", Patterns: []string{`\d{17}[\dXx]`}, Action: "warn", Priority: 0, Message: "检测到身份证号"},
-		{Name: "pii_phone", Patterns: []string{`(?:^|\D)1[3-9]\d{9}(?:\D|$)`}, Action: "warn", Priority: 0, Message: "检测到手机号"},
-		{Name: "pii_bank_card", Patterns: []string{`(?:^|\D)(62|4[0-9]|5[1-5])\d{14,17}(?:\D|$)`}, Action: "warn", Priority: 0, Message: "检测到银行卡号"},
-		{Name: "credential_password", Patterns: []string{`(?i)(password|passwd|secret_key)\s*[:=]\s*\S+`}, Action: "block", Priority: 0, Message: "检测到密码/密钥泄露"},
-		{Name: "credential_api_key", Patterns: []string{`(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16})`}, Action: "block", Priority: 0, Message: "检测到API Key泄露"},
-		{Name: "malicious_command", Patterns: []string{`(?i)rm\s+-rf\s+/`, `(?i)curl\s+.{0,50}\|\s*bash`, `(?i)wget\s+.{0,50}\|\s*bash`}, Action: "block", Priority: 0, Message: "检测到恶意命令"},
+		{Name: "pii_id_card", DisplayName: "身份证号泄露", Patterns: []string{`\d{17}[\dXx]`}, Action: "warn", Priority: 0, Message: "检测到身份证号"},
+		{Name: "pii_phone", DisplayName: "手机号泄露", Patterns: []string{`(?:^|\D)1[3-9]\d{9}(?:\D|$)`}, Action: "warn", Priority: 0, Message: "检测到手机号"},
+		{Name: "pii_bank_card", DisplayName: "银行卡号泄露", Patterns: []string{`(?:^|\D)(62|4[0-9]|5[1-5])\d{14,17}(?:\D|$)`}, Action: "warn", Priority: 0, Message: "检测到银行卡号"},
+		{Name: "credential_password", DisplayName: "密码/密钥泄露", Patterns: []string{`(?i)(password|passwd|secret_key)\s*[:=]\s*\S+`}, Action: "block", Priority: 0, Message: "检测到密码/密钥泄露"},
+		{Name: "credential_api_key", DisplayName: "API Key 泄露", Patterns: []string{`(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16})`}, Action: "block", Priority: 0, Message: "检测到API Key泄露"},
+		{Name: "malicious_command", DisplayName: "恶意命令注入", Patterns: []string{`(?i)rm\s+-rf\s+/`, `(?i)curl\s+.{0,50}\|\s*bash`, `(?i)wget\s+.{0,50}\|\s*bash`}, Action: "block", Priority: 0, Message: "检测到恶意命令"},
 	}
 }
 
@@ -1196,7 +1240,7 @@ func mergeOutboundDefaults(userConfigs []OutboundRuleConfig) []OutboundRuleConfi
 func compileOutboundRules(configs []OutboundRuleConfig) []OutboundRule {
 	var rules []OutboundRule
 	for _, c := range configs {
-		rule := OutboundRule{Name: c.Name, Action: c.Action, Priority: c.Priority, Message: c.Message}
+		rule := OutboundRule{Name: c.Name, DisplayName: c.DisplayName, Action: c.Action, Priority: c.Priority, Message: c.Message}
 		if rule.Action == "" { rule.Action = "log" }
 		var patterns []string
 		if c.Pattern != "" { patterns = append(patterns, c.Pattern) }

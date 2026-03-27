@@ -2708,7 +2708,7 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 		configs := api.outboundEngine.GetRuleConfigs()
 		detailRules := make([]map[string]interface{}, len(configs))
 		for i, c := range configs {
-			detailRules[i] = map[string]interface{}{
+			m := map[string]interface{}{
 				"name":           c.Name,
 				"patterns":       c.Patterns,
 				"patterns_count": len(c.Patterns),
@@ -2716,6 +2716,10 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 				"priority":       c.Priority,
 				"message":        c.Message,
 			}
+			if c.DisplayName != "" {
+				m["display_name"] = c.DisplayName
+			}
+			detailRules[i] = m
 		}
 		piiPatterns := api.inboundEngine.ListPIIPatterns()
 		jsonResponse(w, 200, map[string]interface{}{
@@ -2729,11 +2733,15 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 	api.outboundEngine.mu.RLock()
 	rules := make([]map[string]interface{}, len(api.outboundEngine.rules))
 	for i, rule := range api.outboundEngine.rules {
-		rules[i] = map[string]interface{}{
+		m := map[string]interface{}{
 			"name":           rule.Name,
 			"patterns_count": len(rule.Regexps),
 			"action":         rule.Action,
 		}
+		if rule.DisplayName != "" {
+			m["display_name"] = rule.DisplayName
+		}
+		rules[i] = m
 	}
 	api.outboundEngine.mu.RUnlock()
 	// v3.11: 包含 PII 模式列表
