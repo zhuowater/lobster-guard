@@ -74,6 +74,7 @@ static_upstreams:
     port: 18790
     # path_prefix: "/api/v1"      # 可选：上游服务的路径前缀
     # gateway_token: "your-token"  # 可选：OpenClaw Gateway Auth Token（用于 Agent 运营中心）
+    # openclaw_config_path: "/root/.openclaw/openclaw.json"  # 可选：同机部署时直接读取配置，获取完整 agents/sessions 列表（绕过 tools/invoke 的 visibility 限制）
 
 # --- WebSocket 安全 ---
 # ws_allowed_origins:        # WebSocket Origin 白名单（空则允许全部）

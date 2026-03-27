@@ -313,10 +313,31 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// 优先使用直接扫描（绕过 tools/invoke 的 visibility 限制）
+	if up.OpenClawConfigPath != "" {
+		scan := directScanOpenClaw(up.OpenClawConfigPath)
+		_, sessions := directScanToOverviewData(scan)
+
+		// 按 agent 分组统计
+		byAgent := make(map[string]int)
+		for _, s := range scan.Sessions {
+			byAgent[s.AgentID]++
+		}
+
+		jsonResponse(w, 200, map[string]interface{}{
+			"sessions":  sessions,
+			"count":     len(sessions),
+			"by_agent":  byAgent,
+			"source":    "direct_scan",
+		})
+		return
+	}
+
+	// Fallback: tools/invoke（受 visibility 限制，可能只能看到部分 sessions）
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
 			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token",
+			"message": "请先配置 Gateway Token 或 openclaw_config_path",
 		})
 		return
 	}
@@ -355,6 +376,8 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 	jsonResponse(w, 200, map[string]interface{}{
 		"sessions": sessions,
 		"count":    len(sessions),
+		"source":   "tools_invoke",
+		"warning":  "受 tools.sessions.visibility 限制，可能只显示部分 sessions。配置 openclaw_config_path 可获取完整列表。",
 	})
 }
 
@@ -501,10 +524,28 @@ func (api *ManagementAPI) handleGatewayAgents(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// 优先使用直接扫描
+	if up.OpenClawConfigPath != "" {
+		scan := directScanOpenClaw(up.OpenClawConfigPath)
+		agents, _ := directScanToOverviewData(scan)
+
+		result := map[string]interface{}{
+			"agents": agents,
+			"count":  len(agents),
+			"source": "direct_scan",
+		}
+		if scan.Error != "" {
+			result["warning"] = scan.Error
+		}
+		jsonResponse(w, 200, result)
+		return
+	}
+
+	// Fallback: tools/invoke（agents_list 返回的是 spawn 权限列表，不是完整 agent 列表）
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
 			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token",
+			"message": "请先配置 Gateway Token 或 openclaw_config_path",
 		})
 		return
 	}
@@ -540,8 +581,10 @@ func (api *ManagementAPI) handleGatewayAgents(w http.ResponseWriter, r *http.Req
 	agents := extractAgentsFromResponse(resp)
 
 	jsonResponse(w, 200, map[string]interface{}{
-		"agents": agents,
-		"count":  len(agents),
+		"agents":  agents,
+		"count":   len(agents),
+		"source":  "tools_invoke",
+		"warning": "agents_list 返回的是当前 session 的 spawn 权限列表，不是完整 agent 注册列表。配置 openclaw_config_path 可获取完整列表。",
 	})
 }
 
@@ -593,7 +636,14 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				return
 			}
 
-			// 并行获取 sessions + status + agents
+			// 如果配置了 openclaw_config_path，优先直接扫描 agents/sessions
+			var directScan *openclawDirectScanResult
+			if u.OpenClawConfigPath != "" {
+				directScan = directScanOpenClaw(u.OpenClawConfigPath)
+			}
+
+			// 并行获取 status + cron（始终走 tools/invoke）
+			// sessions 和 agents：如果有 directScan 则用直接扫描结果，否则走 tools/invoke
 			var (
 				sessResp   *toolsInvokeResponse
 				statusResp *toolsInvokeResponse
@@ -605,16 +655,22 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				innerWg    sync.WaitGroup
 			)
 
-			innerWg.Add(4)
+			invokeCount := 2 // status + cron 始终走 tools/invoke
+			if directScan == nil {
+				invokeCount = 4 // 没有直接扫描，sessions + agents 也走 tools/invoke
+			}
+			innerWg.Add(invokeCount)
 
-			// sessions_list
-			go func() {
-				defer innerWg.Done()
-				sessResp, _, sessErr = gatewayToolsInvoke(
-					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-					toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
-				)
-			}()
+			// sessions_list（仅在没有直接扫描时）
+			if directScan == nil {
+				go func() {
+					defer innerWg.Done()
+					sessResp, _, sessErr = gatewayToolsInvoke(
+						u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+						toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
+					)
+				}()
+			}
 
 			// session_status (ping)
 			go func() {
@@ -625,14 +681,16 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				)
 			}()
 
-			// agents_list
-			go func() {
-				defer innerWg.Done()
-				agentsResp, _, _ = gatewayToolsInvoke(
-					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-					toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
-				)
-			}()
+			// agents_list（仅在没有直接扫描时）
+			if directScan == nil {
+				go func() {
+					defer innerWg.Done()
+					agentsResp, _, _ = gatewayToolsInvoke(
+						u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+						toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
+					)
+				}()
+			}
 
 			// cron list
 			go func() {
@@ -655,6 +713,15 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				} else {
 					result.GatewayStatus = "unreachable"
 					result.Error = errStr
+				}
+				// 即使 tools/invoke 不通，直接扫描的数据仍然有效
+				if directScan != nil && directScan.Error == "" {
+					agents, sessions := directScanToOverviewData(directScan)
+					result.Agents = agents
+					result.AgentCount = len(agents)
+					result.Sessions = sessions
+					result.SessionCount = len(sessions)
+					result.GatewayStatus = "partial" // 有文件系统数据但 API 不通
 				}
 				mu.Lock()
 				results = append(results, result)
@@ -681,29 +748,40 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				result.StatusText = statusResp.Result.Content[0].Text
 			}
 
-			// 提取 sessions
-			if sessErr == nil && sessResp != nil && sessResp.OK {
-				sessions := extractSessionsFromResponse(sessResp)
-				result.Sessions = sessions
-				result.SessionCount = len(sessions)
-				for _, s := range sessions {
-					if state, ok := s["state"].(string); ok {
-						if isActiveSessionState(state) {
-							result.ActiveSessions++
-						}
-					}
-					// OpenClaw sessions 可能没有 state 字段，用 updatedAt 判断
-					if result.ActiveSessions == 0 && len(sessions) > 0 {
-						// 有会话就算活跃
-					}
-				}
-			}
-
-			// 提取 agents
-			if agentsResp != nil && agentsResp.OK {
-				agents := extractAgentsFromResponse(agentsResp)
+			// 提取 sessions 和 agents
+			if directScan != nil && directScan.Error == "" {
+				// 使用直接扫描结果（完整数据）
+				agents, sessions := directScanToOverviewData(directScan)
 				result.Agents = agents
 				result.AgentCount = len(agents)
+				result.Sessions = sessions
+				result.SessionCount = len(sessions)
+				// 用最近 30 分钟内有活动的 session 算活跃
+				now := time.Now().UnixMilli()
+				for _, s := range directScan.Sessions {
+					if now-s.LastModifiedAt < 30*60*1000 {
+						result.ActiveSessions++
+					}
+				}
+			} else {
+				// Fallback: tools/invoke 结果
+				if sessErr == nil && sessResp != nil && sessResp.OK {
+					sessions := extractSessionsFromResponse(sessResp)
+					result.Sessions = sessions
+					result.SessionCount = len(sessions)
+					for _, s := range sessions {
+						if state, ok := s["state"].(string); ok {
+							if isActiveSessionState(state) {
+								result.ActiveSessions++
+							}
+						}
+					}
+				}
+				if agentsResp != nil && agentsResp.OK {
+					agents := extractAgentsFromResponse(agentsResp)
+					result.Agents = agents
+					result.AgentCount = len(agents)
+				}
 			}
 
 			// 提取 cron
@@ -1194,4 +1272,174 @@ func countByCategoryPrefix(skills []skillInfo, prefix string) int {
 		}
 	}
 	return n
+}
+
+// ============================================================
+// OpenClaw 直接扫描 — 绕过 tools/invoke 的 visibility 限制
+// 当 openclaw_config_path 已配置时，直接读取 openclaw.json + 扫描 sessions 目录
+// ============================================================
+
+// openclawAgentInfo 从 openclaw.json 解析的 agent 信息
+type openclawAgentInfo struct {
+	ID        string `json:"id"`
+	Workspace string `json:"workspace,omitempty"`
+	AgentDir  string `json:"agent_dir,omitempty"`
+}
+
+// openclawSessionInfo 从文件系统扫描的 session 信息
+type openclawSessionInfo struct {
+	Key            string `json:"key"`
+	AgentID        string `json:"agent_id"`
+	SessionID      string `json:"session_id"`
+	LastModifiedAt int64  `json:"last_modified_at"` // unix ms
+	SizeBytes      int64  `json:"size_bytes"`
+}
+
+// openclawDirectScanResult 直接扫描结果（聚合 agents + sessions）
+type openclawDirectScanResult struct {
+	Agents   []openclawAgentInfo   `json:"agents"`
+	Sessions []openclawSessionInfo `json:"sessions"`
+	Source   string                `json:"source"` // "direct_scan" | "tools_invoke"
+	Error    string                `json:"error,omitempty"`
+}
+
+// scanOpenClawConfig 读取 openclaw.json 提取 agents.list
+func scanOpenClawConfig(configPath string) ([]openclawAgentInfo, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 openclaw.json 失败: %w", err)
+	}
+
+	var parsed struct {
+		Agents struct {
+			List []struct {
+				ID        string `json:"id"`
+				Workspace string `json:"workspace"`
+				AgentDir  string `json:"agentDir"`
+			} `json:"list"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("解析 openclaw.json 失败: %w", err)
+	}
+
+	agents := make([]openclawAgentInfo, 0, len(parsed.Agents.List))
+	for _, a := range parsed.Agents.List {
+		agents = append(agents, openclawAgentInfo{
+			ID:        a.ID,
+			Workspace: a.Workspace,
+			AgentDir:  a.AgentDir,
+		})
+	}
+	return agents, nil
+}
+
+// scanOpenClawSessions 扫描 OpenClaw 的 sessions 目录
+// 约定路径: ~/.openclaw/agents/{agentId-lowercase}/sessions/*.jsonl
+func scanOpenClawSessions(configPath string) ([]openclawSessionInfo, error) {
+	// 从 configPath 推导 .openclaw 根目录
+	// configPath 一般是 /root/.openclaw/openclaw.json
+	openclawDir := filepath.Dir(configPath)
+	agentsBaseDir := filepath.Join(openclawDir, "agents")
+
+	entries, err := os.ReadDir(agentsBaseDir)
+	if err != nil {
+		return nil, fmt.Errorf("读取 agents 目录失败: %w", err)
+	}
+
+	var sessions []openclawSessionInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		agentID := entry.Name()
+		sessionsDir := filepath.Join(agentsBaseDir, agentID, "sessions")
+		sessEntries, err := os.ReadDir(sessionsDir)
+		if err != nil {
+			continue // 该 agent 没有 sessions 目录
+		}
+		for _, se := range sessEntries {
+			if se.IsDir() || !strings.HasSuffix(se.Name(), ".jsonl") {
+				continue
+			}
+			info, err := se.Info()
+			if err != nil {
+				continue
+			}
+			sessionID := strings.TrimSuffix(se.Name(), ".jsonl")
+			sessions = append(sessions, openclawSessionInfo{
+				Key:            fmt.Sprintf("agent:%s:session:%s", agentID, sessionID),
+				AgentID:        agentID,
+				SessionID:      sessionID,
+				LastModifiedAt: info.ModTime().UnixMilli(),
+				SizeBytes:      info.Size(),
+			})
+		}
+	}
+
+	// 按最后修改时间降序排列
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].LastModifiedAt > sessions[j].LastModifiedAt
+	})
+
+	return sessions, nil
+}
+
+// directScanOpenClaw 完整直接扫描：agents + sessions
+func directScanOpenClaw(configPath string) *openclawDirectScanResult {
+	result := &openclawDirectScanResult{Source: "direct_scan"}
+
+	agents, err := scanOpenClawConfig(configPath)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Agents = agents
+
+	sessions, err := scanOpenClawSessions(configPath)
+	if err != nil {
+		result.Error = fmt.Sprintf("agents ok (%d), sessions error: %s", len(agents), err.Error())
+		return result
+	}
+	result.Sessions = sessions
+	return result
+}
+
+// directScanToOverviewData 将直接扫描结果转为 overview API 需要的 agents/sessions 格式
+func directScanToOverviewData(scan *openclawDirectScanResult) (agents []map[string]interface{}, sessions []map[string]interface{}) {
+	agents = make([]map[string]interface{}, 0, len(scan.Agents))
+	for _, a := range scan.Agents {
+		agent := map[string]interface{}{
+			"id":         a.ID,
+			"configured": true,
+		}
+		if a.Workspace != "" {
+			agent["workspace"] = a.Workspace
+		}
+		agents = append(agents, agent)
+	}
+
+	sessions = make([]map[string]interface{}, 0, len(scan.Sessions))
+
+	// 按 agent 分组统计
+	agentSessionCount := make(map[string]int)
+	for _, s := range scan.Sessions {
+		agentSessionCount[s.AgentID]++
+		sess := map[string]interface{}{
+			"key":             s.Key,
+			"agent_id":        s.AgentID,
+			"session_id":      s.SessionID,
+			"last_modified_at": s.LastModifiedAt,
+			"size_bytes":      s.SizeBytes,
+		}
+		sessions = append(sessions, sess)
+	}
+
+	// 回填 agent 的 session_count
+	for i, a := range agents {
+		agentIDLower := strings.ToLower(a["id"].(string))
+		agents[i]["session_count"] = agentSessionCount[agentIDLower]
+	}
+
+	return agents, sessions
 }

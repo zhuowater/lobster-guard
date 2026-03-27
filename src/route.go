@@ -39,7 +39,8 @@ type Upstream struct {
 	Load          map[string]interface{} `json:"load"`
 	UserCount     int                    `json:"user_count"`
 	Static        bool                   `json:"static"`
-	GatewayToken  string                 `json:"-"` // 不暴露在 JSON 响应中！安全考虑
+	GatewayToken       string                 `json:"-"` // 不暴露在 JSON 响应中！安全考虑
+	OpenClawConfigPath string                 `json:"-"` // openclaw.json 路径（同机时直接扫描）
 	proxy         *httputil.ReverseProxy
 }
 
@@ -66,7 +67,7 @@ func NewUpstreamPool(cfg *Config, db *sql.DB) *UpstreamPool {
 			ID: su.ID, Address: su.Address, Port: su.Port, PathPrefix: su.PathPrefix, Healthy: true,
 			RegisteredAt: time.Now(), LastHeartbeat: time.Now(),
 			Tags: map[string]string{"type": "static"}, Load: map[string]interface{}{}, Static: true,
-			GatewayToken: su.GatewayToken,
+			GatewayToken: su.GatewayToken, OpenClawConfigPath: su.OpenClawConfigPath,
 		}
 		up.proxy = createReverseProxy(up.Address, up.Port, up.PathPrefix)
 		pool.upstreams[up.ID] = up
