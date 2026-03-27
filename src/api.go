@@ -502,6 +502,10 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleUpdateInboundRule(w, r)
 	case path == "/api/v1/inbound-rules/delete" && method == "DELETE":
 		api.handleDeleteInboundRule(w, r)
+	case path == "/api/v1/inbound-rules/toggle-shadow" && method == "POST":
+		api.handleInboundToggleShadow(w, r)
+	case path == "/api/v1/outbound-rules/toggle-shadow" && method == "POST":
+		api.handleOutboundToggleShadow(w, r)
 	case path == "/api/v1/rules/export" && method == "GET":
 		api.handleExportRules(w, r)
 	case path == "/api/v1/rules/import" && method == "POST":
@@ -2715,6 +2719,8 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 				"action":         c.Action,
 				"priority":       c.Priority,
 				"message":        c.Message,
+				"shadow_mode":    c.ShadowMode,
+				"enabled":        isEnabled(c.Enabled),
 			}
 			if c.DisplayName != "" {
 				m["display_name"] = c.DisplayName
@@ -2737,10 +2743,14 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 			"name":           rule.Name,
 			"patterns_count": len(rule.Regexps),
 			"action":         rule.Action,
+			"shadow_mode":    rule.ShadowMode,
+			"enabled":        rule.Enabled,
 		}
 		if rule.DisplayName != "" {
 			m["display_name"] = rule.DisplayName
 		}
+		m["shadow_mode"] = rule.ShadowMode
+		m["enabled"] = rule.Enabled
 		rules[i] = m
 	}
 	api.outboundEngine.mu.RUnlock()
@@ -3359,6 +3369,70 @@ func (api *ManagementAPI) handleDeleteInboundRule(w http.ResponseWriter, r *http
 		"rules":   rules,
 		"total":   len(rules),
 	})
+}
+
+// handleInboundToggleShadow POST /api/v1/inbound-rules/toggle-shadow — 切换入站规则影子模式
+func (api *ManagementAPI) handleInboundToggleShadow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
+		return
+	}
+	configs := api.inboundEngine.GetRuleConfigs()
+	found := false
+	var newShadow bool
+	for i, c := range configs {
+		if c.Name == req.Name {
+			configs[i].ShadowMode = !c.ShadowMode
+			newShadow = configs[i].ShadowMode
+			found = true
+			break
+		}
+	}
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "rule '" + req.Name + "' not found"})
+		return
+	}
+	source := api.inboundEngine.Version().Source
+	api.inboundEngine.Reload(configs, source)
+	api.persistInboundRules(configs)
+	mode := "active"
+	if newShadow { mode = "shadow" }
+	log.Printf("[规则CRUD] 入站规则 %s 切换为 %s 模式", req.Name, mode)
+	jsonResponse(w, 200, map[string]interface{}{"status": "toggled", "rule": req.Name, "shadow_mode": newShadow})
+}
+
+// handleOutboundToggleShadow POST /api/v1/outbound-rules/toggle-shadow — 切换出站规则影子模式
+func (api *ManagementAPI) handleOutboundToggleShadow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
+		return
+	}
+	api.outboundEngine.mu.Lock()
+	found := false
+	var newShadow bool
+	for i, rule := range api.outboundEngine.rules {
+		if rule.Name == req.Name {
+			api.outboundEngine.rules[i].ShadowMode = !rule.ShadowMode
+			newShadow = api.outboundEngine.rules[i].ShadowMode
+			found = true
+			break
+		}
+	}
+	api.outboundEngine.mu.Unlock()
+	if !found {
+		jsonResponse(w, 404, map[string]string{"error": "rule '" + req.Name + "' not found"})
+		return
+	}
+	mode := "active"
+	if newShadow { mode = "shadow" }
+	log.Printf("[规则CRUD] 出站规则 %s 切换为 %s 模式", req.Name, mode)
+	jsonResponse(w, 200, map[string]interface{}{"status": "toggled", "rule": req.Name, "shadow_mode": newShadow})
 }
 
 // handleExportRules GET /api/v1/rules/export — 导出所有入站规则为 YAML

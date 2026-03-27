@@ -92,6 +92,8 @@ type InboundRuleConfig struct {
 	Message     string   `yaml:"message" json:"message"`   // v3.6 自定义拦截提示，为空则用默认
 	Type        string   `yaml:"type" json:"type"`         // v3.11 规则类型: "keyword"（默认，AC 自动机）或 "regex"（正则）
 	Group       string   `yaml:"group" json:"group"`       // v3.11 规则分组标签（如 "jailbreak"/"injection"/"social_engineering"/"pii"）
+	ShadowMode  bool  `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
+	Enabled     *bool `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
 }
 
 // RuleBindingConfig 规则绑定配置（v3.11 按 app_id 绑定规则组）
@@ -305,6 +307,8 @@ type OutboundRuleConfig struct {
 	Action      string   `yaml:"action"`
 	Priority    int      `yaml:"priority"` // v3.6 优先级权重，数字越大越高，默认 0
 	Message     string   `yaml:"message"`  // v3.6 自定义拦截提示，为空则用默认
+	ShadowMode  bool  `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
+	Enabled     *bool `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
 }
 
 type StaticUpstreamConfig struct {

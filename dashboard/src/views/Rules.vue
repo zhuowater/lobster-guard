@@ -63,7 +63,7 @@
         <DataTable :columns="allColumns" :data="filteredAllRules" :loading="inboundLoading || outboundLoading" empty-text="暂无规则" empty-desc="点击「新建规则」创建第一条规则" :expandable="true" :row-class="ruleRowClass">
           <template #cell-select="{ row }"><input type="checkbox" class="rule-checkbox" :checked="selectedRules.includes(row._key)" @click.stop="toggleSelectRule(row._key)" /></template>
           <template #cell-direction="{ row }"><span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span></template>
-          <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.display_name || row.name }}</span><span v-if="row.display_name" class="rule-id-hint" :title="row.name">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span></template>
+          <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.display_name || row.name }}</span><span v-if="row.display_name" class="rule-id-hint" :title="row.name">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span><span v-if="row.shadow_mode" class="shadow-badge" title="影子模式：仅记录不拦截">👻</span></template>
           <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
           <template #cell-type="{ value }"><span class="tag tag-info">{{ value || 'keyword' }}</span></template>
           <template #cell-priority="{ row }"><span class="priority-num" :class="priorityClass(row.priority)">{{ row.priority ?? '--' }}</span></template>
@@ -77,6 +77,7 @@
             </div>
           </template>
           <template #actions="{ row }">
+            <button class="btn btn-sm" :class="row.shadow_mode ? 'btn-warning' : 'btn-ghost'" @click.stop="toggleShadow(row)" :title="row.shadow_mode ? '切换为正常模式' : '切换为影子模式'" style="margin-right:4px">{{ row.shadow_mode ? '👻' : '🛡️' }}</button>
             <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row, row._direction)" title="编辑"><Icon name="edit" :size="12" /></button>
             <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row, row._direction)" style="margin-left:4px" title="删除"><Icon name="trash" :size="12" /></button>
           </template>
@@ -526,6 +527,17 @@ async function saveRule(data) {
 }
 
 // ==================== Delete ====================
+async function toggleShadow(row) {
+  const direction = row._direction
+  const basePath = direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
+  try {
+    const res = await apiPost(basePath + '/toggle-shadow', { name: row.name })
+    const mode = res.shadow_mode ? '影子模式 👻' : '正常模式 🛡️'
+    showToast(`${row.display_name || row.name} → ${mode}`, 'success')
+    if (direction === 'outbound') loadOutbound(); else loadInbound()
+  } catch (e) { showToast('切换失败: ' + e.message, 'error') }
+}
+
 function confirmDeleteRule(row, direction) {
   confirmTitle.value = '删除规则'
   confirmMessage.value = '确认删除' + (direction === 'outbound' ? '出站' : '入站') + '规则 "' + row.name + '"？此操作不可恢复。'
@@ -645,6 +657,9 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadInboundTemp
 .priority-med { color: #ffa94d; }
 .priority-low { color: var(--text-secondary); }
 .priority-badge { margin-left: 4px; font-size: .75rem; }
+.shadow-badge { margin-left: 4px; font-size: .75rem; opacity: .8; }
+.btn-warning { background: #f59e0b; color: #fff; border: none; }
+.btn-warning:hover { background: #d97706; }
 .rule-name { font-weight: 500; }
 .rule-name.high-priority { color: #ff6b6b; }
 .rule-id-hint { display: inline-block; margin-left: 6px; font-size: .72rem; color: var(--text-secondary); opacity: .6; font-family: var(--font-mono); }

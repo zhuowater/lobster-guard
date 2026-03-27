@@ -24,7 +24,13 @@ const (
 	LevelMedium
 	LevelLow
 )
-type Rule struct { Name string; Level RuleLevel; Category string; Priority int; Message string; Group string }
+type Rule struct { Name string; Level RuleLevel; Category string; Priority int; Message string; Group string; ShadowMode bool; Enabled bool }
+
+// isEnabled 解析 *bool 指针，nil 默认为 true（旧配置兼容）
+func isEnabled(p *bool) bool {
+	if p == nil { return true }
+	return *p
+}
 
 // RuleVersion 规则版本信息
 type RuleVersion struct {
@@ -46,17 +52,21 @@ type InboundRuleSummary struct {
 	Message       string `json:"message,omitempty"`
 	Type          string `json:"type,omitempty"`  // v3.11 规则类型
 	Group         string `json:"group,omitempty"` // v3.11 规则分组
+	ShadowMode    bool   `json:"shadow_mode"`     // 影子模式
+	Enabled       bool   `json:"enabled"`         // 启用状态
 }
 
 // RegexRule v3.11 正则规则（独立于 AC 自动机）
 type RegexRule struct {
-	Name     string
-	Pattern  *regexp.Regexp
-	Level    RuleLevel
-	Category string
-	Priority int
-	Message  string
-	Group    string
+	Name       string
+	Pattern    *regexp.Regexp
+	Level      RuleLevel
+	Category   string
+	Priority   int
+	Message    string
+	Group      string
+	ShadowMode bool
+	Enabled    bool
 }
 
 type RuleEngine struct {
@@ -105,7 +115,7 @@ func buildACFromConfigs(configs []InboundRuleConfig) (*AhoCorasick, []Rule) {
 		level := actionToLevel(cfg.Action)
 		for _, p := range cfg.Patterns {
 			patterns = append(patterns, p)
-			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message, Group: cfg.Group})
+			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message, Group: cfg.Group, ShadowMode: cfg.ShadowMode, Enabled: isEnabled(cfg.Enabled)})
 		}
 	}
 	if len(patterns) == 0 {
@@ -130,13 +140,15 @@ func buildRegexRules(configs []InboundRuleConfig) []RegexRule {
 				continue
 			}
 			regexRules = append(regexRules, RegexRule{
-				Name:     cfg.Name,
-				Pattern:  compiled,
-				Level:    level,
-				Category: cfg.Category,
-				Priority: cfg.Priority,
-				Message:  cfg.Message,
-				Group:    cfg.Group,
+				Name:       cfg.Name,
+				Pattern:    compiled,
+				Level:      level,
+				Category:   cfg.Category,
+				Priority:   cfg.Priority,
+				Message:    cfg.Message,
+				Group:      cfg.Group,
+				ShadowMode: cfg.ShadowMode,
+				Enabled:    isEnabled(cfg.Enabled),
 			})
 		}
 	}
@@ -386,18 +398,20 @@ func (re *RuleEngine) ListRules() []InboundRuleSummary {
 		if ruleType == "" {
 			ruleType = "keyword"
 		}
+		enabled := isEnabled(cfg.Enabled)
 		summaries[i] = InboundRuleSummary{
 			Name: cfg.Name, DisplayName: cfg.DisplayName,
 			PatternsCount: len(cfg.Patterns),
 			Action: cfg.Action, Category: cfg.Category,
 			Priority: cfg.Priority, Message: cfg.Message,
 			Type: ruleType, Group: cfg.Group,
+			ShadowMode: cfg.ShadowMode, Enabled: enabled,
 		}
 	}
 	return summaries
 }
 
-type DetectResult struct { Action string; Reasons []string; PIIs []string; Message string; MatchedRules []string }
+type DetectResult struct { Action string; Reasons []string; PIIs []string; Message string; MatchedRules []string; ShadowReasons []string }
 
 // actionWeight returns a numeric weight for action precedence (higher = more severe)
 // Used when multiple rules have the same priority: block > warn > log
@@ -448,17 +462,20 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 
 	// Collect all matched rules (deduplicate by rule name, keep highest priority match)
 	type matchedRule struct {
-		Name     string
-		Level    RuleLevel
-		Priority int
-		Message  string
-		Action   string
+		Name       string
+		Level      RuleLevel
+		Priority   int
+		Message    string
+		Action     string
+		ShadowMode bool
 	}
 	matchesByName := make(map[string]*matchedRule)
 
 	for _, idx := range ac.Search(text) {
 		if idx < 0 || idx >= len(rules) { continue }
 		rule := rules[idx]
+		// 跳过禁用的规则
+		if !rule.Enabled { continue }
 		// v3.11: 检查规则组是否适用
 		if !isRuleApplicable(rule.Group, applicableGroups) {
 			continue
@@ -477,13 +494,15 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 			matchesByName[rule.Name] = &matchedRule{
 				Name: rule.Name, Level: rule.Level,
 				Priority: rule.Priority, Message: rule.Message,
-				Action: action,
+				Action: action, ShadowMode: rule.ShadowMode,
 			}
 		}
 	}
 
 	// v3.11: 正则规则匹配（在 AC 自动机之后）
 	for _, rr := range regexRules {
+		// 跳过禁用的规则
+		if !rr.Enabled { continue }
 		// 检查规则组是否适用
 		if !isRuleApplicable(rr.Group, applicableGroups) {
 			continue
@@ -521,7 +540,7 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 			matchesByName[rr.Name] = &matchedRule{
 				Name: rr.Name, Level: rr.Level,
 				Priority: rr.Priority, Message: rr.Message,
-				Action: action,
+				Action: action, ShadowMode: rr.ShadowMode,
 			}
 		}
 	}
@@ -550,13 +569,31 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 			return actionWeight(matches[i].Action) > actionWeight(matches[j].Action)
 		})
 
-		// The winning rule determines the action
-		winner := matches[0]
-		r.Action = winner.Action
-		r.Message = winner.Message
+		// 分离影子模式和正常规则
+		var normalMatches []*matchedRule
+		var shadowMatches []*matchedRule
+		for _, m := range matches {
+			if m.ShadowMode {
+				shadowMatches = append(shadowMatches, m)
+			} else {
+				normalMatches = append(normalMatches, m)
+			}
+		}
+
+		// 影子模式命中记录到 ShadowReasons（只记录不拦截）
+		for _, m := range shadowMatches {
+			r.ShadowReasons = append(r.ShadowReasons, m.Name)
+		}
+
+		// 正常规则决定最终 action
+		if len(normalMatches) > 0 {
+			winner := normalMatches[0]
+			r.Action = winner.Action
+			r.Message = winner.Message
+		}
 
 		// Collect all matched rule names as reasons
-		for _, m := range matches {
+		for _, m := range normalMatches {
 			r.Reasons = append(r.Reasons, m.Name)
 			r.MatchedRules = append(r.MatchedRules, m.Name)
 		}
@@ -1192,6 +1229,8 @@ type OutboundRule struct {
 	Action      string
 	Priority    int
 	Message     string
+	ShadowMode  bool
+	Enabled     bool
 }
 
 type OutboundRuleEngine struct {
@@ -1240,7 +1279,7 @@ func mergeOutboundDefaults(userConfigs []OutboundRuleConfig) []OutboundRuleConfi
 func compileOutboundRules(configs []OutboundRuleConfig) []OutboundRule {
 	var rules []OutboundRule
 	for _, c := range configs {
-		rule := OutboundRule{Name: c.Name, DisplayName: c.DisplayName, Action: c.Action, Priority: c.Priority, Message: c.Message}
+		rule := OutboundRule{Name: c.Name, DisplayName: c.DisplayName, Action: c.Action, Priority: c.Priority, Message: c.Message, ShadowMode: c.ShadowMode, Enabled: isEnabled(c.Enabled)}
 		if rule.Action == "" { rule.Action = "log" }
 		var patterns []string
 		if c.Pattern != "" { patterns = append(patterns, c.Pattern) }
@@ -1336,10 +1375,11 @@ func (ore *OutboundRuleEngine) DeleteRule(name string) error {
 }
 
 type OutboundDetectResult struct {
-	Action   string
-	RuleName string
-	Reason   string
-	Message  string // v3.6 自定义拦截提示
+	Action        string
+	RuleName      string
+	Reason        string
+	Message       string   // v3.6 自定义拦截提示
+	ShadowReasons []string // 影子模式命中的规则名
 }
 
 func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
@@ -1349,23 +1389,27 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 
 	// v3.6: collect all matching rules and pick the one with highest priority
 	type matchedOutbound struct {
-		Action   string
-		RuleName string
-		Reason   string
-		Message  string
-		Priority int
+		Action     string
+		RuleName   string
+		Reason     string
+		Message    string
+		Priority   int
+		ShadowMode bool
 	}
 	var matches []matchedOutbound
 
 	for _, rule := range ore.rules {
+		// 跳过禁用的规则
+		if !rule.Enabled { continue }
 		for _, compiled := range rule.Regexps {
 			if compiled.MatchString(text) {
 				matches = append(matches, matchedOutbound{
-					Action:   rule.Action,
-					RuleName: rule.Name,
-					Reason:   "outbound_" + rule.Action + ":" + rule.Name,
-					Message:  rule.Message,
-					Priority: rule.Priority,
+					Action:     rule.Action,
+					RuleName:   rule.Name,
+					Reason:     "outbound_" + rule.Action + ":" + rule.Name,
+					Message:    rule.Message,
+					Priority:   rule.Priority,
+					ShadowMode: rule.ShadowMode,
 				})
 				break // one match per rule is enough
 			}
@@ -1384,13 +1428,32 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 		return actionWeight(matches[i].Action) > actionWeight(matches[j].Action)
 	})
 
-	winner := matches[0]
-	return OutboundDetectResult{
-		Action:   winner.Action,
-		RuleName: winner.RuleName,
-		Reason:   winner.Reason,
-		Message:  winner.Message,
+	// 分离影子模式和正常规则
+	var normalMatches []matchedOutbound
+	var shadowMatches []matchedOutbound
+	for _, m := range matches {
+		if m.ShadowMode {
+			shadowMatches = append(shadowMatches, m)
+		} else {
+			normalMatches = append(normalMatches, m)
+		}
 	}
+
+	// 影子模式只记录
+	for _, m := range shadowMatches {
+		result.ShadowReasons = append(result.ShadowReasons, m.RuleName)
+	}
+
+	// 正常规则决定最终 action
+	if len(normalMatches) > 0 {
+		winner := normalMatches[0]
+		result.Action = winner.Action
+		result.RuleName = winner.RuleName
+		result.Reason = winner.Reason
+		result.Message = winner.Message
+	}
+
+	return result
 }
 
 // ============================================================
