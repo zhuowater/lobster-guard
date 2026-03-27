@@ -479,15 +479,32 @@ func contains(s, sub string) bool {
 
 func TestGetDefaultLLMTemplates(t *testing.T) {
 	templates := getDefaultLLMTemplates()
-	if len(templates) != 4 {
-		t.Fatalf("期望 4 个默认 LLM 模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Fatalf("期望 12 个默认 LLM 模板，实际 %d", len(templates))
 	}
 
 	expectedIDs := map[string]bool{
-		"tpl-llm-semiconductor": true,
-		"tpl-llm-financial":     true,
-		"tpl-llm-healthcare":    true,
-		"tpl-llm-compliance":    true,
+		"tpl-llm-semiconductor": true, "tpl-llm-financial": true,
+		"tpl-llm-healthcare": true, "tpl-llm-compliance": true,
+		"tpl-llm-legal": true, "tpl-llm-education": true,
+		"tpl-llm-government": true, "tpl-llm-energy": true,
+		"tpl-llm-automotive": true, "tpl-llm-ecommerce": true,
+		"tpl-llm-hr": true, "tpl-llm-insurance": true,
+		// batch 2
+		"tpl-llm-securities": true, "tpl-llm-fund": true,
+		"tpl-llm-pharma": true, "tpl-llm-robotics": true,
+		"tpl-llm-consumer-electronics": true, "tpl-llm-heavy-industry": true,
+		"tpl-llm-civil-aviation": true, "tpl-llm-railway": true,
+		"tpl-llm-metro": true, "tpl-llm-maritime": true,
+		"tpl-llm-gaming": true, "tpl-llm-advertising": true,
+		"tpl-llm-social-media": true, "tpl-llm-live-streaming": true,
+		"tpl-llm-saas-cloud": true, "tpl-llm-search-engine": true,
+		"tpl-llm-local-services": true, "tpl-llm-cybersecurity": true,
+		"tpl-llm-media-news": true, "tpl-llm-publishing": true,
+		"tpl-llm-telecom": true, "tpl-llm-logistics": true,
+		"tpl-llm-real-estate": true, "tpl-llm-agriculture": true,
+		"tpl-llm-aerospace": true, "tpl-llm-mining": true,
+		"tpl-llm-construction": true, "tpl-llm-hospitality": true,
 	}
 	for _, tpl := range templates {
 		if !expectedIDs[tpl.ID] {
@@ -928,10 +945,10 @@ func TestLLMTemplateCRUD(t *testing.T) {
 	engine := NewLLMRuleEngine(defaultLLMRules)
 	engine.SetTemplateDB(db)
 
-	// List: 应包含 4 个内置模板
+	// List: 应包含 12 个内置模板
 	templates := engine.ListLLMTemplates()
-	if len(templates) != 4 {
-		t.Fatalf("期望 4 个内置模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Fatalf("期望 12 个内置模板，实际 %d", len(templates))
 	}
 
 	// Get: 获取单个模板
@@ -967,10 +984,10 @@ func TestLLMTemplateCRUD(t *testing.T) {
 		t.Fatalf("创建自定义模板失败: %v", err)
 	}
 
-	// List 应变为 5
+	// List 应变为 13
 	templates = engine.ListLLMTemplates()
-	if len(templates) != 5 {
-		t.Errorf("创建后期望 5 个模板，实际 %d", len(templates))
+	if len(templates) != 41 {
+		t.Errorf("创建后期望 13 个模板，实际 %d", len(templates))
 	}
 
 	// Get 自定义模板
@@ -1031,10 +1048,10 @@ func TestLLMTemplateCRUD(t *testing.T) {
 		t.Error("删除不存在的模板应失败")
 	}
 
-	// List 应回到 4
+	// List 应回到 12
 	templates = engine.ListLLMTemplates()
-	if len(templates) != 4 {
-		t.Errorf("删除后期望 4 个模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Errorf("删除后期望 12 个模板，实际 %d", len(templates))
 	}
 }
 
@@ -1044,8 +1061,8 @@ func TestLLMTemplateNoDBFallback(t *testing.T) {
 
 	// List 应回退到内存
 	templates := engine.ListLLMTemplates()
-	if len(templates) != 4 {
-		t.Errorf("无 DB 时应回退到内存 4 个模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Errorf("无 DB 时应回退到内存 12 个模板，实际 %d", len(templates))
 	}
 
 	// Get 应回退到内存

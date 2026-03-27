@@ -17,15 +17,32 @@ import (
 func TestListInboundTemplates(t *testing.T) {
 	engine := NewRuleEngine()
 	templates := engine.ListInboundTemplates()
-	if len(templates) != 4 {
-		t.Fatalf("期望 4 个默认模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Fatalf("期望 40 个默认模板，实际 %d", len(templates))
 	}
 	// 验证模板 ID
 	expectedIDs := map[string]bool{
-		"tpl-inbound-semiconductor": true,
-		"tpl-inbound-financial":     true,
-		"tpl-inbound-healthcare":    true,
-		"tpl-inbound-compliance":    true,
+		"tpl-inbound-semiconductor": true, "tpl-inbound-financial": true,
+		"tpl-inbound-healthcare": true, "tpl-inbound-compliance": true,
+		"tpl-inbound-legal": true, "tpl-inbound-education": true,
+		"tpl-inbound-government": true, "tpl-inbound-energy": true,
+		"tpl-inbound-automotive": true, "tpl-inbound-ecommerce": true,
+		"tpl-inbound-hr": true, "tpl-inbound-insurance": true,
+		// batch 2
+		"tpl-inbound-securities": true, "tpl-inbound-fund": true,
+		"tpl-inbound-pharma": true, "tpl-inbound-robotics": true,
+		"tpl-inbound-consumer-electronics": true, "tpl-inbound-heavy-industry": true,
+		"tpl-inbound-civil-aviation": true, "tpl-inbound-railway": true,
+		"tpl-inbound-metro": true, "tpl-inbound-maritime": true,
+		"tpl-inbound-gaming": true, "tpl-inbound-advertising": true,
+		"tpl-inbound-social-media": true, "tpl-inbound-live-streaming": true,
+		"tpl-inbound-saas-cloud": true, "tpl-inbound-search-engine": true,
+		"tpl-inbound-local-services": true, "tpl-inbound-cybersecurity": true,
+		"tpl-inbound-media-news": true, "tpl-inbound-publishing": true,
+		"tpl-inbound-telecom": true, "tpl-inbound-logistics": true,
+		"tpl-inbound-real-estate": true, "tpl-inbound-agriculture": true,
+		"tpl-inbound-aerospace": true, "tpl-inbound-mining": true,
+		"tpl-inbound-construction": true, "tpl-inbound-hospitality": true,
 	}
 	for _, tpl := range templates {
 		if !expectedIDs[tpl.ID] {
@@ -281,8 +298,8 @@ func TestInboundTemplateListAPI(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("解析响应失败: %v", err)
 	}
-	if resp.Total != 4 {
-		t.Errorf("期望 4 个模板，实际 %d", resp.Total)
+	if resp.Total != 40 {
+		t.Errorf("期望 40 个模板，实际 %d", resp.Total)
 	}
 }
 
@@ -632,10 +649,10 @@ func TestInboundTemplateCRUD(t *testing.T) {
 	engine.SetTenantDB(db)
 	engine.SetInboundTemplateDB(db)
 
-	// List: 应包含 4 个内置模板
+	// List: 应包含 40 个内置模板
 	templates := engine.ListInboundTemplates()
-	if len(templates) != 4 {
-		t.Fatalf("期望 4 个内置模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Fatalf("期望 40 个内置模板，实际 %d", len(templates))
 	}
 
 	// Get: 获取单个模板
@@ -670,10 +687,10 @@ func TestInboundTemplateCRUD(t *testing.T) {
 		t.Fatalf("创建自定义入站模板失败: %v", err)
 	}
 
-	// List 应变为 5
+	// List 应变为 13
 	templates = engine.ListInboundTemplates()
-	if len(templates) != 5 {
-		t.Errorf("创建后期望 5 个模板，实际 %d", len(templates))
+	if len(templates) != 41 {
+		t.Errorf("创建后期望 41 个模板，实际 %d", len(templates))
 	}
 
 	// Get 自定义模板
@@ -730,10 +747,10 @@ func TestInboundTemplateCRUD(t *testing.T) {
 		t.Error("删除不存在的入站模板应失败")
 	}
 
-	// List 应回到 4
+	// List 应回到 40
 	templates = engine.ListInboundTemplates()
-	if len(templates) != 4 {
-		t.Errorf("删除后期望 4 个模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Errorf("删除后期望 40 个模板，实际 %d", len(templates))
 	}
 }
 
@@ -743,8 +760,8 @@ func TestInboundTemplateNoDBFallback(t *testing.T) {
 
 	// List 应回退到内存
 	templates := engine.ListInboundTemplates()
-	if len(templates) != 4 {
-		t.Errorf("无 DB 时应回退到内存 4 个模板，实际 %d", len(templates))
+	if len(templates) != 40 {
+		t.Errorf("无 DB 时应回退到内存 40 个模板，实际 %d", len(templates))
 	}
 
 	// Get 应回退到内存

@@ -551,6 +551,16 @@ func getDefaultInboundRules() []InboundRuleConfig {
 		{Name: "sensitive_keywords", Patterns: []string{
 			"密码", "password", "token", "api_key", "secret",
 		}, Action: "warn", Category: "sensitive"},
+		// v29.0: 全局新增规则
+		{Name: "copyright_violation", Patterns: []string{
+			"下载盗版", "破解软件", "绕过DRM", "pirated", "crack software", "bypass DRM",
+		}, Action: "block", Category: "copyright"},
+		{Name: "cross_border_data", Patterns: []string{
+			"跨境传输", "数据出境", "cross-border transfer", "data localization", "数据本地化",
+		}, Action: "warn", Category: "data_sovereignty"},
+		{Name: "confidential_document", Patterns: []string{
+			"商业秘密", "内部文件", "confidential", "trade secret", "NDA", "保密协议",
+		}, Action: "warn", Category: "confidential"},
 	}
 }
 
@@ -571,8 +581,8 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		},
 		{
 			ID:          "tpl-inbound-financial",
-			Name:        "金融行业入站规则",
-			Description: "金融行业专属检测规则，覆盖账户数据和合规交易",
+			Name:        "银行/支付入站规则",
+			Description: "银行/支付行业专属检测规则，覆盖账户数据、交易流水和合规交易",
 			Category:    "industry",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
@@ -602,6 +612,412 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			Rules: []InboundRuleConfig{
 				{Name: "ai_act_prohibited", Patterns: []string{"social scoring", "社会信用评分", "subliminal manipulation", "潜意识操纵", "biometric surveillance", "实时生物识别"}, Action: "block", Category: "ai_act"},
 				{Name: "ai_act_high_risk", Patterns: []string{"automated decision", "自动化决策", "credit scoring", "信用评分", "recruitment AI", "招聘AI", "predictive policing"}, Action: "warn", Category: "ai_act"},
+			},
+		},
+		// v29.0: 8个新行业入站模板
+		{
+			ID:          "tpl-inbound-legal",
+			Name:        "法律行业入站规则",
+			Description: "法律行业专属检测规则，覆盖律师客户特权通信、案件卷宗和法律意见书保护",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "legal_privilege", Patterns: []string{"律师函", "委托代理", "attorney-client privilege", "legal privilege", "privileged communication", "特权通信"}, Action: "warn", Category: "legal_privilege"},
+				{Name: "legal_case_file", Patterns: []string{"案件卷宗", "案卷材料", "证据清单", "case file", "court record", "litigation document", "诉讼文书"}, Action: "warn", Category: "legal_data"},
+				{Name: "legal_opinion_block", Patterns: []string{"法律意见书", "legal opinion", "counsel opinion", "律师意见", "法律备忘录", "legal memorandum"}, Action: "block", Category: "legal_data"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-education",
+			Name:        "教育行业入站规则",
+			Description: "教育行业专属检测规则，覆盖学生数据保护、考试安全和学术诚信",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "edu_student_data", Patterns: []string{"成绩单", "学籍信息", "FERPA", "student record", "transcript", "enrollment data", "学生档案"}, Action: "warn", Category: "student_data"},
+				{Name: "edu_exam_block", Patterns: []string{"考试题库", "试卷答案", "exam bank", "test answers", "考试原题", "answer key"}, Action: "block", Category: "exam_security"},
+				{Name: "edu_ghostwriting", Patterns: []string{"论文代写", "代写作业", "ghostwriting", "essay mill", "contract cheating", "学术代写"}, Action: "warn", Category: "academic_integrity"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-government",
+			Name:        "政务/政府入站规则",
+			Description: "政务行业专属检测规则，覆盖涉密信息保护、政策草案和公文管控",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "gov_classified", Patterns: []string{"机密文件", "秘密文件", "内部文件", "classified document", "confidential government", "state secret", "国家秘密"}, Action: "block", Category: "classified"},
+				{Name: "gov_policy_draft", Patterns: []string{"政策草案", "内部征求意见稿", "policy draft", "internal consultation", "draft regulation", "草案征求意见"}, Action: "warn", Category: "policy_draft"},
+				{Name: "gov_document_number", Patterns: []string{"公文文号", "发文字号", "official document number", "government dispatch", "红头文件", "official gazette"}, Action: "warn", Category: "gov_document"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-energy",
+			Name:        "能源/电力入站规则",
+			Description: "能源行业专属检测规则，覆盖 SCADA 安全、电网调度和工控协议保护",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "energy_scada_block", Patterns: []string{"SCADA命令", "SCADA指令", "SCADA command", "SCADA control", "远程终端单元", "RTU command"}, Action: "block", Category: "scada_security"},
+				{Name: "energy_grid_block", Patterns: []string{"电网调度指令", "负荷调度", "grid dispatch", "load dispatch", "power grid command", "调度控制"}, Action: "block", Category: "grid_security"},
+				{Name: "energy_ics_protocol", Patterns: []string{"Modbus", "DNP3", "IEC 61850", "OPC UA", "工控协议", "industrial control protocol"}, Action: "warn", Category: "ics_protocol"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-automotive",
+			Name:        "汽车/自动驾驶入站规则",
+			Description: "汽车行业专属检测规则，覆盖 ECU 固件、OTA 升级和车辆追踪保护",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "auto_ecu_block", Patterns: []string{"ECU固件", "ECU刷写", "ECU firmware", "flash ECU", "电控单元固件", "ECU calibration"}, Action: "block", Category: "ecu_security"},
+				{Name: "auto_ota_block", Patterns: []string{"OTA升级包", "OTA固件", "OTA update package", "over-the-air firmware", "远程升级固件", "OTA flash"}, Action: "block", Category: "ota_security"},
+				{Name: "auto_vin_tracking", Patterns: []string{"VIN追踪", "车辆识别号", "vehicle identification number", "VIN tracking", "车架号查询", "VIN lookup"}, Action: "warn", Category: "vehicle_tracking"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-ecommerce",
+			Name:        "电商/零售入站规则",
+			Description: "电商行业专属检测规则，覆盖价格操纵、竞品爬取和用户画像保护",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "ecom_price_block", Patterns: []string{"批量改价", "价格操纵", "price manipulation", "bulk price change", "篡改价格", "price tampering"}, Action: "block", Category: "price_manipulation"},
+				{Name: "ecom_competitor_scrape", Patterns: []string{"竞品数据爬取", "爬取竞品价格", "competitor scraping", "scrape competitor", "竞品抓取", "price scraping"}, Action: "warn", Category: "competitive_intel"},
+				{Name: "ecom_user_profile", Patterns: []string{"用户画像导出", "用户行为数据", "user profile export", "user behavior data", "消费者画像", "customer profiling"}, Action: "warn", Category: "user_profiling"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-hr",
+			Name:        "人力资源入站规则",
+			Description: "人力资源行业专属检测规则，覆盖薪酬数据、绩效评估和员工档案保护",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "hr_salary_block", Patterns: []string{"薪酬数据", "工资明细", "salary data", "compensation detail", "薪资报表", "payroll export"}, Action: "block", Category: "salary_data"},
+				{Name: "hr_performance", Patterns: []string{"绩效评估", "绩效考核", "performance review", "performance evaluation", "年度考核", "appraisal report"}, Action: "warn", Category: "performance_data"},
+				{Name: "hr_employee_record", Patterns: []string{"员工档案", "人事档案", "employee record", "personnel file", "员工信息表", "HR record"}, Action: "warn", Category: "employee_data"},
+			},
+		},
+		{
+			ID:          "tpl-inbound-insurance",
+			Name:        "保险行业入站规则",
+			Description: "保险行业专属检测规则，覆盖理赔数据、精算模型和保单信息保护",
+			Category:    "industry",
+			BuiltIn:     true,
+			Rules: []InboundRuleConfig{
+				{Name: "ins_claim_data", Patterns: []string{"理赔数据", "理赔记录", "claim data", "claim record", "出险记录", "insurance claim"}, Action: "warn", Category: "claim_data"},
+				{Name: "ins_actuarial_block", Patterns: []string{"精算模型", "精算数据", "actuarial model", "actuarial data", "精算参数", "actuarial parameter"}, Action: "block", Category: "actuarial_data"},
+				{Name: "ins_policy_detail", Patterns: []string{"保单详情", "保单信息", "policy detail", "insurance policy", "投保人信息", "policyholder data"}, Action: "warn", Category: "policy_data"},
+			},
+		},
+		// ========== 第二批行业模板（28个） ==========
+		// 13. 证券/投行
+		{
+			ID: "tpl-inbound-securities", Name: "证券/投行入站规则",
+			Description: "证券/投行行业专属检测规则，覆盖研报、IPO材料和持仓数据保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "sec_research_draft", Patterns: []string{"研报草稿", "未公开研报", "draft research", "unpublished report", "投行项目", "路演材料", "roadshow material"}, Action: "warn", Category: "research_data"},
+				{Name: "sec_ipo_block", Patterns: []string{"IPO定价", "配售方案", "保荐材料", "IPO pricing", "share allocation", "underwriting"}, Action: "block", Category: "ipo_data"},
+				{Name: "sec_position", Patterns: []string{"持仓明细", "交易策略", "锁定期", "position detail", "trading strategy"}, Action: "warn", Category: "position_data"},
+			},
+		},
+		// 14. 基金/资管
+		{
+			ID: "tpl-inbound-fund", Name: "基金/资管入站规则",
+			Description: "基金/资管行业专属检测规则，覆盖净值预测、投资组合和风控模型保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "fund_nav", Patterns: []string{"净值预测", "NAV forecast", "回撤数据", "夏普比率", "Sharpe ratio"}, Action: "warn", Category: "fund_data"},
+				{Name: "fund_portfolio", Patterns: []string{"基金持仓", "投资组合", "资产配置", "fund holding", "portfolio allocation", "asset allocation"}, Action: "warn", Category: "portfolio_data"},
+				{Name: "fund_risk_block", Patterns: []string{"风控模型", "清盘线", "预警线", "风险敞口", "risk model", "liquidation line", "risk exposure"}, Action: "block", Category: "risk_model"},
+			},
+		},
+		// 15. 制药/生物科技
+		{
+			ID: "tpl-inbound-pharma", Name: "制药/生物科技入站规则",
+			Description: "制药/生物科技行业专属检测规则，覆盖药物配方、临床试验和GMP记录保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "pharma_formula_block", Patterns: []string{"药物配方", "分子式", "合成路线", "drug formula", "molecular structure", "synthesis route", "原料药工艺", "API process"}, Action: "block", Category: "drug_formula"},
+				{Name: "pharma_clinical", Patterns: []string{"临床试验", "受试者数据", "IND申请", "clinical trial", "subject data", "IND filing", "生物等效性", "bioequivalence"}, Action: "warn", Category: "clinical_data"},
+				{Name: "pharma_gmp", Patterns: []string{"GMP记录", "批生产记录", "药品注册", "GMP record", "batch record", "drug registration"}, Action: "warn", Category: "gmp_data"},
+			},
+		},
+		// 16. 机器人/自动化
+		{
+			ID: "tpl-inbound-robotics", Name: "机器人/自动化入站规则",
+			Description: "机器人/自动化行业专属检测规则，覆盖运动控制算法、安全区域和传感器参数保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "robot_algo_block", Patterns: []string{"运动控制算法", "逆运动学", "轨迹规划", "motion control algorithm", "inverse kinematics", "trajectory planning", "SLAM算法", "SLAM algorithm"}, Action: "block", Category: "control_algorithm"},
+				{Name: "robot_safety_block", Patterns: []string{"安全区域", "协作区域", "力控参数", "safety zone", "collaborative zone", "force control"}, Action: "warn", Category: "safety_config"},
+				{Name: "robot_sensor", Patterns: []string{"传感器融合", "PID参数", "伺服参数", "sensor fusion", "PID parameter", "servo parameter", "视觉引导", "visual guidance"}, Action: "warn", Category: "sensor_data"},
+			},
+		},
+		// 17. 消费电子/家电
+		{
+			ID: "tpl-inbound-consumer-electronics", Name: "消费电子/家电入站规则",
+			Description: "消费电子/家电行业专属检测规则，覆盖BOM、模具图纸和供应商报价保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "ce_bom", Patterns: []string{"产品BOM", "物料清单", "product BOM", "bill of materials", "成本结构", "cost structure"}, Action: "warn", Category: "bom_data"},
+				{Name: "ce_mold_block", Patterns: []string{"模具图纸", "模具参数", "开模费用", "mold drawing", "mold parameter", "tooling cost"}, Action: "block", Category: "mold_data"},
+				{Name: "ce_supplier", Patterns: []string{"供应商报价", "认证数据", "3C认证", "CE认证", "FCC认证", "supplier quotation", "certification data"}, Action: "warn", Category: "supplier_data"},
+			},
+		},
+		// 18. 重工/装备制造
+		{
+			ID: "tpl-inbound-heavy-industry", Name: "重工/装备制造入站规则",
+			Description: "重工/装备制造行业专属检测规则，覆盖焊接工艺、压力容器和特种设备数据保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "hi_welding", Patterns: []string{"焊接工艺", "WPS", "焊接规程", "welding procedure", "welding specification"}, Action: "warn", Category: "welding_data"},
+				{Name: "hi_pressure_block", Patterns: []string{"压力容器", "锅炉参数", "管道设计", "pressure vessel", "boiler parameter", "piping design"}, Action: "block", Category: "pressure_data"},
+				{Name: "hi_special_equip", Patterns: []string{"特种设备", "起重机参数", "热处理工艺", "无损检测", "探伤报告", "special equipment", "crane parameter", "heat treatment", "NDT", "inspection report"}, Action: "warn", Category: "special_equipment"},
+			},
+		},
+		// 19. 民航
+		{
+			ID: "tpl-inbound-civil-aviation", Name: "民航入站规则",
+			Description: "民航行业专属检测规则，覆盖适航数据、飞控参数和旅客PNR保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "ca_airworthiness_block", Patterns: []string{"适航证", "适航数据", "飞行数据记录器", "airworthiness", "FDR"}, Action: "block", Category: "airworthiness"},
+				{Name: "ca_flight_control_block", Patterns: []string{"飞控参数", "FMS配置", "航路点", "ACARS", "flight control parameter", "FMS configuration", "waypoint", "ACARS"}, Action: "block", Category: "flight_control"},
+				{Name: "ca_pnr", Patterns: []string{"旅客记录", "PNR", "NOTAM", "MEL", "客座率", "航线收益", "passenger record", "route yield", "load factor"}, Action: "warn", Category: "pnr_data"},
+			},
+		},
+		// 20. 铁路/高铁
+		{
+			ID: "tpl-inbound-railway", Name: "铁路/高铁入站规则",
+			Description: "铁路/高铁行业专属检测规则，覆盖CTCS信号参数、调度运行图和线路限速保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "rail_ctcs_block", Patterns: []string{"CTCS", "列控系统", "ATP参数", "应答器", "轨道电路", "train control system", "ATP parameter", "balise", "track circuit"}, Action: "block", Category: "signal_system"},
+				{Name: "rail_dispatch", Patterns: []string{"运行图", "调度命令", "线路限速", "闭塞分区", "timetable", "dispatch command", "speed restriction", "block section"}, Action: "warn", Category: "dispatch_data"},
+				{Name: "rail_interlock", Patterns: []string{"联锁表", "信号机", "interlocking table", "signal"}, Action: "warn", Category: "interlock_data"},
+			},
+		},
+		// 21. 城市轨道/地铁
+		{
+			ID: "tpl-inbound-metro", Name: "城市轨道/地铁入站规则",
+			Description: "城市轨道/地铁行业专属检测规则，覆盖CBTC参数、屏蔽门和客流数据保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "metro_cbtc_block", Patterns: []string{"CBTC", "ATO参数", "列车自动运行", "CBTC", "ATO parameter", "train automation"}, Action: "block", Category: "cbtc_data"},
+				{Name: "metro_psd", Patterns: []string{"屏蔽门", "站台门", "行车间隔", "platform screen door", "headway", "应急疏散", "emergency evacuation"}, Action: "warn", Category: "psd_data"},
+				{Name: "metro_passenger", Patterns: []string{"客流预测", "客流调度", "折返时间", "正线运行", "passenger flow forecast", "turnaround time"}, Action: "warn", Category: "passenger_flow"},
+			},
+		},
+		// 22. 航运/港口
+		{
+			ID: "tpl-inbound-maritime", Name: "航运/港口入站规则",
+			Description: "航运/港口行业专属检测规则，覆盖AIS数据、海图和港口调度保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "maritime_ais", Patterns: []string{"AIS数据", "船舶位置", "MMSI", "IMO编号", "AIS data", "vessel position", "MMSI", "IMO number"}, Action: "warn", Category: "ais_data"},
+				{Name: "maritime_chart_block", Patterns: []string{"海图数据", "nautical chart"}, Action: "block", Category: "chart_data"},
+				{Name: "maritime_port", Patterns: []string{"港口调度", "泊位分配", "集装箱追踪", "船期表", "提单", "报关单", "port schedule", "berth allocation", "container tracking", "shipping schedule", "bill of lading", "customs declaration"}, Action: "warn", Category: "port_data"},
+			},
+		},
+		// 23. 游戏
+		{
+			ID: "tpl-inbound-gaming", Name: "游戏行业入站规则",
+			Description: "游戏行业专属检测规则，覆盖反外挂策略、内购定价和虚拟资产保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "game_anticheat_block", Patterns: []string{"反外挂策略", "外挂检测", "游戏源码", "anti-cheat strategy", "cheat detection", "game source code"}, Action: "block", Category: "anticheat"},
+				{Name: "game_iap", Patterns: []string{"内购定价", "充值比例", "掉落概率", "抽卡概率", "in-app purchase pricing", "drop rate", "gacha rate"}, Action: "warn", Category: "iap_data"},
+				{Name: "game_minor", Patterns: []string{"未成年防沉迷", "虚拟道具", "游戏币", "服务器架构", "minor protection", "virtual item", "server architecture"}, Action: "warn", Category: "game_misc"},
+			},
+		},
+		// 24. 广告/营销
+		{
+			ID: "tpl-inbound-advertising", Name: "广告/营销入站规则",
+			Description: "广告/营销行业专属检测规则，覆盖用户标签、投放策略和竞品数据保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "ad_user_tag", Patterns: []string{"用户标签", "人群包", "DMP数据", "user tag", "audience segment", "DMP data"}, Action: "warn", Category: "user_tag"},
+				{Name: "ad_strategy", Patterns: []string{"投放策略", "出价策略", "千次展示成本", "广告素材库", "media plan", "bidding strategy", "CPM", "creative library"}, Action: "warn", Category: "ad_strategy"},
+				{Name: "ad_competitor", Patterns: []string{"竞品监控", "ROI数据", "转化漏斗", "competitor monitoring", "ROI data", "conversion funnel"}, Action: "warn", Category: "competitor_data"},
+			},
+		},
+		// 25. 社交平台
+		{
+			ID: "tpl-inbound-social-media", Name: "社交平台入站规则",
+			Description: "社交平台行业专属检测规则，覆盖用户关系链、私信和推荐算法保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "social_graph_block", Patterns: []string{"用户关系链", "好友列表", "社交图谱", "social graph", "friend list"}, Action: "block", Category: "social_graph"},
+				{Name: "social_dm_block", Patterns: []string{"私信内容", "direct message", "用户行为日志", "user behavior log"}, Action: "block", Category: "private_message"},
+				{Name: "social_algo_block", Patterns: []string{"推荐算法", "内容审核策略", "信息流排序", "举报数据", "recommendation algorithm", "content moderation policy", "feed ranking", "report data"}, Action: "block", Category: "rec_algorithm"},
+			},
+		},
+		// 26. 短视频/直播
+		{
+			ID: "tpl-inbound-live-streaming", Name: "短视频/直播入站规则",
+			Description: "短视频/直播行业专属检测规则，覆盖主播收入、流量分发和MCN合约保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "ls_revenue_block", Patterns: []string{"主播收入", "打赏分成", "礼物分成比例", "streamer revenue", "gift sharing ratio"}, Action: "block", Category: "streamer_revenue"},
+				{Name: "ls_traffic_block", Patterns: []string{"流量分发规则", "直播间权重", "推流地址", "直播源码", "traffic distribution rule", "live room weight", "streaming address", "source code"}, Action: "block", Category: "traffic_rule"},
+				{Name: "ls_mcn", Patterns: []string{"MCN合约", "带货佣金", "审核策略", "MCN contract", "commission rate", "moderation policy"}, Action: "warn", Category: "mcn_data"},
+			},
+		},
+		// 27. SaaS/云服务
+		{
+			ID: "tpl-inbound-saas-cloud", Name: "SaaS/云服务入站规则",
+			Description: "SaaS/云服务行业专属检测规则，覆盖客户数据、多租户配置和API密钥保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "saas_customer_block", Patterns: []string{"客户数据隔离", "客户续约率", "客户流失率", "customer data isolation", "customer retention", "churn rate"}, Action: "block", Category: "customer_data"},
+				{Name: "saas_tenant", Patterns: []string{"多租户配置", "部署架构", "multi-tenant config", "deployment architecture"}, Action: "warn", Category: "tenant_config"},
+				{Name: "saas_key_block", Patterns: []string{"API密钥", "服务可用性", "SLA违约", "ARR", "MRR", "API key", "service availability", "SLA breach"}, Action: "block", Category: "api_key"},
+			},
+		},
+		// 28. 搜索引擎
+		{
+			ID: "tpl-inbound-search-engine", Name: "搜索引擎入站规则",
+			Description: "搜索引擎行业专属检测规则，覆盖排名算法、搜索日志和广告竞价保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "se_ranking_block", Patterns: []string{"搜索排名算法", "排名因子", "索引策略", "ranking algorithm", "ranking factor", "indexing strategy"}, Action: "block", Category: "ranking_algo"},
+				{Name: "se_log", Patterns: []string{"搜索日志", "用户搜索词", "搜索意图", "search log", "search query", "search intent"}, Action: "warn", Category: "search_log"},
+				{Name: "se_auction", Patterns: []string{"广告竞价规则", "质量得分", "爬虫策略", "ad auction rule", "quality score", "crawl policy"}, Action: "warn", Category: "auction_data"},
+			},
+		},
+		// 29. 外卖/本地生活
+		{
+			ID: "tpl-inbound-local-services", Name: "外卖/本地生活入站规则",
+			Description: "外卖/本地生活行业专属检测规则，覆盖骑手轨迹、商户评分和用户地址保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "ls_rider", Patterns: []string{"骑手轨迹", "配送路径", "运力调度", "rider trajectory", "delivery route", "capacity scheduling"}, Action: "warn", Category: "rider_data"},
+				{Name: "ls_merchant_block", Patterns: []string{"商户评分算法", "佣金比例", "抽成比例", "merchant scoring algorithm", "commission rate"}, Action: "block", Category: "merchant_algo"},
+				{Name: "ls_address", Patterns: []string{"用户收货地址", "商户流水", "高峰定价", "满减策略", "delivery address", "merchant revenue", "surge pricing", "promotion strategy"}, Action: "warn", Category: "address_data"},
+			},
+		},
+		// 30. 网络安全
+		{
+			ID: "tpl-inbound-cybersecurity", Name: "网络安全入站规则",
+			Description: "网络安全行业专属检测规则，覆盖漏洞数据、攻击payload和0day信息保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "cyber_vuln_block", Patterns: []string{"0day漏洞", "未公开漏洞", "漏洞利用代码", "PoC代码", "zero-day", "undisclosed vulnerability", "exploit code", "PoC code"}, Action: "block", Category: "vulnerability"},
+				{Name: "cyber_payload_block", Patterns: []string{"攻击载荷", "攻击工具链", "attack payload", "attack toolchain"}, Action: "block", Category: "attack_payload"},
+				{Name: "cyber_report_block", Patterns: []string{"渗透报告", "客户资产", "安全审计报告", "应急响应", "penetration report", "client asset", "security audit report", "incident response"}, Action: "block", Category: "security_report"},
+			},
+		},
+		// 31. 传媒/新闻
+		{
+			ID: "tpl-inbound-media-news", Name: "传媒/新闻入站规则",
+			Description: "传媒/新闻行业专属检测规则，覆盖未发布稿件、信息源和独家线索保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "news_unpub_block", Patterns: []string{"未发布稿件", "发稿计划", "新闻素材", "unpublished article", "publication schedule", "news material"}, Action: "block", Category: "unpublished"},
+				{Name: "news_source_block", Patterns: []string{"信息源", "匿名线人", "anonymous source", "confidential informant"}, Action: "block", Category: "news_source"},
+				{Name: "news_editorial", Patterns: []string{"独家新闻", "采编策略", "审稿流程", "舆论引导", "舆情监控", "exclusive story", "editorial strategy", "editorial review", "public opinion guidance"}, Action: "warn", Category: "editorial_data"},
+			},
+		},
+		// 32. 出版/版权
+		{
+			ID: "tpl-inbound-publishing", Name: "出版/版权入站规则",
+			Description: "出版/版权行业专属检测规则，覆盖未出版手稿、版税数据和DRM配置保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "pub_manuscript_block", Patterns: []string{"未出版手稿", "unpublished manuscript"}, Action: "block", Category: "manuscript"},
+				{Name: "pub_royalty", Patterns: []string{"版税数据", "稿费标准", "royalty data", "author fee", "印数", "首印量", "print run"}, Action: "warn", Category: "royalty_data"},
+				{Name: "pub_drm_block", Patterns: []string{"DRM配置", "数字版权", "ISBN分配", "发行渠道", "翻译合同", "DRM configuration", "digital rights", "ISBN assignment", "distribution channel", "translation contract"}, Action: "block", Category: "drm_data"},
+			},
+		},
+		// 33. 电信/运营商
+		{
+			ID: "tpl-inbound-telecom", Name: "电信/运营商入站规则",
+			Description: "电信/运营商行业专属检测规则，覆盖CDR通话记录、基站数据和用户号码保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "telecom_cdr_block", Patterns: []string{"通话记录", "CDR数据", "信令数据", "call detail record", "CDR data", "signaling data"}, Action: "block", Category: "cdr_data"},
+				{Name: "telecom_bs_block", Patterns: []string{"基站位置", "核心网配置", "监听接口", "DPI数据", "base station location", "core network config", "lawful interception", "DPI data"}, Action: "block", Category: "network_data"},
+				{Name: "telecom_user", Patterns: []string{"IMSI", "IMEI", "用户套餐", "号码归属", "IMSI", "IMEI", "subscriber plan", "number ownership"}, Action: "warn", Category: "subscriber_data"},
+			},
+		},
+		// 34. 物流/供应链
+		{
+			ID: "tpl-inbound-logistics", Name: "物流/供应链入站规则",
+			Description: "物流/供应链行业专属检测规则，覆盖客户地址、仓储布局和供应商报价保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "logi_address", Patterns: []string{"客户收货地址", "customer shipping address"}, Action: "warn", Category: "address_data"},
+				{Name: "logi_warehouse", Patterns: []string{"仓储布局", "库位规划", "库存数据", "入库单", "出库单", "warehouse layout", "storage planning", "inventory data"}, Action: "warn", Category: "warehouse_data"},
+				{Name: "logi_supplier_block", Patterns: []string{"供应商报价", "物流路由", "运费协议", "供应链金融", "supplier quotation", "logistics route", "freight agreement", "supply chain finance"}, Action: "block", Category: "supplier_data"},
+			},
+		},
+		// 35. 房地产/物业
+		{
+			ID: "tpl-inbound-real-estate", Name: "房地产/物业入站规则",
+			Description: "房地产/物业行业专属检测规则，覆盖业主信息、房价数据和户型图纸保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "re_owner", Patterns: []string{"业主信息", "业主名单", "owner information", "owner list"}, Action: "warn", Category: "owner_data"},
+				{Name: "re_price", Patterns: []string{"房价数据", "成交底价", "楼盘均价", "物业费", "按揭数据", "property price", "transaction floor price", "average price", "property fee", "mortgage data"}, Action: "warn", Category: "price_data"},
+				{Name: "re_plan", Patterns: []string{"户型图纸", "公摊面积", "购房合同", "floor plan", "purchase contract"}, Action: "warn", Category: "plan_data"},
+			},
+		},
+		// 36. 农业/食品
+		{
+			ID: "tpl-inbound-agriculture", Name: "农业/食品入站规则",
+			Description: "农业/食品行业专属检测规则，覆盖种子专利、农药配方和溯源数据保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "agri_seed_block", Patterns: []string{"种子专利", "转基因数据", "育种记录", "seed patent", "GMO data", "breeding record"}, Action: "block", Category: "seed_data"},
+				{Name: "agri_pesticide_block", Patterns: []string{"农药配方", "农药残留", "饲料配方", "pesticide formula", "pesticide residue", "feed formula"}, Action: "block", Category: "pesticide_data"},
+				{Name: "agri_trace", Patterns: []string{"食品安全检测", "溯源数据", "产地证明", "有机认证", "food safety test", "traceability data", "origin certificate", "organic certification"}, Action: "warn", Category: "trace_data"},
+			},
+		},
+		// 37. 航空航天
+		{
+			ID: "tpl-inbound-aerospace", Name: "航空航天入站规则",
+			Description: "航空航天行业专属检测规则，覆盖ITAR管制、卫星参数和飞控代码保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "aero_itar_block", Patterns: []string{"ITAR管制", "ITAR controlled"}, Action: "block", Category: "itar_control"},
+				{Name: "aero_satellite_block", Patterns: []string{"卫星参数", "轨道数据", "TLE", "遥测数据", "遥控指令", "satellite parameter", "orbital data", "TLE", "telemetry data", "telecommand"}, Action: "block", Category: "satellite_data"},
+				{Name: "aero_rocket_block", Patterns: []string{"星载软件", "火箭参数", "发射窗口", "测控频段", "载荷参数", "onboard software", "rocket parameter", "launch window", "tracking frequency", "payload parameter"}, Action: "block", Category: "rocket_data"},
+			},
+		},
+		// 38. 矿业/资源
+		{
+			ID: "tpl-inbound-mining", Name: "矿业/资源入站规则",
+			Description: "矿业/资源行业专属检测规则，覆盖勘探数据、矿藏储量和环评数据保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "mine_explore_block", Patterns: []string{"勘探数据", "矿藏储量", "品位数据", "exploration data", "mineral reserves", "ore grade"}, Action: "block", Category: "exploration_data"},
+				{Name: "mine_rights_block", Patterns: []string{"采矿权", "探矿权", "地质报告", "mining rights", "prospecting rights", "geological report"}, Action: "block", Category: "mining_rights"},
+				{Name: "mine_env", Patterns: []string{"环评报告", "尾矿处理", "选矿参数", "矿石成分", "environmental assessment", "tailings", "beneficiation parameter", "ore composition"}, Action: "warn", Category: "env_data"},
+			},
+		},
+		// 39. 建筑/工程
+		{
+			ID: "tpl-inbound-construction", Name: "建筑/工程入站规则",
+			Description: "建筑/工程行业专属检测规则，覆盖设计图纸、结构计算和招标底价保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "const_drawing", Patterns: []string{"设计图纸", "结构计算书", "施工方案", "design drawing", "structural calculation", "construction plan"}, Action: "warn", Category: "design_data"},
+				{Name: "const_bid_block", Patterns: []string{"招标底价", "投标报价", "工程造价", "bid floor price", "tender price", "project cost"}, Action: "block", Category: "bid_data"},
+				{Name: "const_bim", Patterns: []string{"BIM模型", "地勘报告", "变更单", "签证单", "结算审计", "BIM model", "geotechnical report", "change order", "site instruction", "final account"}, Action: "warn", Category: "bim_data"},
+			},
+		},
+		// bonus. 酒店/旅游
+		{
+			ID: "tpl-inbound-hospitality", Name: "酒店/旅游入站规则",
+			Description: "酒店/旅游行业专属检测规则，覆盖旅客信息、VIP客户和定价策略保护",
+			Category: "industry", BuiltIn: true,
+			Rules: []InboundRuleConfig{
+				{Name: "hotel_guest", Patterns: []string{"旅客信息", "PNR记录", "VIP客户", "客户偏好", "会员数据", "guest information", "PNR record", "VIP customer", "customer preference", "loyalty data"}, Action: "warn", Category: "guest_data"},
+				{Name: "hotel_pricing_block", Patterns: []string{"定价策略", "收益管理", "房价策略", "pricing strategy", "revenue management", "rate strategy"}, Action: "block", Category: "pricing_data"},
+				{Name: "hotel_occ", Patterns: []string{"入住率", "RevPAR", "occupancy rate", "RevPAR"}, Action: "warn", Category: "occ_data"},
 			},
 		},
 	}
