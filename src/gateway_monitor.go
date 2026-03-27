@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // skillInfo 表示一个 skill 的基本信息
@@ -48,9 +50,9 @@ type toolsInvokeRequest struct {
 
 // toolsInvokeResponse 是 /tools/invoke 的响应体
 type toolsInvokeResponse struct {
-	OK     bool                   `json:"ok"`
-	Result *toolsInvokeResult     `json:"result,omitempty"`
-	Error  *toolsInvokeError      `json:"error,omitempty"`
+	OK     bool               `json:"ok"`
+	Result *toolsInvokeResult `json:"result,omitempty"`
+	Error  *toolsInvokeError  `json:"error,omitempty"`
 }
 
 type toolsInvokeResult struct {
@@ -126,6 +128,96 @@ func gatewayToolsInvoke(address string, port int, pathPrefix, gatewayToken strin
 	}
 
 	return &result, latency, nil
+}
+
+// Gateway RPC frames (WebSocket control plane)
+type gatewayRPCRequest struct {
+	Type   string      `json:"type"`
+	ID     string      `json:"id"`
+	Method string      `json:"method"`
+	Params interface{} `json:"params,omitempty"`
+}
+
+type gatewayRPCResponse struct {
+	Type    string                 `json:"type"`
+	ID      string                 `json:"id"`
+	OK      bool                   `json:"ok"`
+	Payload map[string]interface{} `json:"payload,omitempty"`
+	Error   map[string]interface{} `json:"error,omitempty"`
+}
+
+func gatewayRPCRequestCall(address string, port int, gatewayToken string, method string, params map[string]interface{}) (map[string]interface{}, int64, error) {
+	if gatewayToken == "" {
+		return nil, 0, fmt.Errorf("AUTH_FAILED")
+	}
+	wsURL := fmt.Sprintf("ws://%s:%d/", address, port)
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+gatewayToken)
+	start := time.Now()
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		if resp != nil && resp.StatusCode == 401 {
+			return nil, latency, fmt.Errorf("AUTH_FAILED")
+		}
+		return nil, latency, fmt.Errorf("ws dial failed: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	requestID := fmt.Sprintf("lgm-%d", time.Now().UnixNano())
+	frame := gatewayRPCRequest{Type: "req", ID: requestID, Method: method, Params: params}
+	if err := conn.WriteJSON(frame); err != nil {
+		return nil, latency, fmt.Errorf("ws write failed: %w", err)
+	}
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return nil, latency, fmt.Errorf("ws read failed: %w", err)
+		}
+		var probe map[string]interface{}
+		if json.Unmarshal(data, &probe) != nil {
+			continue
+		}
+		if probe["type"] == "event" {
+			continue
+		}
+		var res gatewayRPCResponse
+		if err := json.Unmarshal(data, &res); err != nil {
+			continue
+		}
+		if res.Type != "res" || res.ID != requestID {
+			continue
+		}
+		if !res.OK {
+			if msg, ok := res.Error["message"].(string); ok && msg != "" {
+				return nil, latency, fmt.Errorf(msg)
+			}
+			return nil, latency, fmt.Errorf("rpc method failed: %s", method)
+		}
+		return res.Payload, latency, nil
+	}
+}
+
+func gatewaySessionsList(address string, port int, gatewayToken string) ([]map[string]interface{}, int64, error) {
+	payload, latency, err := gatewayRPCRequestCall(address, port, gatewayToken, "sessions.list", map[string]interface{}{
+		"includeGlobal":        true,
+		"includeUnknown":       true,
+		"includeDerivedTitles": true,
+		"includeLastMessage":   true,
+		"limit":                500,
+	})
+	if err != nil {
+		return nil, latency, err
+	}
+	raw, _ := payload["sessions"].([]interface{})
+	out := make([]map[string]interface{}, 0, len(raw))
+	for _, item := range raw {
+		if m, ok := item.(map[string]interface{}); ok {
+			out = append(out, m)
+		}
+	}
+	return out, latency, nil
 }
 
 // isHTMLResponse 检测响应是否是 HTML（防止 SPA fallback 误判）
@@ -313,27 +405,7 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 优先使用直接扫描（绕过 tools/invoke 的 visibility 限制）
-	if up.OpenClawConfigPath != "" {
-		scan := directScanOpenClaw(up.OpenClawConfigPath)
-		_, sessions := directScanToOverviewData(scan)
-
-		// 按 agent 分组统计
-		byAgent := make(map[string]int)
-		for _, s := range scan.Sessions {
-			byAgent[s.AgentID]++
-		}
-
-		jsonResponse(w, 200, map[string]interface{}{
-			"sessions":  sessions,
-			"count":     len(sessions),
-			"by_agent":  byAgent,
-			"source":    "direct_scan",
-		})
-		return
-	}
-
-	// Fallback: tools/invoke（受 visibility 限制，可能只能看到部分 sessions）
+	// 优先复刻 OpenClaw Control UI：走 Gateway RPC sessions.list
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
 			"error":   "gateway_token_not_configured",
@@ -342,25 +414,37 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	resp, _, err := gatewayToolsInvoke(
-		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
-		toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
-	)
-
-	if err != nil {
-		errStr := err.Error()
-		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 502, map[string]interface{}{
-				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
-			})
-			return
+	sessions, _, err := gatewaySessionsList(up.Address, up.Port, up.GatewayToken)
+	if err == nil {
+		byAgent := make(map[string]int)
+		for _, s := range sessions {
+			if agentID, ok := s["agentId"].(string); ok && agentID != "" {
+				byAgent[agentID]++
+			}
 		}
-		jsonResponse(w, 502, map[string]interface{}{
-			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+		jsonResponse(w, 200, map[string]interface{}{
+			"sessions": sessions,
+			"count":    len(sessions),
+			"by_agent": byAgent,
+			"source":   "gateway_rpc",
 		})
 		return
 	}
 
+	// Fallback: tools/invoke sessions_list（兼容旧版上游）
+	resp, _, invokeErr := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
+	)
+	if invokeErr != nil {
+		errStr := invokeErr.Error()
+		if errStr == "AUTH_FAILED" {
+			jsonResponse(w, 502, map[string]interface{}{"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期"})
+			return
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "unreachable", "message": fmt.Sprintf("Gateway RPC失败: %v; tools/invoke fallback也失败: %v", err, invokeErr)})
+		return
+	}
 	if !resp.OK {
 		errMsg := "sessions_list 调用失败"
 		if resp.Error != nil {
@@ -369,15 +453,12 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
-
-	// 从 details 提取 sessions，从 content[0].text 解析 JSON 作为 fallback
-	sessions := extractSessionsFromResponse(resp)
-
+	sessions = extractSessionsFromResponse(resp)
 	jsonResponse(w, 200, map[string]interface{}{
 		"sessions": sessions,
 		"count":    len(sessions),
 		"source":   "tools_invoke",
-		"warning":  "受 tools.sessions.visibility 限制，可能只显示部分 sessions。配置 openclaw_config_path 可获取完整列表。",
+		"warning":  "Gateway RPC sessions.list 不可用，已降级到 tools/invoke sessions_list；结果可能受 visibility 限制。",
 	})
 }
 
@@ -1456,11 +1537,11 @@ func directScanToOverviewData(scan *openclawDirectScanResult) (agents []map[stri
 	for _, s := range scan.Sessions {
 		agentSessionCount[s.AgentID]++
 		sess := map[string]interface{}{
-			"key":             s.Key,
-			"agent_id":        s.AgentID,
-			"session_id":      s.SessionID,
+			"key":              s.Key,
+			"agent_id":         s.AgentID,
+			"session_id":       s.SessionID,
 			"last_modified_at": s.LastModifiedAt,
-			"size_bytes":      s.SizeBytes,
+			"size_bytes":       s.SizeBytes,
 		}
 		sessions = append(sessions, sess)
 	}
