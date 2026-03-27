@@ -250,6 +250,7 @@ func main() {
 
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)
 		llmProxy = NewLLMProxy(cfg.LLMProxy, llmAuditor, llmRuleEngine)
+		llmProxy.mainCfg = cfg
 		go func() {
 			if err := llmProxy.Start(); err != nil {
 				log.Printf("[LLM代理] 启动失败: %v", err)

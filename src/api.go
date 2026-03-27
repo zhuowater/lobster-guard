@@ -5104,6 +5104,34 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		updated = append(updated, "backup_auto_interval")
 	}
 
+	// v23-v26 引擎开关
+	engineMap := map[string]struct {
+		cfgPtr  *bool
+		yamlKey string
+	}{
+		"engine_path_policy":    {&api.cfg.PathPolicy.Enabled, "path_policy"},
+		"engine_counterfactual": {&api.cfg.Counterfactual.Enabled, "counterfactual"},
+		"engine_plan_compiler":  {&api.cfg.PlanCompiler.Enabled, "plan_compiler"},
+		"engine_capability":     {&api.cfg.Capability.Enabled, "capability"},
+		"engine_deviation":      {&api.cfg.Deviation.Enabled, "deviation"},
+		"engine_ifc":            {&api.cfg.IFC.Enabled, "ifc"},
+	}
+	for reqKey, eng := range engineMap {
+		if v, ok := req[reqKey]; ok {
+			b, _ := v.(bool)
+			*eng.cfgPtr = b
+			// Ensure YAML sub-map exists
+			sub, _ := raw[eng.yamlKey].(map[string]interface{})
+			if sub == nil {
+				sub = map[string]interface{}{}
+			}
+			sub["enabled"] = b
+			raw[eng.yamlKey] = sub
+			updated = append(updated, reqKey)
+			needRestart = true
+		}
+	}
+
 	if len(updated) == 0 {
 		jsonResponse(w, 400, map[string]string{"error": "no fields to update"})
 		return

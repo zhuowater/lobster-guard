@@ -252,6 +252,7 @@ const activeTab = ref('config')
 const configGroups = [
   { key: 'basic', label: '配置基础', icon: '🌐' },
   { key: 'security', label: '安全检测', icon: '🛡️' },
+  { key: 'engines', label: '引擎开关', icon: '🧠' },
   { key: 'ratelimit', label: '限流配置', icon: '⚡' },
   { key: 'session', label: '会话关联', icon: '🔗' },
   { key: 'alerts', label: '告警配置', icon: '🔔' },
@@ -272,6 +273,10 @@ const form = reactive({
   alert_webhook: '', alert_format: 'generic', alert_min_interval: 60,
   db_path: '', heartbeat_interval_sec: 10, route_default_policy: 'least-users',
   audit_retention_days: 30, ws_idle_timeout: 300, backup_auto_interval: 0,
+  // v23-v26 引擎开关
+  engine_path_policy: true, engine_counterfactual: true,
+  engine_plan_compiler: true, engine_capability: true,
+  engine_deviation: true, engine_ifc: true,
 })
 const errors = reactive({})
 
@@ -289,6 +294,14 @@ const visibleGroups = computed(() => [
     { key: 'inbound_detect_enabled', label: '入站检测', desc: '对入站流量执行规则匹配和威胁检测', type: 'toggle' },
     { key: 'outbound_audit_enabled', label: '出站审计', desc: '对出站流量执行 PII 扫描和内容审计', type: 'toggle' },
     { key: 'detect_timeout_ms', label: '检测超时', desc: '单次检测最大耗时，超时则放行', type: 'number', min: 1, max: 10000, step: 10, unit: 'ms' },
+  ]},
+  { key: 'engines', icon: '🧠', title: '引擎开关', desc: 'v23-v26 安全引擎的启用/禁用控制，修改需重启', items: [
+    { key: 'engine_path_policy', label: '路径策略引擎 (v23)', desc: '基于路径和风险评分的运行时策略决策，含风险仪表和行业模板', type: 'toggle' },
+    { key: 'engine_counterfactual', label: '反事实验证 (v24)', desc: '通过假设替换和归因分析验证 AI 决策的因果逻辑', type: 'toggle' },
+    { key: 'engine_plan_compiler', label: '执行计划编译器 (v25)', desc: 'CaMeL 控制流/数据流分离，将自然语言计划编译为确定性步骤', type: 'toggle' },
+    { key: 'engine_capability', label: '能力权限系统 (v25)', desc: '工具映射、来源追踪（Sources 并集）和信任评分传播', type: 'toggle' },
+    { key: 'engine_deviation', label: '偏差检测器 (v25)', desc: '检测实际 tool_call 与计划的偏差，支持策略化自动修复', type: 'toggle' },
+    { key: 'engine_ifc', label: '信息流控制 (v26)', desc: 'Fides 双标签格积（机密性×完整性），选择性隐藏和隔离 LLM', type: 'toggle' },
   ]},
   { key: 'ratelimit', icon: '⚡', title: '限流配置', desc: '令牌桶限流参数，0 = 不限制', items: [
     { field: 'global_rps', label: '全局 RPS', desc: '每秒最大通过数', type: 'number', min: 0, max: 100000, step: 10, unit: 'req/s' },
@@ -321,7 +334,7 @@ function isChanged(key) { return String(form[key]) !== String(originalConfig.val
 function isRLChanged(field) { return String(form.rate_limit[field]) !== String((originalConfig.value.rate_limit || {})[field]) }
 const changedFields = computed(() => {
   const c = []
-  const flat = ['inbound_listen','outbound_listen','management_listen','openclaw_upstream','lanxin_upstream','log_level','log_format','inbound_detect_enabled','outbound_audit_enabled','detect_timeout_ms','session_idle_timeout_min','session_fp_window_sec','alert_webhook','alert_format','alert_min_interval','db_path','heartbeat_interval_sec','route_default_policy','audit_retention_days','ws_idle_timeout','backup_auto_interval']
+  const flat = ['inbound_listen','outbound_listen','management_listen','openclaw_upstream','lanxin_upstream','log_level','log_format','inbound_detect_enabled','outbound_audit_enabled','detect_timeout_ms','session_idle_timeout_min','session_fp_window_sec','alert_webhook','alert_format','alert_min_interval','db_path','heartbeat_interval_sec','route_default_policy','audit_retention_days','ws_idle_timeout','backup_auto_interval','engine_path_policy','engine_counterfactual','engine_plan_compiler','engine_capability','engine_deviation','engine_ifc']
   for (const k of flat) if (String(form[k]) !== String(originalConfig.value[k])) c.push({ key: k, label: fieldLabels.value[k]||k, oldVal: originalConfig.value[k], newVal: form[k], restart: restartFields.has(k) })
   const orl = originalConfig.value.rate_limit || {}
   for (const f of ['global_rps','global_burst','per_sender_rps','per_sender_burst']) if (String(form.rate_limit[f]) !== String(orl[f])) c.push({ key:'rate_limit.'+f, label: fieldLabels.value['rate_limit.'+f]||f, oldVal: orl[f], newVal: form.rate_limit[f] })
@@ -349,6 +362,13 @@ function fillForm(d) {
   form.db_path = d.db_path || ''; form.heartbeat_interval_sec = d.heartbeat_interval_sec || 10
   form.route_default_policy = d.route_default_policy || 'least-users'; form.audit_retention_days = d.audit_retention_days || 30
   form.ws_idle_timeout = d.ws_idle_timeout || 300; form.backup_auto_interval = d.backup_auto_interval || 0
+  // v23-v26 引擎开关
+  form.engine_path_policy = (d.path_policy || {}).enabled !== false
+  form.engine_counterfactual = (d.counterfactual || {}).enabled !== false
+  form.engine_plan_compiler = (d.plan_compiler || {}).enabled !== false
+  form.engine_capability = (d.capability || {}).enabled !== false
+  form.engine_deviation = (d.deviation || {}).enabled !== false
+  form.engine_ifc = (d.ifc || {}).enabled !== false
 }
 function extractForm() {
   return { inbound_listen: form.inbound_listen, outbound_listen: form.outbound_listen, management_listen: form.management_listen,
@@ -357,7 +377,10 @@ function extractForm() {
     rate_limit: { ...form.rate_limit }, session_idle_timeout_min: form.session_idle_timeout_min, session_fp_window_sec: form.session_fp_window_sec,
     alert_webhook: form.alert_webhook, alert_format: form.alert_format, alert_min_interval: form.alert_min_interval,
     db_path: form.db_path, heartbeat_interval_sec: form.heartbeat_interval_sec, route_default_policy: form.route_default_policy,
-    audit_retention_days: form.audit_retention_days, ws_idle_timeout: form.ws_idle_timeout, backup_auto_interval: form.backup_auto_interval }
+    audit_retention_days: form.audit_retention_days, ws_idle_timeout: form.ws_idle_timeout, backup_auto_interval: form.backup_auto_interval,
+    engine_path_policy: form.engine_path_policy, engine_counterfactual: form.engine_counterfactual,
+    engine_plan_compiler: form.engine_plan_compiler, engine_capability: form.engine_capability,
+    engine_deviation: form.engine_deviation, engine_ifc: form.engine_ifc }
 }
 function resetConfig() { fillForm(originalConfig.value); Object.keys(errors).forEach(k => delete errors[k]); showChangesPreview.value = false }
 function validateForm() {

@@ -22,6 +22,7 @@ import (
 // LLMProxy — LLM 侧透明反向代理
 type LLMProxy struct {
 	cfg        LLMProxyConfig
+	mainCfg    *Config // reference to main config for engine enabled checks
 	auditor    *LLMAuditor
 	ruleEngine *LLMRuleEngine
 	httpServer *http.Server
@@ -530,7 +531,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, traceID, tenantID)
 					// v23.0: 路径策略引擎 — 注册 tool_call 步骤并评估
-					if lp.pathPolicyEngine != nil {
+					if lp.pathPolicyEngine != nil && lp.isEngineEnabled("path_policy") {
 						lp.pathPolicyEngine.RegisterStep(traceID, PathStep{Stage: "tool_call", Action: tcName, Details: tcArgs})
 						ppDec := lp.pathPolicyEngine.Evaluate(traceID, tcName)
 						if actionSev(ppDec.Decision) > actionSev(tpEvent.Decision) {
@@ -559,7 +560,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						log.Printf("[ToolPolicy] 工具调用告警: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
 					}
 					// v24.0: 反事实验证 — 在 tool_call 被 ToolPolicy 评估后
-					if lp.cfVerifier != nil && lp.cfVerifier.ShouldVerify(tcName, tcArgs, traceID, tpEvent.RiskScoreNum()) {
+					if lp.cfVerifier != nil && lp.isEngineEnabled("counterfactual") && lp.cfVerifier.ShouldVerify(tcName, tcArgs, traceID, tpEvent.RiskScoreNum()) {
 						cfUpstream := upstreamURL
 						cfAuth := r.Header.Get("Authorization")
 						cfCfg := lp.cfVerifier.GetConfig()
@@ -597,7 +598,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					if i25 < len(info25.ToolInputs) { tcArgs25 = info25.ToolInputs[i25] }
 
 					// v25.0: PlanCompiler — 比对 tool_call vs 计划模板
-					if lp.planCompiler != nil {
+					if lp.planCompiler != nil && lp.isEngineEnabled("plan_compiler") {
 						planEval := lp.planCompiler.EvaluateToolCall(traceID, tcName25, tcArgs25)
 						if planEval != nil && planEval.Violation != nil {
 							log.Printf("[PlanCompiler] 计划偏离: tool=%s violation=%s severity=%s decision=%s trace=%s",
@@ -614,7 +615,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 
 					// v25.1+v28.0g: CapabilityEngine — 数据级权限检查 + CaMeL source propagation
-					if lp.capabilityEngine != nil {
+					if lp.capabilityEngine != nil && lp.isEngineEnabled("capability") {
 						toolDataID := fmt.Sprintf("tool-%s-%d", tcName25, i25)
 						lp.capabilityEngine.RegisterToolResult(traceID, tcName25, toolDataID)
 
@@ -653,7 +654,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 
 					// v25.2: DeviationDetector — 综合偏差检测
-					if lp.deviationDetector != nil {
+					if lp.deviationDetector != nil && lp.isEngineEnabled("deviation") {
 						devResult := lp.deviationDetector.Detect(traceID, tcName25, tcArgs25)
 						if devResult.HasDeviation {
 							log.Printf("[Deviation] 检测到偏差: tool=%s type=%s severity=%s decision=%s trace=%s",
@@ -889,7 +890,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 							tpEvent.Decision, tcName, tpEvent.RuleHit, auditCtx.TraceID)
 					}
 					// v25.0: PlanCompiler — SSE 模式下也评估 tool_call
-					if lp.planCompiler != nil {
+					if lp.planCompiler != nil && lp.isEngineEnabled("plan_compiler") {
 						planEval := lp.planCompiler.EvaluateToolCall(auditCtx.TraceID, tcName, tcArgs)
 						if planEval != nil && planEval.Violation != nil {
 							log.Printf("[PlanCompiler] SSE 计划偏离: tool=%s severity=%s trace=%s (流式仅记录)",
@@ -897,7 +898,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 						}
 					}
 					// v25.1+v28.0g: CapabilityEngine — SSE 模式下注册 tool 结果 + source propagation
-					if lp.capabilityEngine != nil {
+					if lp.capabilityEngine != nil && lp.isEngineEnabled("capability") {
 						sseDataID := fmt.Sprintf("sse-tool-%s-%d", tcName, i)
 						lp.capabilityEngine.RegisterToolResult(auditCtx.TraceID, tcName, sseDataID)
 						// CaMeL: propagate sources from prior tools in this SSE batch
@@ -914,7 +915,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 						}
 					}
 					// v25.2: DeviationDetector — SSE 模式下检测偏差
-					if lp.deviationDetector != nil {
+					if lp.deviationDetector != nil && lp.isEngineEnabled("deviation") {
 						devResult := lp.deviationDetector.Detect(auditCtx.TraceID, tcName, tcArgs)
 						if devResult.HasDeviation {
 							repairNote := ""
@@ -1100,6 +1101,29 @@ func isToolBlacklisted(toolName, blacklistCSV string) bool {
 // ============================================================
 // Algorithm 7 HIDE: for each node in tool result, if label ⋢ context label,
 // store in variable and replace with reference.
+
+// isEngineEnabled checks if a v23-v26 engine is enabled via mainCfg
+func (lp *LLMProxy) isEngineEnabled(engine string) bool {
+	if lp.mainCfg == nil {
+		return true // if no mainCfg reference, default to enabled
+	}
+	switch engine {
+	case "path_policy":
+		return lp.mainCfg.PathPolicy.Enabled
+	case "counterfactual":
+		return lp.mainCfg.Counterfactual.Enabled
+	case "plan_compiler":
+		return lp.mainCfg.PlanCompiler.Enabled
+	case "capability":
+		return lp.mainCfg.Capability.Enabled
+	case "deviation":
+		return lp.mainCfg.Deviation.Enabled
+	case "ifc":
+		return lp.mainCfg.IFC.Enabled
+	default:
+		return true
+	}
+}
 
 func (lp *LLMProxy) applySelectiveHide(traceID string, body []byte) []byte {
 	if lp.ifcEngine == nil {
