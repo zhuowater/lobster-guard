@@ -233,6 +233,9 @@
                       </div>
                       <!-- Cron -->
                       <div v-if="activeTab === 'cron'" class="dtab-body">
+                        <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+                          <button class="btn btn-sm btn-primary" @click="openCronModal(null)">+ 新建任务</button>
+                        </div>
                         <div v-if="detailLoading" class="skel-lines"><div class="skel-line" v-for="i in 3" :key="i"></div></div>
                         <div v-else-if="cronJobs.length === 0" class="dtab-empty">暂无定时任务</div>
                         <template v-else>
@@ -247,6 +250,7 @@
                               <td>{{ fmtTime(c.next_run||c.nextRun||c.nextRunAt) }}</td>
                               <td @click.stop>
                                 <div class="act-group">
+                                  <button class="btn btn-xs btn-ghost" title="编辑" @click="openCronModal(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
                                   <button class="btn btn-xs btn-ghost" title="立即运行" @click="cronTrigger(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>
                                   <button class="btn btn-xs btn-ghost" :title="c.enabled!==false?'禁用':'启用'" @click="cronToggle(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line v-if="c.enabled!==false" x1="4.93" y1="4.93" x2="19.07" y2="19.07"/><polyline v-else points="9 12 12 15 16 10"/></svg></button>
                                   <button class="btn btn-xs btn-ghost" title="运行历史" @click="toggleCronRuns(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
@@ -597,7 +601,7 @@
                               <div class="files-agent-select">
                                 <select v-model="fileAgentId" @change="loadAgentFiles" class="refresh-select" style="width:100%">
                                   <option value="">选择 Agent</option>
-                                  <option v-for="a in expandedAgents" :key="a.agentId" :value="a.agentId">{{ a.agentId }}</option>
+                                  <option v-for="a in expandedAgents" :key="a.id" :value="a.id">{{ a.id }}</option>
                                 </select>
                               </div>
                               <div class="files-list">
@@ -690,6 +694,61 @@
           <div class="modal-foot">
             <button class="btn btn-ghost" @click="testInModal" :disabled="tokenModal.testing || !tokenModal.token">{{ tokenModal.testing ? '测试中...' : '测试连接' }}</button>
             <button class="btn btn-primary" @click="saveToken" :disabled="tokenModal.saving || !tokenModal.token">{{ tokenModal.saving ? '保存中...' : '保存' }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Cron CRUD 弹窗 -->
+    <Teleport to="body">
+      <div v-if="cronModalOpen" class="modal-overlay" @click.self="cronModalOpen=false">
+        <div class="modal-box" style="max-width:560px">
+          <h3>{{ cronEditing ? '编辑定时任务' : '新建定时任务' }}</h3>
+          <div class="form-group">
+            <label>名称</label>
+            <input v-model="cronForm.name" class="form-input" placeholder="任务名称" />
+          </div>
+          <div class="form-group">
+            <label>调度类型</label>
+            <select v-model="cronForm.scheduleKind" class="form-input">
+              <option value="cron">Cron 表达式</option>
+              <option value="every">固定间隔</option>
+              <option value="at">一次性定时</option>
+            </select>
+          </div>
+          <div class="form-group" v-if="cronForm.scheduleKind === 'cron'">
+            <label>Cron 表达式</label>
+            <input v-model="cronForm.cronExpr" class="form-input" placeholder="*/30 * * * *" />
+          </div>
+          <div class="form-group" v-if="cronForm.scheduleKind === 'every'">
+            <label>间隔（分钟）</label>
+            <input v-model.number="cronForm.everyMin" type="number" class="form-input" placeholder="30" min="1" />
+          </div>
+          <div class="form-group" v-if="cronForm.scheduleKind === 'at'">
+            <label>执行时间 (ISO)</label>
+            <input v-model="cronForm.atTime" class="form-input" placeholder="2026-03-28T12:00:00Z" />
+          </div>
+          <div class="form-group">
+            <label>Session 目标</label>
+            <select v-model="cronForm.sessionTarget" class="form-input">
+              <option value="isolated">isolated (独立会话)</option>
+              <option value="main">main (主会话)</option>
+            </select>
+          </div>
+          <div class="form-group" v-if="cronForm.sessionTarget === 'main'">
+            <label>系统事件文本</label>
+            <textarea v-model="cronForm.eventText" class="form-input" rows="3" placeholder="注入到主会话的系统事件文本"></textarea>
+          </div>
+          <div class="form-group" v-if="cronForm.sessionTarget === 'isolated'">
+            <label>Agent 消息</label>
+            <textarea v-model="cronForm.agentMessage" class="form-input" rows="3" placeholder="发送给 Agent 的消息"></textarea>
+          </div>
+          <div class="form-group">
+            <label><input type="checkbox" v-model="cronForm.enabled" /> 启用</label>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-sm" @click="cronModalOpen=false">取消</button>
+            <button class="btn btn-sm btn-primary" @click="cronSave" :disabled="cronSaving">{{ cronSaving ? '保存中…' : '保存' }}</button>
           </div>
         </div>
       </div>
@@ -799,6 +858,13 @@ const chatSending = ref(false)
 const expandedCronId = ref(null)
 const cronRuns = ref([])
 const cronRunsLoading = ref(false)
+const cronModalOpen = ref(false)
+const cronEditing = ref(null) // null=新建, object=编辑
+const cronSaving = ref(false)
+const cronForm = reactive({
+  name: '', scheduleKind: 'cron', cronExpr: '', everyMin: 30, atTime: '',
+  sessionTarget: 'isolated', eventText: '', agentMessage: '', enabled: true
+})
 
 // v29.0: agent 文件编辑
 const fileAgentId = ref('')
@@ -868,7 +934,7 @@ function switchToSkills() {
 function switchToFiles() {
   aocView.value = 'files'
   if (expandedAgents.value.length > 0 && !fileAgentId.value) {
-    fileAgentId.value = expandedAgents.value[0].agentId
+    fileAgentId.value = expandedAgents.value[0].id
     loadAgentFiles()
   }
 }
@@ -956,6 +1022,56 @@ async function cronRemove(c) {
     toastMsg.value = '已删除'; toastType.value = 'success'; showToast.value = true
     loadTabData(expandedId.value, 'cron')
   } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+function openCronModal(c) {
+  if (c) {
+    cronEditing.value = c
+    cronForm.name = c.name || ''
+    const sched = c.schedule || {}
+    if (typeof sched === 'object') {
+      cronForm.scheduleKind = sched.kind || 'cron'
+      cronForm.cronExpr = sched.expr || ''
+      cronForm.everyMin = sched.everyMs ? sched.everyMs / 60000 : 30
+      cronForm.atTime = sched.at || ''
+    }
+    cronForm.sessionTarget = c.sessionTarget || 'isolated'
+    const pl = c.payload || {}
+    cronForm.eventText = pl.text || ''
+    cronForm.agentMessage = pl.message || ''
+    cronForm.enabled = c.enabled !== false
+  } else {
+    cronEditing.value = null
+    cronForm.name = ''; cronForm.scheduleKind = 'cron'; cronForm.cronExpr = ''
+    cronForm.everyMin = 30; cronForm.atTime = ''
+    cronForm.sessionTarget = 'isolated'; cronForm.eventText = ''; cronForm.agentMessage = ''
+    cronForm.enabled = true
+  }
+  cronModalOpen.value = true
+}
+
+async function cronSave() {
+  cronSaving.value = true
+  try {
+    const schedule = cronForm.scheduleKind === 'cron' ? { kind: 'cron', expr: cronForm.cronExpr }
+      : cronForm.scheduleKind === 'every' ? { kind: 'every', everyMs: cronForm.everyMin * 60000 }
+      : { kind: 'at', at: cronForm.atTime }
+    const payload = cronForm.sessionTarget === 'main'
+      ? { kind: 'systemEvent', text: cronForm.eventText }
+      : { kind: 'agentTurn', message: cronForm.agentMessage }
+    const body = { name: cronForm.name, schedule, payload, sessionTarget: cronForm.sessionTarget, enabled: cronForm.enabled }
+
+    if (cronEditing.value) {
+      body.id = cronEditing.value.id || cronEditing.value.jobId
+      await apiPut(`/api/v1/upstreams/${expandedId.value}/gateway/cron/update`, body)
+    } else {
+      await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/cron/add`, body)
+    }
+    cronModalOpen.value = false
+    toastMsg.value = cronEditing.value ? '任务已更新' : '任务已创建'; toastType.value = 'success'; showToast.value = true
+    loadTabData(expandedId.value, 'cron')
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  cronSaving.value = false
 }
 
 async function toggleCronRuns(c) {
@@ -1759,6 +1875,11 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .input-wrap { position:relative; }
 .form-input { width:100%; padding:8px 40px 8px 12px; background:var(--bg-base,#0f172a); border:1px solid var(--border-subtle,#334155); border-radius:8px; color:var(--text-primary,#e2e8f0); font-size:13px; font-family:'SF Mono',Menlo,monospace; outline:none; transition:border-color .15s; box-sizing:border-box; }
 .form-input:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.1); }
+.form-group { margin-bottom:12px; }
+.form-group label { display:block; font-size:12px; font-weight:600; color:var(--text-secondary,#94a3b8); margin-bottom:4px; }
+.form-group select.form-input { padding-right:12px; }
+.form-group textarea.form-input { font-family:'JetBrains Mono','Fira Code',monospace; resize:vertical; min-height:60px; line-height:1.5; }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid var(--border-subtle,#334155); }
 .eye-btn { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:14px; padding:2px; }
 .test-result { margin-top:12px; padding:8px 12px; border-radius:6px; font-size:13px; }
 .tr-ok { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.2); color:#4ade80; }
