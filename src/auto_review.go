@@ -22,9 +22,11 @@ type RuleAutoReviewConfig struct {
 	SpikeThreshold    int      `yaml:"spike_threshold" json:"spike_threshold"`         // 窗口内block次数阈值（默认10）
 	SpikeRatio        float64  `yaml:"spike_ratio" json:"spike_ratio"`                 // 相比历史均值的倍数（默认3.0）
 	AutoReviewTTL     int      `yaml:"auto_review_ttl" json:"auto_review_ttl"`         // 自动降级持续时间秒（默认3600=1小时）
-	LLMUpstreamID     string   `yaml:"llm_upstream_id" json:"llm_upstream_id"`         // LLM复核用的上游ID（空=用第一个LLM上游）
+	LLMUpstreamID     string   `yaml:"llm_upstream_id" json:"llm_upstream_id"`         // LLM复核用的上游名(匹配LLM target name)
 	LLMModel          string   `yaml:"llm_model" json:"llm_model"`                     // LLM模型（空=用默认）
 	LLMTimeoutSec     int      `yaml:"llm_timeout_sec" json:"llm_timeout_sec"`         // LLM调用超时（默认5秒）
+	LLMApiKey         string   `yaml:"llm_api_key" json:"llm_api_key"`                 // LLM API Key (内部调用用)
+	LLMEndpoint       string   `yaml:"llm_endpoint" json:"llm_endpoint"`               // 直接指定 LLM endpoint URL（优先级最高）
 	ManualReviewRules []string `yaml:"manual_review_rules" json:"manual_review_rules"` // 人工指定的review规则
 }
 
@@ -306,12 +308,12 @@ func (m *AutoReviewManager) ReviewWithLLM(ruleName, text string) string {
 	atomic.AddInt64(&m.totalReviews, 1)
 
 	// 获取 LLM 上游地址
-	endpoint, model, apiKeyHeader := m.getLLMEndpoint()
+	endpoint, model, apiKey := m.getLLMEndpoint()
 	if endpoint == "" {
-		// 无可用 LLM 上游，fallback 为 block
+		// 无可用 LLM 上游，fallback 为 warn（规则已降级，管理员意图是放行审查）
 		atomic.AddInt64(&m.errorCount, 1)
-		log.Printf("[AutoReview] ⚠️ 无可用 LLM 上游，rule=%s fallback to block", ruleName)
-		return "block"
+		log.Printf("[AutoReview] ⚠️ 无可用 LLM 上游，rule=%s fallback to warn (规则已在review状态)", ruleName)
+		return "warn"
 	}
 
 	// 构造审查 prompt
@@ -336,40 +338,40 @@ Respond with exactly one word: "malicious" if it's a real threat, or "benign" if
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		atomic.AddInt64(&m.errorCount, 1)
-		return "block"
+		log.Printf("[AutoReview] JSON marshal 失败: %v", err)
+		return "warn"
 	}
 
 	timeout := time.Duration(m.config.LLMTimeoutSec) * time.Second
 	client := &http.Client{Timeout: timeout}
 
 	reqURL := endpoint + "/v1/chat/completions"
+	log.Printf("[AutoReview] 调用 LLM: %s model=%s", reqURL, model)
 	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		atomic.AddInt64(&m.errorCount, 1)
-		return "block"
+		log.Printf("[AutoReview] 构造请求失败: %v", err)
+		return "warn"
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// 如果有 API Key header，传递认证信息
-	if apiKeyHeader != "" {
-		// apiKeyHeader 格式如 "Authorization: Bearer sk-xxx" 或 "X-API-Key: xxx"
-		parts := strings.SplitN(apiKeyHeader, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-		}
+	// API Key 认证
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		atomic.AddInt64(&m.errorCount, 1)
-		log.Printf("[AutoReview] LLM 调用失败 rule=%s: %v, fallback to block", ruleName, err)
-		return "block"
+		log.Printf("[AutoReview] LLM 调用失败 rule=%s: %v, fallback to warn", ruleName, err)
+		return "warn"
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil || resp.StatusCode != 200 {
 		atomic.AddInt64(&m.errorCount, 1)
-		return "block"
+		log.Printf("[AutoReview] LLM 响应异常 rule=%s status=%d, fallback to warn", ruleName, resp.StatusCode)
+		return "warn"
 	}
 
 	// 解析 LLM 响应
@@ -380,63 +382,59 @@ Respond with exactly one word: "malicious" if it's a real threat, or "benign" if
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if json.Unmarshal(body, &llmResp) != nil || len(llmResp.Choices) == 0 {
+	if err := json.Unmarshal(body, &llmResp); err != nil || len(llmResp.Choices) == 0 {
 		atomic.AddInt64(&m.errorCount, 1)
-		return "block"
+		log.Printf("[AutoReview] LLM 响应解析失败 rule=%s body=%s, fallback to warn", ruleName, string(body)[:min(200, len(body))])
+		return "warn"
 	}
 
 	answer := strings.ToLower(strings.TrimSpace(llmResp.Choices[0].Message.Content))
+	log.Printf("[AutoReview] LLM 判断 rule=%s answer=%q", ruleName, answer)
 	if strings.Contains(answer, "benign") || strings.Contains(answer, "safe") || strings.Contains(answer, "false positive") {
 		atomic.AddInt64(&m.allowedCount, 1)
+		log.Printf("[AutoReview] ✅ LLM 判断为良性, rule=%s → allow", ruleName)
 		return "allow"
 	}
 
 	atomic.AddInt64(&m.blockedCount, 1)
+	log.Printf("[AutoReview] ❌ LLM 判断为恶意, rule=%s → block", ruleName)
 	return "block"
 }
 
 // getLLMEndpoint 获取 LLM 上游地址和模型
+// getLLMEndpoint 获取 LLM 上游地址、模型和 API Key
+// 返回: (endpoint, model, apiKey)
+// endpoint 是到 /v1/chat/completions 的基础 URL（不含 /v1/chat/completions）
 func (m *AutoReviewManager) getLLMEndpoint() (string, string, string) {
 	model := m.config.LLMModel
 	if model == "" {
 		model = "gpt-4"
 	}
+	apiKey := m.config.LLMApiKey
 
-	// 优先使用 LLM Proxy 的 targets（真正的 LLM API）
+	// 最高优先: 直接配置的 endpoint
+	if m.config.LLMEndpoint != "" {
+		return strings.TrimRight(m.config.LLMEndpoint, "/"), model, apiKey
+	}
+
+	// 次优先: LLM Proxy targets（真正的 LLM API）
 	if len(m.llmTargets) > 0 {
 		// 如果指定了上游名，精确匹配
 		if m.config.LLMUpstreamID != "" {
 			for _, t := range m.llmTargets {
 				if t.Name == m.config.LLMUpstreamID {
-					endpoint := strings.TrimRight(t.Upstream, "/")
-					if t.PathPrefix != "" && !t.StripPrefix {
-						endpoint += t.PathPrefix
-					}
-					return endpoint, model, t.APIKeyHeader
+					// upstream 本身就是完整的 base URL（如 https://api.deepseek.com）
+					// 不要拼 path_prefix — 那是 LLM proxy 路由用的，不是 upstream 的真实路径
+					return strings.TrimRight(t.Upstream, "/"), model, apiKey
 				}
 			}
 		}
 		// 使用第一个 target
 		t := m.llmTargets[0]
-		endpoint := strings.TrimRight(t.Upstream, "/")
-		if t.PathPrefix != "" && !t.StripPrefix {
-			endpoint += t.PathPrefix
-		}
-		return endpoint, model, t.APIKeyHeader
+		return strings.TrimRight(t.Upstream, "/"), model, apiKey
 	}
 
-	// fallback: UpstreamPool（不推荐，OpenClaw 实例不是 LLM API）
-	if m.pool != nil {
-		upstreams := m.pool.ListUpstreams()
-		for _, up := range upstreams {
-			if up.Healthy {
-				log.Printf("[AutoReview] ⚠️ 使用 UpstreamPool fallback（非 LLM API）: %s:%d", up.Address, up.Port)
-				return fmt.Sprintf("http://%s:%d", up.Address, up.Port), model, ""
-			}
-		}
-	}
-
-	return "", model, ""
+	return "", model, apiKey
 }
 
 // GetStats 获取 LLM 复核统计

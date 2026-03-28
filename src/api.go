@@ -635,6 +635,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleDemoClear(w, r)
 	case path == "/api/v1/simulate/traffic" && method == "POST":
 		api.handleSimulateTraffic(w, r)
+	case path == "/api/v1/detect/test" && method == "POST":
+		api.handleDetectTest(w, r)
 	// v27.1 入站规则行业模板 API
 	case path == "/api/v1/inbound-templates" && method == "GET":
 		api.handleInboundTemplateList(w, r)

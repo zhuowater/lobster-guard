@@ -1,13 +1,81 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// handleDetectTest POST /api/v1/detect/test — 明文入站检测测试（走完整检测链路）
+// 用于 QA 和 Red Team，不经过通道插件加密/解密
+func (api *ManagementAPI) handleDetectTest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text     string `json:"text"`
+		SenderID string `json:"sender_id"`
+		AppID    string `json:"app_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.Text == "" {
+		jsonResponse(w, 400, map[string]string{"error": "text is required"})
+		return
+	}
+	if req.SenderID == "" {
+		req.SenderID = "test-user"
+	}
+	if req.AppID == "" {
+		req.AppID = "test-app"
+	}
+
+	start := time.Now()
+
+	// 1. 默认规则检测
+	result := api.inboundEngine.DetectWithAppID(req.Text, req.AppID)
+
+	// 2. 全局模板检测
+	globalTplResult := api.inboundEngine.DetectGlobalTemplates(req.Text)
+	if globalTplResult.Action != "pass" {
+		result = mergeDetectResults(result, globalTplResult)
+	}
+
+	// 3. 租户规则检测（测试模式：从 query 参数指定 tenant_id）
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if tenantID != "" && tenantID != "default" {
+		tenantResult := api.inboundEngine.DetectTenantRules(tenantID, req.Text)
+		if tenantResult.Action != "pass" {
+			result = mergeDetectResults(result, tenantResult)
+		}
+	}
+
+	elapsed := time.Since(start)
+
+	jsonResponse(w, 200, map[string]interface{}{
+		"action":        result.Action,
+		"matched_rules": result.MatchedRules,
+		"reasons":       result.Reasons,
+		"piis":          result.PIIs,
+		"message":       result.Message,
+		"tenant_id":     tenantID,
+		"sender_id":     req.SenderID,
+		"latency_us":    elapsed.Microseconds(),
+		"chains": map[string]interface{}{
+			"default_rules":    result.Action != "pass" && len(result.MatchedRules) > 0,
+			"global_templates": globalTplResult.Action != "pass",
+			"tenant_rules":     tenantID != "" && tenantID != "default",
+		},
+	})
+	_ = strings.TrimSpace // suppress unused import
+}
 
 func (api *ManagementAPI) handleDemoSeed(w http.ResponseWriter, r *http.Request) {
 	al := api.logger
