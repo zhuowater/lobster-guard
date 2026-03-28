@@ -320,7 +320,7 @@
                             <button class="btn btn-sm btn-primary" @click="loadGatewayConfig(up)">加载当前配置</button>
                           </div>
                           <template v-else>
-                            <textarea v-model="gwConfigRaw" class="file-textarea" style="min-height:420px;max-height:70vh;border:1px solid var(--border-subtle,#334155);border-radius:6px;margin:8px 0" spellcheck="false" @input="gwConfigDirty=true"></textarea>
+                            <textarea v-model="gwConfigRaw" class="file-textarea" style="min-height:60vh;max-height:80vh;border:1px solid var(--border-subtle,#334155);border-radius:6px;margin:8px 0;width:100%" spellcheck="false" @input="gwConfigDirty=true"></textarea>
                             <div class="tk-actions" style="gap:8px">
                               <button class="btn btn-sm btn-primary" @click="patchGatewayConfig(up)" :disabled="gwConfigSaving || !gwConfigDirty">{{ gwConfigSaving ? '保存中…' : '保存并应用' }}</button>
                               <span v-if="gwConfigDirty" class="badge-unsaved">未保存</span>
@@ -335,6 +335,7 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                             Agent 运营中心 <span class="badge-count">{{ expandedAgents.length }}</span>
                           </h3>
+                          <button class="btn btn-xs btn-primary" style="margin-left:auto;margin-right:12px" @click="openAgentModal(null)">+ 新建 Agent</button>
                           <div class="aoc-view-toggle">
                             <button class="aoc-vbtn" :class="{ active: aocView === 'dashboard' }" @click="aocView='dashboard'" title="仪表盘"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button>
                             <button class="aoc-vbtn" :class="{ active: aocView === 'cards' }" @click="aocView='cards'" title="详情卡片"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
@@ -475,6 +476,10 @@
                                 </div>
                                 <div class="aoc-footer-item aoc-footer-time" :title="'最后活跃: ' + new Date(ag.lastActive).toLocaleString()">{{ fmtTime(ag.lastActive) }}</div>
                               </div>
+                              <div class="aoc-card-ops">
+                                <button class="btn btn-xs btn-ghost" title="编辑 Agent" @click="openAgentModal(ag)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                                <button class="btn btn-xs btn-ghost btn-danger-ghost" title="删除 Agent" @click="agentDelete(ag)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                              </div>
                               <div v-if="ag.hasError" class="aoc-card-warn">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                                 abortedLastRun
@@ -567,6 +572,7 @@
                           <div class="skills-search">
                             <input v-model="skillSearch" placeholder="搜索 skill 名称或描述..." class="skills-search-input" />
                             <span class="skills-search-count" v-if="skillSearch">{{ filteredSkills.length }} / {{ skillData.skills.length }}</span>
+                            <button class="btn btn-xs btn-primary" style="margin-left:8px" @click="openSkillInstall">+ 安装</button>
                           </div>
                           <div v-if="skillsLoading" class="skel-lines"><div class="skel-line" v-for="i in 6" :key="i"></div></div>
                           <template v-else>
@@ -586,6 +592,10 @@
                                   <div class="skill-badges">
                                     <span v-if="sk.has_skill_md" class="skill-badge sb-ok">SKILL.md</span>
                                     <span v-if="sk.workspace" class="skill-badge sb-ws" :title="sk.workspace">{{ sk.workspace.substring(0, 12) }}...</span>
+                                  </div>
+                                  <div class="skill-actions">
+                                    <button class="btn btn-xs btn-ghost" title="更新" @click.stop="skillUpdate(sk)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+                                    <button class="btn btn-xs btn-ghost btn-danger-ghost" title="卸载" @click.stop="skillUninstall(sk)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                                   </div>
                                 </div>
                               </div>
@@ -754,6 +764,52 @@
       </div>
     </Teleport>
 
+    <!-- Agent CRUD 弹窗 -->
+    <Teleport to="body">
+      <div v-if="agentModalOpen" class="modal-overlay" @click.self="agentModalOpen=false">
+        <div class="modal-box" style="max-width:500px">
+          <h3>{{ agentEditing ? '编辑 Agent' : '新建 Agent' }}</h3>
+          <div class="form-group">
+            <label>Agent ID</label>
+            <input v-model="agentForm.id" class="form-input" placeholder="my-agent" :disabled="!!agentEditing" />
+          </div>
+          <div class="form-group">
+            <label>显示名称</label>
+            <input v-model="agentForm.name" class="form-input" placeholder="My Agent (可选)" />
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <input v-model="agentForm.model" class="form-input" placeholder="claude-sonnet-4-20250514 (可选)" />
+          </div>
+          <div class="form-group">
+            <label>System Prompt</label>
+            <textarea v-model="agentForm.systemPrompt" class="form-input" rows="4" placeholder="系统提示词 (可选)"></textarea>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-sm" @click="agentModalOpen=false">取消</button>
+            <button class="btn btn-sm btn-primary" @click="agentSave" :disabled="agentSaving">{{ agentSaving ? '保存中…' : '保存' }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Skill 安装弹窗 -->
+    <Teleport to="body">
+      <div v-if="skillInstallOpen" class="modal-overlay" @click.self="skillInstallOpen=false">
+        <div class="modal-box" style="max-width:480px">
+          <h3>安装 Skill</h3>
+          <div class="form-group">
+            <label>Skill 名称 (slug)</label>
+            <input v-model="skillInstallSlug" class="form-input" placeholder="skill-name 或 @author/skill-name" />
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-sm" @click="skillInstallOpen=false">取消</button>
+            <button class="btn btn-sm btn-primary" @click="skillInstall" :disabled="skillInstalling">{{ skillInstalling ? '安装中…' : '安装' }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Toast -->
     <Teleport to="body">
       <Transition name="toast">
@@ -873,6 +929,17 @@ const editingFileName = ref('')
 const fileContent = ref('')
 const fileUnsaved = ref(false)
 const fileSaving = ref(false)
+
+// v29.0: Agent CRUD
+const agentModalOpen = ref(false)
+const agentEditing = ref(null)
+const agentSaving = ref(false)
+const agentForm = reactive({ id: '', name: '', model: '', systemPrompt: '' })
+
+// v29.0: Skill 安装/卸载
+const skillInstallOpen = ref(false)
+const skillInstallSlug = ref('')
+const skillInstalling = ref(false)
 
 // v29.0: Gateway 远程配置
 const gwConfigLoaded = ref(false)
@@ -1138,6 +1205,76 @@ async function wakeAgent() {
   try {
     await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/wake`, { mode: 'now' })
     toastMsg.value = '已发送唤醒'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+// v29.0: Agent CRUD
+function openAgentModal(ag) {
+  if (ag) {
+    agentEditing.value = ag
+    agentForm.id = ag.id
+    agentForm.name = ag.name || ''
+    agentForm.model = ag.model || ''
+    agentForm.systemPrompt = ag.systemPrompt || ''
+  } else {
+    agentEditing.value = null
+    agentForm.id = ''; agentForm.name = ''; agentForm.model = ''; agentForm.systemPrompt = ''
+  }
+  agentModalOpen.value = true
+}
+
+async function agentSave() {
+  agentSaving.value = true
+  try {
+    const body = { id: agentForm.id, name: agentForm.name || undefined, model: agentForm.model || undefined, systemPrompt: agentForm.systemPrompt || undefined }
+    if (agentEditing.value) {
+      await apiPut(`/api/v1/upstreams/${expandedId.value}/gateway/agents/update`, body)
+    } else {
+      await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/agents/create`, body)
+    }
+    agentModalOpen.value = false
+    toastMsg.value = agentEditing.value ? 'Agent 已更新' : 'Agent 已创建'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  agentSaving.value = false
+}
+
+async function agentDelete(ag) {
+  if (!confirm(`删除 Agent "${ag.id}"？此操作不可恢复！`)) return
+  try {
+    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/agents/delete?id=${encodeURIComponent(ag.id)}`)
+    toastMsg.value = 'Agent 已删除'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+// v29.0: Skill 安装/更新/卸载
+function openSkillInstall() { skillInstallSlug.value = ''; skillInstallOpen.value = true }
+
+async function skillInstall() {
+  if (!skillInstallSlug.value.trim()) return
+  skillInstalling.value = true
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/skills/install`, { slug: skillInstallSlug.value.trim() })
+    skillInstallOpen.value = false
+    toastMsg.value = 'Skill 安装成功'; toastType.value = 'success'; showToast.value = true
+    loadSkills()
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  skillInstalling.value = false
+}
+
+async function skillUpdate(sk) {
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/skills/update`, { slug: sk.name })
+    toastMsg.value = `${sk.name} 已更新`; toastType.value = 'success'; showToast.value = true
+    loadSkills()
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function skillUninstall(sk) {
+  if (!confirm(`卸载 Skill "${sk.name}"？`)) return
+  try {
+    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/skills/uninstall?slug=${encodeURIComponent(sk.name)}`)
+    toastMsg.value = `${sk.name} 已卸载`; toastType.value = 'success'; showToast.value = true
+    loadSkills()
   } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
 }
 
@@ -1880,6 +2017,17 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .form-group select.form-input { padding-right:12px; }
 .form-group textarea.form-input { font-family:'JetBrains Mono','Fira Code',monospace; resize:vertical; min-height:60px; line-height:1.5; }
 .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid var(--border-subtle,#334155); }
+
+/* Skill 操作按钮 */
+.skill-item { position:relative; }
+.skill-actions { display:flex; gap:2px; margin-left:auto; flex-shrink:0; }
+.skill-actions .btn { opacity:0.3; transition:opacity .15s; }
+.skill-item:hover .skill-actions .btn { opacity:1; }
+
+/* Agent 卡片操作 */
+.aoc-card-ops { display:flex; gap:4px; justify-content:flex-end; padding-top:8px; margin-top:8px; border-top:1px solid rgba(51,65,85,.2); }
+.aoc-card-ops .btn { opacity:0.4; transition:opacity .15s; }
+.aoc-agent-card:hover .aoc-card-ops .btn { opacity:1; }
 .eye-btn { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:14px; padding:2px; }
 .test-result { margin-top:12px; padding:8px 12px; border-radius:6px; font-size:13px; }
 .tr-ok { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.2); color:#4ade80; }
