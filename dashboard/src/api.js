@@ -105,6 +105,15 @@ export async function apiPut(path, body) {
 }
 
 /**
+ * PATCH 请求
+ * @param {string} path
+ * @param {object} body
+ */
+export async function apiPatch(path, body) {
+  return api(path, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+/**
  * DELETE 请求（带 body）
  * @param {string} path
  * @param {object} body
