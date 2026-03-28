@@ -591,16 +591,21 @@ func (c *GatewayWSClient) recordError(msg string) {
 
 // GatewayWSManager 管理所有上游 WSS 连接
 type GatewayWSManager struct {
-	clients map[string]*GatewayWSClient // key: upstream ID
-	mu      sync.RWMutex
-	onEvent func(upstreamID string, event *gwEventFrame)
+	clients       map[string]*GatewayWSClient // key: upstream ID
+	mu            sync.RWMutex
+	defaultOrigin string // v29.0: 全局默认 Origin，从 config 读取
+	onEvent       func(upstreamID string, event *gwEventFrame)
 }
 
 // NewGatewayWSManager 创建连接管理器
-func NewGatewayWSManager(onEvent func(string, *gwEventFrame)) *GatewayWSManager {
+func NewGatewayWSManager(onEvent func(string, *gwEventFrame), defaultOrigin string) *GatewayWSManager {
+	if defaultOrigin == "" {
+		defaultOrigin = "http://localhost"
+	}
 	return &GatewayWSManager{
-		clients: make(map[string]*GatewayWSClient),
-		onEvent: onEvent,
+		clients:       make(map[string]*GatewayWSClient),
+		defaultOrigin: defaultOrigin,
+		onEvent:       onEvent,
 	}
 }
 
@@ -634,11 +639,19 @@ func (m *GatewayWSManager) EnsureClient(up *Upstream) *GatewayWSClient {
 		Address:    up.Address,
 		Port:       up.Port,
 		Token:      up.GatewayToken,
-		Origin:     up.GatewayOrigin,
+		Origin:     m.resolveOrigin(up.GatewayOrigin),
 		OnEvent:    m.onEvent,
 	})
 	m.clients[up.ID] = client
 	return client
+}
+
+// resolveOrigin 返回上游 origin，fallback 到全局默认
+func (m *GatewayWSManager) resolveOrigin(upstreamOrigin string) string {
+	if upstreamOrigin != "" {
+		return upstreamOrigin
+	}
+	return m.defaultOrigin
 }
 
 // GetClient 获取已有客户端（不创建）

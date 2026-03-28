@@ -266,7 +266,7 @@ const originalConfig = ref({})
 
 const form = reactive({
   inbound_listen: '', outbound_listen: '', management_listen: '',
-  openclaw_upstream: '', lanxin_upstream: '', log_level: 'info', log_format: 'text',
+  openclaw_upstream: '', lanxin_upstream: '', default_gateway_origin: 'http://localhost', log_level: 'info', log_format: 'text',
   inbound_detect_enabled: true, outbound_audit_enabled: true, detect_timeout_ms: 50,
   rate_limit: { global_rps: 0, global_burst: 0, per_sender_rps: 0, per_sender_burst: 0 },
   session_idle_timeout_min: 60, session_fp_window_sec: 300,
@@ -286,6 +286,7 @@ const visibleGroups = computed(() => [
     { key: 'outbound_listen', label: '出站监听地址', desc: '出站审计代理监听端口（如 :8444）', placeholder: ':8444', restart: true },
     { key: 'management_listen', label: '管理端口', desc: 'Management API 监听地址', placeholder: ':9090', restart: true },
     { key: 'openclaw_upstream', label: 'OpenClaw 上游', desc: 'OpenClaw Gateway 转发地址', placeholder: 'http://localhost:18790', wide: true },
+    { key: 'default_gateway_origin', label: 'Gateway 默认 Origin', desc: 'WSS RPC 连接时发送的 Origin header，需在 Gateway allowedOrigins 白名单中', placeholder: 'http://localhost', wide: true },
     { key: 'lanxin_upstream', label: '蓝信上游', desc: '蓝信 API 网关地址', placeholder: 'https://apigw.lx.qianxin.com', wide: true },
     { key: 'log_level', label: '日志级别', desc: '运行日志详细程度', options: [{value:'debug',label:'debug'},{value:'info',label:'info'},{value:'warn',label:'warn'},{value:'error',label:'error'}] },
     { key: 'log_format', label: '日志格式', desc: '输出格式', options: [{value:'text',label:'text'},{value:'json',label:'json'}] },
@@ -334,7 +335,7 @@ function isChanged(key) { return String(form[key]) !== String(originalConfig.val
 function isRLChanged(field) { return String(form.rate_limit[field]) !== String((originalConfig.value.rate_limit || {})[field]) }
 const changedFields = computed(() => {
   const c = []
-  const flat = ['inbound_listen','outbound_listen','management_listen','openclaw_upstream','lanxin_upstream','log_level','log_format','inbound_detect_enabled','outbound_audit_enabled','detect_timeout_ms','session_idle_timeout_min','session_fp_window_sec','alert_webhook','alert_format','alert_min_interval','db_path','heartbeat_interval_sec','route_default_policy','audit_retention_days','ws_idle_timeout','backup_auto_interval','engine_path_policy','engine_counterfactual','engine_plan_compiler','engine_capability','engine_deviation','engine_ifc']
+  const flat = ['inbound_listen','outbound_listen','management_listen','openclaw_upstream','lanxin_upstream','default_gateway_origin','log_level','log_format','inbound_detect_enabled','outbound_audit_enabled','detect_timeout_ms','session_idle_timeout_min','session_fp_window_sec','alert_webhook','alert_format','alert_min_interval','db_path','heartbeat_interval_sec','route_default_policy','audit_retention_days','ws_idle_timeout','backup_auto_interval','engine_path_policy','engine_counterfactual','engine_plan_compiler','engine_capability','engine_deviation','engine_ifc']
   for (const k of flat) if (String(form[k]) !== String(originalConfig.value[k])) c.push({ key: k, label: fieldLabels.value[k]||k, oldVal: originalConfig.value[k], newVal: form[k], restart: restartFields.has(k) })
   const orl = originalConfig.value.rate_limit || {}
   for (const f of ['global_rps','global_burst','per_sender_rps','per_sender_burst']) if (String(form.rate_limit[f]) !== String(orl[f])) c.push({ key:'rate_limit.'+f, label: fieldLabels.value['rate_limit.'+f]||f, oldVal: orl[f], newVal: form.rate_limit[f] })
@@ -352,7 +353,7 @@ async function loadConfig() {
 function fillForm(d) {
   form.inbound_listen = d.inbound_listen || ':8443'; form.outbound_listen = d.outbound_listen || ':8444'
   form.management_listen = d.management_listen || ':9090'; form.openclaw_upstream = d.openclaw_upstream || ''
-  form.lanxin_upstream = d.lanxin_upstream || ''; form.log_level = d.log_level || 'info'; form.log_format = d.log_format || 'text'
+  form.lanxin_upstream = d.lanxin_upstream || ''; form.default_gateway_origin = d.default_gateway_origin || 'http://localhost'; form.log_level = d.log_level || 'info'; form.log_format = d.log_format || 'text'
   form.inbound_detect_enabled = d.inbound_detect_enabled !== false; form.outbound_audit_enabled = d.outbound_audit_enabled !== false
   form.detect_timeout_ms = d.detect_timeout_ms || 50
   const rl = d.rate_limit || {}; form.rate_limit.global_rps = rl.global_rps || 0; form.rate_limit.global_burst = rl.global_burst || 0
@@ -372,7 +373,7 @@ function fillForm(d) {
 }
 function extractForm() {
   return { inbound_listen: form.inbound_listen, outbound_listen: form.outbound_listen, management_listen: form.management_listen,
-    openclaw_upstream: form.openclaw_upstream, lanxin_upstream: form.lanxin_upstream, log_level: form.log_level, log_format: form.log_format,
+    openclaw_upstream: form.openclaw_upstream, lanxin_upstream: form.lanxin_upstream, default_gateway_origin: form.default_gateway_origin, log_level: form.log_level, log_format: form.log_format,
     inbound_detect_enabled: form.inbound_detect_enabled, outbound_audit_enabled: form.outbound_audit_enabled, detect_timeout_ms: form.detect_timeout_ms,
     rate_limit: { ...form.rate_limit }, session_idle_timeout_min: form.session_idle_timeout_min, session_fp_window_sec: form.session_fp_window_sec,
     alert_webhook: form.alert_webhook, alert_format: form.alert_format, alert_min_interval: form.alert_min_interval,

@@ -165,6 +165,7 @@ type Config struct {
 	RoutePersist         bool                 `yaml:"route_persist"`
 	OutboundRules        []OutboundRuleConfig `yaml:"outbound_rules"`
 	Whitelist            []string             `yaml:"whitelist"`
+	DefaultGatewayOrigin string               `yaml:"default_gateway_origin"` // v29.0: 全局默认 Gateway Origin，默认 http://localhost
 	StaticUpstreams      []StaticUpstreamConfig `yaml:"static_upstreams"`
 	RateLimit            RateLimiterConfig    `yaml:"rate_limit"`
 	MetricsEnabled       *bool                `yaml:"metrics_enabled"`       // 默认 true

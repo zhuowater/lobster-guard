@@ -177,7 +177,7 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
 		userCache: userCache, policyEng: policyEng, alertNotifier: alertNotifier,
 		wsProxy: wsProxy, store: store, shutdownMgr: shutdownMgr, realtime: realtime,
-		gwManager: NewGatewayWSManager(nil), // v29.0 Gateway WSS 连接管理器
+		gwManager: NewGatewayWSManager(nil, cfg.DefaultGatewayOrigin), // v29.0 Gateway WSS 连接管理器
 	}
 }
 
@@ -5157,6 +5157,17 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		api.cfg.LogFormat = s
 		raw["log_format"] = s
 		updated = append(updated, "log_format")
+	}
+	// v29.0: 全局默认 Gateway Origin
+	if v, ok := req["default_gateway_origin"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.DefaultGatewayOrigin = s
+		raw["default_gateway_origin"] = s
+		updated = append(updated, "default_gateway_origin")
+		// 更新 WSS manager 的默认 origin
+		if api.gwManager != nil {
+			api.gwManager.defaultOrigin = s
+		}
 	}
 
 	// 安全检测
