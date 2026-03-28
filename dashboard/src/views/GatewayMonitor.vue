@@ -305,6 +305,24 @@
                             <button v-if="up.token_configured" class="btn btn-sm btn-danger-ghost" @click="clearToken(up)">清除</button>
                           </div>
                         </div>
+                        <!-- Gateway 远程配置 -->
+                        <div class="diag-card" v-if="up.gateway_status === 'connected'">
+                          <h4>⚙️ Gateway 配置
+                            <button class="btn btn-xs btn-ghost" style="float:right" @click="loadGatewayConfig(up)" title="加载配置">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            </button>
+                          </h4>
+                          <div v-if="!gwConfigLoaded" class="tk-actions">
+                            <button class="btn btn-sm btn-primary" @click="loadGatewayConfig(up)">加载当前配置</button>
+                          </div>
+                          <template v-else>
+                            <textarea v-model="gwConfigRaw" class="file-textarea" style="min-height:200px;max-height:400px;border:1px solid var(--border-subtle,#334155);border-radius:6px;margin:8px 0" spellcheck="false" @input="gwConfigDirty=true"></textarea>
+                            <div class="tk-actions" style="gap:8px">
+                              <button class="btn btn-sm btn-primary" @click="patchGatewayConfig(up)" :disabled="gwConfigSaving || !gwConfigDirty">{{ gwConfigSaving ? '保存中…' : '保存并应用' }}</button>
+                              <span v-if="gwConfigDirty" class="badge-unsaved">未保存</span>
+                            </div>
+                          </template>
+                        </div>
                       </div>
                       <!-- Agent Tab (AOC per-upstream) -->
                       <div v-if="activeTab === 'agent'" class="dtab-body aoc-section aoc-inline">
@@ -790,6 +808,12 @@ const fileContent = ref('')
 const fileUnsaved = ref(false)
 const fileSaving = ref(false)
 
+// v29.0: Gateway 远程配置
+const gwConfigLoaded = ref(false)
+const gwConfigRaw = ref('')
+const gwConfigDirty = ref(false)
+const gwConfigSaving = ref(false)
+
 // v29.0: 心跳/设备/节点
 const heartbeatData = ref(null)
 const devicesList = ref([])
@@ -999,6 +1023,30 @@ async function wakeAgent() {
     await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/wake`, { mode: 'now' })
     toastMsg.value = '已发送唤醒'; toastType.value = 'success'; showToast.value = true
   } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+// v29.0: Gateway 远程配置
+async function loadGatewayConfig(up) {
+  try {
+    const res = await api(`/api/v1/upstreams/${up.id}/gateway/config`)
+    gwConfigRaw.value = JSON.stringify(res, null, 2)
+    gwConfigLoaded.value = true
+    gwConfigDirty.value = false
+  } catch (e) { toastMsg.value = '加载配置失败: ' + e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function patchGatewayConfig(up) {
+  if (!confirm('确认修改 Gateway 配置？这将触发 Gateway 重启。')) return
+  gwConfigSaving.value = true
+  try {
+    let parsed = JSON.parse(gwConfigRaw.value)
+    await apiPatch(`/api/v1/upstreams/${up.id}/gateway/config`, parsed)
+    gwConfigDirty.value = false
+    toastMsg.value = '配置已保存，Gateway 正在重启'; toastType.value = 'success'; showToast.value = true
+  } catch (e) {
+    toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true
+  }
+  gwConfigSaving.value = false
 }
 
 // 加载所有 Gateway 的 cron jobs
