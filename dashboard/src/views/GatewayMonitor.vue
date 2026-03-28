@@ -184,7 +184,7 @@
                         <div v-if="detailLoading" class="skel-lines"><div class="skel-line" v-for="i in 4" :key="i"></div></div>
                         <div v-else-if="sessions.length === 0" class="dtab-empty">暂无会话</div>
                         <table v-else class="inner-table">
-                          <thead><tr><th style="width:24px"></th><th>Key</th><th>Channel</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th></tr></thead>
+                          <thead><tr><th style="width:24px"></th><th>Key</th><th>Channel</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th><th>操作</th></tr></thead>
                           <tbody>
                             <template v-for="s in sessions" :key="s.key||s.sessionId">
                               <tr class="session-row" :class="{ 'row-active': expandedSessionKey === (s.key||s.sessionId) }" @click="toggleSessionHistory(s)">
@@ -195,9 +195,16 @@
                                 <td>{{ fmtTokens(s) }}</td>
                                 <td>{{ fmtContext(s) }}</td>
                                 <td>{{ fmtTime(s.updatedAt||s.updated_at) }}</td>
+                                <td @click.stop>
+                                  <div class="act-group">
+                                    <button class="btn btn-xs btn-ghost" title="压缩上下文" @click="sessionCompact(s)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+                                    <button class="btn btn-xs btn-ghost" title="重置会话" @click="sessionReset(s)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+                                    <button class="btn btn-xs btn-ghost btn-danger-ghost" title="删除会话" @click="sessionDelete(s)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                                  </div>
+                                </td>
                               </tr>
                               <tr v-if="expandedSessionKey === (s.key||s.sessionId)" class="session-detail-row">
-                                <td colspan="7">
+                                <td colspan="8">
                                   <div class="session-replay">
                                     <div v-if="sessionHistoryLoading" class="skel-lines"><div class="skel-line" v-for="i in 4" :key="i"></div></div>
                                     <div v-else-if="sessionMessages.length === 0" class="dtab-empty">暂无消息</div>
@@ -211,6 +218,12 @@
                                         <div class="msg-meta" v-if="msg.timestamp">{{ fmtTime(msg.timestamp) }}</div>
                                       </div>
                                     </div>
+                                    <!-- 发消息 + 中止 -->
+                                    <div class="chat-actions">
+                                      <input v-model="chatInput" class="chat-input" placeholder="向此 session 发送消息…" @keyup.enter="chatSend(s)" />
+                                      <button class="btn btn-xs btn-primary" @click="chatSend(s)" :disabled="!chatInput.trim() || chatSending">{{ chatSending ? '发送中…' : '发送' }}</button>
+                                      <button class="btn btn-xs btn-warn" @click="chatAbort(s)" title="中止生成">中止</button>
+                                    </div>
                                   </div>
                                 </td>
                               </tr>
@@ -222,17 +235,44 @@
                       <div v-if="activeTab === 'cron'" class="dtab-body">
                         <div v-if="detailLoading" class="skel-lines"><div class="skel-line" v-for="i in 3" :key="i"></div></div>
                         <div v-else-if="cronJobs.length === 0" class="dtab-empty">暂无定时任务</div>
-                        <table v-else class="inner-table">
-                          <thead><tr><th>名称</th><th>状态</th><th>计划</th><th>下次运行</th></tr></thead>
+                        <template v-else>
+                        <table class="inner-table">
+                          <thead><tr><th>名称</th><th>状态</th><th>计划</th><th>下次运行</th><th>操作</th></tr></thead>
                           <tbody>
-                            <tr v-for="c in cronJobs" :key="c.id||c.name">
+                            <template v-for="c in cronJobs" :key="c.id||c.name">
+                            <tr>
                               <td>{{ c.name||c.id||'—' }}</td>
                               <td><span class="gw-badge" :class="c.enabled!==false?'gw-connected':'gw-not_configured'">{{ c.enabled!==false?'启用':'禁用' }}</span></td>
-                              <td><code class="mono-sm">{{ c.schedule||c.cron||'—' }}</code></td>
-                              <td>{{ fmtTime(c.next_run||c.nextRun) }}</td>
+                              <td><code class="mono-sm">{{ fmtCronSchedule(c) }}</code></td>
+                              <td>{{ fmtTime(c.next_run||c.nextRun||c.nextRunAt) }}</td>
+                              <td @click.stop>
+                                <div class="act-group">
+                                  <button class="btn btn-xs btn-ghost" title="立即运行" @click="cronTrigger(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>
+                                  <button class="btn btn-xs btn-ghost" :title="c.enabled!==false?'禁用':'启用'" @click="cronToggle(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line v-if="c.enabled!==false" x1="4.93" y1="4.93" x2="19.07" y2="19.07"/><polyline v-else points="9 12 12 15 16 10"/></svg></button>
+                                  <button class="btn btn-xs btn-ghost" title="运行历史" @click="toggleCronRuns(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                                  <button class="btn btn-xs btn-ghost btn-danger-ghost" title="删除" @click="cronRemove(c)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                                </div>
+                              </td>
                             </tr>
+                            <!-- cron 运行历史展开 -->
+                            <tr v-if="expandedCronId === (c.id||c.jobId)" class="session-detail-row">
+                              <td colspan="5">
+                                <div v-if="cronRunsLoading" class="skel-lines"><div class="skel-line" v-for="i in 3" :key="i"></div></div>
+                                <div v-else-if="cronRuns.length === 0" class="dtab-empty">暂无运行记录</div>
+                                <table v-else class="inner-table" style="font-size:12px">
+                                  <thead><tr><th>时间</th><th>状态</th><th>耗时</th></tr></thead>
+                                  <tbody><tr v-for="(run, ri) in cronRuns" :key="ri">
+                                    <td>{{ fmtTime(run.startedAt||run.ts) }}</td>
+                                    <td><span class="gw-badge" :class="run.ok||run.status==='ok'?'gw-connected':'gw-error'">{{ run.ok||run.status==='ok'?'成功':'失败' }}</span></td>
+                                    <td>{{ run.durationMs ? run.durationMs + 'ms' : '—' }}</td>
+                                  </tr></tbody>
+                                </table>
+                              </td>
+                            </tr>
+                            </template>
                           </tbody>
                         </table>
+                        </template>
                       </div>
                       <!-- 诊断 Tab -->
                       <div v-if="activeTab === 'diag'" class="dtab-body diag-body">
@@ -279,6 +319,8 @@
                             <button class="aoc-vbtn" :class="{ active: aocView === 'collab' }" @click="aocView='collab'" title="协作视图"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
                             <button class="aoc-vbtn" :class="{ active: aocView === 'users' }" @click="aocView='users'" title="用户归因"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
                             <button class="aoc-vbtn" :class="{ active: aocView === 'skills' }" @click="switchToSkills" title="Skill 目录"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'files' }" @click="switchToFiles" title="文件编辑"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'heartbeat' }" @click="switchToHeartbeat" title="心跳/设备"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
                           </div>
                         </div>
 
@@ -529,6 +571,72 @@
                             <div v-if="filteredSkills.length === 0 && !skillsLoading" class="dtab-empty">{{ skillSearch ? '无匹配 skill' : '暂无 skill 数据' }}</div>
                           </template>
                         </div>
+
+                        <!-- ===== 6. 文件编辑器 ===== -->
+                        <div v-if="aocView === 'files'" class="aoc-files-view">
+                          <div class="files-layout">
+                            <div class="files-sidebar">
+                              <div class="files-agent-select">
+                                <select v-model="fileAgentId" @change="loadAgentFiles" class="refresh-select" style="width:100%">
+                                  <option value="">选择 Agent</option>
+                                  <option v-for="a in expandedAgents" :key="a.agentId" :value="a.agentId">{{ a.agentId }}</option>
+                                </select>
+                              </div>
+                              <div class="files-list">
+                                <div v-for="f in agentFiles" :key="f.name" class="file-item" :class="{ active: f.name === editingFileName }" @click="openFile(f)">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                                  <span>{{ f.name }}</span>
+                                </div>
+                                <div v-if="fileAgentId && agentFiles.length === 0" class="dtab-empty" style="padding:12px;font-size:12px">暂无文件</div>
+                              </div>
+                            </div>
+                            <div class="files-editor">
+                              <div v-if="!editingFileName" class="dtab-empty">选择文件开始编辑</div>
+                              <template v-else>
+                                <div class="editor-header">
+                                  <code class="mono-sm">{{ editingFileName }}</code>
+                                  <span v-if="fileUnsaved" class="badge-unsaved">未保存</span>
+                                  <button class="btn btn-xs btn-primary" @click="saveFile" :disabled="fileSaving">{{ fileSaving ? '保存中…' : '保存' }}</button>
+                                </div>
+                                <textarea v-model="fileContent" class="file-textarea" spellcheck="false" @input="fileUnsaved=true"></textarea>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- ===== 7. 心跳/设备/节点 ===== -->
+                        <div v-if="aocView === 'heartbeat'" class="aoc-heartbeat-view">
+                          <div class="hb-cards">
+                            <div class="hb-card">
+                              <h4>💓 心跳状态</h4>
+                              <div v-if="heartbeatData">
+                                <div class="hb-row"><span>状态：</span><span class="gw-badge" :class="heartbeatData.status==='ok'||heartbeatData.status==='skipped'?'gw-connected':'gw-error'">{{ heartbeatData.status }}</span></div>
+                                <div class="hb-row" v-if="heartbeatData.ts"><span>时间：</span><span>{{ fmtTime(heartbeatData.ts) }}</span></div>
+                                <div class="hb-row" v-if="heartbeatData.reason"><span>原因：</span><span class="text-dim">{{ heartbeatData.reason }}</span></div>
+                              </div>
+                              <div v-else class="text-dim" style="font-size:13px">加载中…</div>
+                              <div class="hb-actions" style="margin-top:8px">
+                                <button class="btn btn-sm btn-primary" @click="wakeAgent">⚡ 唤醒 Agent</button>
+                              </div>
+                            </div>
+                            <div class="hb-card">
+                              <h4>📱 已配对设备</h4>
+                              <div v-if="devicesList.length === 0" class="text-dim" style="font-size:13px">暂无设备</div>
+                              <div v-for="d in devicesList" :key="d.id||d.deviceId" class="hb-device">
+                                <span>{{ d.name||d.label||d.id||d.deviceId }}</span>
+                                <span class="gw-badge gw-connected" style="font-size:10px">已配对</span>
+                              </div>
+                            </div>
+                            <div class="hb-card">
+                              <h4>🖥️ 已配对节点</h4>
+                              <div v-if="nodePairList.length === 0" class="text-dim" style="font-size:13px">暂无节点</div>
+                              <div v-for="n in nodePairList" :key="n.id||n.nodeId" class="hb-device">
+                                <span>{{ n.name||n.id||n.nodeId }}</span>
+                                <span class="gw-badge gw-connected" style="font-size:10px">在线</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -580,7 +688,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { api, apiPut, apiDelete } from '../api.js'
+import { api, apiPost, apiPut, apiPatch, apiDelete } from '../api.js'
 
 // === State ===
 const initialLoading = ref(true)
@@ -665,6 +773,28 @@ const skillsLoading = ref(false)
 const skillSearch = ref('')
 const skillGroupExpanded = reactive({})
 
+// v29.0: session 操作
+const chatInput = ref('')
+const chatSending = ref(false)
+
+// v29.0: cron 操作
+const expandedCronId = ref(null)
+const cronRuns = ref([])
+const cronRunsLoading = ref(false)
+
+// v29.0: agent 文件编辑
+const fileAgentId = ref('')
+const agentFiles = ref([])
+const editingFileName = ref('')
+const fileContent = ref('')
+const fileUnsaved = ref(false)
+const fileSaving = ref(false)
+
+// v29.0: 心跳/设备/节点
+const heartbeatData = ref(null)
+const devicesList = ref([])
+const nodePairList = ref([])
+
 const filteredSkills = computed(() => {
   if (!skillSearch.value) return skillData.skills
   const q = skillSearch.value.toLowerCase()
@@ -709,6 +839,166 @@ async function loadSkills() {
 function switchToSkills() {
   aocView.value = 'skills'
   loadSkills()
+}
+
+function switchToFiles() {
+  aocView.value = 'files'
+  if (expandedAgents.value.length > 0 && !fileAgentId.value) {
+    fileAgentId.value = expandedAgents.value[0].agentId
+    loadAgentFiles()
+  }
+}
+
+function switchToHeartbeat() {
+  aocView.value = 'heartbeat'
+  loadHeartbeatData()
+}
+
+// v29.0: Session 操作
+async function sessionCompact(s) {
+  if (!confirm(`压缩会话 ${truncKey(s.key||s.sessionId)}？`)) return
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/session/compact`, { key: s.key||s.sessionId })
+    toastMsg.value = '会话已压缩'; toastType.value = 'success'; showToast.value = true
+    loadTabData(expandedId.value, 'sessions')
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function sessionReset(s) {
+  if (!confirm(`重置会话 ${truncKey(s.key||s.sessionId)}？所有历史将被清空。`)) return
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/session/reset`, { key: s.key||s.sessionId })
+    toastMsg.value = '会话已重置'; toastType.value = 'success'; showToast.value = true
+    loadTabData(expandedId.value, 'sessions')
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function sessionDelete(s) {
+  if (!confirm(`删除会话 ${truncKey(s.key||s.sessionId)}？此操作不可恢复！`)) return
+  try {
+    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/session?key=${encodeURIComponent(s.key||s.sessionId)}`)
+    toastMsg.value = '会话已删除'; toastType.value = 'success'; showToast.value = true
+    loadTabData(expandedId.value, 'sessions')
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function chatSend(s) {
+  if (!chatInput.value.trim()) return
+  chatSending.value = true
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/chat/send`, { sessionKey: s.key||s.sessionId, message: chatInput.value.trim() })
+    chatInput.value = ''
+    toastMsg.value = '消息已发送'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  chatSending.value = false
+}
+
+async function chatAbort(s) {
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/chat/abort`, { sessionKey: s.key||s.sessionId })
+    toastMsg.value = '已发送中止请求'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+// v29.0: Cron 操作
+function fmtCronSchedule(c) {
+  const sched = c.schedule || c.cron || {}
+  if (typeof sched === 'string') return sched
+  if (sched.kind === 'cron') return `cron: ${sched.expr || '?'}`
+  if (sched.kind === 'every') return `every ${sched.everyMs ? (sched.everyMs/1000/60)+'m' : '?'}`
+  if (sched.kind === 'at') return `at: ${sched.at || '?'}`
+  return JSON.stringify(sched).slice(0, 40)
+}
+
+async function cronTrigger(c) {
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/cron/run`, { id: c.id||c.jobId, mode: 'force' })
+    toastMsg.value = '已触发运行'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function cronToggle(c) {
+  try {
+    await apiPut(`/api/v1/upstreams/${expandedId.value}/gateway/cron/update`, { id: c.id||c.jobId, enabled: c.enabled === false })
+    toastMsg.value = c.enabled === false ? '已启用' : '已禁用'; toastType.value = 'success'; showToast.value = true
+    loadTabData(expandedId.value, 'cron')
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function cronRemove(c) {
+  if (!confirm(`删除定时任务 ${c.name||c.id}？`)) return
+  try {
+    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/cron/remove?id=${encodeURIComponent(c.id||c.jobId)}`)
+    toastMsg.value = '已删除'; toastType.value = 'success'; showToast.value = true
+    loadTabData(expandedId.value, 'cron')
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+}
+
+async function toggleCronRuns(c) {
+  const cid = c.id || c.jobId
+  if (expandedCronId.value === cid) { expandedCronId.value = null; return }
+  expandedCronId.value = cid
+  cronRunsLoading.value = true
+  try {
+    const res = await api(`/api/v1/upstreams/${expandedId.value}/gateway/cron/runs?id=${encodeURIComponent(cid)}&limit=10`)
+    cronRuns.value = res.runs || res.history || []
+  } catch { cronRuns.value = [] }
+  cronRunsLoading.value = false
+}
+
+// v29.0: Agent 文件编辑
+async function loadAgentFiles() {
+  if (!fileAgentId.value || !expandedId.value) return
+  try {
+    const res = await api(`/api/v1/upstreams/${expandedId.value}/gateway/agents/files?agentId=${encodeURIComponent(fileAgentId.value)}`)
+    agentFiles.value = res.files || []
+  } catch { agentFiles.value = [] }
+  editingFileName.value = ''
+  fileContent.value = ''
+  fileUnsaved.value = false
+}
+
+async function openFile(f) {
+  if (fileUnsaved.value && !confirm('有未保存的修改，确认切换？')) return
+  editingFileName.value = f.name
+  fileContent.value = ''
+  fileUnsaved.value = false
+  try {
+    const res = await api(`/api/v1/upstreams/${expandedId.value}/gateway/agents/file?agentId=${encodeURIComponent(fileAgentId.value)}&name=${encodeURIComponent(f.name)}`)
+    fileContent.value = res.content || ''
+  } catch (e) { fileContent.value = '// 加载失败: ' + e.message }
+}
+
+async function saveFile() {
+  fileSaving.value = true
+  try {
+    await apiPut(`/api/v1/upstreams/${expandedId.value}/gateway/agents/file`, { agentId: fileAgentId.value, name: editingFileName.value, content: fileContent.value })
+    fileUnsaved.value = false
+    toastMsg.value = '文件已保存'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  fileSaving.value = false
+}
+
+// v29.0: 心跳/设备/节点
+async function loadHeartbeatData() {
+  if (!expandedId.value) return
+  try {
+    const [hb, dev, np] = await Promise.all([
+      api(`/api/v1/upstreams/${expandedId.value}/gateway/heartbeat`),
+      api(`/api/v1/upstreams/${expandedId.value}/gateway/devices`),
+      api(`/api/v1/upstreams/${expandedId.value}/gateway/node-pairs`),
+    ])
+    heartbeatData.value = hb
+    devicesList.value = hb.paired || dev.paired || []
+    nodePairList.value = np.paired || []
+  } catch { /* ignore */ }
+}
+
+async function wakeAgent() {
+  try {
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/wake`, { mode: 'now' })
+    toastMsg.value = '已发送唤醒'; toastType.value = 'success'; showToast.value = true
+  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
 }
 
 // 加载所有 Gateway 的 cron jobs
@@ -1669,5 +1959,39 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .msg-meta { font-size:10px; color:var(--text-tertiary,#64748b); margin-top:4px; }
 .msg-expand-btn { background:none; border:none; color:#6366f1; cursor:pointer; font-size:11px; padding:2px 0; margin-top:4px; transition:color .15s; }
 .msg-expand-btn:hover { color:#a5b4fc; text-decoration:underline; }
+
+/* v29.0: Chat 发送区 */
+.chat-actions { display:flex; gap:8px; align-items:center; padding:10px 0 2px; border-top:1px solid rgba(51,65,85,.3); margin-top:10px; }
+.chat-input { flex:1; background:rgba(30,41,59,.6); border:1px solid var(--border-subtle,#334155); border-radius:6px; padding:6px 10px; color:var(--text-primary,#e2e8f0); font-size:13px; outline:none; }
+.chat-input:focus { border-color:#6366f1; }
+
+/* v29.0: 危险按钮 */
+.btn-danger-ghost { color:#ef4444 !important; }
+.btn-danger-ghost:hover { background:rgba(239,68,68,.12) !important; }
+.btn-warn { background:rgba(234,179,8,.15); color:#eab308; border:1px solid rgba(234,179,8,.3); }
+.btn-warn:hover { background:rgba(234,179,8,.25); }
+
+/* v29.0: 文件编辑器 */
+.aoc-files-view { padding:0; }
+.files-layout { display:flex; min-height:360px; }
+.files-sidebar { width:200px; border-right:1px solid var(--border-subtle,#334155); padding:8px; flex-shrink:0; }
+.files-agent-select { margin-bottom:8px; }
+.files-list { display:flex; flex-direction:column; gap:2px; }
+.file-item { display:flex; align-items:center; gap:6px; padding:5px 8px; border-radius:4px; cursor:pointer; font-size:13px; color:var(--text-secondary,#94a3b8); transition:background .15s; }
+.file-item:hover { background:rgba(99,102,241,.08); }
+.file-item.active { background:rgba(99,102,241,.15); color:#a5b4fc; }
+.files-editor { flex:1; display:flex; flex-direction:column; }
+.editor-header { display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border-subtle,#334155); }
+.badge-unsaved { font-size:10px; background:rgba(234,179,8,.2); color:#eab308; padding:1px 6px; border-radius:3px; }
+.file-textarea { flex:1; background:transparent; border:none; padding:12px; color:var(--text-primary,#e2e8f0); font-family:'JetBrains Mono','Fira Code',monospace; font-size:13px; line-height:1.6; resize:none; outline:none; min-height:300px; }
+
+/* v29.0: 心跳/设备 */
+.aoc-heartbeat-view { padding:12px 0; }
+.hb-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+.hb-card { background:rgba(30,41,59,.4); border:1px solid var(--border-subtle,#334155); border-radius:8px; padding:14px; }
+.hb-card h4 { margin:0 0 10px; font-size:14px; }
+.hb-row { display:flex; justify-content:space-between; align-items:center; padding:3px 0; font-size:13px; }
+.hb-device { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13px; border-bottom:1px solid rgba(51,65,85,.2); }
+.hb-actions { display:flex; gap:8px; }
 
 </style>

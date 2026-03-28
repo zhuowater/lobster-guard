@@ -185,9 +185,6 @@ const allNavItems = {
   'ops':               { path: '/ops',            label: '运维工具',       icon: 'cog' },
   'settings':          { path: '/settings',       label: '设置',           icon: 'settings' },
   'gateway-monitor':   { path: '/gateway-monitor', label: 'Gateway 监控',  icon: 'activity' },
-  'gateway-sessions':  { path: '/gateway-sessions', label: '🗨️ 会话管理',  icon: 'message-square' },
-  'gateway-cron':      { path: '/gateway-cron',     label: '⏰ 定时任务',  icon: 'clock' },
-  'gateway-agents':    { path: '/gateway-agents',   label: '🤖 Agent 管理', icon: 'bot' },
 }
 
 // 当前 Tab 配置
