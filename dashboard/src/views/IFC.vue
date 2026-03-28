@@ -152,15 +152,16 @@
 <div class="doe-alert">DOE 检测总数: <strong>{{ stats.total_doe }}</strong></div>
 </div>
 </div>
-
+<ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doCfmAction" @cancel="cfmVisible = false" />
 </div>
 </template>
 <script>
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import EmptyState from '../components/EmptyState.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 export default {
   name: 'IFC',
-  components: { EmptyState },
+  components: { EmptyState, ConfirmModal },
   data() { return {
     tab: 'source-rules', stats: {}, sourceRules: [], toolReqs: [], variables: [], violations: [],
     varTraceId: '', showAddSource: false, showAddTool: false, editingSource: null, editingTool: null,
@@ -168,6 +169,7 @@ export default {
     toolForm: { tool: '', required_integrity: 2, max_confidentiality: 1 },
     checkForm: { trace_id: '', tool: '', var_ids_str: '' },
     checkResult: null, checking: false,
+    cfmVisible: false, cfmTitle: '', cfmMsg: '', cfmType: 'danger', cfmAction: null,
     // v26.1: Quarantine
     quarantineSessions: [], quarantineStats: {},
     // v26.2: Data Flow
@@ -215,7 +217,7 @@ export default {
         this.showAddSource = false; this.editingSource = null; this.loadAll()
       } catch(e) { alert(e.message||e) }
     },
-    async deleteSource(src) { if(!confirm('确定删除来源规则: '+src+'？')) return; try { await apiDelete('/api/v1/ifc/source-rules/'+encodeURIComponent(src)); this.loadAll() } catch(e){ alert(e.message||e) } },
+    deleteSource(src) { this.cfmTitle='删除来源规则';this.cfmMsg='确定删除来源规则: '+src+'？';this.cfmType='danger';this.cfmAction=async()=>{try{await apiDelete('/api/v1/ifc/source-rules/'+encodeURIComponent(src));this.loadAll()}catch(e){alert(e.message||e)}};this.cfmVisible=true },
     editTool(r) { this.editingTool = r.tool; this.toolForm = { tool: r.tool, required_integrity: r.required_integrity, max_confidentiality: r.max_confidentiality }; this.showAddTool = true },
     async saveTool() {
       try {
@@ -224,7 +226,8 @@ export default {
         this.showAddTool = false; this.editingTool = null; this.loadAll()
       } catch(e) { alert(e.message||e) }
     },
-    async deleteTool(tool) { if(!confirm('确定删除工具要求: '+tool+'？')) return; try { await apiDelete('/api/v1/ifc/tool-requirements/'+encodeURIComponent(tool)); this.loadAll() } catch(e){ alert(e.message||e) } },
+    deleteTool(tool) { this.cfmTitle='删除工具要求';this.cfmMsg='确定删除工具要求: '+tool+'？';this.cfmType='danger';this.cfmAction=async()=>{try{await apiDelete('/api/v1/ifc/tool-requirements/'+encodeURIComponent(tool));this.loadAll()}catch(e){alert(e.message||e)}};this.cfmVisible=true },
+    doCfmAction(){ this.cfmVisible=false; if(this.cfmAction) this.cfmAction() },
     async runCheck() {
       this.checking = true; this.checkResult = null
       try {

@@ -86,6 +86,8 @@ type RuleEngine struct {
 	tenantRuleList map[string][]Rule              // tenantID -> Rule metadata
 	tenantRegex    map[string][]RegexRule          // tenantID -> regex rules
 	tenantDB       *sql.DB                        // v27.2: 持久化存储
+	// v31.0 AC 智能分级
+	autoReviewMgr  *AutoReviewManager
 	// v30.0 全局启用的行业模板规则
 	globalTemplateAC    *AhoCorasick // 全局模板 AC 自动机
 	globalTemplateRules []Rule       // 全局模板 Rule 列表
@@ -600,6 +602,20 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 		for _, m := range normalMatches {
 			r.Reasons = append(r.Reasons, m.Name)
 			r.MatchedRules = append(r.MatchedRules, m.Name)
+		}
+	}
+
+	// v31.0: AC 智能分级 — block 前检查 auto-review
+	if r.Action == "block" && re.autoReviewMgr != nil && len(r.MatchedRules) > 0 {
+		winnerRule := r.MatchedRules[0]
+		// 记录 block 命中到滑动窗口
+		re.autoReviewMgr.RecordBlock(winnerRule)
+		// 检查是否处于 review 状态
+		if re.autoReviewMgr.IsInReview(winnerRule) {
+			r.Action = "review"
+			// 触发 LLM 复核（同步调用，受超时限制）
+			llmResult := re.autoReviewMgr.ReviewWithLLM(winnerRule, text)
+			r.Action = llmResult
 		}
 	}
 

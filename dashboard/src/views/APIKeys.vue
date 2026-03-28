@@ -128,6 +128,7 @@
         </div>
       </div>
     </div>
+    <ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doConfirmAction" @cancel="cfmVisible = false" />
   </div>
 </template>
 
@@ -135,6 +136,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { api, apiPost, apiPut, apiDelete } from '../api'
 import Icon from '../components/Icon.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
+
+const cfmVisible = ref(false), cfmTitle = ref(''), cfmMsg = ref(''), cfmType = ref('danger')
+let cfmAction = null
+function doConfirmAction() { cfmVisible.value = false; if (cfmAction) cfmAction() }
 
 const keys = ref([])
 const search = ref('')
@@ -193,14 +199,16 @@ async function saveEdit() {
   saving.value=false
 }
 
-async function rotateKey(k) {
-  if (!confirm(`确定轮换 ${k.key_prefix}... 的密钥？旧密钥将立即失效。`)) return
-  try { const d=await apiPost('/api/v1/apikeys/'+k.id+'/rotate',{}); alert('新密钥: '+d.raw_key+'\n请妥善保管！'); loadKeys() } catch(e) { alert('轮换失败: '+e.message) }
+function rotateKey(k) {
+  cfmTitle.value = '轮换密钥'; cfmMsg.value = `确定轮换 ${k.key_prefix}... 的密钥？旧密钥将立即失效。`; cfmType.value = 'warning'
+  cfmAction = async () => { try { const d=await apiPost('/api/v1/apikeys/'+k.id+'/rotate',{}); alert('新密钥: '+d.raw_key+'\n请妥善保管！'); loadKeys() } catch(e) { alert('轮换失败: '+e.message) } }
+  cfmVisible.value = true
 }
 
-async function deleteKey(k) {
-  if (!confirm(`确定删除 ${k.user_name||k.user_id} 的 API Key？`)) return
-  try { await apiDelete('/api/v1/apikeys/'+k.id); loadKeys() } catch(e) { alert('删除失败: '+e.message) }
+function deleteKey(k) {
+  cfmTitle.value = '删除 API Key'; cfmMsg.value = `确定删除 ${k.user_name||k.user_id} 的 API Key？`; cfmType.value = 'danger'
+  cfmAction = async () => { try { await apiDelete('/api/v1/apikeys/'+k.id); loadKeys() } catch(e) { alert('删除失败: '+e.message) } }
+  cfmVisible.value = true
 }
 
 function copyKey() { navigator.clipboard.writeText(newRawKey.value).then(()=>alert('已复制到剪贴板')) }

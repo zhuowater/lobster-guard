@@ -864,12 +864,19 @@
         <div v-if="toast.show" class="toast" :class="'toast-' + toast.type" @click="toast.show = false">{{ toast.msg }}</div>
       </Transition>
     </Teleport>
+    <ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doGwConfirm" @cancel="cfmVisible = false" />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { api, apiPost, apiPut, apiPatch, apiDelete } from '../api.js'
+import ConfirmModal from '../components/ConfirmModal.vue'
+
+const cfmVisible = ref(false), cfmTitle = ref(''), cfmMsg = ref(''), cfmType = ref('danger')
+let cfmAction = null
+function doGwConfirm() { cfmVisible.value = false; if (cfmAction) cfmAction() }
+function gwConfirm(title, msg, type, action) { cfmTitle.value = title; cfmMsg.value = msg; cfmType.value = type || 'danger'; cfmAction = action; cfmVisible.value = true }
 
 // === State ===
 const initialLoading = ref(true)
@@ -1086,31 +1093,25 @@ function sessionKind(s) {
 }
 
 // v29.0: Session 操作
-async function sessionCompact(s) {
-  if (!confirm(`压缩会话 ${truncKey(s.key||s.sessionId)}？`)) return
-  try {
-    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/session/compact`, { key: s.key||s.sessionId })
-    toastMsg.value = '会话已压缩'; toastType.value = 'success'; showToast.value = true
-    loadTabData(expandedId.value, 'sessions')
-  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+function sessionCompact(s) {
+  gwConfirm('压缩会话', `压缩会话 ${truncKey(s.key||s.sessionId)}？`, 'warning', async () => {
+    try { await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/session/compact`, { key: s.key||s.sessionId }); toastMsg.value = '会话已压缩'; toastType.value = 'success'; showToast.value = true; loadTabData(expandedId.value, 'sessions') }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  })
 }
 
-async function sessionReset(s) {
-  if (!confirm(`重置会话 ${truncKey(s.key||s.sessionId)}？所有历史将被清空。`)) return
-  try {
-    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/session/reset`, { key: s.key||s.sessionId })
-    toastMsg.value = '会话已重置'; toastType.value = 'success'; showToast.value = true
-    loadTabData(expandedId.value, 'sessions')
-  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+function sessionReset(s) {
+  gwConfirm('重置会话', `重置会话 ${truncKey(s.key||s.sessionId)}？所有历史将被清空。`, 'danger', async () => {
+    try { await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/session/reset`, { key: s.key||s.sessionId }); toastMsg.value = '会话已重置'; toastType.value = 'success'; showToast.value = true; loadTabData(expandedId.value, 'sessions') }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  })
 }
 
-async function sessionDelete(s) {
-  if (!confirm(`删除会话 ${truncKey(s.key||s.sessionId)}？此操作不可恢复！`)) return
-  try {
-    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/session?key=${encodeURIComponent(s.key||s.sessionId)}`)
-    toastMsg.value = '会话已删除'; toastType.value = 'success'; showToast.value = true
-    loadTabData(expandedId.value, 'sessions')
-  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+function sessionDelete(s) {
+  gwConfirm('删除会话', `删除会话 ${truncKey(s.key||s.sessionId)}？此操作不可恢复！`, 'danger', async () => {
+    try { await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/session?key=${encodeURIComponent(s.key||s.sessionId)}`); toastMsg.value = '会话已删除'; toastType.value = 'success'; showToast.value = true; loadTabData(expandedId.value, 'sessions') }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  })
 }
 
 async function chatSend(s) {
@@ -1156,13 +1157,11 @@ async function cronToggle(c) {
   } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
 }
 
-async function cronRemove(c) {
-  if (!confirm(`删除定时任务 ${c.name||c.id}？`)) return
-  try {
-    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/cron/remove?id=${encodeURIComponent(c.id||c.jobId)}`)
-    toastMsg.value = '已删除'; toastType.value = 'success'; showToast.value = true
-    loadTabData(expandedId.value, 'cron')
-  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+function cronRemove(c) {
+  gwConfirm('删除定时任务', `删除定时任务 ${c.name||c.id}？`, 'danger', async () => {
+    try { await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/cron/remove?id=${encodeURIComponent(c.id||c.jobId)}`); toastMsg.value = '已删除'; toastType.value = 'success'; showToast.value = true; loadTabData(expandedId.value, 'cron') }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  })
 }
 
 function openCronModal(c) {
@@ -1312,12 +1311,11 @@ async function agentSave() {
   agentSaving.value = false
 }
 
-async function agentDelete(ag) {
-  if (!confirm(`删除 Agent "${ag.id}"？此操作不可恢复！`)) return
-  try {
-    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/agents/delete?id=${encodeURIComponent(ag.id)}`)
-    toastMsg.value = 'Agent 已删除'; toastType.value = 'success'; showToast.value = true
-  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+function agentDelete(ag) {
+  gwConfirm('删除 Agent', `删除 Agent "${ag.id}"？此操作不可恢复！`, 'danger', async () => {
+    try { await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/agents/delete?id=${encodeURIComponent(ag.id)}`); toastMsg.value = 'Agent 已删除'; toastType.value = 'success'; showToast.value = true }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  })
 }
 
 // v29.0: Skill 安装/更新/卸载
@@ -1343,13 +1341,11 @@ async function skillUpdate(sk) {
   } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
 }
 
-async function skillUninstall(sk) {
-  if (!confirm(`卸载 Skill "${sk.name}"？`)) return
-  try {
-    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/skills/uninstall`, { slug: sk.name })
-    showToast(`${sk.name} 已卸载`, 'success')
-    loadSkills()
-  } catch (e) { showToast(e.message, 'error') }
+function skillUninstall(sk) {
+  gwConfirm('卸载 Skill', `卸载 Skill "${sk.name}"？`, 'warning', async () => {
+    try { await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/skills/uninstall`, { slug: sk.name }); toastMsg.value = `${sk.name} 已卸载`; toastType.value = 'success'; showToast.value = true; loadSkills() }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  })
 }
 
 // v29.0: Gateway 远程配置
@@ -1362,18 +1358,13 @@ async function loadGatewayConfig(up) {
   } catch (e) { toastMsg.value = '加载配置失败: ' + e.message; toastType.value = 'error'; showToast.value = true }
 }
 
-async function patchGatewayConfig(up) {
-  if (!confirm('确认修改 Gateway 配置？这将触发 Gateway 重启。')) return
-  gwConfigSaving.value = true
-  try {
-    let parsed = JSON.parse(gwConfigRaw.value)
-    await apiPatch(`/api/v1/upstreams/${up.id}/gateway/config`, parsed)
-    gwConfigDirty.value = false
-    toastMsg.value = '配置已保存，Gateway 正在重启'; toastType.value = 'success'; showToast.value = true
-  } catch (e) {
-    toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true
-  }
-  gwConfigSaving.value = false
+function patchGatewayConfig(up) {
+  gwConfirm('修改 Gateway 配置', '确认修改 Gateway 配置？这将触发 Gateway 重启。', 'warning', async () => {
+    gwConfigSaving.value = true
+    try { let parsed = JSON.parse(gwConfigRaw.value); await apiPatch(`/api/v1/upstreams/${up.id}/gateway/config`, parsed); gwConfigDirty.value = false; toastMsg.value = '配置已保存，Gateway 正在重启'; toastType.value = 'success'; showToast.value = true }
+    catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+    gwConfigSaving.value = false
+  })
 }
 
 // 加载所有 Gateway 的 cron jobs
@@ -1851,17 +1842,18 @@ async function rejectExec(ea) {
   } catch (e) { showToast('拒绝失败: ' + e.message, 'error') }
 }
 
-async function gatewayRestart() {
+function gatewayRestart() {
   if (!expandedId.value) return
-  if (!confirm('确认重启当前 Gateway？')) return
-  try {
-    await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/restart`, { reason: 'Dashboard manual restart' })
-    gwUpdateResult.value = 'Gateway 重启指令已发送'
-    showToast('Gateway 正在重启', 'success')
+  gwConfirm('重启 Gateway', '确认重启当前 Gateway？', 'warning', async () => {
+    try {
+      await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/restart`, { reason: 'Dashboard manual restart' })
+      gwUpdateResult.value = 'Gateway 重启指令已发送'
+      toastMsg.value = 'Gateway 正在重启'; toastType.value = 'success'; showToast.value = true
   } catch (e) {
     gwUpdateResult.value = '重启失败：' + e.message
-    showToast(gwUpdateResult.value, 'error')
+    toastMsg.value = gwUpdateResult.value; toastType.value = 'error'; showToast.value = true
   }
+  })
 }
 
 async function gatewayUpdate() {
@@ -1946,9 +1938,10 @@ async function saveToken() {
   try { await apiPut(`/api/v1/upstreams/${encodeURIComponent(tokenModal.data.id)}/gateway-token`,{token:tokenModal.token}); showToast('Token 已保存','success'); tokenModal.show=false; await refresh() }
   catch (e) { showToast('保存失败: '+e.message,'error') } finally { tokenModal.saving=false }
 }
-async function clearToken(up) {
-  if (!confirm(`确定清除 ${up.id} 的 Gateway Token？`)) return
-  try { await apiDelete(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway-token`); showToast('已清除','success'); await refresh() } catch(e) { showToast('失败: '+e.message,'error') }
+function clearToken(up) {
+  gwConfirm('清除 Gateway Token', `确定清除 ${up.id} 的 Gateway Token？`, 'danger', async () => {
+    try { await apiDelete(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway-token`); toastMsg.value='已清除';toastType.value='success';showToast.value=true; await refresh() } catch(e) { toastMsg.value='失败: '+e.message;toastType.value='error';showToast.value=true }
+  })
 }
 
 function statusLabel(s) { return {connected:'已连接',not_configured:'未配置',auth_failed:'认证失败',unreachable:'不可达',error:'错误'}[s]||s||'未知' }

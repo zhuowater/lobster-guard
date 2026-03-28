@@ -121,15 +121,17 @@
       </div>
       <EmptyState v-else :iconSvg="emptyIcons.attribution" title="暂无因果归因事件" description="因果归因分析结果将显示在这里" />
     </div>
+    <ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doCfmAction" @cancel="cfmVisible = false" />
   </div>
 </template>
 
 <script>
 import { api, apiPost, apiPut, apiDelete } from '../api.js'
 import EmptyState from '../components/EmptyState.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 export default {
   name: 'Counterfactual',
-  components: { EmptyState },
+  components: { EmptyState, ConfirmModal },
   data() {
     return {
       activeTab: 'verifications',
@@ -140,6 +142,7 @@ export default {
       costSummary: null, effectMetrics: null, adaptiveConfig: { feedback_enabled: false },
       adaptiveForm: { enabled: false, monthly_budget_usd: 100, cost_per_verification: 0.05, priority_mode: 'hybrid', min_risk_for_sync: 80, feedback_enabled: true },
       savingAdaptive: false, adaptiveMsg: '', adaptiveMsgType: '', feedbackMap: {},
+      cfmVisible: false, cfmTitle: '', cfmMsg: '', cfmType: 'danger', cfmAction: null,
       timelineEvents: [], expandedTimelineId: null,
       highRiskTools: [],
       newToolName: '',
@@ -164,14 +167,15 @@ export default {
     async loadConfig() { try { const d = await api('/api/v1/counterfactual/config'); this.configForm = { ...d } } catch(e) {} },
     async loadHighRiskTools() { try { const d = await api('/api/v1/counterfactual/high-risk-tools'); this.highRiskTools = d.tools || [] } catch(e) {} },
     async addHighRiskTool() { const name = this.newToolName.trim(); if (!name) return; try { await apiPost('/api/v1/counterfactual/high-risk-tools', { name }); this.newToolName = ''; this.configMsg = '已添加: ' + name; this.configMsgType = 'msg-success'; await this.loadHighRiskTools() } catch(e) { this.configMsg = '添加失败: ' + e.message; this.configMsgType = 'msg-error' } },
-    async removeHighRiskTool(name) { try { await apiDelete('/api/v1/counterfactual/high-risk-tools/' + encodeURIComponent(name)); this.configMsg = '已移除: ' + name; this.configMsgType = 'msg-success'; await this.loadHighRiskTools() } catch(e) { this.configMsg = '移除失败: ' + e.message; this.configMsgType = 'msg-error' } },
+    removeHighRiskTool(name) { this.cfmTitle='移除高危工具';this.cfmMsg='确定移除高危工具 "'+name+'"？';this.cfmType='warning';this.cfmAction=async()=>{try{await apiDelete('/api/v1/counterfactual/high-risk-tools/'+encodeURIComponent(name));this.configMsg='已移除: '+name;this.configMsgType='msg-success';await this.loadHighRiskTools()}catch(e){this.configMsg='移除失败: '+e.message;this.configMsgType='msg-error'}};this.cfmVisible=true },
     async loadCost() { try { this.costSummary = await api('/api/v1/counterfactual/cost') } catch(e) {} },
     async loadEffectiveness() { try { this.effectMetrics = await api('/api/v1/counterfactual/effectiveness') } catch(e) {} },
     async loadAdaptiveConfig() { try { const d = await api('/api/v1/counterfactual/adaptive-config'); this.adaptiveConfig = d; this.adaptiveForm = { ...d } } catch(e) {} },
     async saveConfig() { this.saving = true; this.configMsg = ''; try { await apiPut('/api/v1/counterfactual/config', this.configForm); this.configMsg = '配置已保存'; this.configMsgType = 'msg-success'; this.loadStats() } catch (e) { this.configMsg = '保存失败: ' + e.message; this.configMsgType = 'msg-error' } this.saving = false },
     async saveAdaptiveConfig() { this.savingAdaptive = true; this.adaptiveMsg = ''; try { await apiPut('/api/v1/counterfactual/adaptive-config', this.adaptiveForm); this.adaptiveMsg = '自适应配置已保存'; this.adaptiveMsgType = 'msg-success' } catch (e) { this.adaptiveMsg = '保存失败: ' + e.message; this.adaptiveMsgType = 'msg-error' } this.savingAdaptive = false },
     async submitFeedback(vid, wasCorrect) { try { await apiPost('/api/v1/counterfactual/feedback', { verification_id: vid, was_correct: wasCorrect }); this.feedbackMap = { ...this.feedbackMap, [vid]: wasCorrect } } catch(e) {} },
-    async clearCache() { this.clearingCache = true; try { const d = await apiDelete('/api/v1/counterfactual/cache'); this.configMsg = '缓存已清除: ' + (d.cleared || 0) + ' 条'; this.configMsgType = 'msg-success' } catch (e) { this.configMsg = '清除失败: ' + e.message; this.configMsgType = 'msg-error' } this.clearingCache = false },
+    clearCache() { this.cfmTitle='清除缓存';this.cfmMsg='确定清除所有反事实验证缓存？';this.cfmType='warning';this.cfmAction=async()=>{this.clearingCache=true;try{const d=await apiDelete('/api/v1/counterfactual/cache');this.configMsg='缓存已清除: '+(d.cleared||0)+' 条';this.configMsgType='msg-success'}catch(e){this.configMsg='清除失败: '+e.message;this.configMsgType='msg-error'};this.clearingCache=false};this.cfmVisible=true },
+    doCfmAction(){ this.cfmVisible=false; if(this.cfmAction) this.cfmAction() },
     async loadTimeline() { try { const d = await api('/api/v1/counterfactual/timeline?limit=200'); this.timelineEvents = d.events || [] } catch(e) {} },
     toggleExpand(id) { this.expandedId = this.expandedId === id ? null : id },
     toggleTimelineExpand(ev) {

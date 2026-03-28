@@ -207,6 +207,7 @@ func main() {
 	engine.SetInboundTemplateDB(db)
 	// v30.0: 初始化全局启用的行业模板 AC 自动机
 	engine.InitGlobalTemplateAC()
+	// (v31.0 auto-review init moved below pool creation)
 
 	// v14.1: 初始化认证管理器
 	authMgr := NewAuthManager(db, &cfg.Auth)
@@ -255,6 +256,17 @@ func main() {
 
 	pool := NewUpstreamPool(cfg, db)
 	routes := NewRouteTable(db, cfg.RoutePersist)
+
+	// v31.0: AC 智能分级（自动模式）
+	autoReviewMgr := NewAutoReviewManager(cfg.AutoReview, pool)
+	engine.autoReviewMgr = autoReviewMgr
+	if cfg.AutoReview.Enabled {
+		autoReviewMgr.Start()
+		fmt.Printf("[初始化] ✅ AC 智能分级已启用 (窗口=%ds, 阈值=%d, TTL=%ds)\n",
+			cfg.AutoReview.WindowSeconds, cfg.AutoReview.SpikeThreshold, cfg.AutoReview.AutoReviewTTL)
+	} else {
+		fmt.Println("[初始化] ⚠️ AC 智能分级: 未启用 (auto_review.enabled=false)")
+	}
 	// D-006: 从路由表聚合恢复 user_count（比逐个 CountByUpstream 更精确）
 	pool.RestoreUserCounts(db)
 
@@ -531,6 +543,9 @@ func main() {
 			llmProxy.eventBus = eventBus
 		}
 		mgmtAPI.eventBus = eventBus
+		// v31.0: 提示语追踪→告警
+		promptTracker.eventBus = eventBus
+		promptTracker.driftThreshold = 0.5 // 默认漂移阈值
 		// 注入严格模式回调
 		if mgmtAPI.strictMode != nil {
 			eventBus.strictModeFunc = func(enable bool) error {
@@ -713,6 +728,10 @@ func main() {
 		fmt.Println("[初始化] ⚠️ 信息流污染追踪: 未启用")
 	}
 	mgmtAPI.taintTracker = taintTracker
+	// v31.0: 污点→IFC 统一
+	if taintTracker != nil {
+		taintTracker.SetIFCEngine(ifcEngine)
+	}
 	inbound.pathPolicyEngine = pathPolicyEngine // v23.0
 	inbound.planCompiler = planCompiler          // v25.0
 	inbound.capabilityEngine = capEngine         // v25.1
@@ -727,6 +746,7 @@ func main() {
 		llmProxy.SetAPIKeyManager(apiKeyMgr)
 	}
 	mgmtAPI.apiKeyMgr = apiKeyMgr
+	mgmtAPI.autoReviewMgr = autoReviewMgr
 	fmt.Printf("[初始化] ✅ 租户策略闭环 + API Key 管理器已就绪\n")
 	inbound.taintTracker = taintTracker
 	outbound.taintTracker = taintTracker
@@ -928,6 +948,10 @@ func main() {
 	sig := <-quit
 	log.Printf("[关闭] 收到信号 %v，正在优雅关闭...", sig)
 
+	// v31.0: 停止自动复核管理器
+	if autoReviewMgr != nil {
+		autoReviewMgr.Stop()
+	}
 	// v20.1: 停止污染追踪引擎
 	if taintTracker != nil {
 		taintTracker.Stop()

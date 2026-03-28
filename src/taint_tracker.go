@@ -116,6 +116,15 @@ type TaintTracker struct {
 	totalWarned  int64
 	// 关闭
 	stopCh chan struct{}
+	// v31.0: IFC 引擎联动
+	ifcEngine *IFCEngine
+}
+
+// SetIFCEngine 设置 IFC 引擎引用（v31.0 污点→IFC 统一）
+func (tt *TaintTracker) SetIFCEngine(e *IFCEngine) {
+	tt.mu.Lock()
+	tt.ifcEngine = e
+	tt.mu.Unlock()
 }
 
 // NewTaintTracker 创建污染追踪引擎
@@ -271,7 +280,13 @@ func (tt *TaintTracker) MarkTainted(traceID string, text string, source string) 
 	tt.mu.Lock()
 	tt.active[traceID] = entry
 	tt.totalMarked++
+	ifc := tt.ifcEngine
 	tt.mu.Unlock()
+
+	// v31.0: 自动注册 IFC source（污点→IFC 统一）
+	if ifc != nil {
+		ifc.RegisterVariable(traceID, "taint:"+source, strings.Join(labels, ","), strings.Join(matchedNames, ","))
+	}
 
 	// 异步持久化到 SQLite
 	go tt.persistEntry(entry)

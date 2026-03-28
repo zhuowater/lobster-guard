@@ -19,9 +19,12 @@ import (
 
 // PromptTracker Prompt 版本追踪器
 type PromptTracker struct {
-	db          *sql.DB
-	currentHash string
-	mu          sync.Mutex
+	db             *sql.DB
+	currentHash    string
+	mu             sync.Mutex
+	// v31.0: 提示语漂移→告警
+	eventBus       *EventBus
+	driftThreshold float64
 }
 
 // PromptVersion 一个 Prompt 版本
@@ -147,6 +150,18 @@ func (pt *PromptTracker) Track(content string, model string) string {
 		pt.db.Exec(`UPDATE prompt_versions SET last_seen=?, call_count=call_count+1 WHERE hash=?`, now, hash)
 	} else {
 		log.Printf("[PromptTracker] 🔔 检测到新 Prompt 版本! hash=%s model=%s prev=%s", hash, model, prevHash)
+		// v31.0: 提示语漂移→告警
+		// 新版本即视为 drift, driftScore = 1.0
+		driftScore := 1.0
+		if pt.eventBus != nil && driftScore > pt.driftThreshold {
+			pt.eventBus.Emit(&SecurityEvent{
+				Type:     "prompt_drift",
+				Severity: "medium",
+				Domain:   "llm",
+				Summary:  fmt.Sprintf("Prompt 版本漂移: hash=%s model=%s", hash, model),
+				Details:  map[string]interface{}{"drift_score": driftScore, "hash": hash, "prev_hash": prevHash, "model": model},
+			})
+		}
 	}
 
 	pt.currentHash = hash

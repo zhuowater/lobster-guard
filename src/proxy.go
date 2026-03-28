@@ -456,6 +456,17 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 					if ip.honeypotDeep != nil {
 						ip.honeypotDeep.RecordInteraction(senderID, tpl.TriggerType, "im", msgText)
 					}
+					// v31.0: 蜜罐→攻击链事件发布
+					if ip.eventBus != nil {
+						ip.eventBus.Emit(&SecurityEvent{
+							Type:     "honeypot_trigger",
+							Severity: "high",
+							SenderID: senderID,
+							Summary: fmt.Sprintf("蜜罐触发: template=%s watermark=%s trigger_type=%s", tpl.Name, watermark, tpl.TriggerType),
+							Details: map[string]interface{}{"template": tpl.Name, "watermark": watermark, "trigger_type": tpl.TriggerType},
+							Domain: "inbound",
+						})
+					}
 					log.Printf("[桥接入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s", senderID, tpl.Name, watermark)
 					return // 不转发给上游，蜜罐已介入
 				}
@@ -1076,6 +1087,17 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// v19.2: 蜜罐深度交互记录
 				if ip.honeypotDeep != nil {
 					ip.honeypotDeep.RecordInteraction(senderID, tpl.TriggerType, "im", msgText)
+				}
+				// v31.0: 蜜罐→攻击链事件发布
+				if ip.eventBus != nil {
+					ip.eventBus.Emit(&SecurityEvent{
+						Type:     "honeypot_trigger",
+						Severity: "high",
+						SenderID: senderID,
+						Summary:  fmt.Sprintf("蜜罐触发: template=%s watermark=%s trigger_type=%s", tpl.Name, watermark, tpl.TriggerType),
+						Details:  map[string]interface{}{"template": tpl.Name, "watermark": watermark, "trigger_type": tpl.TriggerType},
+						Domain:   "inbound",
+					})
 				}
 				log.Printf("[入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s trace_id=%s", senderID, tpl.Name, watermark, traceID)
 				// 返回蜜罐假响应而不是转发给上游

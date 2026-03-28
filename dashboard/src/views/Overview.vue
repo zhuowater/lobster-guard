@@ -194,6 +194,7 @@
       <Skeleton v-if="!loaded" type="table"/><EmptyState v-else-if="!recentAttacks.length" :iconSvg="svgShieldCheck" title="当前环境安全" description="没有检测到攻击事件"/>
       <div v-else class="table-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
         <TransitionGroup name="list-anim" tag="tbody"><tr v-for="a in recentAttacks" :key="a.id||a.trace_id||a.timestamp" class="row-block" style="cursor:pointer" @click="$router.push('/audit')"><td>{{fmtTime(a.timestamp||a.time)}}</td><td>{{a.direction==='inbound'?'入站':'出站'}}</td><td><a v-if="a.sender_id" class="user-link" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(a.sender_id))">{{a.sender_id}}</a><span v-else>--</span></td><td>{{a.reason||'--'}}</td></tr></TransitionGroup></table></div></div>
+    <ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doCfmAction" @cancel="cfmVisible = false" />
   </div>
 </template>
 <script setup>
@@ -203,6 +204,11 @@ import { api, apiPost } from '../api.js'
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
 import Icon from '../components/Icon.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
+
+const cfmVisible = ref(false), cfmTitle = ref(''), cfmMsg = ref(''), cfmType = ref('danger')
+let cfmAction = null
+function doCfmAction() { cfmVisible.value = false; if (cfmAction) cfmAction() }
 import PieChart from '../components/PieChart.vue'
 import HeatMap from '../components/HeatMap.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -476,15 +482,14 @@ async function hotReloadRules() {
   actionLoading.value.reload = false
 }
 
-async function clearCache() {
-  actionLoading.value.cache = true
-  try {
-    await api('/api/v1/cache/entries', { method: 'DELETE' })
-    showToast('缓存已清理', 'success')
-  } catch (e) {
-    showToast('缓存清理失败: ' + e.message, 'error')
-  }
-  actionLoading.value.cache = false
+function clearCache() {
+  cfmTitle.value = '清理缓存'; cfmMsg.value = '确认清除所有 LLM 响应缓存？此操作不可恢复。'; cfmType.value = 'warning'
+  cfmAction = async () => {
+    actionLoading.value.cache = true
+    try { await api('/api/v1/cache/entries', { method: 'DELETE' }); showToast('缓存已清理', 'success') }
+    catch (e) { showToast('缓存清理失败: ' + e.message, 'error') }
+    actionLoading.value.cache = false
+  }; cfmVisible.value = true
 }
 
 // ====== 自动刷新 ======

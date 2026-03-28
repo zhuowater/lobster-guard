@@ -267,6 +267,8 @@ type Config struct {
 	Deviation DeviationConfig `yaml:"deviation" json:"deviation"`
 	// v26.0 信息流控制
 	IFC IFCConfig `yaml:"ifc" json:"ifc"`
+	// v31.0 AC 智能分级（自动模式）
+	AutoReview RuleAutoReviewConfig `yaml:"auto_review" json:"auto_review"`
 }
 
 // DiscoveryConfig K8s 服务发现配置（v21.0）

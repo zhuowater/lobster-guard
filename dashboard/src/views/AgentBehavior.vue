@@ -168,6 +168,7 @@
         <div class="modal-footer"><button class="btn btn-ghost btn-sm" @click="editingRule=null">取消</button><button class="btn btn-primary btn-sm" @click="saveRule">保存</button></div>
       </div>
     </div>
+    <ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doConfirmAction" @cancel="cfmVisible = false" />
   </div>
 </template>
 
@@ -177,6 +178,11 @@ import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import { showToast } from '../stores/app.js'
 import Icon from '../components/Icon.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
+
+const cfmVisible = ref(false), cfmTitle = ref(''), cfmMsg = ref(''), cfmType = ref('danger')
+let cfmAction = null
+function doConfirmAction() { cfmVisible.value = false; if (cfmAction) cfmAction() }
 import StatCard from '../components/StatCard.vue'
 import TrendChart from '../components/TrendChart.vue'
 import PieChart from '../components/PieChart.vue'
@@ -235,7 +241,10 @@ function fmtTime(ts){if(!ts)return'--';const d=new Date(ts);return isNaN(d.getTi
 
 function addRule(){editingRule.value={name:'',condition:'',action:'log',enabled:true,_isNew:true}}
 function editRule(i){editingRule.value={...rules.value[i],_idx:i}}
-function deleteRule(i){rules.value.splice(i,1);showToast('规则已删除','success')}
+function deleteRule(i){
+  cfmTitle.value='删除规则';cfmMsg.value='确认删除此规则？该操作不可恢复。';cfmType.value='danger'
+  cfmAction=()=>{rules.value.splice(i,1);showToast('规则已删除','success')};cfmVisible.value=true
+}
 function saveRule(){
   if(!editingRule.value.name){showToast('请输入规则名称','error');return}
   if(editingRule.value._isNew){rules.value.push({...editingRule.value});delete rules.value[rules.value.length-1]._isNew}

@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="settings-tabs">
-      <button v-for="tab in tabs" :key="tab.key" class="settings-tab" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
+      <button v-for="tab in tabs" :key="tab.key" class="settings-tab" :class="{ active: activeTab === tab.key }" @click="switchTab(tab.key)">
         <span class="tab-icon" v-html="tab.icon"></span>
         <span class="tab-label">{{ tab.label }}</span>
         <span v-if="tab.key === 'config' && hasChanges" class="tab-badge">●</span>
@@ -109,14 +109,14 @@
             <input :type="showToken ? 'text' : 'password'" v-model="tokenValue" placeholder="输入 Bearer Token" class="token-input" />
             <button class="token-toggle" @click="showToken = !showToken"><svg v-if="showToken" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></svg><svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
-          <div class="token-actions"><button class="btn btn-sm" @click="doSaveToken">保存</button><button class="btn btn-danger btn-sm" @click="doClearToken">清除</button></div>
+          <div class="token-actions"><button class="btn btn-sm" @click="doSaveToken">保存</button><button class="btn btn-danger btn-sm" @click="confirmClearToken">清除</button></div>
         </div>
       </div>
       <div class="card" style="margin-bottom:20px">
         <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></span><span class="card-title">演示数据</span></div>
         <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-3)">注入模拟审计数据用于演示。</div>
         <div v-if="demoResult" style="margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);background:var(--bg-elevated)"><span :style="{ color: demoResult.ok ? 'var(--color-success)' : 'var(--color-danger)' }">{{ demoResult.message }}</span></div>
-        <div style="display:flex;gap:var(--space-2)"><button class="btn btn-sm" @click="seedDemo" :disabled="demoLoading">{{ demoLoading ? '注入中...' : '注入演示数据' }}</button><button class="btn btn-danger btn-sm" @click="clearDemo" :disabled="demoLoading">清除</button></div>
+        <div style="display:flex;gap:var(--space-2)"><button class="btn btn-sm" @click="seedDemo" :disabled="demoLoading">{{ demoLoading ? '注入中...' : '注入演示数据' }}</button><button class="btn btn-danger btn-sm" @click="confirmClearDemo" :disabled="demoLoading">清除</button></div>
       </div>
       <div class="card" style="margin-bottom:20px">
         <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg></span><span class="card-title">备份管理</span><div class="card-actions"><button class="btn btn-sm" @click="createBackup">创建备份</button><button class="btn btn-ghost btn-sm" @click="loadBackups">刷新</button></div></div>
@@ -213,6 +213,140 @@
       </div>
     </div>
 
+    <!-- Tab: 检测引擎开关 -->
+    <div v-show="activeTab === 'engines'">
+      <Skeleton v-if="enginesLoading" type="table" />
+      <template v-else>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">
+            <span class="card-icon">🧠</span><span class="card-title">检测引擎总览</span>
+            <div class="card-actions">
+              <span class="engine-stats"><span class="engine-stat-on">{{ engineOnCount }} 启用</span><span class="engine-stat-off">{{ engineOffCount }} 关闭</span></span>
+              <button class="btn btn-ghost btn-sm" @click="loadEngineSettings">刷新</button>
+            </div>
+          </div>
+          <div class="config-desc">统一管理所有安全引擎的启用/禁用状态，修改即时生效。</div>
+        </div>
+        <div class="engine-list">
+          <div v-for="eng in engineList" :key="eng.configPath" class="engine-row card">
+            <div class="engine-info">
+              <div class="engine-name-row">
+                <span class="engine-status-dot" :class="{ on: eng.alwaysOn || engineSettings[eng.configPath] }"></span>
+                <span class="engine-name">{{ eng.name }}</span>
+                <span v-if="eng.alwaysOn" class="engine-always-on-tag">始终启用</span>
+              </div>
+              <div class="engine-desc">{{ eng.desc }}</div>
+              <div class="engine-path"><code>{{ eng.configPath }}</code></div>
+            </div>
+            <div class="engine-toggle">
+              <label v-if="!eng.alwaysOn" class="toggle-switch toggle-switch-lg"><input type="checkbox" :checked="engineSettings[eng.configPath]" @change="toggleEngine(eng, $event)" :disabled="eng.saving" /><span class="toggle-slider"></span></label>
+              <span v-else class="engine-locked">🔒</span>
+              <span v-if="eng.saving" class="engine-saving">保存中...</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Tab: AC 智能分级 -->
+    <div v-show="activeTab === 'autoreview'">
+      <Skeleton v-if="arLoading" type="text" />
+      <template v-else>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><span class="card-icon">🎚️</span><span class="card-title">AC 自动 Review</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadAutoReview">刷新</button></div></div>
+          <div class="cfg-item" style="border-bottom:none;padding-top:4px">
+            <div class="cfg-toggle-row">
+              <label class="toggle-switch toggle-switch-lg"><input type="checkbox" v-model="arConfig.enabled" /><span class="toggle-slider"></span></label>
+              <span class="cfg-toggle-label" style="font-weight:600">{{ arConfig.enabled ? '已启用' : '未启用' }}</span>
+            </div>
+          </div>
+          <div class="ar-params">
+            <div class="ar-param"><span class="ar-param-label">窗口时间</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.window_sec" class="cfg-input-num" min="10" max="3600" step="10" /><span class="cfg-unit">秒</span></div></div>
+            <div class="ar-param"><span class="ar-param-label">FP阈值</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.fp_threshold" class="cfg-input-num" min="1" max="100" step="1" /></div></div>
+            <div class="ar-param"><span class="ar-param-label">降级倍数</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.downgrade_multiplier" class="cfg-input-num" min="1" max="10" step="0.5" /><span class="cfg-unit">x</span></div></div>
+            <div class="ar-param"><span class="ar-param-label">TTL</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.ttl_sec" class="cfg-input-num" min="60" max="86400" step="60" /><span class="cfg-unit">秒</span></div></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-sm btn-primary" @click="saveAutoReviewConfig" :disabled="arSaving">{{ arSaving ? '保存中...' : '保存配置' }}</button></div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><span class="card-icon">📋</span><span class="card-title">规则状态</span></div>
+          <div v-if="!arRules.length" class="empty" style="padding:24px"><div class="empty-icon">📭</div>暂无规则状态数据</div>
+          <div v-else class="table-wrap">
+            <table>
+              <thead><tr><th>规则名</th><th>当前动作</th><th>原始动作</th><th>降级原因</th><th>剩余时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="r in arRules" :key="r.name">
+                  <td><code class="rule-name-code">{{ r.name }}</code></td>
+                  <td><span class="ar-action-badge" :class="'ar-action-' + r.current_action">{{ r.current_action }}</span></td>
+                  <td><span class="ar-action-badge ar-action-original">{{ r.original_action }}</span></td>
+                  <td><span class="ar-reason">{{ r.reason || '--' }}</span></td>
+                  <td><span class="ar-ttl">{{ r.ttl_remaining ? formatTTL(r.ttl_remaining) : '--' }}</span></td>
+                  <td class="ar-ops">
+                    <button v-if="r.current_action === r.original_action" class="btn btn-xs" @click="confirmReviewRule(r)" :disabled="r.reviewing">⬇ 降级</button>
+                    <button v-else class="btn btn-xs btn-primary" @click="confirmRestoreRule(r)" :disabled="r.restoring">⬆ 恢复</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><span class="card-icon">📊</span><span class="card-title">LLM 复核统计</span></div>
+          <div class="ar-stats-grid">
+            <div class="ar-stat-card"><div class="ar-stat-value">{{ arStats.total_reviews || 0 }}</div><div class="ar-stat-label">总复核次数</div></div>
+            <div class="ar-stat-card"><div class="ar-stat-value" style="color:var(--color-success)">{{ arStats.pass_rate != null ? (arStats.pass_rate * 100).toFixed(1) + '%' : '--' }}</div><div class="ar-stat-label">通过率</div></div>
+            <div class="ar-stat-card"><div class="ar-stat-value" style="color:var(--color-warning)">{{ arStats.avg_latency_ms != null ? arStats.avg_latency_ms.toFixed(0) + 'ms' : '--' }}</div><div class="ar-stat-label">平均延迟</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-icon">✏️</span><span class="card-title">人工 Review 规则</span>
+            <div class="card-actions"><div class="ar-add-rule"><input v-model="newReviewRule" class="cfg-input" style="width:180px" placeholder="规则名称" @keyup.enter="addReviewRule" /><button class="btn btn-sm btn-primary" @click="addReviewRule" :disabled="!newReviewRule.trim()">添加</button></div></div>
+          </div>
+          <div v-if="!arManualRules.length" class="empty" style="padding:24px"><div class="empty-icon">📝</div>暂无人工 Review 规则</div>
+          <div v-else class="ar-manual-list">
+            <div v-for="(rule, idx) in arManualRules" :key="rule" class="ar-manual-item"><code>{{ rule }}</code><button class="btn btn-xs btn-ghost" style="color:var(--color-danger)" @click="confirmRemoveManualRule(rule, idx)">移除</button></div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Tab: 行业模板管理 -->
+    <div v-show="activeTab === 'templates'">
+      <Skeleton v-if="tplLoading" type="table" />
+      <template v-else>
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-header"><span class="card-icon">⬇️</span><span class="card-title">入站检测模板</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadInboundTemplates">刷新</button></div></div>
+          <div v-if="!inboundTemplates.length" class="empty" style="padding:24px"><div class="empty-icon">📦</div>暂无入站模板</div>
+          <div v-else class="table-wrap">
+            <table>
+              <thead><tr><th>模板名称</th><th>规则数</th><th>分类</th><th>全局启用</th><th>操作</th></tr></thead>
+              <tbody>
+                <template v-for="tpl in inboundTemplates" :key="tpl.id">
+                  <tr><td><strong>{{ tpl.name }}</strong></td><td>{{ (tpl.rules || []).length }}</td><td><span class="tpl-category-badge">{{ tpl.category || '通用' }}</span></td><td><label class="toggle-switch"><input type="checkbox" :checked="tpl.enabled" @change="toggleInboundTemplate(tpl, $event)" :disabled="tpl.toggling" /><span class="toggle-slider"></span></label></td><td><button class="btn btn-xs btn-ghost" @click="toggleTplExpand('inbound', tpl.id)">{{ tplExpandedIds['inbound_' + tpl.id] ? '收起' : '查看规则' }}</button></td></tr>
+                  <tr v-if="tplExpandedIds['inbound_' + tpl.id]" class="expand-row"><td colspan="5"><div class="tpl-rules-detail"><div v-if="!tpl.rules || !tpl.rules.length" class="empty-hint">暂无规则</div><div v-for="(rule, ri) in (tpl.rules || [])" :key="ri" class="tpl-rule-item"><span class="tpl-rule-name">{{ rule.name }}</span><span class="tpl-rule-action" :class="'action-' + rule.action">{{ rule.action }}</span><span class="tpl-rule-type">{{ rule.type || 'keyword' }}</span></div></div></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-icon">🤖</span><span class="card-title">LLM 检测模板</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadLLMTemplates">刷新</button></div></div>
+          <div v-if="!llmTemplates.length" class="empty" style="padding:24px"><div class="empty-icon">📦</div>暂无 LLM 模板</div>
+          <div v-else class="table-wrap">
+            <table>
+              <thead><tr><th>模板名称</th><th>规则数</th><th>分类</th><th>全局启用</th><th>操作</th></tr></thead>
+              <tbody>
+                <template v-for="tpl in llmTemplates" :key="tpl.id">
+                  <tr><td><strong>{{ tpl.name }}</strong></td><td>{{ (tpl.rules || []).length }}</td><td><span class="tpl-category-badge">{{ tpl.category || '通用' }}</span></td><td><label class="toggle-switch"><input type="checkbox" :checked="tpl.enabled" @change="toggleLLMTemplate(tpl, $event)" :disabled="tpl.toggling" /><span class="toggle-slider"></span></label></td><td><button class="btn btn-xs btn-ghost" @click="toggleTplExpand('llm', tpl.id)">{{ tplExpandedIds['llm_' + tpl.id] ? '收起' : '查看规则' }}</button></td></tr>
+                  <tr v-if="tplExpandedIds['llm_' + tpl.id]" class="expand-row"><td colspan="5"><div class="tpl-rules-detail"><div v-if="!tpl.rules || !tpl.rules.length" class="empty-hint">暂无规则</div><div v-for="(rule, ri) in (tpl.rules || [])" :key="ri" class="tpl-rule-item"><span class="tpl-rule-name">{{ rule.name }}</span><span class="tpl-rule-action" :class="'action-' + rule.action">{{ rule.action }}</span><span class="tpl-rule-type">{{ rule.type || 'keyword' }}</span></div></div></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <ConfirmModal :visible="confirmVisible" :title="confirmTitle" :message="confirmMessage" :type="confirmType" @confirm="doConfirm" @cancel="confirmVisible = false" />
   </div>
 </template>
@@ -243,6 +377,9 @@ let confirmAction = null
 
 const tabs = [
   { key: 'config', label: '配置管理', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9c-.11-.65-.56-1.15-1.16-1.41l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06c.5.46 1.17.62 1.82.33A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09c.11.65.56 1.15 1.16 1.41.65.29 1.32.13 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06c-.46.5-.62 1.17-.33 1.82V9c.26.6.77 1.05 1.41 1.16H21a2 2 0 0 1 0 4h-.09c-.64.11-1.15.56-1.41 1.16z"/></svg>' },
+  { key: 'engines', label: '检测引擎', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>' },
+  { key: 'autoreview', label: 'AC 分级', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>' },
+  { key: 'templates', label: '行业模板', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
   { key: 'auth', label: '认证与安全', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
   { key: 'system', label: '系统信息', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>' },
   { key: 'llm', label: 'LLM 代理', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44"/></svg>' },
@@ -468,6 +605,8 @@ function fmtTime(ts) { if (!ts) return '--'; const d = new Date(ts); return isNa
 function formatSize(bytes) { const kb = Math.round((bytes||0)/1024); return kb > 1024 ? (kb/1024).toFixed(1)+' MB' : kb+' KB' }
 function doSaveToken() { const v = tokenValue.value.trim(); if (v) { saveToken(v); showToast('Token 已保存', 'success') } else showToast('请输入', 'error') }
 function doClearToken() { clearToken(); tokenValue.value = ''; showToast('已清除', 'success') }
+function confirmClearToken() { confirmTitle.value = '清除 Token'; confirmMessage.value = '确认清除 Bearer Token？清除后需重新输入。'; confirmType.value = 'danger'; confirmAction = () => doClearToken(); confirmVisible.value = true }
+function confirmClearDemo() { confirmTitle.value = '清除演示数据'; confirmMessage.value = '确认清除所有演示数据？此操作不可恢复。'; confirmType.value = 'danger'; confirmAction = () => clearDemo(); confirmVisible.value = true }
 async function refreshHealth() { try { const d = await api('/healthz'); updateHealth(d) } catch {} }
 async function loadBackups() { backupsLoading.value = true; try { const d = await api('/api/v1/backups'); backups.value = d.backups || [] } catch { backups.value = [] }; backupsLoading.value = false }
 async function createBackup() { try { await apiPost('/api/v1/backup', {}); showToast('备份成功', 'success'); loadBackups() } catch (e) { showToast('失败: ' + e.message, 'error') } }
@@ -475,6 +614,197 @@ async function seedDemo() { demoLoading.value = true; demoResult.value = null; t
 async function clearDemo() { demoLoading.value = true; demoResult.value = null; try { const d = await apiDelete('/api/v1/demo/clear'); demoResult.value = { ok: true, message: '✅ 清除 ' + d.deleted + ' 条' } } catch (e) { demoResult.value = { ok: false, message: '❌ ' + e.message } }; demoLoading.value = false }
 function confirmDeleteBackup(row) { confirmTitle.value = '删除备份'; confirmMessage.value = '确认删除 ' + row.name + '？'; confirmType.value = 'danger'; confirmAction = async () => { try { await api('/api/v1/backups/' + encodeURIComponent(row.name), { method: 'DELETE' }); showToast('已删除', 'success'); loadBackups() } catch (e) { showToast('失败: ' + e.message, 'error') } }; confirmVisible.value = true }
 function doConfirm() { confirmVisible.value = false; if (confirmAction) confirmAction() }
+
+// === Tab switching with lazy loading ===
+function switchTab(key) {
+  activeTab.value = key
+  if (key === 'engines' && !enginesLoaded.value) loadEngineSettings()
+  if (key === 'autoreview' && !arLoaded.value) loadAutoReview()
+  if (key === 'templates' && !tplLoaded.value) { loadInboundTemplates(); loadLLMTemplates() }
+}
+
+// === Tab 2: 检测引擎开关 ===
+const enginesLoading = ref(false)
+const enginesLoaded = ref(false)
+const engineSettings = reactive({})
+const engineList = [
+  { name: '入站检测', configPath: 'inbound_detect_enabled', desc: 'AC自动机+正则+PII三阶段检测' },
+  { name: '会话检测', configPath: 'session_detect_enabled', desc: '多轮会话上下文关联+风险累积' },
+  { name: 'LLM检测', configPath: 'llm_detect_enabled', desc: 'Pipeline内LLM调用检测' },
+  { name: '语义检测', configPath: 'semantic_detector.enabled', desc: '基于embedding的语义匹配' },
+  { name: '蜜罐引擎', configPath: 'honeypot', desc: '模式匹配→假响应+水印', alwaysOn: true },
+  { name: '深度蜜罐', configPath: 'honeypot_deep.enabled', desc: '多轮交互蜜罐+行为建模' },
+  { name: '奇点引擎', configPath: 'singularity.enabled', desc: '概率性诱饵投放+预算控制' },
+  { name: 'IFC引擎', configPath: 'ifc.enabled', desc: 'Bell-LaPadula双标签信息流控制' },
+  { name: 'IFC隔离', configPath: 'ifc.quarantine_enabled', desc: '违规隔离到安全上游' },
+  { name: 'IFC隐藏', configPath: 'ifc.hiding_enabled', desc: 'Selective Hide基于标签隐藏' },
+  { name: '路径策略', configPath: 'path_policy.enabled', desc: '条件匹配→allow/deny/audit' },
+  { name: '工具策略', configPath: 'tool_policy.enabled', desc: '工具级黑/白名单' },
+  { name: '计划编译器', configPath: 'plan_compiler.enabled', desc: '预编译合法tool_call序列' },
+  { name: '能力引擎', configPath: 'capability.enabled', desc: 'Sources并集+Labels交集+TrustScore' },
+  { name: '偏差检测', configPath: 'deviation.enabled', desc: '计划vs实际偏差+自动修复' },
+  { name: '反事实验证', configPath: 'counterfactual.enabled', desc: '置换输入验证因果关系' },
+  { name: '执行信封', configPath: 'envelope_enabled', desc: '密封决策证据链+Merkle树' },
+  { name: '演化引擎', configPath: 'evolution_enabled', desc: '红队结果→规则自动演化' },
+  { name: '自适应决策', configPath: 'adaptive_decision.enabled', desc: '多因素动态决策阈值' },
+  { name: '污点追踪', configPath: 'taint_tracker.enabled', desc: '全链路数据流标记' },
+  { name: '污点溯源', configPath: 'taint_reversal.enabled', desc: '反向追踪数据来源' },
+  { name: '事件总线', configPath: 'event_bus.enabled', desc: '引擎间事件发布/订阅' },
+]
+const engineOnCount = computed(() => engineList.filter(e => e.alwaysOn || engineSettings[e.configPath]).length)
+const engineOffCount = computed(() => engineList.length - engineOnCount.value)
+
+async function loadEngineSettings() {
+  enginesLoading.value = true
+  try {
+    const d = await api('/api/v1/config/settings')
+    for (const eng of engineList) {
+      if (eng.alwaysOn) continue
+      const parts = eng.configPath.split('.')
+      let val = d
+      for (const p of parts) { val = val?.[p] }
+      engineSettings[eng.configPath] = val !== false && val !== undefined
+    }
+    enginesLoaded.value = true
+  } catch (e) { showToast('加载引擎配置失败: ' + e.message, 'error') }
+  enginesLoading.value = false
+}
+
+async function toggleEngine(eng, event) {
+  const newVal = event.target.checked
+  eng.saving = true
+  try {
+    await apiPut('/api/v1/config/settings', { [eng.configPath]: newVal })
+    engineSettings[eng.configPath] = newVal
+    showToast(`${eng.name} 已${newVal ? '启用' : '关闭'}`, 'success')
+  } catch (e) {
+    event.target.checked = !newVal
+    showToast('切换失败: ' + e.message, 'error')
+  }
+  eng.saving = false
+}
+
+// === Tab 3: AC 智能分级 ===
+const arLoading = ref(false)
+const arLoaded = ref(false)
+const arSaving = ref(false)
+const arConfig = reactive({ enabled: false, window_sec: 300, fp_threshold: 5, downgrade_multiplier: 2, ttl_sec: 3600 })
+const arRules = ref([])
+const arStats = ref({})
+const arManualRules = ref([])
+const newReviewRule = ref('')
+
+async function loadAutoReview() {
+  arLoading.value = true
+  try {
+    const [status, stats] = await Promise.all([
+      api('/api/v1/auto-review/status'),
+      api('/api/v1/auto-review/stats').catch(() => ({}))
+    ])
+    if (status.config) {
+      arConfig.enabled = status.config.enabled !== false
+      arConfig.window_sec = status.config.window_sec || 300
+      arConfig.fp_threshold = status.config.fp_threshold || 5
+      arConfig.downgrade_multiplier = status.config.downgrade_multiplier || 2
+      arConfig.ttl_sec = status.config.ttl_sec || 3600
+    }
+    arRules.value = status.rules || []
+    arManualRules.value = status.manual_review_rules || []
+    arStats.value = stats || {}
+    arLoaded.value = true
+  } catch (e) { showToast('加载 AC 分级失败: ' + e.message, 'error') }
+  arLoading.value = false
+}
+
+async function saveAutoReviewConfig() {
+  arSaving.value = true
+  try {
+    await apiPost('/api/v1/auto-review/config', { enabled: arConfig.enabled, window_sec: arConfig.window_sec, fp_threshold: arConfig.fp_threshold, downgrade_multiplier: arConfig.downgrade_multiplier, ttl_sec: arConfig.ttl_sec })
+    showToast('AC 分级配置已保存', 'success')
+  } catch (e) { showToast('保存失败: ' + e.message, 'error') }
+  arSaving.value = false
+}
+
+function confirmReviewRule(r) {
+  confirmTitle.value = '手动降级'; confirmMessage.value = '确认降级规则 "' + r.name + '" ？降级后该规则动作将被调低。'
+  confirmType.value = 'warning'; confirmAction = () => doReviewRule(r); confirmVisible.value = true
+}
+async function doReviewRule(r) {
+  r.reviewing = true
+  try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(r.name) + '/review', {}); showToast('已降级 ' + r.name, 'success'); loadAutoReview() }
+  catch (e) { showToast('降级失败: ' + e.message, 'error') }
+  r.reviewing = false
+}
+
+function confirmRestoreRule(r) {
+  confirmTitle.value = '手动恢复'; confirmMessage.value = '确认恢复规则 "' + r.name + '" 到原始动作？'
+  confirmType.value = 'warning'; confirmAction = () => doRestoreRule(r); confirmVisible.value = true
+}
+async function doRestoreRule(r) {
+  r.restoring = true
+  try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(r.name) + '/restore', {}); showToast('已恢复 ' + r.name, 'success'); loadAutoReview() }
+  catch (e) { showToast('恢复失败: ' + e.message, 'error') }
+  r.restoring = false
+}
+
+async function addReviewRule() {
+  const name = newReviewRule.value.trim()
+  if (!name) return
+  try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(name) + '/review', { manual: true }); arManualRules.value.push(name); newReviewRule.value = ''; showToast('已添加', 'success') }
+  catch (e) { showToast('添加失败: ' + e.message, 'error') }
+}
+
+function confirmRemoveManualRule(rule, idx) {
+  confirmTitle.value = '移除规则'; confirmMessage.value = '确认移除人工 Review 规则 "' + rule + '"？'
+  confirmType.value = 'danger'; confirmAction = async () => {
+    try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(rule) + '/restore', {}); arManualRules.value.splice(idx, 1); showToast('已移除', 'success') }
+    catch (e) { showToast('移除失败: ' + e.message, 'error') }
+  }; confirmVisible.value = true
+}
+
+function formatTTL(sec) {
+  if (!sec || sec <= 0) return '--'
+  if (sec < 60) return sec + 's'
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's'
+  return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm'
+}
+
+// === Tab 4: 行业模板管理 ===
+const tplLoading = ref(false)
+const tplLoaded = ref(false)
+const inboundTemplates = ref([])
+const llmTemplates = ref([])
+const tplExpandedIds = reactive({})
+
+async function loadInboundTemplates() {
+  tplLoading.value = true
+  try { const d = await api('/api/v1/inbound-templates'); inboundTemplates.value = d.templates || d || []; tplLoaded.value = true }
+  catch (e) { showToast('加载入站模板失败: ' + e.message, 'error') }
+  tplLoading.value = false
+}
+
+async function loadLLMTemplates() {
+  try { const d = await api('/api/v1/llm/templates'); llmTemplates.value = d.templates || d || [] }
+  catch (e) { showToast('加载 LLM 模板失败: ' + e.message, 'error') }
+}
+
+async function toggleInboundTemplate(tpl, event) {
+  const newVal = event.target.checked
+  tpl.toggling = true
+  try { await apiPost('/api/v1/inbound-templates/' + tpl.id + '/enable', { enabled: newVal }); tpl.enabled = newVal; showToast(tpl.name + (newVal ? ' 已启用' : ' 已禁用'), 'success') }
+  catch (e) { event.target.checked = !newVal; showToast('切换失败: ' + e.message, 'error') }
+  tpl.toggling = false
+}
+
+async function toggleLLMTemplate(tpl, event) {
+  const newVal = event.target.checked
+  tpl.toggling = true
+  try { await apiPost('/api/v1/llm/templates/' + tpl.id + '/enable', { enabled: newVal }); tpl.enabled = newVal; showToast(tpl.name + (newVal ? ' 已启用' : ' 已禁用'), 'success') }
+  catch (e) { event.target.checked = !newVal; showToast('切换失败: ' + e.message, 'error') }
+  tpl.toggling = false
+}
+
+function toggleTplExpand(type, id) { const key = type + '_' + id; tplExpandedIds[key] = !tplExpandedIds[key] }
 
 function scrollToSection(section) {
   if (!section) return
@@ -590,10 +920,80 @@ onMounted(() => {
 .llm-advanced-toggle { display: flex; align-items: center; }
 @keyframes section-flash { 0%, 100% { background: transparent; } 50% { background: rgba(99,102,241,0.1); } }
 .section-highlight { animation: section-flash 0.5s ease 2; border-radius: var(--radius-sm); padding: 2px 4px; margin: -2px -4px; }
+/* 检测引擎 Tab */
+.engine-list { display: flex; flex-direction: column; gap: 8px; }
+.engine-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; }
+.engine-info { flex: 1; min-width: 0; }
+.engine-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.engine-status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-quaternary, #4a5568); flex-shrink: 0; transition: background .3s; }
+.engine-status-dot.on { background: var(--color-success, #22c55e); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+.engine-name { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+.engine-always-on-tag { font-size: 10px; padding: 1px 8px; border-radius: 9999px; background: rgba(34,197,94,0.12); color: var(--color-success); font-weight: 500; }
+.engine-desc { font-size: var(--text-xs); color: var(--text-tertiary); margin-bottom: 2px; padding-left: 18px; }
+.engine-path { padding-left: 18px; }
+.engine-path code { font-size: 11px; color: var(--text-quaternary, #64748b); font-family: var(--font-mono); }
+.engine-toggle { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.engine-locked { font-size: 18px; }
+.engine-saving { font-size: var(--text-xs); color: var(--color-warning); }
+.engine-stats { display: flex; gap: 12px; font-size: var(--text-xs); }
+.engine-stat-on { color: var(--color-success); font-weight: 600; }
+.engine-stat-off { color: var(--text-tertiary); }
+.toggle-switch-lg { width: 44px; height: 24px; }
+.toggle-switch-lg .toggle-slider:before { height: 18px; width: 18px; }
+.toggle-switch-lg input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+/* AC 分级 Tab */
+.ar-params { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 0; }
+.ar-param { display: flex; align-items: center; gap: 8px; }
+.ar-param-label { font-size: var(--text-sm); color: var(--text-secondary); min-width: 70px; }
+.ar-action-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: var(--text-xs); font-weight: 600; }
+.ar-action-block { background: rgba(239,68,68,0.12); color: #EF4444; }
+.ar-action-review { background: rgba(245,158,11,0.12); color: var(--color-warning); }
+.ar-action-log, .ar-action-warn { background: rgba(99,102,241,0.1); color: var(--color-primary); }
+.ar-action-allow { background: rgba(34,197,94,0.12); color: var(--color-success); }
+.ar-action-original { background: var(--bg-elevated); color: var(--text-tertiary); }
+.ar-reason { font-size: var(--text-xs); color: var(--text-tertiary); }
+.ar-ttl { font-size: var(--text-xs); color: var(--text-secondary); font-family: var(--font-mono); }
+.ar-ops { white-space: nowrap; }
+.ar-stats-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+.ar-stat-card { flex: 1; min-width: 120px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; text-align: center; }
+.ar-stat-value { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); }
+.ar-stat-label { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 4px; }
+.ar-manual-list { display: flex; flex-direction: column; gap: 0; }
+.ar-manual-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
+.ar-manual-item:last-child { border-bottom: none; }
+.ar-manual-item code { font-size: var(--text-sm); color: var(--color-primary); font-family: var(--font-mono); }
+.ar-add-rule { display: flex; gap: 8px; align-items: center; }
+.rule-name-code { font-size: var(--text-sm); color: var(--color-primary); font-family: var(--font-mono); }
+
+/* 行业模板 Tab */
+.tpl-category-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: var(--text-xs); background: rgba(99,102,241,0.1); color: var(--color-primary); }
+.tpl-rules-detail { padding: 8px 0; }
+.tpl-rule-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); }
+.tpl-rule-item:last-child { border-bottom: none; }
+.tpl-rule-name { font-weight: 600; color: var(--text-primary); min-width: 120px; }
+.tpl-rule-action { padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+.tpl-rule-action.action-block { background: rgba(239,68,68,0.12); color: #EF4444; }
+.tpl-rule-action.action-review { background: rgba(245,158,11,0.12); color: var(--color-warning); }
+.tpl-rule-action.action-log { background: rgba(99,102,241,0.1); color: var(--color-primary); }
+.tpl-rule-action.action-allow { background: rgba(34,197,94,0.12); color: var(--color-success); }
+.tpl-rule-type { color: var(--text-tertiary); }
+.tpl-rule-patterns { color: var(--text-quaternary, #64748b); font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+.expand-row td { background: var(--bg-elevated); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+.empty-hint { font-size: var(--text-sm); color: var(--text-tertiary); padding: 8px 0; }
+
+/* Responsive tab overflow */
+.settings-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.settings-tabs::-webkit-scrollbar { display: none; }
+
 @media (max-width: 640px) {
   .cfg-input-wide { width: 100%; }
   .config-group-nav { gap: 4px; }
   .config-group-btn { padding: 4px 10px; font-size: var(--text-xs); }
   .changes-bar-inner { flex-direction: column; align-items: flex-start; }
+  .engine-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .ar-params { flex-direction: column; }
+  .ar-stats-grid { flex-direction: column; }
+  .settings-tab { padding: var(--space-2) var(--space-3); font-size: var(--text-xs); }
 }
 </style>
