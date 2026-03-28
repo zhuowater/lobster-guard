@@ -88,6 +88,7 @@ type ManagementAPI struct {
 	llmAuditor      *LLMAuditor        // v9.0 LLM 审计器
 	llmRuleEngine   *LLMRuleEngine     // v10.0 LLM 规则引擎
 	llmProxy        *LLMProxy          // v10.1 LLM 代理引用（用于 canary token 操作）
+	gwManager       *GatewayWSManager  // v29.0 Gateway WSS 连接管理器
 	userProfileEng  *UserProfileEngine // v11.0 用户画像引擎
 	// v11.1 驾驶舱模式
 	healthScoreEng  *HealthScoreEngine
@@ -176,6 +177,7 @@ func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *R
 		inbound: inbound, channel: channel, metrics: metrics, ruleHits: ruleHits,
 		userCache: userCache, policyEng: policyEng, alertNotifier: alertNotifier,
 		wsProxy: wsProxy, store: store, shutdownMgr: shutdownMgr, realtime: realtime,
+		gwManager: NewGatewayWSManager(nil), // v29.0 Gateway WSS 连接管理器
 	}
 }
 
@@ -376,6 +378,21 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleGatewaySessionHistory(w, r)
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/skills") && method == "GET":
 		api.handleGatewaySkills(w, r)
+	// v29.0: WSS 连接状态 + 新 RPC 代理端点
+	case path == "/api/v1/gateway/wss/status" && method == "GET":
+		api.handleGatewayWSSStatus(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/models") && method == "GET":
+		api.handleGatewayModels(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/channels") && method == "GET":
+		api.handleGatewayChannels(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/nodes") && method == "GET":
+		api.handleGatewayNodes(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/logs") && method == "GET":
+		api.handleGatewayLogs(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/config") && method == "GET":
+		api.handleGatewayConfig(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/usage") && method == "GET":
+		api.handleGatewayUsage(w, r)
 	// v21.0: 上游 CRUD（带 ID 的路由必须在 health-check 之后匹配）
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/health-check") && method == "POST":
 		api.handleUpstreamHealthCheck(w, r)

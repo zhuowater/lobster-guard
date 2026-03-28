@@ -1,5 +1,5 @@
-// gateway_monitor.go — v22.1 上游 OpenClaw Gateway 监控中心
-// 通过 POST /tools/invoke 调用上游 OpenClaw Gateway 的官方 HTTP API
+// gateway_monitor.go — v29.0 上游 OpenClaw Gateway 监控中心
+// 优先通过持久化 WSS RPC 连接（复刻 Control UI 协议），fallback 到 tools/invoke
 package main
 
 import (
@@ -230,6 +230,30 @@ func isHTMLResponse(body []byte) bool {
 }
 
 // ============================================================
+// WSS Client 辅助方法（v29.0）
+// ============================================================
+
+// getWSClient 获取或创建上游的 WSS 客户端
+func (api *ManagementAPI) getWSClient(up *Upstream) *GatewayWSClient {
+	if api.gwManager == nil || up.GatewayToken == "" {
+		return nil
+	}
+	return api.gwManager.EnsureClient(up)
+}
+
+// rpcOrError 调用 WSS RPC，如果连接不可用返回 nil + error
+func (api *ManagementAPI) rpcCall(up *Upstream, method string, params interface{}) (map[string]interface{}, error) {
+	client := api.getWSClient(up)
+	if client == nil {
+		return nil, fmt.Errorf("WSS_NOT_AVAILABLE")
+	}
+	if !client.IsConnected() {
+		return nil, fmt.Errorf("WSS_NOT_CONNECTED")
+	}
+	return client.Request(method, params, 15*time.Second)
+}
+
+// ============================================================
 // API Handlers
 // ============================================================
 
@@ -310,7 +334,7 @@ func (api *ManagementAPI) handleGatewayTokenStatus(w http.ResponseWriter, r *htt
 }
 
 // handleGatewayPing GET /api/v1/upstreams/{id}/gateway/ping
-// 通过调用 session_status 验证连接 + 认证 + API 可用性
+// v29.0: 优先 WSS RPC health，fallback tools/invoke
 func (api *ManagementAPI) handleGatewayPing(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/ping")
 	if id == "" {
@@ -332,66 +356,72 @@ func (api *ManagementAPI) handleGatewayPing(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// 用 session_status 做健康检查 — 轻量且能验证认证
-	resp, latency, err := gatewayToolsInvoke(
+	// v29.0: 优先 WSS RPC
+	start := time.Now()
+	payload, err := api.rpcCall(up, "health", map[string]interface{}{})
+	latency := time.Since(start).Milliseconds()
+	if err == nil {
+		// WSS 连接正常
+		client := api.getWSClient(up)
+		result := map[string]interface{}{
+			"reachable":     true,
+			"authenticated": true,
+			"api_ok":        true,
+			"latency_ms":    latency,
+			"source":        "wss_rpc",
+			"wss_state":     "connected",
+		}
+		if client != nil {
+			result["wss_stats"] = client.Stats()
+		}
+		for k, v := range payload {
+			result[k] = v
+		}
+		jsonResponse(w, 200, result)
+		return
+	}
+
+	// Fallback: tools/invoke
+	resp, latency2, invokeErr := gatewayToolsInvoke(
 		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
 		toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
 	)
-
-	if err != nil {
-		errStr := err.Error()
+	if invokeErr != nil {
+		errStr := invokeErr.Error()
 		if errStr == "AUTH_FAILED" {
 			jsonResponse(w, 200, map[string]interface{}{
-				"reachable":     true,
-				"authenticated": false,
-				"latency_ms":    latency,
-				"error":         "authentication_failed",
-				"message":       "Gateway Token 无效或已过期",
+				"reachable": true, "authenticated": false,
+				"latency_ms": latency2, "error": "authentication_failed",
+				"message": "Gateway Token 无效或已过期", "source": "tools_invoke_fallback",
 			})
 			return
 		}
 		jsonResponse(w, 200, map[string]interface{}{
-			"reachable":     false,
-			"authenticated": false,
-			"latency_ms":    latency,
-			"error":         "unreachable",
-			"message":       fmt.Sprintf("无法连接到 Gateway: %v", err),
+			"reachable": false, "authenticated": false,
+			"latency_ms": latency2, "error": "unreachable",
+			"message": fmt.Sprintf("WSS: %v; HTTP fallback: %v", err, invokeErr), "source": "tools_invoke_fallback",
 		})
 		return
 	}
-
 	if !resp.OK {
 		errMsg := "API 返回失败"
-		if resp.Error != nil {
-			errMsg = resp.Error.Message
-		}
+		if resp.Error != nil { errMsg = resp.Error.Message }
 		jsonResponse(w, 200, map[string]interface{}{
-			"reachable":     true,
-			"authenticated": true,
-			"api_ok":        false,
-			"latency_ms":    latency,
-			"error":         "api_error",
-			"message":       errMsg,
+			"reachable": true, "authenticated": true, "api_ok": false,
+			"latency_ms": latency2, "error": "api_error", "message": errMsg, "source": "tools_invoke_fallback",
 		})
 		return
 	}
-
-	// 提取状态文本
 	statusText := ""
-	if resp.Result != nil && len(resp.Result.Content) > 0 {
-		statusText = resp.Result.Content[0].Text
-	}
-
+	if resp.Result != nil && len(resp.Result.Content) > 0 { statusText = resp.Result.Content[0].Text }
 	jsonResponse(w, 200, map[string]interface{}{
-		"reachable":     true,
-		"authenticated": true,
-		"api_ok":        true,
-		"latency_ms":    latency,
-		"status_text":   statusText,
+		"reachable": true, "authenticated": true, "api_ok": true,
+		"latency_ms": latency2, "status_text": statusText, "source": "tools_invoke_fallback",
 	})
 }
 
 // handleGatewaySessions GET /api/v1/upstreams/{id}/gateway/sessions
+// v29.0: 优先持久化 WSS RPC，fallback tools/invoke
 func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/sessions")
 	if id == "" {
@@ -405,17 +435,20 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 优先复刻 OpenClaw Control UI：走 Gateway RPC sessions.list
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
-			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token 或 openclaw_config_path",
+			"error": "gateway_token_not_configured", "message": "请先配置 Gateway Token",
 		})
 		return
 	}
 
-	sessions, _, err := gatewaySessionsList(up.Address, up.Port, up.GatewayToken)
+	// v29.0: 优先 WSS RPC sessions.list
+	payload, err := api.rpcCall(up, "sessions.list", map[string]interface{}{
+		"includeGlobal": true, "includeUnknown": true, "limit": 500,
+	})
 	if err == nil {
+		raw, _ := payload["sessions"].([]interface{})
+		sessions := interfaceSliceToMaps(raw)
 		byAgent := make(map[string]int)
 		for _, s := range sessions {
 			if agentID, ok := s["agentId"].(string); ok && agentID != "" {
@@ -423,46 +456,38 @@ func (api *ManagementAPI) handleGatewaySessions(w http.ResponseWriter, r *http.R
 			}
 		}
 		jsonResponse(w, 200, map[string]interface{}{
-			"sessions": sessions,
-			"count":    len(sessions),
-			"by_agent": byAgent,
-			"source":   "gateway_rpc",
+			"sessions": sessions, "count": len(sessions),
+			"by_agent": byAgent, "source": "wss_rpc",
 		})
 		return
 	}
 
-	// Fallback: tools/invoke sessions_list（兼容旧版上游）
+	// Fallback: tools/invoke
 	resp, _, invokeErr := gatewayToolsInvoke(
 		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
 		toolsInvokeRequest{Tool: "sessions_list", Args: map[string]interface{}{}},
 	)
 	if invokeErr != nil {
-		errStr := invokeErr.Error()
-		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 502, map[string]interface{}{"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期"})
-			return
-		}
-		jsonResponse(w, 502, map[string]interface{}{"error": "unreachable", "message": fmt.Sprintf("Gateway RPC失败: %v; tools/invoke fallback也失败: %v", err, invokeErr)})
+		jsonResponse(w, 502, map[string]interface{}{
+			"error": "unreachable", "message": fmt.Sprintf("WSS: %v; fallback: %v", err, invokeErr),
+		})
 		return
 	}
 	if !resp.OK {
 		errMsg := "sessions_list 调用失败"
-		if resp.Error != nil {
-			errMsg = resp.Error.Message
-		}
+		if resp.Error != nil { errMsg = resp.Error.Message }
 		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
-	sessions = extractSessionsFromResponse(resp)
+	sessions := extractSessionsFromResponse(resp)
 	jsonResponse(w, 200, map[string]interface{}{
-		"sessions": sessions,
-		"count":    len(sessions),
-		"source":   "tools_invoke",
-		"warning":  "Gateway RPC sessions.list 不可用，已降级到 tools/invoke sessions_list；结果可能受 visibility 限制。",
+		"sessions": sessions, "count": len(sessions),
+		"source": "tools_invoke_fallback", "warning": "WSS 不可用，已降级到 tools/invoke",
 	})
 }
 
 // handleGatewayCron GET /api/v1/upstreams/{id}/gateway/cron
+// v29.0: 优先 WSS RPC cron.list
 func (api *ManagementAPI) handleGatewayCron(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/cron")
 	if id == "" {
@@ -478,49 +503,47 @@ func (api *ManagementAPI) handleGatewayCron(w http.ResponseWriter, r *http.Reque
 
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
-			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token",
+			"error": "gateway_token_not_configured", "message": "请先配置 Gateway Token",
 		})
 		return
 	}
 
-	resp, _, err := gatewayToolsInvoke(
+	// v29.0: 优先 WSS RPC
+	payload, err := api.rpcCall(up, "cron.list", map[string]interface{}{"includeDisabled": true})
+	if err == nil {
+		raw, _ := payload["jobs"].([]interface{})
+		jobs := interfaceSliceToMaps(raw)
+		jsonResponse(w, 200, map[string]interface{}{
+			"jobs": jobs, "count": len(jobs), "source": "wss_rpc",
+		})
+		return
+	}
+
+	// Fallback: tools/invoke
+	resp, _, invokeErr := gatewayToolsInvoke(
 		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
 		toolsInvokeRequest{Tool: "cron", Action: "list", Args: map[string]interface{}{}},
 	)
-
-	if err != nil {
-		errStr := err.Error()
-		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 502, map[string]interface{}{
-				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
-			})
-			return
-		}
+	if invokeErr != nil {
 		jsonResponse(w, 502, map[string]interface{}{
-			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+			"error": "unreachable", "message": fmt.Sprintf("WSS: %v; fallback: %v", err, invokeErr),
 		})
 		return
 	}
-
 	if !resp.OK {
 		errMsg := "cron list 调用失败"
-		if resp.Error != nil {
-			errMsg = resp.Error.Message
-		}
+		if resp.Error != nil { errMsg = resp.Error.Message }
 		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
-
 	jobs := extractCronJobsFromResponse(resp)
-
 	jsonResponse(w, 200, map[string]interface{}{
-		"jobs":  jobs,
-		"count": len(jobs),
+		"jobs": jobs, "count": len(jobs), "source": "tools_invoke_fallback",
 	})
 }
 
 // handleGatewayStatus GET /api/v1/upstreams/{id}/gateway/status
+// v29.0: 优先 WSS RPC status + health 聚合
 func (api *ManagementAPI) handleGatewayStatus(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/status")
 	if id == "" {
@@ -536,62 +559,71 @@ func (api *ManagementAPI) handleGatewayStatus(w http.ResponseWriter, r *http.Req
 
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
-			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token",
+			"error": "gateway_token_not_configured", "message": "请先配置 Gateway Token",
 		})
 		return
 	}
 
+	// v29.0: 优先 WSS RPC — 并发获取 status + health
+	client := api.getWSClient(up)
+	if client != nil && client.IsConnected() {
+		var (
+			statusPayload, healthPayload map[string]interface{}
+			statusErr, healthErr         error
+			wg                           sync.WaitGroup
+		)
+		wg.Add(2)
+		start := time.Now()
+		go func() { defer wg.Done(); statusPayload, statusErr = client.GWStatus() }()
+		go func() { defer wg.Done(); healthPayload, healthErr = client.GWHealth() }()
+		wg.Wait()
+		latency := time.Since(start).Milliseconds()
+
+		if statusErr == nil {
+			result := map[string]interface{}{
+				"latency_ms": latency, "source": "wss_rpc", "wss_state": "connected",
+			}
+			for k, v := range statusPayload { result["status_"+k] = v }
+			if healthErr == nil {
+				for k, v := range healthPayload { result["health_"+k] = v }
+			}
+			result["wss_stats"] = client.Stats()
+			jsonResponse(w, 200, result)
+			return
+		}
+	}
+
+	// Fallback: tools/invoke session_status
 	resp, latency, err := gatewayToolsInvoke(
 		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
 		toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
 	)
-
 	if err != nil {
 		errStr := err.Error()
 		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 502, map[string]interface{}{
-				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
-			})
+			jsonResponse(w, 502, map[string]interface{}{"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期"})
 			return
 		}
-		jsonResponse(w, 502, map[string]interface{}{
-			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
-		})
+		jsonResponse(w, 502, map[string]interface{}{"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err)})
 		return
 	}
-
 	if !resp.OK {
 		errMsg := "session_status 调用失败"
-		if resp.Error != nil {
-			errMsg = resp.Error.Message
-		}
+		if resp.Error != nil { errMsg = resp.Error.Message }
 		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
-
-	// 提取状态文本和 details
 	statusText := ""
-	if resp.Result != nil && len(resp.Result.Content) > 0 {
-		statusText = resp.Result.Content[0].Text
-	}
-
-	result := map[string]interface{}{
-		"status_text": statusText,
-		"latency_ms":  latency,
-	}
-
-	// 合并 details 字段到结果
+	if resp.Result != nil && len(resp.Result.Content) > 0 { statusText = resp.Result.Content[0].Text }
+	result := map[string]interface{}{"status_text": statusText, "latency_ms": latency, "source": "tools_invoke_fallback"}
 	if resp.Result != nil && resp.Result.Details != nil {
-		for k, v := range resp.Result.Details {
-			result[k] = v
-		}
+		for k, v := range resp.Result.Details { result[k] = v }
 	}
-
 	jsonResponse(w, 200, result)
 }
 
 // handleGatewayAgents GET /api/v1/upstreams/{id}/gateway/agents
+// v29.0: 优先直接扫描 > WSS RPC agents.list > tools/invoke
 func (api *ManagementAPI) handleGatewayAgents(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/agents")
 	if id == "" {
@@ -605,94 +637,86 @@ func (api *ManagementAPI) handleGatewayAgents(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// 优先使用直接扫描
+	// 优先使用直接扫描（同机部署场景）
 	if up.OpenClawConfigPath != "" {
 		scan := directScanOpenClaw(up.OpenClawConfigPath)
 		agents, _ := directScanToOverviewData(scan)
-
-		result := map[string]interface{}{
-			"agents": agents,
-			"count":  len(agents),
-			"source": "direct_scan",
-		}
-		if scan.Error != "" {
-			result["warning"] = scan.Error
-		}
+		result := map[string]interface{}{"agents": agents, "count": len(agents), "source": "direct_scan"}
+		if scan.Error != "" { result["warning"] = scan.Error }
 		jsonResponse(w, 200, result)
 		return
 	}
 
-	// Fallback: tools/invoke（agents_list 返回的是 spawn 权限列表，不是完整 agent 列表）
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
-			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token 或 openclaw_config_path",
+			"error": "gateway_token_not_configured", "message": "请先配置 Gateway Token",
 		})
 		return
 	}
 
-	resp, _, err := gatewayToolsInvoke(
+	// v29.0: WSS RPC agents.list（完整 agent 列表）
+	payload, err := api.rpcCall(up, "agents.list", map[string]interface{}{})
+	if err == nil {
+		raw, _ := payload["agents"].([]interface{})
+		agents := interfaceSliceToMaps(raw)
+		jsonResponse(w, 200, map[string]interface{}{
+			"agents": agents, "count": len(agents), "source": "wss_rpc",
+		})
+		return
+	}
+
+	// Fallback: tools/invoke
+	resp, _, invokeErr := gatewayToolsInvoke(
 		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
 		toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
 	)
-
-	if err != nil {
-		errStr := err.Error()
-		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 502, map[string]interface{}{
-				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
-			})
-			return
-		}
+	if invokeErr != nil {
 		jsonResponse(w, 502, map[string]interface{}{
-			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+			"error": "unreachable", "message": fmt.Sprintf("WSS: %v; fallback: %v", err, invokeErr),
 		})
 		return
 	}
-
 	if !resp.OK {
 		errMsg := "agents_list 调用失败"
-		if resp.Error != nil {
-			errMsg = resp.Error.Message
-		}
+		if resp.Error != nil { errMsg = resp.Error.Message }
 		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
-
 	agents := extractAgentsFromResponse(resp)
-
 	jsonResponse(w, 200, map[string]interface{}{
-		"agents":  agents,
-		"count":   len(agents),
-		"source":  "tools_invoke",
-		"warning": "agents_list 返回的是当前 session 的 spawn 权限列表，不是完整 agent 注册列表。配置 openclaw_config_path 可获取完整列表。",
+		"agents": agents, "count": len(agents), "source": "tools_invoke_fallback",
+		"warning": "agents_list 返回的是 spawn 权限列表，不是完整 agent 列表",
 	})
 }
 
+// gwOverviewResult v29.0 overview 结果结构体（包级别，供多方法共享）
+type gwOverviewResult struct {
+	ID              string                   `json:"id"`
+	Address         string                   `json:"address"`
+	Port            int                      `json:"port"`
+	Healthy         bool                     `json:"healthy"`
+	TokenConfigured bool                     `json:"token_configured"`
+	GatewayStatus   string                   `json:"gateway_status"`
+	WSSState        string                   `json:"wss_state,omitempty"`
+	Source          string                   `json:"source,omitempty"`
+	LatencyMs       int64                    `json:"latency_ms"`
+	Sessions        []map[string]interface{} `json:"sessions,omitempty"`
+	SessionCount    int                      `json:"session_count"`
+	ActiveSessions  int                      `json:"active_sessions"`
+	CronCount       int                      `json:"cron_count"`
+	Agents          []map[string]interface{} `json:"agents,omitempty"`
+	AgentCount      int                      `json:"agent_count"`
+	StatusText      string                   `json:"status_text,omitempty"`
+	Error           string                   `json:"error,omitempty"`
+}
+
 // handleGatewayOverview GET /api/v1/upstreams/gateway/overview
+// v29.0: 全面改用持久化 WSS RPC，fallback tools/invoke
 func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.Request) {
 	upstreams := api.pool.ListUpstreams()
 
-	type upstreamResult struct {
-		ID              string                   `json:"id"`
-		Address         string                   `json:"address"`
-		Port            int                      `json:"port"`
-		Healthy         bool                     `json:"healthy"`
-		TokenConfigured bool                     `json:"token_configured"`
-		GatewayStatus   string                   `json:"gateway_status"`
-		LatencyMs       int64                    `json:"latency_ms"`
-		Sessions        []map[string]interface{} `json:"sessions,omitempty"`
-		SessionCount    int                      `json:"session_count"`
-		ActiveSessions  int                      `json:"active_sessions"`
-		CronCount       int                      `json:"cron_count"`
-		Agents          []map[string]interface{} `json:"agents,omitempty"`
-		AgentCount      int                      `json:"agent_count"`
-		StatusText      string                   `json:"status_text,omitempty"`
-		Error           string                   `json:"error,omitempty"`
-	}
-
 	var (
-		results []upstreamResult
+		results []gwOverviewResult
 		mu      sync.Mutex
 		wg      sync.WaitGroup
 	)
@@ -701,11 +725,8 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 		wg.Add(1)
 		go func(u Upstream) {
 			defer wg.Done()
-			result := upstreamResult{
-				ID:              u.ID,
-				Address:         u.Address,
-				Port:            u.Port,
-				Healthy:         u.Healthy,
+			result := gwOverviewResult{
+				ID: u.ID, Address: u.Address, Port: u.Port, Healthy: u.Healthy,
 				TokenConfigured: u.GatewayToken != "",
 			}
 
@@ -717,148 +738,25 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 				return
 			}
 
-			// 远程监控优先走接口：sessions 用 Gateway RPC，status/cron/agents 先保留 tools/invoke
-			var (
-				sessResp    *toolsInvokeResponse
-				statusResp  *toolsInvokeResponse
-				agentsResp  *toolsInvokeResponse
-				cronResp    *toolsInvokeResponse
-				rpcSessions []map[string]interface{}
-				sessErr     error
-				statusErr   error
-				latency     int64
-				innerWg     sync.WaitGroup
-			)
-
-			innerWg.Add(4)
-
-			// sessions.list（Gateway RPC，复刻 Control UI）
-			go func() {
-				defer innerWg.Done()
-				rpcSessions, _, sessErr = gatewaySessionsList(u.Address, u.Port, u.GatewayToken)
-			}()
-
-			// session_status (ping)
-			go func() {
-				defer innerWg.Done()
-				statusResp, latency, statusErr = gatewayToolsInvoke(
-					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-					toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
-				)
-			}()
-
-			// agents_list（暂时保留 tools/invoke，后续再补 RPC/更准的控制面来源）
-			go func() {
-				defer innerWg.Done()
-				agentsResp, _, _ = gatewayToolsInvoke(
-					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-					toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
-				)
-			}()
-
-			// cron list
-			go func() {
-				defer innerWg.Done()
-				cronResp, _, _ = gatewayToolsInvoke(
-					u.Address, u.Port, u.PathPrefix, u.GatewayToken,
-					toolsInvokeRequest{Tool: "cron", Action: "list", Args: map[string]interface{}{}},
-				)
-			}()
-
-			innerWg.Wait()
-
-			result.LatencyMs = latency
-
-			// 判断连接状态
-			if statusErr != nil {
-				errStr := statusErr.Error()
-				if errStr == "AUTH_FAILED" {
-					result.GatewayStatus = "auth_failed"
-				} else {
-					result.GatewayStatus = "unreachable"
-					result.Error = errStr
-				}
-				// 如果 status 不通但 sessions.list 成功，仍返回 partial 结果
-				if sessErr == nil && len(rpcSessions) > 0 {
-					result.Sessions = rpcSessions
-					result.SessionCount = len(rpcSessions)
-					result.GatewayStatus = "partial"
-				}
+			// v29.0: 优先 WSS RPC 持久连接
+			client := api.getWSClient(&u)
+			if client != nil && client.IsConnected() {
+				result.WSSState = "connected"
+				result.Source = "wss_rpc"
+				api.overviewViaWSS(client, &u, &result)
 				mu.Lock()
 				results = append(results, result)
 				mu.Unlock()
 				return
 			}
 
-			if statusResp != nil && !statusResp.OK {
-				result.GatewayStatus = "error"
-				if statusResp.Error != nil {
-					result.Error = statusResp.Error.Message
-				}
-				mu.Lock()
-				results = append(results, result)
-				mu.Unlock()
-				return
+			// Fallback: tools/invoke（WSS 未就绪时）
+			result.WSSState = "disconnected"
+			if client != nil {
+				result.WSSState = client.State()
 			}
-
-			// 连接成功
-			result.GatewayStatus = "connected"
-
-			// 提取 status_text
-			if statusResp != nil && statusResp.Result != nil && len(statusResp.Result.Content) > 0 {
-				result.StatusText = statusResp.Result.Content[0].Text
-			}
-
-			// 提取 sessions 和 agents
-			if sessErr == nil && len(rpcSessions) > 0 {
-				result.Sessions = rpcSessions
-				result.SessionCount = len(rpcSessions)
-				now := time.Now().UnixMilli()
-				for _, s := range rpcSessions {
-					if state, ok := s["state"].(string); ok {
-						if isActiveSessionState(state) {
-							result.ActiveSessions++
-							continue
-						}
-					}
-					if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
-						if now-updatedAt < 30*60*1000 {
-							result.ActiveSessions++
-						}
-					}
-				}
-			} else if sessResp != nil && sessResp.OK {
-				// Fallback: tools/invoke sessions_list
-				sessions := extractSessionsFromResponse(sessResp)
-				result.Sessions = sessions
-				result.SessionCount = len(sessions)
-				now := time.Now().UnixMilli()
-				for _, s := range sessions {
-					if state, ok := s["state"].(string); ok {
-						if isActiveSessionState(state) {
-							result.ActiveSessions++
-							continue
-						}
-					}
-					if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
-						if now-updatedAt < 30*60*1000 {
-							result.ActiveSessions++
-						}
-					}
-				}
-			}
-			if agentsResp != nil && agentsResp.OK {
-				agents := extractAgentsFromResponse(agentsResp)
-				result.Agents = agents
-				result.AgentCount = len(agents)
-			}
-
-			// 提取 cron
-			if cronResp != nil && cronResp.OK {
-				jobs := extractCronJobsFromResponse(cronResp)
-				result.CronCount = len(jobs)
-			}
-
+			result.Source = "tools_invoke_fallback"
+			api.overviewViaToolsInvoke(&u, &result)
 			mu.Lock()
 			results = append(results, result)
 			mu.Unlock()
@@ -869,26 +767,12 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 
 	// 聚合统计
 	totalUpstreams := len(results)
-	onlineCount := 0
-	offlineCount := 0
-	tokenConfigured := 0
-	tokenNotConfigured := 0
-	totalSessions := 0
-	activeSessions := 0
-	totalAgents := 0
-	totalCronJobs := 0
+	var onlineCount, offlineCount, tokenConfigured, tokenNotConfigured int
+	var totalSessions, activeSessions, totalAgents, totalCronJobs int
 
 	for _, r := range results {
-		if r.GatewayStatus == "connected" {
-			onlineCount++
-		} else {
-			offlineCount++
-		}
-		if r.TokenConfigured {
-			tokenConfigured++
-		} else {
-			tokenNotConfigured++
-		}
+		if r.GatewayStatus == "connected" { onlineCount++ } else { offlineCount++ }
+		if r.TokenConfigured { tokenConfigured++ } else { tokenNotConfigured++ }
 		totalSessions += r.SessionCount
 		activeSessions += r.ActiveSessions
 		totalAgents += r.AgentCount
@@ -896,17 +780,202 @@ func (api *ManagementAPI) handleGatewayOverview(w http.ResponseWriter, r *http.R
 	}
 
 	jsonResponse(w, 200, map[string]interface{}{
-		"upstreams":            results,
-		"total":                totalUpstreams,
-		"online":               onlineCount,
-		"offline":              offlineCount,
-		"token_configured":     tokenConfigured,
-		"token_not_configured": tokenNotConfigured,
-		"total_sessions":       totalSessions,
-		"active_sessions":      activeSessions,
-		"total_agents":         totalAgents,
-		"total_cron_jobs":      totalCronJobs,
+		"upstreams": results, "total": totalUpstreams,
+		"online": onlineCount, "offline": offlineCount,
+		"token_configured": tokenConfigured, "token_not_configured": tokenNotConfigured,
+		"total_sessions": totalSessions, "active_sessions": activeSessions,
+		"total_agents": totalAgents, "total_cron_jobs": totalCronJobs,
 	})
+}
+
+// overviewViaWSS 通过持久化 WSS 连接并发获取 overview 数据
+func (api *ManagementAPI) overviewViaWSS(client *GatewayWSClient, u *Upstream, result *gwOverviewResult) {
+	var (
+		statusPayload, sessPayload, agentsPayload, cronPayload map[string]interface{}
+		statusErr, sessErr, agentsErr, cronErr                  error
+		innerWg                                                 sync.WaitGroup
+	)
+
+	innerWg.Add(4)
+	start := time.Now()
+
+	go func() {
+		defer innerWg.Done()
+		statusPayload, statusErr = client.GWStatus()
+	}()
+	go func() {
+		defer innerWg.Done()
+		sessPayload, sessErr = client.GWSessionsList(nil)
+	}()
+	go func() {
+		defer innerWg.Done()
+		agentsPayload, agentsErr = client.GWAgentsList()
+	}()
+	go func() {
+		defer innerWg.Done()
+		cronPayload, cronErr = client.GWCronList()
+	}()
+
+	innerWg.Wait()
+	result.LatencyMs = time.Since(start).Milliseconds()
+
+	// Status
+	if statusErr != nil {
+		result.GatewayStatus = "error"
+		result.Error = statusErr.Error()
+		// 仍尝试填充 sessions 数据
+	} else {
+		result.GatewayStatus = "connected"
+		// 提取 status text（如有）
+		if txt, ok := statusPayload["statusText"].(string); ok {
+			result.StatusText = txt
+		}
+	}
+
+	// Sessions
+	if sessErr == nil && sessPayload != nil {
+		raw, _ := sessPayload["sessions"].([]interface{})
+		sessions := interfaceSliceToMaps(raw)
+		result.Sessions = sessions
+		result.SessionCount = len(sessions)
+		now := time.Now().UnixMilli()
+		for _, s := range sessions {
+			if state, ok := s["state"].(string); ok && isActiveSessionState(state) {
+				result.ActiveSessions++
+				continue
+			}
+			if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
+				if now-updatedAt < 30*60*1000 { result.ActiveSessions++ }
+			}
+		}
+	}
+
+	// Agents（直接扫描优先，WSS RPC 次之）
+	if u.OpenClawConfigPath != "" {
+		scan := directScanOpenClaw(u.OpenClawConfigPath)
+		agents, _ := directScanToOverviewData(scan)
+		result.Agents = agents
+		result.AgentCount = len(agents)
+	} else if agentsErr == nil && agentsPayload != nil {
+		raw, _ := agentsPayload["agents"].([]interface{})
+		agents := interfaceSliceToMaps(raw)
+		result.Agents = agents
+		result.AgentCount = len(agents)
+	}
+
+	// Cron
+	if cronErr == nil && cronPayload != nil {
+		raw, _ := cronPayload["jobs"].([]interface{})
+		result.CronCount = len(raw)
+	}
+}
+
+// overviewViaToolsInvoke fallback: 走 tools/invoke（WSS 未就绪时）
+func (api *ManagementAPI) overviewViaToolsInvoke(u *Upstream, result *gwOverviewResult) {
+	var (
+		statusResp *toolsInvokeResponse
+		statusErr  error
+		latency    int64
+		innerWg    sync.WaitGroup
+	)
+
+	var sessPayload map[string]interface{}
+	var sessErr error
+	var agentsResp, cronResp *toolsInvokeResponse
+
+	innerWg.Add(4)
+
+	go func() {
+		defer innerWg.Done()
+		statusResp, latency, statusErr = gatewayToolsInvoke(
+			u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+			toolsInvokeRequest{Tool: "session_status", Args: map[string]interface{}{}},
+		)
+	}()
+	go func() {
+		defer innerWg.Done()
+		// 尝试一次性 WSS RPC sessions.list（旧方式）
+		var rpcSess []map[string]interface{}
+		rpcSess, _, sessErr = gatewaySessionsList(u.Address, u.Port, u.GatewayToken)
+		if sessErr == nil {
+			sessPayload = map[string]interface{}{"sessions": func() []interface{} {
+				out := make([]interface{}, len(rpcSess))
+				for i, s := range rpcSess { out[i] = s }
+				return out
+			}()}
+		}
+	}()
+	go func() {
+		defer innerWg.Done()
+		agentsResp, _, _ = gatewayToolsInvoke(
+			u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+			toolsInvokeRequest{Tool: "agents_list", Args: map[string]interface{}{}},
+		)
+	}()
+	go func() {
+		defer innerWg.Done()
+		cronResp, _, _ = gatewayToolsInvoke(
+			u.Address, u.Port, u.PathPrefix, u.GatewayToken,
+			toolsInvokeRequest{Tool: "cron", Action: "list", Args: map[string]interface{}{}},
+		)
+	}()
+
+	innerWg.Wait()
+	result.LatencyMs = latency
+
+	if statusErr != nil {
+		errStr := statusErr.Error()
+		if errStr == "AUTH_FAILED" {
+			result.GatewayStatus = "auth_failed"
+		} else {
+			result.GatewayStatus = "unreachable"
+			result.Error = errStr
+		}
+	} else if statusResp != nil && !statusResp.OK {
+		result.GatewayStatus = "error"
+		if statusResp.Error != nil { result.Error = statusResp.Error.Message }
+	} else {
+		result.GatewayStatus = "connected"
+		if statusResp != nil && statusResp.Result != nil && len(statusResp.Result.Content) > 0 {
+			result.StatusText = statusResp.Result.Content[0].Text
+		}
+	}
+
+	// Sessions
+	if sessErr == nil && sessPayload != nil {
+		raw, _ := sessPayload["sessions"].([]interface{})
+		sessions := interfaceSliceToMaps(raw)
+		result.Sessions = sessions
+		result.SessionCount = len(sessions)
+		now := time.Now().UnixMilli()
+		for _, s := range sessions {
+			if state, ok := s["state"].(string); ok && isActiveSessionState(state) {
+				result.ActiveSessions++
+				continue
+			}
+			if updatedAt := extractTimestampMs(s, "updatedAt", "updated_at"); updatedAt > 0 {
+				if now-updatedAt < 30*60*1000 { result.ActiveSessions++ }
+			}
+		}
+	}
+
+	// Agents
+	if u.OpenClawConfigPath != "" {
+		scan := directScanOpenClaw(u.OpenClawConfigPath)
+		agents, _ := directScanToOverviewData(scan)
+		result.Agents = agents
+		result.AgentCount = len(agents)
+	} else if agentsResp != nil && agentsResp.OK {
+		agents := extractAgentsFromResponse(agentsResp)
+		result.Agents = agents
+		result.AgentCount = len(agents)
+	}
+
+	// Cron
+	if cronResp != nil && cronResp.OK {
+		jobs := extractCronJobsFromResponse(cronResp)
+		result.CronCount = len(jobs)
+	}
 }
 
 // ============================================================
@@ -1070,6 +1139,7 @@ func extractUpstreamIDFromGatewayPath(urlPath, suffix string) string {
 // ============================================================
 
 // handleGatewaySessionHistory GET /api/v1/upstreams/{id}/gateway/session-history?sessionKey=xxx&limit=20
+// v29.0: 优先 WSS RPC chat.history
 func (api *ManagementAPI) handleGatewaySessionHistory(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/session-history")
 	if id == "" {
@@ -1085,8 +1155,7 @@ func (api *ManagementAPI) handleGatewaySessionHistory(w http.ResponseWriter, r *
 
 	if up.GatewayToken == "" {
 		jsonResponse(w, 200, map[string]interface{}{
-			"error":   "gateway_token_not_configured",
-			"message": "请先配置 Gateway Token",
+			"error": "gateway_token_not_configured", "message": "请先配置 Gateway Token",
 		})
 		return
 	}
@@ -1099,58 +1168,46 @@ func (api *ManagementAPI) handleGatewaySessionHistory(w http.ResponseWriter, r *
 
 	limit := 30
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := fmt.Sscanf(l, "%d", &limit); err != nil || n != 1 {
-			limit = 30
-		}
+		if n, err := fmt.Sscanf(l, "%d", &limit); err != nil || n != 1 { limit = 30 }
 	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	if limit < 1 { limit = 1 }
+	if limit > 100 { limit = 100 }
 
-	resp, _, err := gatewayToolsInvoke(
-		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
-		toolsInvokeRequest{
-			Tool: "sessions_history",
-			Args: map[string]interface{}{
-				"sessionKey":   sessionKey,
-				"limit":        limit,
-				"includeTools": false,
-			},
-		},
-	)
-
-	if err != nil {
-		errStr := err.Error()
-		if errStr == "AUTH_FAILED" {
-			jsonResponse(w, 502, map[string]interface{}{
-				"error": "upstream_auth_failed", "message": "Gateway Token 无效或已过期",
-			})
-			return
-		}
-		jsonResponse(w, 502, map[string]interface{}{
-			"error": "unreachable", "message": fmt.Sprintf("无法连接到 Gateway: %v", err),
+	// v29.0: 优先 WSS RPC chat.history
+	payload, err := api.rpcCall(up, "chat.history", map[string]interface{}{
+		"sessionKey": sessionKey, "limit": limit,
+	})
+	if err == nil {
+		raw, _ := payload["messages"].([]interface{})
+		messages := interfaceSliceToMaps(raw)
+		jsonResponse(w, 200, map[string]interface{}{
+			"messages": messages, "count": len(messages), "source": "wss_rpc",
 		})
 		return
 	}
 
+	// Fallback: tools/invoke
+	resp, _, invokeErr := gatewayToolsInvoke(
+		up.Address, up.Port, up.PathPrefix, up.GatewayToken,
+		toolsInvokeRequest{Tool: "sessions_history", Args: map[string]interface{}{
+			"sessionKey": sessionKey, "limit": limit, "includeTools": false,
+		}},
+	)
+	if invokeErr != nil {
+		jsonResponse(w, 502, map[string]interface{}{
+			"error": "unreachable", "message": fmt.Sprintf("WSS: %v; fallback: %v", err, invokeErr),
+		})
+		return
+	}
 	if !resp.OK {
 		errMsg := "sessions_history 调用失败"
-		if resp.Error != nil {
-			errMsg = resp.Error.Message
-		}
+		if resp.Error != nil { errMsg = resp.Error.Message }
 		jsonResponse(w, 502, map[string]interface{}{"error": "api_error", "message": errMsg})
 		return
 	}
-
-	// 从 details 提取 messages
 	messages := extractMessagesFromResponse(resp)
-
 	jsonResponse(w, 200, map[string]interface{}{
-		"messages": messages,
-		"count":    len(messages),
+		"messages": messages, "count": len(messages), "source": "tools_invoke_fallback",
 	})
 }
 
@@ -1532,4 +1589,122 @@ func directScanToOverviewData(scan *openclawDirectScanResult) (agents []map[stri
 	}
 
 	return agents, sessions
+}
+
+// ============================================================
+// v29.0 新增 API Handlers — 全部走 WSS RPC
+// ============================================================
+
+// handleGatewayWSSStatus GET /api/v1/gateway/wss/status
+// 返回所有 WSS 连接的状态
+func (api *ManagementAPI) handleGatewayWSSStatus(w http.ResponseWriter, r *http.Request) {
+	if api.gwManager == nil {
+		jsonResponse(w, 200, map[string]interface{}{"clients": []interface{}{}, "count": 0})
+		return
+	}
+	stats := api.gwManager.Stats()
+	jsonResponse(w, 200, map[string]interface{}{
+		"clients": stats,
+		"count":   len(stats),
+	})
+}
+
+// handleGatewayModels GET /api/v1/upstreams/{id}/gateway/models
+func (api *ManagementAPI) handleGatewayModels(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/models")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 200, map[string]interface{}{"error": "gateway_token_not_configured"}); return }
+
+	payload, err := api.rpcCall(up, "models.list", map[string]interface{}{})
+	if err != nil {
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, payload)
+}
+
+// handleGatewayChannels GET /api/v1/upstreams/{id}/gateway/channels
+func (api *ManagementAPI) handleGatewayChannels(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/channels")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 200, map[string]interface{}{"error": "gateway_token_not_configured"}); return }
+
+	probe := r.URL.Query().Get("probe") == "true"
+	payload, err := api.rpcCall(up, "channels.status", map[string]interface{}{
+		"probe": probe, "timeoutMs": 8000,
+	})
+	if err != nil {
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, payload)
+}
+
+// handleGatewayNodes GET /api/v1/upstreams/{id}/gateway/nodes
+func (api *ManagementAPI) handleGatewayNodes(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/nodes")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 200, map[string]interface{}{"error": "gateway_token_not_configured"}); return }
+
+	payload, err := api.rpcCall(up, "node.list", map[string]interface{}{})
+	if err != nil {
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, payload)
+}
+
+// handleGatewayLogs GET /api/v1/upstreams/{id}/gateway/logs?limit=50
+func (api *ManagementAPI) handleGatewayLogs(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/logs")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 200, map[string]interface{}{"error": "gateway_token_not_configured"}); return }
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	if limit < 1 { limit = 1 }
+	if limit > 500 { limit = 500 }
+
+	payload, err := api.rpcCall(up, "logs.tail", map[string]interface{}{"limit": limit})
+	if err != nil {
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, payload)
+}
+
+// handleGatewayConfig GET /api/v1/upstreams/{id}/gateway/config
+func (api *ManagementAPI) handleGatewayConfig(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/config")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 200, map[string]interface{}{"error": "gateway_token_not_configured"}); return }
+
+	payload, err := api.rpcCall(up, "config.get", map[string]interface{}{})
+	if err != nil {
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, payload)
+}
+
+// handleGatewayUsage GET /api/v1/upstreams/{id}/gateway/usage
+func (api *ManagementAPI) handleGatewayUsage(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/usage")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 200, map[string]interface{}{"error": "gateway_token_not_configured"}); return }
+
+	payload, err := api.rpcCall(up, "usage.cost", map[string]interface{}{})
+	if err != nil {
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, payload)
 }

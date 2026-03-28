@@ -317,6 +317,7 @@ type StaticUpstreamConfig struct {
 	Port               int    `yaml:"port"`
 	PathPrefix         string `yaml:"path_prefix"`
 	GatewayToken       string `yaml:"gateway_token"`        // OpenClaw Gateway auth token
+	GatewayOrigin      string `yaml:"gateway_origin"`       // v29.0: Gateway controlUi allowedOrigins 对应的 HTTPS origin
 	OpenClawConfigPath string `yaml:"openclaw_config_path"` // 上游 OpenClaw 的 openclaw.json 路径（同机部署时可直接读取，获取完整 agents/sessions 列表）
 }
 
