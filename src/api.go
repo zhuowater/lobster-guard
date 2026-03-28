@@ -482,6 +482,22 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/system-event") && method == "POST":
 		api.handleGatewaySystemEvent(w, r)
 
+	// ===== v29.0 P2: 执行审批 / Gateway 控制 / 记忆 / Skill 卸载 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/exec-approvals") && method == "GET":
+		api.handleGatewayExecApprovals(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/exec-approvals/approve") && method == "POST":
+		api.handleGatewayExecApprovalAction(w, r, true)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/exec-approvals/reject") && method == "POST":
+		api.handleGatewayExecApprovalAction(w, r, false)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/restart") && method == "POST":
+		api.handleGatewayRestart(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/update") && method == "POST":
+		api.handleGatewayUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/memory/search") && method == "POST":
+		api.handleGatewayMemorySearch(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/skills/uninstall") && method == "POST":
+		api.handleGatewaySkillUninstall(w, r)
+
 	// v21.0: 上游 CRUD（带 ID 的路由必须在 health-check 之后匹配）
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/health-check") && method == "POST":
 		api.handleUpstreamHealthCheck(w, r)

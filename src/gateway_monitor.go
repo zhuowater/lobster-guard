@@ -2473,3 +2473,81 @@ func (api *ManagementAPI) handleGatewaySystemEvent(w http.ResponseWriter, r *htt
 	}
 	jsonResponse(w, 200, payload)
 }
+
+// ===== v29.0 P2: 执行审批 / Gateway 控制 / 记忆 / Skill 卸载 =====
+
+func (api *ManagementAPI) handleGatewayExecApprovals(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/exec-approvals")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
+	payload, err := api.rpcCall(up, "exec.approvals.list", map[string]interface{}{})
+	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	jsonResponse(w, 200, payload)
+}
+
+func (api *ManagementAPI) handleGatewayExecApprovalAction(w http.ResponseWriter, r *http.Request, approve bool) {
+	suffix := "/gateway/exec-approvals/approve"
+	if !approve { suffix = "/gateway/exec-approvals/reject" }
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, suffix)
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
+	var body map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil { jsonResponse(w, 400, map[string]string{"error": "invalid_json"}); return }
+	method := "exec.approvals.approve"
+	if !approve { method = "exec.approvals.reject" }
+	payload, err := api.rpcCall(up, method, body)
+	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	jsonResponse(w, 200, payload)
+}
+
+func (api *ManagementAPI) handleGatewayRestart(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/restart")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
+	var body map[string]interface{}
+	json.NewDecoder(r.Body).Decode(&body)
+	if body == nil { body = map[string]interface{}{} }
+	payload, err := api.rpcCall(up, "gateway.restart", body)
+	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	jsonResponse(w, 200, payload)
+}
+
+func (api *ManagementAPI) handleGatewayUpdate(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/update")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
+	var body map[string]interface{}
+	json.NewDecoder(r.Body).Decode(&body)
+	if body == nil { body = map[string]interface{}{} }
+	payload, err := api.rpcCall(up, "gateway.update", body)
+	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	jsonResponse(w, 200, payload)
+}
+
+func (api *ManagementAPI) handleGatewayMemorySearch(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/memory/search")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
+	var body map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil { jsonResponse(w, 400, map[string]string{"error": "invalid_json"}); return }
+	payload, err := api.rpcCall(up, "memory.search", body)
+	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	jsonResponse(w, 200, payload)
+}
+
+func (api *ManagementAPI) handleGatewaySkillUninstall(w http.ResponseWriter, r *http.Request) {
+	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/skills/uninstall")
+	up, ok := api.pool.GetUpstream(id)
+	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
+	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
+	var body map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil { jsonResponse(w, 400, map[string]string{"error": "invalid_json"}); return }
+	payload, err := api.rpcCall(up, "skills.uninstall", body)
+	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	jsonResponse(w, 200, payload)
+}

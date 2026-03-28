@@ -182,15 +182,32 @@
                       <!-- Sessions -->
                       <div v-if="activeTab === 'sessions'" class="dtab-body">
                         <div v-if="detailLoading" class="skel-lines"><div class="skel-line" v-for="i in 4" :key="i"></div></div>
-                        <div v-else-if="sessions.length === 0" class="dtab-empty">暂无会话</div>
-                        <table v-else class="inner-table">
-                          <thead><tr><th style="width:24px"></th><th>Key</th><th>Channel</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th><th>操作</th></tr></thead>
+                        <template v-else>
+                          <div class="exec-approvals-section" v-if="execApprovals.length > 0">
+                            <div class="ea-header" @click="eaExpanded = !eaExpanded">
+                              <span class="ea-badge">⚠️ {{ execApprovals.length }} 条命令待审批</span>
+                              <svg class="expand-chevron" :class="{ open: eaExpanded }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                            </div>
+                            <div v-if="eaExpanded" class="ea-body">
+                              <div v-for="ea in execApprovals" :key="ea.id" class="ea-item">
+                                <div class="ea-cmd"><code>{{ ea.command }}</code></div>
+                                <div class="ea-meta">Agent: {{ ea.agentId || '—' }} | Session: {{ ea.sessionKey || '—' }}</div>
+                                <div class="ea-actions">
+                                  <button class="btn btn-xs btn-primary" @click="approveExec(ea)">✅ 批准</button>
+                                  <button class="btn btn-xs btn-danger-ghost" @click="rejectExec(ea)">❌ 拒绝</button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div v-if="sessions.length === 0" class="dtab-empty">暂无会话</div>
+                          <table v-else class="inner-table">
+                          <thead><tr><th style="width:24px"></th><th>Key</th><th>类型</th><th>Model</th><th>Token</th><th>上下文</th><th>最后活跃</th><th>操作</th></tr></thead>
                           <tbody>
                             <template v-for="s in sessions" :key="s.key||s.sessionId">
                               <tr class="session-row" :class="{ 'row-active': expandedSessionKey === (s.key||s.sessionId) }" @click="toggleSessionHistory(s)">
                                 <td><svg class="expand-chevron" :class="{ open: expandedSessionKey === (s.key||s.sessionId) }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
                                 <td><code class="mono-sm">{{ truncKey(s.key||s.sessionId) }}</code></td>
-                                <td>{{ s.channel||s.lastChannel||'—' }}</td>
+                                <td><span class="session-kind" :class="'sk-' + (s.kind||sessionKind(s))">{{ s.kind === 'group' || sessionKind(s) === 'group' ? '👥' : '💬' }}</span> {{ s.channel||s.lastChannel||'—' }}</td>
                                 <td class="text-dim">{{ s.model||'—' }}</td>
                                 <td>{{ fmtTokens(s) }}</td>
                                 <td>{{ fmtContext(s) }}</td>
@@ -230,6 +247,7 @@
                             </template>
                           </tbody>
                         </table>
+                        </template>
                       </div>
                       <!-- Cron -->
                       <div v-if="activeTab === 'cron'" class="dtab-body">
@@ -309,6 +327,14 @@
                             <button v-if="up.token_configured" class="btn btn-sm btn-danger-ghost" @click="clearToken(up)">清除</button>
                           </div>
                         </div>
+                        <div class="diag-card" v-if="up.gateway_status === 'connected'">
+                          <h4>🎛️ Gateway 控制</h4>
+                          <div class="gw-ctrl-actions">
+                            <button class="btn btn-sm btn-warn" @click="gatewayRestart">🔄 重启 Gateway</button>
+                            <button class="btn btn-sm btn-primary" @click="gatewayUpdate">⬆️ 检查更新</button>
+                          </div>
+                          <div v-if="gwUpdateResult" class="gw-update-result">{{ gwUpdateResult }}</div>
+                        </div>
                         <!-- Gateway 远程配置 -->
                         <div class="diag-card diag-card-full" v-if="up.gateway_status === 'connected'">
                           <h4>⚙️ Gateway 配置
@@ -344,6 +370,7 @@
                             <button class="aoc-vbtn" :class="{ active: aocView === 'skills' }" @click="switchToSkills" title="Skill 目录"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></button>
                             <button class="aoc-vbtn" :class="{ active: aocView === 'files' }" @click="switchToFiles" title="文件编辑"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
                             <button class="aoc-vbtn" :class="{ active: aocView === 'heartbeat' }" @click="switchToHeartbeat" title="心跳/设备"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
+                            <button class="aoc-vbtn" :class="{ active: aocView === 'memory' }" @click="switchToMemory" title="记忆搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
                           </div>
                         </div>
 
@@ -669,6 +696,27 @@
                             </div>
                           </div>
                         </div>
+
+                        <div v-if="aocView === 'memory'" class="aoc-memory-view">
+                          <div class="memory-search-bar">
+                            <select v-model="memoryAgentId" class="refresh-select">
+                              <option value="">选择Agent</option>
+                              <option v-for="a in expandedAgents" :key="a.id" :value="a.id">{{ a.id }}</option>
+                            </select>
+                            <input v-model="memoryQuery" class="chat-input" placeholder="搜索记忆…" @keyup.enter="searchMemory" />
+                            <button class="btn btn-sm btn-primary" @click="searchMemory" :disabled="memorySearching || !memoryQuery.trim()">{{ memorySearching ? '搜索中…' : '搜索' }}</button>
+                          </div>
+                          <div v-if="memoryResults.length > 0" class="memory-results">
+                            <div v-for="(r, idx) in memoryResults" :key="(r.path || 'path') + ':' + (r.line || idx)" class="memory-item">
+                              <div class="mem-head">
+                                <div class="mem-path">{{ r.path }}:{{ r.line }}</div>
+                                <div class="mem-score">{{ (((r.score || 0) * 100)).toFixed(0) }}%</div>
+                              </div>
+                              <div class="mem-text">{{ r.text }}</div>
+                            </div>
+                          </div>
+                          <div v-else-if="!memorySearching" class="dtab-empty">{{ memoryQuery ? '暂无匹配结果' : '输入关键词搜索 Agent 记忆' }}</div>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -947,6 +995,16 @@ const gwConfigRaw = ref('')
 const gwConfigDirty = ref(false)
 const gwConfigSaving = ref(false)
 
+const execApprovals = ref([])
+const eaExpanded = ref(true)
+
+const gwUpdateResult = ref('')
+
+const memoryAgentId = ref('')
+const memoryQuery = ref('')
+const memoryResults = ref([])
+const memorySearching = ref(false)
+
 // v29.0: 心跳/设备/节点
 const heartbeatData = ref(null)
 const devicesList = ref([])
@@ -1009,6 +1067,22 @@ function switchToFiles() {
 function switchToHeartbeat() {
   aocView.value = 'heartbeat'
   loadHeartbeatData()
+}
+
+function switchToMemory() {
+  aocView.value = 'memory'
+  memoryResults.value = []
+  if (!memoryAgentId.value && expandedAgents.value.length > 0) memoryAgentId.value = expandedAgents.value[0].id
+}
+
+// v29.0: session kind 推断
+function sessionKind(s) {
+  if (s.kind) return s.kind
+  const key = s.key || s.sessionId || ''
+  if (key.includes(':g:') || key.includes(':group:')) return 'group'
+  if (key.endsWith(':main') || key.includes(':direct:')) return 'direct'
+  if (key.includes(':subagent:') || key.includes(':isolated:')) return 'isolated'
+  return 'direct'
 }
 
 // v29.0: Session 操作
@@ -1272,10 +1346,10 @@ async function skillUpdate(sk) {
 async function skillUninstall(sk) {
   if (!confirm(`卸载 Skill "${sk.name}"？`)) return
   try {
-    await apiDelete(`/api/v1/upstreams/${expandedId.value}/gateway/skills/uninstall?slug=${encodeURIComponent(sk.name)}`)
-    toastMsg.value = `${sk.name} 已卸载`; toastType.value = 'success'; showToast.value = true
+    await apiPost(`/api/v1/upstreams/${expandedId.value}/gateway/skills/uninstall`, { slug: sk.name })
+    showToast(`${sk.name} 已卸载`, 'success')
     loadSkills()
-  } catch (e) { toastMsg.value = e.message; toastType.value = 'error'; showToast.value = true }
+  } catch (e) { showToast(e.message, 'error') }
 }
 
 // v29.0: Gateway 远程配置
@@ -1722,14 +1796,18 @@ async function loadTabData(id, tab) {
   detailLoading.value = true
   try {
     if (tab === 'sessions') {
-      const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/sessions`)
+      const [d, approvals] = await Promise.all([
+        api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/sessions`),
+        api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/exec-approvals`)
+      ])
       sessions.value = d.error ? [] : (Array.isArray(d.sessions) ? d.sessions : [])
+      execApprovals.value = approvals.error ? [] : (Array.isArray(approvals.items) ? approvals.items : (Array.isArray(approvals.approvals) ? approvals.approvals : (Array.isArray(approvals) ? approvals : [])))
     } else if (tab === 'cron') {
       const d = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/cron`)
       cronJobs.value = d.error ? [] : (Array.isArray(d.jobs) ? d.jobs : [])
     }
   } catch (e) {
-    sessions.value = []; cronJobs.value = []
+    sessions.value = []; cronJobs.value = []; execApprovals.value = []
     // 502 upstream_auth_failed: 提示用户重新配置 Token，不要静默
     const msg = e.message || ''
     if (msg.includes('502')) {
@@ -1755,6 +1833,65 @@ async function quickPing(up) {
   up._pinging = true
   try { const r = await api(`/api/v1/upstreams/${encodeURIComponent(up.id)}/gateway/ping`); showToast(r.api_ok ? `${up.id}: ✅ ${r.latency_ms}ms` : `${up.id}: ❌ ${r.message||'连接失败'}`, r.api_ok?'success':'error') }
   catch (e) { showToast(`${up.id}: ❌ ${e.message}`, 'error') } finally { up._pinging = false }
+}
+
+async function approveExec(ea) {
+  try {
+    await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/exec-approvals/approve`, { id: ea.id })
+    showToast('审批已通过', 'success')
+    await loadTabData(expandedId.value, 'sessions')
+  } catch (e) { showToast('审批失败: ' + e.message, 'error') }
+}
+
+async function rejectExec(ea) {
+  try {
+    await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/exec-approvals/reject`, { id: ea.id })
+    showToast('已拒绝命令', 'success')
+    await loadTabData(expandedId.value, 'sessions')
+  } catch (e) { showToast('拒绝失败: ' + e.message, 'error') }
+}
+
+async function gatewayRestart() {
+  if (!expandedId.value) return
+  if (!confirm('确认重启当前 Gateway？')) return
+  try {
+    await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/restart`, { reason: 'Dashboard manual restart' })
+    gwUpdateResult.value = 'Gateway 重启指令已发送'
+    showToast('Gateway 正在重启', 'success')
+  } catch (e) {
+    gwUpdateResult.value = '重启失败：' + e.message
+    showToast(gwUpdateResult.value, 'error')
+  }
+}
+
+async function gatewayUpdate() {
+  if (!expandedId.value) return
+  gwUpdateResult.value = '正在检查更新…'
+  try {
+    const res = await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/update`, {})
+    gwUpdateResult.value = res.message || res.result || '已触发更新检查'
+    showToast('已触发更新检查', 'success')
+  } catch (e) {
+    gwUpdateResult.value = '更新失败：' + e.message
+    showToast(gwUpdateResult.value, 'error')
+  }
+}
+
+async function searchMemory() {
+  if (!expandedId.value || !memoryQuery.value.trim()) return
+  memorySearching.value = true
+  try {
+    const res = await apiPost(`/api/v1/upstreams/${encodeURIComponent(expandedId.value)}/gateway/memory/search`, {
+      query: memoryQuery.value.trim(),
+      agentId: memoryAgentId.value
+    })
+    memoryResults.value = res.results || res.items || []
+  } catch (e) {
+    memoryResults.value = []
+    showToast('记忆搜索失败: ' + e.message, 'error')
+  } finally {
+    memorySearching.value = false
+  }
 }
 
 // Session history
@@ -2278,6 +2415,12 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .msg-expand-btn { background:none; border:none; color:#6366f1; cursor:pointer; font-size:11px; padding:2px 0; margin-top:4px; transition:color .15s; }
 .msg-expand-btn:hover { color:#a5b4fc; text-decoration:underline; }
 
+/* v29.0: Session kind 标签 */
+.session-kind { font-size:14px; margin-right:4px; }
+.sk-group { }
+.sk-direct { }
+.sk-isolated { opacity:0.6; }
+
 /* v29.0: Chat 发送区 */
 .chat-actions { display:flex; gap:8px; align-items:center; padding:10px 0 2px; border-top:1px solid rgba(51,65,85,.3); margin-top:10px; }
 .chat-input { flex:1; background:rgba(30,41,59,.6); border:1px solid var(--border-subtle,#334155); border-radius:6px; padding:6px 10px; color:var(--text-primary,#e2e8f0); font-size:13px; outline:none; }
@@ -2311,5 +2454,25 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .hb-row { display:flex; justify-content:space-between; align-items:center; padding:3px 0; font-size:13px; }
 .hb-device { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13px; border-bottom:1px solid rgba(51,65,85,.2); }
 .hb-actions { display:flex; gap:8px; }
+
+.exec-approvals-section { margin-bottom:14px; border:1px solid rgba(248,113,113,.28); background:linear-gradient(180deg, rgba(127,29,29,.18), rgba(120,53,15,.14)); border-radius:10px; overflow:hidden; box-shadow:0 8px 24px rgba(127,29,29,.12); }
+.ea-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; cursor:pointer; color:#fecaca; }
+.ea-badge { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:#fdba74; }
+.ea-body { padding:0 14px 14px; display:flex; flex-direction:column; gap:10px; }
+.ea-item { border:1px solid rgba(251,146,60,.22); background:rgba(30,41,59,.55); border-radius:8px; padding:12px; }
+.ea-cmd code { display:block; font-family:'JetBrains Mono','Fira Code',monospace; font-size:12px; color:#fde68a; background:rgba(15,23,42,.7); border:1px solid rgba(251,146,60,.16); border-radius:6px; padding:8px 10px; white-space:pre-wrap; word-break:break-word; }
+.ea-meta { margin-top:8px; font-size:12px; color:#fca5a5; }
+.ea-actions { display:flex; gap:8px; margin-top:10px; }
+.gw-ctrl-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.gw-update-result { margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(99,102,241,.12); border:1px solid rgba(99,102,241,.24); color:#c7d2fe; font-size:12px; white-space:pre-wrap; word-break:break-word; }
+.aoc-memory-view { animation:fadeIn .25s; }
+.memory-search-bar { display:flex; gap:8px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+.memory-search-bar .chat-input { min-width:240px; }
+.memory-results { display:flex; flex-direction:column; gap:10px; }
+.memory-item { background:rgba(15,23,42,.55); border:1px solid rgba(99,102,241,.18); border-radius:10px; padding:12px 14px; border-left:3px solid #6366f1; }
+.mem-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; }
+.mem-path { font-size:11px; color:#a5b4fc; font-family:'JetBrains Mono','Fira Code',monospace; }
+.mem-text { font-size:13px; color:#e2e8f0; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+.mem-score { font-size:11px; font-weight:700; color:#818cf8; background:rgba(99,102,241,.14); padding:3px 8px; border-radius:999px; }
 
 </style>
