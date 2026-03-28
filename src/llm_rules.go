@@ -62,6 +62,7 @@ type LLMRuleTemplate struct {
 	Category    string    `json:"category"` // industry / security / compliance
 	Rules       []LLMRule `json:"rules"`
 	BuiltIn     bool      `json:"built_in"`
+	Enabled     bool      `json:"enabled"` // v30.0: 全局开关，启用后对所有流量生效
 }
 
 // compiledLLMRegexRule 编译后的正则规则
@@ -109,6 +110,14 @@ type LLMRuleEngine struct {
 	tenantDB        *sql.DB                           // 租户规则持久化
 	// v28.0 LLM 规则模板 DB
 	templateDB *sql.DB
+	// v30.0 全局启用的行业模板规则
+	globalTemplateRules  []LLMRule
+	globalTplReqAC       *AhoCorasick
+	globalTplRespAC      *AhoCorasick
+	globalTplReqACRules  []llmACEntry
+	globalTplRespACRules []llmACEntry
+	globalTplReqRegex    []compiledLLMRegexRule
+	globalTplRespRegex   []compiledLLMRegexRule
 }
 
 // llmACEntry AC 自动机中每个 pattern 对应的规则信息
@@ -1631,6 +1640,54 @@ func (e *LLMRuleEngine) CheckRequestWithTenant(content, tenantID string) []LLMRu
 	// 全局规则检测
 	matches := e.CheckRequest(content)
 
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		seen[m.RuleID] = true
+	}
+
+	// v30.0: 全局启用的行业模板规则检测
+	e.mu.RLock()
+	gTplReqAC := e.globalTplReqAC
+	gTplReqACRules := e.globalTplReqACRules
+	gTplReqRegex := e.globalTplReqRegex
+	e.mu.RUnlock()
+	if gTplReqAC != nil {
+		for _, idx := range gTplReqAC.Search(content) {
+			if idx < 0 || idx >= len(gTplReqACRules) {
+				continue
+			}
+			entry := gTplReqACRules[idx]
+			if seen[entry.ruleID] {
+				continue
+			}
+			seen[entry.ruleID] = true
+			matches = append(matches, LLMRuleMatch{
+				RuleID: entry.ruleID, RuleName: entry.ruleName, Category: entry.category,
+				Action: entry.action, Pattern: entry.pattern, MatchedText: entry.pattern,
+				ShadowMode: entry.shadowMode, Priority: entry.priority, RewriteTo: entry.rewriteTo,
+			})
+		}
+	}
+	for _, cr := range gTplReqRegex {
+		if seen[cr.ruleID] {
+			continue
+		}
+		loc := cr.pattern.FindStringIndex(content)
+		if loc == nil {
+			continue
+		}
+		seen[cr.ruleID] = true
+		matchedText := content[loc[0]:loc[1]]
+		if len(matchedText) > 100 {
+			matchedText = matchedText[:100] + "..."
+		}
+		matches = append(matches, LLMRuleMatch{
+			RuleID: cr.ruleID, RuleName: cr.ruleName, Category: cr.category,
+			Action: cr.action, Pattern: cr.rawPattern, MatchedText: matchedText,
+			ShadowMode: cr.shadowMode, Priority: cr.priority, RewriteTo: cr.rewriteTo,
+		})
+	}
+
 	if tenantID == "" {
 		return matches
 	}
@@ -1644,11 +1701,6 @@ func (e *LLMRuleEngine) CheckRequestWithTenant(content, tenantID string) []LLMRu
 
 	if reqAC == nil && len(reqRegex) == 0 {
 		return matches
-	}
-
-	seen := make(map[string]bool)
-	for _, m := range matches {
-		seen[m.RuleID] = true
 	}
 
 	// AC 自动机匹配
@@ -1694,10 +1746,58 @@ func (e *LLMRuleEngine) CheckRequestWithTenant(content, tenantID string) []LLMRu
 	return matches
 }
 
-// CheckResponseWithTenant 全局 + 租户 LLM 规则合并检测（响应方向）
+// CheckResponseWithTenant 全局 + 全局模板 + 租户 LLM 规则合并检测（响应方向）
 func (e *LLMRuleEngine) CheckResponseWithTenant(content, tenantID string) []LLMRuleMatch {
 	// 全局规则检测
 	matches := e.CheckResponse(content)
+
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		seen[m.RuleID] = true
+	}
+
+	// v30.0: 全局启用的行业模板规则检测
+	e.mu.RLock()
+	gTplRespAC := e.globalTplRespAC
+	gTplRespACRules := e.globalTplRespACRules
+	gTplRespRegex := e.globalTplRespRegex
+	e.mu.RUnlock()
+	if gTplRespAC != nil {
+		for _, idx := range gTplRespAC.Search(content) {
+			if idx < 0 || idx >= len(gTplRespACRules) {
+				continue
+			}
+			entry := gTplRespACRules[idx]
+			if seen[entry.ruleID] {
+				continue
+			}
+			seen[entry.ruleID] = true
+			matches = append(matches, LLMRuleMatch{
+				RuleID: entry.ruleID, RuleName: entry.ruleName, Category: entry.category,
+				Action: entry.action, Pattern: entry.pattern, MatchedText: entry.pattern,
+				ShadowMode: entry.shadowMode, Priority: entry.priority, RewriteTo: entry.rewriteTo,
+			})
+		}
+	}
+	for _, cr := range gTplRespRegex {
+		if seen[cr.ruleID] {
+			continue
+		}
+		loc := cr.pattern.FindStringIndex(content)
+		if loc == nil {
+			continue
+		}
+		seen[cr.ruleID] = true
+		matchedText := content[loc[0]:loc[1]]
+		if len(matchedText) > 100 {
+			matchedText = matchedText[:100] + "..."
+		}
+		matches = append(matches, LLMRuleMatch{
+			RuleID: cr.ruleID, RuleName: cr.ruleName, Category: cr.category,
+			Action: cr.action, Pattern: cr.rawPattern, MatchedText: matchedText,
+			ShadowMode: cr.shadowMode, Priority: cr.priority, RewriteTo: cr.rewriteTo,
+		})
+	}
 
 	if tenantID == "" {
 		return matches
@@ -1712,11 +1812,6 @@ func (e *LLMRuleEngine) CheckResponseWithTenant(content, tenantID string) []LLMR
 
 	if respAC == nil && len(respRegex) == 0 {
 		return matches
-	}
-
-	seen := make(map[string]bool)
-	for _, m := range matches {
-		seen[m.RuleID] = true
 	}
 
 	// AC 自动机匹配
@@ -1783,9 +1878,12 @@ func (e *LLMRuleEngine) SetTemplateDB(db *sql.DB) {
 		category TEXT,
 		rules_json TEXT NOT NULL,
 		built_in INTEGER DEFAULT 0,
+		enabled INTEGER DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
+	// v30.0: 给已有表加 enabled 列（ALTER TABLE 幂等）
+	db.Exec(`ALTER TABLE llm_rule_templates ADD COLUMN enabled INTEGER DEFAULT 0`)
 
 	// 加载内置模板
 	e.loadBuiltinLLMTemplates(db)
@@ -1826,7 +1924,7 @@ func (e *LLMRuleEngine) ListLLMTemplates() []LLMRuleTemplate {
 		return getDefaultLLMTemplates()
 	}
 
-	rows, err := db.Query(`SELECT id, name, description, category, rules_json, built_in FROM llm_rule_templates ORDER BY id`)
+	rows, err := db.Query(`SELECT id, name, description, category, rules_json, built_in, COALESCE(enabled,0) FROM llm_rule_templates ORDER BY id`)
 	if err != nil {
 		log.Printf("[LLM规则] 查询模板失败: %v", err)
 		return getDefaultLLMTemplates()
@@ -1837,11 +1935,12 @@ func (e *LLMRuleEngine) ListLLMTemplates() []LLMRuleTemplate {
 	for rows.Next() {
 		var tpl LLMRuleTemplate
 		var rulesJSON string
-		var builtIn int
-		if rows.Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn) != nil {
+		var builtIn, enabled int
+		if rows.Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn, &enabled) != nil {
 			continue
 		}
 		tpl.BuiltIn = builtIn == 1
+		tpl.Enabled = enabled == 1
 		if json.Unmarshal([]byte(rulesJSON), &tpl.Rules) != nil {
 			continue
 		}
@@ -1871,17 +1970,163 @@ func (e *LLMRuleEngine) GetLLMTemplate(id string) *LLMRuleTemplate {
 
 	var tpl LLMRuleTemplate
 	var rulesJSON string
-	var builtIn int
-	err := db.QueryRow(`SELECT id, name, description, category, rules_json, built_in FROM llm_rule_templates WHERE id=?`, id).
-		Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn)
+	var builtIn, enabled int
+	err := db.QueryRow(`SELECT id, name, description, category, rules_json, built_in, COALESCE(enabled,0) FROM llm_rule_templates WHERE id=?`, id).
+		Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn, &enabled)
 	if err != nil {
 		return nil
 	}
 	tpl.BuiltIn = builtIn == 1
+	tpl.Enabled = enabled == 1
 	if json.Unmarshal([]byte(rulesJSON), &tpl.Rules) != nil {
 		return nil
 	}
 	return &tpl
+}
+
+// EnableLLMTemplate 启用/禁用 LLM 模板全局开关（v30.0）
+func (e *LLMRuleEngine) EnableLLMTemplate(id string, enabled bool) error {
+	e.mu.RLock()
+	db := e.templateDB
+	e.mu.RUnlock()
+	if db == nil {
+		return fmt.Errorf("模板 DB 未初始化")
+	}
+	val := 0
+	if enabled {
+		val = 1
+	}
+	result, err := db.Exec(`UPDATE llm_rule_templates SET enabled=?, updated_at=? WHERE id=?`,
+		val, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("LLM 模板 %q 不存在", id)
+	}
+	// 重建全局 LLM 模板规则
+	e.rebuildGlobalLLMTemplateRules()
+	return nil
+}
+
+// rebuildGlobalLLMTemplateRules 重建全局 LLM 模板规则缓存（v30.0）
+func (e *LLMRuleEngine) rebuildGlobalLLMTemplateRules() {
+	e.mu.RLock()
+	db := e.templateDB
+	e.mu.RUnlock()
+	if db == nil {
+		return
+	}
+	rows, err := db.Query(`SELECT rules_json FROM llm_rule_templates WHERE enabled=1`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	var allRules []LLMRule
+	for rows.Next() {
+		var rulesJSON string
+		if rows.Scan(&rulesJSON) != nil {
+			continue
+		}
+		var rules []LLMRule
+		if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
+			continue
+		}
+		allRules = append(allRules, rules...)
+	}
+	// 编译为全局模板检测规则（复用 SetTenantLLMRules 的编译逻辑）
+	e.mu.Lock()
+	e.globalTemplateRules = allRules
+	e.mu.Unlock()
+	// 重新编译 AC 和正则
+	e.compileGlobalTemplateRules(allRules)
+	log.Printf("[LLM规则] 全局模板: %d 条规则已重建", len(allRules))
+}
+
+// compileGlobalTemplateRules 编译全局模板规则到 AC 和正则（v30.0）
+func (e *LLMRuleEngine) compileGlobalTemplateRules(rules []LLMRule) {
+	var reqKeywords, respKeywords, bothKeywords []string
+	type acEntry struct {
+		ruleID, ruleName, category, action, pattern, rewriteTo string
+		shadowMode                                              bool
+		priority                                                int
+	}
+	var reqACEntries, respACEntries []acEntry
+	var reqRegex, respRegex []compiledLLMRegexRule
+
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		for _, p := range rule.Patterns {
+			entry := acEntry{ruleID: rule.ID, ruleName: rule.Name, category: rule.Category, action: rule.Action, pattern: p, rewriteTo: rule.RewriteTo, shadowMode: rule.ShadowMode, priority: rule.Priority}
+			switch rule.Type {
+			case "regex":
+				compiled, err := regexp.Compile(p)
+				if err != nil {
+					continue
+				}
+				cr := compiledLLMRegexRule{ruleID: rule.ID, ruleName: rule.Name, category: rule.Category, action: rule.Action, rawPattern: p, pattern: compiled, shadowMode: rule.ShadowMode, priority: rule.Priority, rewriteTo: rule.RewriteTo}
+				switch rule.Direction {
+				case "request":
+					reqRegex = append(reqRegex, cr)
+				case "response":
+					respRegex = append(respRegex, cr)
+				default:
+					reqRegex = append(reqRegex, cr)
+					respRegex = append(respRegex, cr)
+				}
+			default: // keyword
+				switch rule.Direction {
+				case "request":
+					reqKeywords = append(reqKeywords, p)
+					reqACEntries = append(reqACEntries, entry)
+				case "response":
+					respKeywords = append(respKeywords, p)
+					respACEntries = append(respACEntries, entry)
+				default:
+					bothKeywords = append(bothKeywords, p)
+					reqACEntries = append(reqACEntries, entry)
+					respACEntries = append(respACEntries, entry)
+				}
+			}
+		}
+	}
+
+	// 构建 AC 自动机
+	allReqKW := append(reqKeywords, bothKeywords...)
+	allRespKW := append(respKeywords, bothKeywords...)
+
+	e.mu.Lock()
+	if len(allReqKW) > 0 {
+		e.globalTplReqAC = NewAhoCorasick(allReqKW)
+		e.globalTplReqACRules = make([]llmACEntry, len(reqACEntries))
+		for i, entry := range reqACEntries {
+			e.globalTplReqACRules[i] = llmACEntry{ruleID: entry.ruleID, ruleName: entry.ruleName, category: entry.category, action: entry.action, pattern: entry.pattern, rewriteTo: entry.rewriteTo, shadowMode: entry.shadowMode, priority: entry.priority}
+		}
+	} else {
+		e.globalTplReqAC = nil
+		e.globalTplReqACRules = nil
+	}
+	if len(allRespKW) > 0 {
+		e.globalTplRespAC = NewAhoCorasick(allRespKW)
+		e.globalTplRespACRules = make([]llmACEntry, len(respACEntries))
+		for i, entry := range respACEntries {
+			e.globalTplRespACRules[i] = llmACEntry{ruleID: entry.ruleID, ruleName: entry.ruleName, category: entry.category, action: entry.action, pattern: entry.pattern, rewriteTo: entry.rewriteTo, shadowMode: entry.shadowMode, priority: entry.priority}
+		}
+	} else {
+		e.globalTplRespAC = nil
+		e.globalTplRespACRules = nil
+	}
+	e.globalTplReqRegex = reqRegex
+	e.globalTplRespRegex = respRegex
+	e.mu.Unlock()
+}
+
+// InitGlobalLLMTemplateRules 启动时初始化全局 LLM 模板规则（v30.0）
+func (e *LLMRuleEngine) InitGlobalLLMTemplateRules() {
+	e.rebuildGlobalLLMTemplateRules()
 }
 
 // CreateLLMTemplate 创建自定义 LLM 规则模板

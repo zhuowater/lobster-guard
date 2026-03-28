@@ -121,6 +121,7 @@ type InboundRuleTemplate struct {
 	Category    string              `json:"category" yaml:"category"` // industry / security / compliance
 	Rules       []InboundRuleConfig `json:"rules" yaml:"rules"`
 	BuiltIn     bool                `json:"built_in" yaml:"built_in"`
+	Enabled     bool                `json:"enabled" yaml:"enabled"` // v30.0: 全局开关，启用后对所有流量生效
 }
 
 type Config struct {
@@ -195,7 +196,7 @@ type Config struct {
 	AuditArchiveEnabled bool   `yaml:"audit_archive_enabled"` // 是否启用审计日志归档
 	AuditArchiveDir     string `yaml:"audit_archive_dir"`     // 归档目录，默认 /var/lib/lobster-guard/archives/
 	// v5.1 智能检测
-	RuleTemplates          []string `yaml:"rule_templates"`           // 规则模板: ["general", "financial"]
+	RuleTemplates          []string `yaml:"rule_templates"`           // [已弃用v30.0] 改为 DB 全局开关，通过 Dashboard 启用
 	DetectPipeline         []string `yaml:"detect_pipeline"`          // 检测链顺序: ["keyword", "regex", "pii"]
 	SessionDetectEnabled   bool     `yaml:"session_detect_enabled"`   // 会话检测开关
 	SessionRiskThreshold   float64  `yaml:"session_risk_threshold"`   // 风险积分阈值（默认 10）
@@ -589,36 +590,50 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID:          "tpl-inbound-financial",
 			Name:        "银行/支付入站规则",
-			Description: "银行/支付行业专属检测规则，覆盖账户数据、交易流水和合规交易",
+			Description: "银行/支付行业专属检测规则，覆盖账户数据、交易流水、合规交易、反洗钱和金融社工",
 			Category:    "industry",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
-				{Name: "fin_account_cn", Patterns: []string{"账户余额", "交易流水", "银行卡号", "信用卡号", "贷款审批", "授信额度", "征信报告"}, Action: "warn", Category: "financial_data"},
-				{Name: "fin_account_en", Patterns: []string{"account balance", "transaction history", "credit score", "loan approval", "swift code", "routing number"}, Action: "warn", Category: "financial_data"},
-				{Name: "fin_trading", Patterns: []string{"内幕交易", "insider trading", "material non-public", "MNPI", "front running", "抢先交易"}, Action: "block", Category: "compliance"},
+				{Name: "fin_account_cn", Patterns: []string{"账户余额", "交易流水", "银行卡号", "信用卡号", "贷款审批", "授信额度", "征信报告", "银行账号", "开户行"}, Action: "warn", Category: "financial_data"},
+				{Name: "fin_account_en", Patterns: []string{"account balance", "transaction history", "credit score", "loan approval", "SWIFT code", "routing number", "IBAN", "ABA number", "account number"}, Action: "warn", Category: "financial_data"},
+				{Name: "fin_trading", Patterns: []string{"内幕交易", "内幕信息", "未公开信息", "insider trading", "material non-public", "MNPI", "front running", "抢先交易"}, Action: "block", Category: "compliance"},
+				{Name: "fin_market_manipulation", Patterns: []string{"操纵市场", "对敲交易", "pump and dump", "wash trading", "market manipulation"}, Action: "block", Category: "compliance"},
+				{Name: "fin_aml", Patterns: []string{"洗钱", "地下钱庄", "money laundering", "hawala", "制裁规避", "sanctions evasion", "OFAC", "SDN list"}, Action: "block", Category: "compliance"},
+				{Name: "fin_transfer", Patterns: []string{"转账金额", "电汇", "wire transfer", "transfer funds to", "approve payment", "authorize withdrawal"}, Action: "warn", Category: "financial_operations"},
+				{Name: "fin_risk_bypass", Patterns: []string{"跳过风控", "绕过审批", "override risk limit", "bypass compliance", "skip audit", "不留记录", "off the record"}, Action: "block", Category: "compliance"},
+				{Name: "fin_bec", Patterns: []string{"CEO asked me to", "urgent wire transfer", "紧急转账", "confidential acquisition", "redirect payment", "change account", "modify beneficiary"}, Action: "block", Category: "social_engineering"},
+				{Name: "fin_customer_pii", Patterns: []string{"客户编号", "证件号码", "纳税人识别号", "税号", "customer ID", "client ID", "tax ID", "taxpayer"}, Action: "warn", Category: "financial_pii"},
 			},
 		},
 		{
 			ID:          "tpl-inbound-healthcare",
 			Name:        "医疗行业入站规则",
-			Description: "医疗行业专属检测规则，覆盖患者隐私和药品安全",
+			Description: "医疗行业专属检测规则，覆盖患者隐私、药品安全、基因数据、精神健康和医疗合规",
 			Category:    "industry",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
-				{Name: "health_phi_cn", Patterns: []string{"病历", "诊断报告", "处方", "医嘱", "化验单", "影像报告", "手术记录", "出院小结"}, Action: "warn", Category: "phi"},
-				{Name: "health_phi_en", Patterns: []string{"patient record", "diagnosis", "prescription", "medical history", "lab result", "HIPAA", "protected health information"}, Action: "warn", Category: "phi"},
+				{Name: "health_phi_cn", Patterns: []string{"病历", "诊断报告", "处方", "医嘱", "化验单", "影像报告", "手术记录", "出院小结", "病历号", "就诊卡号", "医保卡号"}, Action: "warn", Category: "phi"},
+				{Name: "health_phi_en", Patterns: []string{"patient record", "patient ID", "diagnosis", "prescription", "medical history", "lab result", "HIPAA", "protected health information", "test results", "blood test"}, Action: "warn", Category: "phi"},
 				{Name: "health_drug", Patterns: []string{"处方药", "管制药品", "麻醉药品", "精神药品", "controlled substance"}, Action: "block", Category: "drug_safety"},
+				{Name: "health_genetic_block", Patterns: []string{"基因检测", "DNA analysis", "genome", "染色体", "genetic test", "基因数据"}, Action: "block", Category: "phi"},
+				{Name: "health_mental_block", Patterns: []string{"精神科", "心理诊断", "抑郁症", "psychiatric", "mental health record"}, Action: "block", Category: "phi"},
+				{Name: "health_hiv_block", Patterns: []string{"HIV status", "HIV positive", "HIV test", "艾滋病检测"}, Action: "block", Category: "phi"},
+				{Name: "health_safety_block", Patterns: []string{"超剂量", "跳过用药审核", "忽略过敏", "跳过过敏检查", "override dosage", "ignore dosage limit", "ignore allergy", "bypass allergy check"}, Action: "block", Category: "medical_safety"},
+				{Name: "health_compliance", Patterns: []string{"未经同意", "跳过知情同意", "修改病历", "篡改诊断", "查看全部病历", "导出患者数据", "without consent", "skip consent", "modify diagnosis", "change medical record", "access all patients", "view all records"}, Action: "block", Category: "medical_compliance"},
+				{Name: "health_fraud", Patterns: []string{"虚假诊断", "骗保", "套取医保", "fake diagnosis", "insurance fraud"}, Action: "block", Category: "medical_compliance"},
 			},
 		},
 		{
 			ID:          "tpl-inbound-compliance",
 			Name:        "AI 合规入站规则",
-			Description: "AI 法规合规检测规则，覆盖 EU AI Act 禁止/高风险类别",
+			Description: "AI 法规合规检测规则，覆盖 EU AI Act、中国生成式AI暂行办法和数据安全法",
 			Category:    "compliance",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "ai_act_prohibited", Patterns: []string{"social scoring", "社会信用评分", "subliminal manipulation", "潜意识操纵", "biometric surveillance", "实时生物识别"}, Action: "block", Category: "ai_act"},
-				{Name: "ai_act_high_risk", Patterns: []string{"automated decision", "自动化决策", "credit scoring", "信用评分", "recruitment AI", "招聘AI", "predictive policing"}, Action: "warn", Category: "ai_act"},
+				{Name: "ai_act_high_risk", Patterns: []string{"automated decision", "自动化决策", "credit scoring", "信用评分", "recruitment AI", "招聘AI", "predictive policing", "预测性执法"}, Action: "warn", Category: "ai_act"},
+				{Name: "cn_gen_ai", Patterns: []string{"深度合成", "deepfake", "换脸", "face swap", "AI生成内容未标注", "AI generated without label"}, Action: "warn", Category: "cn_gen_ai"},
+				{Name: "data_security_law", Patterns: []string{"核心数据", "重要数据", "数据安全评估", "core data", "important data", "data security assessment", "数据分类分级"}, Action: "warn", Category: "data_security"},
 			},
 		},
 		// v29.0: 8个新行业入站模板
@@ -649,13 +664,19 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID:          "tpl-inbound-government",
 			Name:        "政务/政府入站规则",
-			Description: "政务行业专属检测规则，覆盖涉密信息保护、政策草案和公文管控",
+			Description: "政务行业专属检测规则，覆盖涉密信息、公民隐私、政策草案、跨境数据和社工攻击",
 			Category:    "industry",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
-				{Name: "gov_classified", Patterns: []string{"机密文件", "秘密文件", "内部文件", "classified document", "confidential government", "state secret", "国家秘密"}, Action: "block", Category: "classified"},
-				{Name: "gov_policy_draft", Patterns: []string{"政策草案", "内部征求意见稿", "policy draft", "internal consultation", "draft regulation", "草案征求意见"}, Action: "warn", Category: "policy_draft"},
-				{Name: "gov_document_number", Patterns: []string{"公文文号", "发文字号", "official document number", "government dispatch", "红头文件", "official gazette"}, Action: "warn", Category: "gov_document"},
+				{Name: "gov_classified", Patterns: []string{"机密文件", "秘密文件", "绝密", "秘密级", "top secret", "classified document", "confidential government", "state secret", "国家秘密", "定密依据", "保密法"}, Action: "block", Category: "classified"},
+				{Name: "gov_internal", Patterns: []string{"内部资料", "不得外传", "仅限内部", "内部文件", "internal use only"}, Action: "warn", Category: "classified"},
+				{Name: "gov_citizen_pii", Patterns: []string{"身份证号", "居民身份证", "citizen ID", "户籍信息", "户口本", "household register", "犯罪记录", "案底", "前科", "criminal record"}, Action: "block", Category: "pii"},
+				{Name: "gov_policy_draft", Patterns: []string{"政策草案", "内部征求意见稿", "未发布政策", "内部会议纪要", "policy draft", "internal consultation", "draft regulation"}, Action: "warn", Category: "policy_draft"},
+				{Name: "gov_document_number", Patterns: []string{"公文文号", "发文字号", "红头文件", "official document number", "government dispatch", "official gazette"}, Action: "warn", Category: "gov_document"},
+				{Name: "gov_cross_border", Patterns: []string{"数据出境", "跨境传输", "transfer overseas", "send abroad", "cross-border data"}, Action: "block", Category: "compliance"},
+				{Name: "gov_approval_bypass", Patterns: []string{"跳过审批", "绕过流程", "bypass approval", "skip review"}, Action: "block", Category: "compliance"},
+				{Name: "gov_disclosure", Patterns: []string{"泄露给媒体", "告诉记者", "leak to media", "disclose to press"}, Action: "block", Category: "compliance"},
+				{Name: "gov_impersonation", Patterns: []string{"纪检组要求", "上级领导指示", "巡视组要求", "I am from inspection", "导出全部数据", "批量下载", "export all data", "dump database"}, Action: "warn", Category: "social_engineering"},
 			},
 		},
 		{

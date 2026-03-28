@@ -1176,6 +1176,11 @@ func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID stri
 				}
 			}
 		}
+		// v30.0: 追加全局启用的行业模板规则检测
+		globalTplResult := ip.engine.DetectGlobalTemplates(msgText)
+		if globalTplResult.Action != "pass" {
+			dr = mergeDetectResults(dr, globalTplResult)
+		}
 		// v27.1: 追加租户专属入站规则检测
 		if tenantID != "" && tenantID != "default" {
 			tenantResult := ip.engine.DetectTenantRules(tenantID, msgText)
@@ -1187,6 +1192,11 @@ func (ip *InboundProxy) runPipelineDetect(msgText, appID, senderID, traceID stri
 	}
 	// 回退: 直接调用引擎（带排除）
 	result := ip.engine.DetectWithExclusions(msgText, appID, excludeRules)
+	// v30.0: 追加全局启用的行业模板规则检测
+	globalTplResult := ip.engine.DetectGlobalTemplates(msgText)
+	if globalTplResult.Action != "pass" {
+		result = mergeDetectResults(result, globalTplResult)
+	}
 	// v27.1: 追加租户专属入站规则检测
 	if tenantID != "" && tenantID != "default" {
 		tenantResult := ip.engine.DetectTenantRules(tenantID, msgText)

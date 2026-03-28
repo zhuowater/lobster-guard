@@ -174,28 +174,12 @@ func main() {
 	inboundRules, inboundSource, err := resolveInboundRules(cfg)
 	if err != nil { log.Fatalf("加载入站规则失败: %v", err) }
 
-	// v5.1: 加载规则模板
-	var templateRules []InboundRuleConfig
-	if len(cfg.RuleTemplates) > 0 {
-		templateRules, err = LoadRuleTemplates(cfg.RuleTemplates)
-		if err != nil { log.Fatalf("加载规则模板失败: %v", err) }
-		fmt.Printf("[初始化] ✅ 规则模板: %v (%d 条模板规则)\n", cfg.RuleTemplates, len(templateRules))
-	}
-
+	// v30.0: 行业模板不再通过 config.yaml rule_templates 加载
+	// 改为 DB 全局开关机制，通过 Dashboard 启用/禁用
 	if inboundRules != nil {
-		if len(templateRules) > 0 {
-			// 合并模板规则 + 自定义规则
-			inboundRules = MergeRulesWithTemplates(templateRules, inboundRules)
-			inboundSource = inboundSource + "+templates"
-		}
 		engine = NewRuleEngineWithPII(inboundRules, inboundSource, cfg.OutboundPIIPatterns, cfg.RuleBindings)
 	} else {
-		if len(templateRules) > 0 {
-			// 只有模板规则
-			engine = NewRuleEngineWithPII(templateRules, "templates", cfg.OutboundPIIPatterns, cfg.RuleBindings)
-		} else {
-			engine = NewRuleEngineWithPII(getDefaultInboundRules(), "default", cfg.OutboundPIIPatterns, cfg.RuleBindings)
-		}
+		engine = NewRuleEngineWithPII(getDefaultInboundRules(), "default", cfg.OutboundPIIPatterns, cfg.RuleBindings)
 	}
 	printInboundRuleSummary(engine)
 
@@ -221,6 +205,8 @@ func main() {
 	engine.SetTenantDB(db)
 	// v28.0: 入站规则模板 DB 初始化
 	engine.SetInboundTemplateDB(db)
+	// v30.0: 初始化全局启用的行业模板 AC 自动机
+	engine.InitGlobalTemplateAC()
 
 	// v14.1: 初始化认证管理器
 	authMgr := NewAuthManager(db, &cfg.Auth)
@@ -246,6 +232,7 @@ func main() {
 		llmRuleEngine.SetDB(logger.DB()) // Issue #7 fix: 命中计数持久化
 		llmRuleEngine.SetTenantDB(logger.DB())   // v28.0: LLM 规则租户绑定持久化
 		llmRuleEngine.SetTemplateDB(logger.DB())  // v28.0: LLM 规则模板持久化
+		llmRuleEngine.InitGlobalLLMTemplateRules() // v30.0: 初始化全局启用的 LLM 行业模板规则
 		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则 (用户%d+默认补充)", len(llmRules), len(cfg.LLMProxy.Rules))
 
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)

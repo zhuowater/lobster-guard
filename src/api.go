@@ -650,6 +650,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleInboundTemplateGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "PUT":
 		api.handleInboundTemplateUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
+		api.handleInboundTemplateEnable(w, r)
 	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "DELETE":
 		api.handleInboundTemplateDelete(w, r)
 
@@ -660,6 +662,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleLLMTemplateCreate(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "GET":
 		api.handleLLMTemplateGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/llm/templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
+		api.handleLLMTemplateEnable(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "PUT":
 		api.handleLLMTemplateUpdate(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "DELETE":
@@ -3261,15 +3265,27 @@ func (api *ManagementAPI) handleAuditArchiveNow(w http.ResponseWriter, r *http.R
 // v5.1 智能检测 API
 // ============================================================
 
-// handleListRuleTemplates GET /api/v1/rule-templates — 列出可用规则模板及其规则数
+// handleListRuleTemplates GET /api/v1/rule-templates — 列出可用规则模板（v30.0: 转发到入站模板列表）
 func (api *ManagementAPI) handleListRuleTemplates(w http.ResponseWriter, r *http.Request) {
-	templates := ListRuleTemplates()
-	if templates == nil {
-		templates = []RuleTemplateMeta{}
+	templates := api.inboundEngine.ListInboundTemplates()
+	type templateMeta struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		RuleCount int    `json:"rule_count"`
+		Category  string `json:"category"`
+		Enabled   bool   `json:"enabled"`
+		BuiltIn   bool   `json:"built_in"`
+	}
+	var result []templateMeta
+	for _, tpl := range templates {
+		result = append(result, templateMeta{
+			ID: tpl.ID, Name: tpl.Name, RuleCount: len(tpl.Rules),
+			Category: tpl.Category, Enabled: tpl.Enabled, BuiltIn: tpl.BuiltIn,
+		})
 	}
 	jsonResponse(w, 200, map[string]interface{}{
-		"templates": templates,
-		"total":     len(templates),
+		"templates": result,
+		"total":     len(result),
 	})
 }
 
@@ -3689,22 +3705,24 @@ func (api *ManagementAPI) handleImportRules(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleRuleTemplateDetail GET /api/v1/rule-templates/detail?name=xxx — 获取模板详情
+// handleRuleTemplateDetail GET /api/v1/rule-templates/detail?name=xxx — 获取模板详情（v30.0: 转发到入站模板）
 func (api *ManagementAPI) handleRuleTemplateDetail(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		jsonResponse(w, 400, map[string]string{"error": "name parameter required"})
 		return
 	}
-	rules, err := LoadRuleTemplate(name)
-	if err != nil {
-		jsonResponse(w, 404, map[string]string{"error": err.Error()})
+	tpl := api.inboundEngine.GetInboundTemplate(name)
+	if tpl == nil {
+		jsonResponse(w, 404, map[string]string{"error": fmt.Sprintf("模板 %q 不存在", name)})
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{
-		"name":  name,
-		"rules": rules,
-		"total": len(rules),
+		"name":    tpl.Name,
+		"id":      tpl.ID,
+		"rules":   tpl.Rules,
+		"total":   len(tpl.Rules),
+		"enabled": tpl.Enabled,
 	})
 }
 
@@ -9485,6 +9503,32 @@ func (api *ManagementAPI) handleInboundTemplateDelete(w http.ResponseWriter, r *
 	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
 }
 
+// handleInboundTemplateEnable POST /api/v1/inbound-templates/:id/enable — 启用/禁用入站模板全局开关（v30.0）
+func (api *ManagementAPI) handleInboundTemplateEnable(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/inbound-templates/")
+	id := strings.TrimSuffix(trimmed, "/enable")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := api.inboundEngine.EnableInboundTemplate(id, req.Enabled); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	action := "disabled"
+	if req.Enabled {
+		action = "enabled"
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": action, "id": id, "enabled": req.Enabled})
+}
+
 // ============================================================
 // v28.0 LLM 规则模板 CRUD API
 // ============================================================
@@ -9580,6 +9624,36 @@ func (api *ManagementAPI) handleLLMTemplateDelete(w http.ResponseWriter, r *http
 		return
 	}
 	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": id})
+}
+
+// handleLLMTemplateEnable POST /api/v1/llm/templates/:id/enable — 启用/禁用 LLM 模板全局开关（v30.0）
+func (api *ManagementAPI) handleLLMTemplateEnable(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/llm/templates/")
+	id := strings.TrimSuffix(trimmed, "/enable")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "template id required"})
+		return
+	}
+	if api.llmRuleEngine == nil {
+		jsonResponse(w, 400, map[string]string{"error": "LLM 规则引擎未启用"})
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := api.llmRuleEngine.EnableLLMTemplate(id, req.Enabled); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	action := "disabled"
+	if req.Enabled {
+		action = "enabled"
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": action, "id": id, "enabled": req.Enabled})
 }
 
 // ============================================================

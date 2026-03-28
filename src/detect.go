@@ -86,6 +86,10 @@ type RuleEngine struct {
 	tenantRuleList map[string][]Rule              // tenantID -> Rule metadata
 	tenantRegex    map[string][]RegexRule          // tenantID -> regex rules
 	tenantDB       *sql.DB                        // v27.2: 持久化存储
+	// v30.0 全局启用的行业模板规则
+	globalTemplateAC    *AhoCorasick // 全局模板 AC 自动机
+	globalTemplateRules []Rule       // 全局模板 Rule 列表
+	globalTemplateRegex []RegexRule  // 全局模板正则规则
 }
 
 // actionToLevel 将 action 字符串映射到 RuleLevel
@@ -907,9 +911,12 @@ func (re *RuleEngine) SetInboundTemplateDB(db *sql.DB) {
 		category TEXT,
 		rules_json TEXT NOT NULL,
 		built_in INTEGER DEFAULT 0,
+		enabled INTEGER DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
+	// v30.0: 给已有表加 enabled 列（ALTER TABLE 幂等）
+	db.Exec(`ALTER TABLE inbound_rule_templates ADD COLUMN enabled INTEGER DEFAULT 0`)
 	// 加载内置模板
 	re.loadBuiltinInboundTemplates(db)
 }
@@ -947,7 +954,7 @@ func (re *RuleEngine) ListInboundTemplates() []InboundRuleTemplate {
 		return getDefaultInboundTemplates()
 	}
 
-	rows, err := db.Query(`SELECT id, name, description, category, rules_json, built_in FROM inbound_rule_templates ORDER BY id`)
+	rows, err := db.Query(`SELECT id, name, description, category, rules_json, built_in, COALESCE(enabled,0) FROM inbound_rule_templates ORDER BY id`)
 	if err != nil {
 		return getDefaultInboundTemplates()
 	}
@@ -957,11 +964,12 @@ func (re *RuleEngine) ListInboundTemplates() []InboundRuleTemplate {
 	for rows.Next() {
 		var tpl InboundRuleTemplate
 		var rulesJSON string
-		var builtIn int
-		if rows.Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn) != nil {
+		var builtIn, enabled int
+		if rows.Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn, &enabled) != nil {
 			continue
 		}
 		tpl.BuiltIn = builtIn == 1
+		tpl.Enabled = enabled == 1
 		if json.Unmarshal([]byte(rulesJSON), &tpl.Rules) != nil {
 			continue
 		}
@@ -991,17 +999,175 @@ func (re *RuleEngine) GetInboundTemplate(id string) *InboundRuleTemplate {
 
 	var tpl InboundRuleTemplate
 	var rulesJSON string
-	var builtIn int
-	err := db.QueryRow(`SELECT id, name, description, category, rules_json, built_in FROM inbound_rule_templates WHERE id=?`, id).
-		Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn)
+	var builtIn, enabled int
+	err := db.QueryRow(`SELECT id, name, description, category, rules_json, built_in, COALESCE(enabled,0) FROM inbound_rule_templates WHERE id=?`, id).
+		Scan(&tpl.ID, &tpl.Name, &tpl.Description, &tpl.Category, &rulesJSON, &builtIn, &enabled)
 	if err != nil {
 		return nil
 	}
 	tpl.BuiltIn = builtIn == 1
+	tpl.Enabled = enabled == 1
 	if json.Unmarshal([]byte(rulesJSON), &tpl.Rules) != nil {
 		return nil
 	}
 	return &tpl
+}
+
+// EnableInboundTemplate 启用/禁用入站模板全局开关（v30.0）
+func (re *RuleEngine) EnableInboundTemplate(id string, enabled bool) error {
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+	if db == nil {
+		return fmt.Errorf("模板 DB 未初始化")
+	}
+	val := 0
+	if enabled {
+		val = 1
+	}
+	result, err := db.Exec(`UPDATE inbound_rule_templates SET enabled=?, updated_at=? WHERE id=?`,
+		val, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("模板 %q 不存在", id)
+	}
+	// 重建全局模板 AC 自动机
+	re.rebuildGlobalTemplateAC()
+	return nil
+}
+
+// GetEnabledInboundTemplateRules 返回所有全局启用模板的规则合集（v30.0）
+func (re *RuleEngine) GetEnabledInboundTemplateRules() []InboundRuleConfig {
+	re.mu.RLock()
+	db := re.tenantDB
+	re.mu.RUnlock()
+	if db == nil {
+		return nil
+	}
+	rows, err := db.Query(`SELECT rules_json FROM inbound_rule_templates WHERE enabled=1`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var allRules []InboundRuleConfig
+	for rows.Next() {
+		var rulesJSON string
+		if rows.Scan(&rulesJSON) != nil {
+			continue
+		}
+		var rules []InboundRuleConfig
+		if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
+			continue
+		}
+		allRules = append(allRules, rules...)
+	}
+	return allRules
+}
+
+// rebuildGlobalTemplateAC 重建全局模板 AC 自动机缓存（v30.0）
+func (re *RuleEngine) rebuildGlobalTemplateAC() {
+	rules := re.GetEnabledInboundTemplateRules()
+	if len(rules) == 0 {
+		re.mu.Lock()
+		re.globalTemplateAC = nil
+		re.globalTemplateRules = nil
+		re.globalTemplateRegex = nil
+		re.mu.Unlock()
+		log.Printf("[入站规则] 全局模板: 0 条规则（已清空）")
+		return
+	}
+	ac, ruleList := buildACFromConfigs(rules)
+	regexRules := buildRegexRules(rules)
+	re.mu.Lock()
+	re.globalTemplateAC = ac
+	re.globalTemplateRules = ruleList
+	re.globalTemplateRegex = regexRules
+	re.mu.Unlock()
+	log.Printf("[入站规则] 全局模板: %d 条规则, AC 已重建", len(rules))
+}
+
+// DetectGlobalTemplates 全局模板规则检测（v30.0）
+func (re *RuleEngine) DetectGlobalTemplates(text string) DetectResult {
+	r := DetectResult{Action: "pass"}
+	if text == "" {
+		return r
+	}
+	re.mu.RLock()
+	ac := re.globalTemplateAC
+	rules := re.globalTemplateRules
+	regexRules := re.globalTemplateRegex
+	re.mu.RUnlock()
+	if ac == nil && len(regexRules) == 0 {
+		return r
+	}
+	type matchedRule struct {
+		Name     string
+		Level    RuleLevel
+		Priority int
+		Message  string
+		Action   string
+	}
+	matchesByName := make(map[string]*matchedRule)
+	// AC 匹配
+	if ac != nil && rules != nil {
+		for _, idx := range ac.Search(text) {
+			if idx < 0 || idx >= len(rules) {
+				continue
+			}
+			rule := rules[idx]
+			action := levelToAction(rule.Level)
+			if existing, ok := matchesByName[rule.Name]; ok {
+				if rule.Priority > existing.Priority ||
+					(rule.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
+					existing.Level = rule.Level
+					existing.Priority = rule.Priority
+					existing.Message = rule.Message
+					existing.Action = action
+				}
+			} else {
+				matchesByName[rule.Name] = &matchedRule{Name: rule.Name, Level: rule.Level, Priority: rule.Priority, Message: rule.Message, Action: action}
+			}
+		}
+	}
+	// 正则匹配
+	for _, rr := range regexRules {
+		if !rr.Enabled {
+			continue
+		}
+		if rr.Pattern.MatchString(text) {
+			action := levelToAction(rr.Level)
+			if existing, ok := matchesByName[rr.Name]; ok {
+				if rr.Priority > existing.Priority {
+					existing.Level = rr.Level
+					existing.Priority = rr.Priority
+					existing.Message = rr.Message
+					existing.Action = action
+				}
+			} else {
+				matchesByName[rr.Name] = &matchedRule{Name: rr.Name, Level: rr.Level, Priority: rr.Priority, Message: rr.Message, Action: action}
+			}
+		}
+	}
+	// 转换为 DetectResult
+	for _, m := range matchesByName {
+		r.MatchedRules = append(r.MatchedRules, m.Name)
+		if m.Message != "" {
+			r.Reasons = append(r.Reasons, m.Message)
+		}
+		if actionWeight(m.Action) > actionWeight(r.Action) {
+			r.Action = m.Action
+			r.Message = m.Message
+		}
+	}
+	return r
+}
+
+// InitGlobalTemplateAC 启动时初始化全局模板 AC（v30.0）
+func (re *RuleEngine) InitGlobalTemplateAC() {
+	re.rebuildGlobalTemplateAC()
 }
 
 // CreateInboundTemplate 创建自定义入站规则模板

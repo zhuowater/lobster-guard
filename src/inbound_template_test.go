@@ -321,8 +321,8 @@ func TestInboundTemplateGetAPI(t *testing.T) {
 	if tpl.ID != "tpl-inbound-semiconductor" {
 		t.Errorf("期望 ID=tpl-inbound-semiconductor，实际 %s", tpl.ID)
 	}
-	if len(tpl.Rules) != 3 {
-		t.Errorf("芯片模板期望 3 条规则，实际 %d", len(tpl.Rules))
+	if len(tpl.Rules) < 3 {
+		t.Errorf("芯片模板期望至少 3 条规则，实际 %d", len(tpl.Rules))
 	}
 
 	// 不存在的模板
@@ -354,14 +354,17 @@ func TestBindInboundTemplateAPI(t *testing.T) {
 		t.Errorf("期望 status=bound，实际 %v", resp["status"])
 	}
 	rulesBound := int(resp["rules_bound"].(float64))
-	if rulesBound != 3 {
-		t.Errorf("期望绑定 3 条规则，实际 %d", rulesBound)
+	// 动态获取金融模板实际规则数
+	finTpl := engine.GetInboundTemplate("tpl-inbound-financial")
+	expectedFinRules := len(finTpl.Rules)
+	if rulesBound != expectedFinRules {
+		t.Errorf("期望绑定 %d 条规则，实际 %d", expectedFinRules, rulesBound)
 	}
 
 	// 验证规则已存入
 	rules := engine.GetTenantRules("test-fin")
-	if len(rules) != 3 {
-		t.Fatalf("期望 3 条租户规则，实际 %d", len(rules))
+	if len(rules) != expectedFinRules {
+		t.Fatalf("期望 %d 条租户规则，实际 %d", expectedFinRules, len(rules))
 	}
 	// 检查名称后缀
 	for _, r := range rules {
@@ -417,17 +420,20 @@ func TestBindMultipleTemplates(t *testing.T) {
 		t.Fatalf("第二次绑定失败: %d", w2.Code)
 	}
 
-	// 验证总规则数=3+3=6
+	// 验证总规则数=芯片+金融
+	chipTpl := engine.GetInboundTemplate("tpl-inbound-semiconductor")
+	finTpl := engine.GetInboundTemplate("tpl-inbound-financial")
+	expectedTotal := len(chipTpl.Rules) + len(finTpl.Rules)
 	rules := engine.GetTenantRules("multi")
-	if len(rules) != 6 {
-		t.Errorf("期望 6 条规则（芯片3+金融3），实际 %d", len(rules))
+	if len(rules) != expectedTotal {
+		t.Errorf("期望 %d 条规则（芯片%d+金融%d），实际 %d", expectedTotal, len(chipTpl.Rules), len(finTpl.Rules), len(rules))
 	}
 
 	var resp map[string]interface{}
 	json.NewDecoder(w2.Body).Decode(&resp)
 	totalRules := int(resp["total_rules"].(float64))
-	if totalRules != 6 {
-		t.Errorf("API 返回 total_rules 应为 6，实际 %d", totalRules)
+	if totalRules != expectedTotal {
+		t.Errorf("API 返回 total_rules 应为 %d，实际 %d", expectedTotal, totalRules)
 	}
 }
 
@@ -608,8 +614,10 @@ func TestInboundTemplateRouting(t *testing.T) {
 			Total int `json:"total"`
 		}
 		json.NewDecoder(w2.Body).Decode(&resp)
-		if resp.Total != 2 { // compliance 模板有 2 条规则
-			t.Errorf("期望 2 条规则，实际 %d", resp.Total)
+		compTpl := engine.GetInboundTemplate("tpl-inbound-compliance")
+		expectedCompRules := len(compTpl.Rules)
+		if resp.Total != expectedCompRules { // compliance 模板规则数
+			t.Errorf("期望 %d 条规则，实际 %d", expectedCompRules, resp.Total)
 		}
 
 		// delete
