@@ -67,13 +67,20 @@ registration_token: "YOUR_REGISTRATION_TOKEN"
 route_default_policy: "least-users"
 route_persist: true
 
+# v29.0: Gateway WSS RPC 全局默认 Origin
+# 当上游未配置 gateway_origin 时使用此值
+# 需与 OpenClaw Gateway 的 controlUi.allowedOrigins 匹配
+default_gateway_origin: "http://localhost"
+
 # --- 静态上游 ---
+# 上游配置示例
 static_upstreams:
   - id: "openclaw-local"
     address: "127.0.0.1"
-    port: 18790
+    port: 19444
+    gateway_token: "your-gateway-token-here"
+    # gateway_origin: "https://your-domain.com"  # 可选，覆盖 default_gateway_origin
     # path_prefix: "/api/v1"      # 可选：上游服务的路径前缀
-    # gateway_token: "your-token"  # 可选：OpenClaw Gateway Auth Token（用于 Agent 运营中心）
     # openclaw_config_path: "/root/.openclaw/openclaw.json"  # 可选：同机部署时直接读取配置，获取完整 agents/sessions 列表（绕过 tools/invoke 的 visibility 限制）
 
 # --- WebSocket 安全 ---

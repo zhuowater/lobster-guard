@@ -1,6 +1,6 @@
 # lobster-guard Roadmap
 
-> **当前版本：v25.2** · 242 commits · Go ~86,300 行 · Vue ~27,300 行 · 1151 测试 · 256+ API · 46 页面 · 72 Vue 文件 · 53 引擎 · 5 依赖
+> **当前版本：v29.0** · 242 commits · Go ~86,300 行 · Vue ~27,300 行 · 1151 测试 · 256+ API · 46 页面 · 72 Vue 文件 · 53 引擎 · 5 依赖
 >
 > 更新时间：2026-03-26
 
@@ -634,15 +634,35 @@
   - 第三方检测器插件（基于 v19.2 SDK）
   - OpenTelemetry 接入：安全事件+IFC 标签 作为 span attribute 导出
 
-### v29.x — 分布式部署 · 企业级
-> 水平扩展 · 高可用 | 理论基础：CAP 定理（分布式安全的权衡选择）
-> 依赖：🔧 需要 PostgreSQL + 多实例协调
+### v29.x — Gateway WSS RPC 远程管理 · 企业级网关运维 ✅
+> 从 REST 调用升级到持久化 WSS RPC，直接复刻 OpenClaw Control UI 协议 | 理论基础：连接复用 + 状态同步优于轮询式管理
+> 依赖：✅ 纯网关层改造（无需 PostgreSQL / 多实例协调）
 
-- [ ] v29.0 **PostgresStore + 多实例**
-  - SQLite → PostgreSQL 存储后端（保持 SQLite 兼容用于单机模式）
-  - IFC 标签 + Capability + 路径策略 跨节点同步
-  - 多实例部署：Leader 选举 · 路由状态同步 · 读写分离
-  - 执行信封跨节点验证链（v18 延伸：分布式证据链完整性验证）
+- [x] v29.0 **Gateway WSS RPC 远程管理** ✅ (2026-03-28)
+  - 从 RESTful `POST /tools/invoke` 升级为持久化 WSS RPC 连接
+  - 复刻 OpenClaw Control UI WebSocket 协议：`challenge → connect → hello → ready`
+  - 双路径架构：WSS RPC 优先，`tools/invoke` 自动 fallback
+  - 响应延迟从 78-184ms 降至 11-44ms
+  - 新增 55 个 Gateway 管理端点，覆盖 Control UI 约 85%
+  - Session 管理：list/patch/delete/reset/compact + history
+  - Chat 操作：send（发消息触发 agent）/ abort（中止生成）
+  - Cron CRUD：list/add/update/remove/run/runs
+  - Agent 管理：list/create/update/delete + files list/get/set
+  - 执行审批：list/approve/reject
+  - Config 管理：get/patch/schema
+  - Skills：bins/install/update/uninstall
+  - Gateway 控制：restart/update
+  - 心跳/设备：heartbeat get/set + wake + devices list/approve/reject
+  - 节点：pairs list/approve/reject + describe/rename
+  - 记忆：memory search
+  - 系统：health/models/channels/logs/usage
+  - 其他：system-event/ping
+  - Dashboard 全部集成到 GatewayMonitor 页面：
+    - Sessions tab：执行审批面板 + 压缩/重置/删除 + 发消息/中止 + 👥群聊/💬私聊标识
+    - Cron tab：完整 CRUD + 运行历史
+    - Diag tab：Gateway 配置编辑器（60vh）+ Gateway 控制（重启/更新）+ Token 管理
+    - Agent tab：7 个子视图（仪表盘/卡片含 CRUD/协作/用户/Skills 安装更新卸载/文件编辑器/心跳设备/记忆搜索）
+  - 配置新增：`default_gateway_origin` 全局默认 Origin（默认 `http://localhost`），上游 `gateway_origin` 可覆盖；同机部署只需 Gateway 增加 `controlUi.allowedOrigins: ["http://localhost"]`
 - [ ] v29.1 **弹性伸缩 + 零停机升级**
   - 滚动更新：新旧版本共存期间路由无感知切换
   - 配置热同步：修改一个节点的配置自动同步到集群
@@ -871,12 +891,12 @@ Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
   v23:     路径级策略引擎 (Runtime Governance)         ✅
   v24:     因果归因防御 (AttriGuard 反事实验证)        ✅
   v25:     控制流/数据流分离 (CaMeL 执行计划编译)      ✅
-------- v25.2 当前版本 · 以下为规划 -------
+------- v29.0 当前版本 · 以下为规划 -------
   v26:     信息流控制 (Fides IFC 变量级污点追踪)       ← 数学保证安全
 Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
   v27:     Agent 身份 + MCP 安全网关 + 跨 Agent 蠕虫检测
   v28:     AI 安全副驾驶 + Benchmark 自动化 + Guardrail 市场
-  v29:     分布式部署 + PostgreSQL + 弹性伸缩
+  v29:     Gateway WSS RPC 远程管理 + 企业级 Gateway 运维
 
 产品定位演进:
   v1-v5:   AI Agent 安全网关（被动防御 — 规则匹配）
@@ -886,7 +906,7 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
   v23-v25: ✅ 学术前沿转化 Phase 2a（路径策略 + 因果推断 + CaMeL 执行计划）
   v26:     🆕 可证明安全 2.0 — 信息流控制 IFC（变量级污点追踪）
   v27-v28: MCP 安全网关 + AI 安全副驾驶（Phase 3 生态扩展）
-  v29:     企业级分布式（水平扩展 + 高可用）
+  v29:     企业级 Gateway 远程管理（WSS RPC + Dashboard 运维闭环）
 
 三个产品线:
   A — Agent 防注入引擎（核心壁垒）  : v25 CaMeL + v24 AttriGuard + v19 语义检测
@@ -907,7 +927,7 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
 | **v26** | **Bell-LaPadula IFC** | **arXiv:2505.23643 Microsoft Fides** | **每个变量有数学标签 → 安全是可证明的** |
 | v27 | SMCP + MCPShield | arXiv:2602.01129 / 2602.14281 | MCP 安全是架构问题 → 网关层透明加固 |
 | v28 | Nash 均衡 | AgentDojo / AgentDyn | 安全均衡需要被设计 → AI 辅助全局视角 |
-| v29 | CAP 定理 | — | 分布式安全三选二 → 明确权衡选择 |
+| v29 | 连接复用 + 状态同步 | OpenClaw Control UI WSS 协议 | 持久化 RPC 代替轮询式 REST，远程管理要像本地控制台一样实时 |
 
 ### 每个版本的反直觉创新 🔥
 
@@ -922,7 +942,7 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
 | **v26** | 🆕 安全不是 if-else，是**数学定理** — 标签传播规则保证信息不泄露 |
 | v27 | MCP Server 说自己安全？**让龙虾卫士验证** — 信任要靠行为赢取不是声明 |
 | v28 | 安全运营不是看 Dashboard，是**跟安全助手对话** |
-| v29 | 单二进制 → 集群，但**零配置迁移** |
+| v29 | `POST /tools/invoke` 不是终点，**持久化 WSS RPC 才能做实时远程管理** |
 
 ### 🆕 学术论文→产品功能 映射表
 
