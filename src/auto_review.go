@@ -118,7 +118,8 @@ type AutoReviewManager struct {
 	manualRules    map[string]bool              // 手动指定的 review 规则
 	stats          AutoReviewStats
 	stopCh         chan struct{}
-	pool           *UpstreamPool                // 用于获取 LLM 上游地址
+	pool           *UpstreamPool                // 用于获取 LLM 上游地址（fallback）
+	llmTargets     []LLMTargetConfig            // LLM Proxy 的上游 targets（优先使用）
 	// 统计原子计数
 	totalReviews   int64
 	allowedCount   int64
@@ -305,10 +306,11 @@ func (m *AutoReviewManager) ReviewWithLLM(ruleName, text string) string {
 	atomic.AddInt64(&m.totalReviews, 1)
 
 	// 获取 LLM 上游地址
-	endpoint, model := m.getLLMEndpoint()
+	endpoint, model, apiKeyHeader := m.getLLMEndpoint()
 	if endpoint == "" {
 		// 无可用 LLM 上游，fallback 为 block
 		atomic.AddInt64(&m.errorCount, 1)
+		log.Printf("[AutoReview] ⚠️ 无可用 LLM 上游，rule=%s fallback to block", ruleName)
 		return "block"
 	}
 
@@ -340,12 +342,21 @@ Respond with exactly one word: "malicious" if it's a real threat, or "benign" if
 	timeout := time.Duration(m.config.LLMTimeoutSec) * time.Second
 	client := &http.Client{Timeout: timeout}
 
-	req, err := http.NewRequest("POST", endpoint+"/v1/chat/completions", bytes.NewBuffer(jsonData))
+	reqURL := endpoint + "/v1/chat/completions"
+	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		atomic.AddInt64(&m.errorCount, 1)
 		return "block"
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// 如果有 API Key header，传递认证信息
+	if apiKeyHeader != "" {
+		// apiKeyHeader 格式如 "Authorization: Bearer sk-xxx" 或 "X-API-Key: xxx"
+		parts := strings.SplitN(apiKeyHeader, ":", 2)
+		if len(parts) == 2 {
+			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -385,35 +396,47 @@ Respond with exactly one word: "malicious" if it's a real threat, or "benign" if
 }
 
 // getLLMEndpoint 获取 LLM 上游地址和模型
-func (m *AutoReviewManager) getLLMEndpoint() (string, string) {
+func (m *AutoReviewManager) getLLMEndpoint() (string, string, string) {
 	model := m.config.LLMModel
 	if model == "" {
 		model = "gpt-4"
 	}
 
-	if m.pool == nil {
-		return "", model
+	// 优先使用 LLM Proxy 的 targets（真正的 LLM API）
+	if len(m.llmTargets) > 0 {
+		// 如果指定了上游名，精确匹配
+		if m.config.LLMUpstreamID != "" {
+			for _, t := range m.llmTargets {
+				if t.Name == m.config.LLMUpstreamID {
+					endpoint := strings.TrimRight(t.Upstream, "/")
+					if t.PathPrefix != "" && !t.StripPrefix {
+						endpoint += t.PathPrefix
+					}
+					return endpoint, model, t.APIKeyHeader
+				}
+			}
+		}
+		// 使用第一个 target
+		t := m.llmTargets[0]
+		endpoint := strings.TrimRight(t.Upstream, "/")
+		if t.PathPrefix != "" && !t.StripPrefix {
+			endpoint += t.PathPrefix
+		}
+		return endpoint, model, t.APIKeyHeader
 	}
 
-	upstreams := m.pool.ListUpstreams()
-
-	// 如果指定了上游ID，直接使用
-	if m.config.LLMUpstreamID != "" {
+	// fallback: UpstreamPool（不推荐，OpenClaw 实例不是 LLM API）
+	if m.pool != nil {
+		upstreams := m.pool.ListUpstreams()
 		for _, up := range upstreams {
-			if up.ID == m.config.LLMUpstreamID && up.Healthy {
-				return fmt.Sprintf("http://%s:%d", up.Address, up.Port), model
+			if up.Healthy {
+				log.Printf("[AutoReview] ⚠️ 使用 UpstreamPool fallback（非 LLM API）: %s:%d", up.Address, up.Port)
+				return fmt.Sprintf("http://%s:%d", up.Address, up.Port), model, ""
 			}
 		}
 	}
 
-	// 使用第一个健康的上游
-	for _, up := range upstreams {
-		if up.Healthy {
-			return fmt.Sprintf("http://%s:%d", up.Address, up.Port), model
-		}
-	}
-
-	return "", model
+	return "", model, ""
 }
 
 // GetStats 获取 LLM 复核统计

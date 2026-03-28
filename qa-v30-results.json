@@ -1,0 +1,344 @@
+{
+  "v30": [
+    {
+      "endpoint": "/api/v1/auto-review/status",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, current config and review rules",
+      "body": "{\"config\":{\"enabled\":false,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"enabled\":false,\"rules\":[]}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/config",
+      "method": "POST",
+      "status": "200",
+      "expect": "200, config updated",
+      "body": "{\"config\":{\"enabled\":true,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"status\":\"ok\"}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/status",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, verify config updated",
+      "body": "{\"config\":{\"enabled\":true,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"enabled\":true,\"rules\":[]}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/rules/prompt_injection_en/review",
+      "method": "POST",
+      "status": "200",
+      "expect": "200, set rule to review",
+      "body": "{\"mode\":\"review\",\"rule\":\"prompt_injection_en\",\"status\":\"ok\"}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/status",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, rule appears in review list",
+      "body": "{\"config\":{\"enabled\":true,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"enabled\":true,\"rules\":[{\"rule_name\":\"prompt_injection_en\",\"expires_at\":\"0001-01-01T00:00:00Z\",\"is_manual\":true,\"reason\":\"manual\"}]}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/rules/prompt_injection_en/restore",
+      "method": "POST",
+      "status": "200",
+      "expect": "200, restore rule to block",
+      "body": "{\"mode\":\"block\",\"rule\":\"prompt_injection_en\",\"status\":\"ok\"}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/status",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, rule disappears from review list",
+      "body": "{\"config\":{\"enabled\":true,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"enabled\":true,\"rules\":[]}"
+    },
+    {
+      "endpoint": "/api/v1/auto-review/stats",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, stats returned",
+      "body": "{\"total_reviews\":0,\"allowed_count\":0,\"blocked_count\":0,\"error_count\":0,\"pass_rate\":0,\"avg_latency_ms\":0}"
+    },
+    {
+      "endpoint": "/api/v1/inbound-templates",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, list with enabled field",
+      "body": "{\"templates\":[{\"id\":\"tpl-inbound-advertising\",\"name\":\"广告/营销入站规则\",\"description\":\"广告/营销行业专属检测规则，覆盖用户标签、投放策略和竞品数据保护\",\"category\":\"industry\",\"rules\":[{\"name\":\"ad_user_tag\",\"patterns\":[\"用户标签\",\"人群包\",\"DMP数据\",\"user tag\",\"audience segment\",\"DMP data\"],\"action\":\"warn\",\"category\":\"user_tag\",\"priority\":0,\"message\":\"\",\"type\":\"\",\"group\":\"\",\"shadow_mode\":false,\"enabled\":null},{\"name\":\"ad_strategy\",\"patterns\":[\"投放策略\",\"出价策略\",\"千次展示成本\",\"广告素材库\",\"media plan\",\"bidding strategy\",\"CPM\",\"creative library\"],\"action\":\"warn"
+    },
+    {
+      "endpoint": "/api/v1/inbound-templates/tpl-inbound-financial/enable",
+      "method": "POST",
+      "status": "200",
+      "expect": "200, enabled",
+      "body": "{\"enabled\":true,\"id\":\"tpl-inbound-financial\",\"status\":\"enabled\"}"
+    },
+    {
+      "endpoint": "/api/v1/inbound-templates/tpl-inbound-financial",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, verify enabled=true",
+      "body": "{\"id\":\"tpl-inbound-financial\",\"name\":\"银行/支付入站规则\",\"description\":\"银行/支付行业专属检测规则，覆盖账户数据、交易流水、合规交易、反洗钱和金融社工\",\"category\":\"industry\",\"rules\":[{\"name\":\"fin_account_cn\",\"patterns\":[\"账户余额\",\"交易流水\",\"银行卡号\",\"信用卡号\",\"贷款审批\",\"授信额度\",\"征信报告\",\"银行账号\",\"开户行\"],\"action\":\"warn\",\"category\":\"financial_data\",\"priority\":0,\"message\":\"\",\"type\":\"\",\"group\":\"\",\"shadow_mode\":false,\"enabled\":null},{\"name\":\"fin_account_en\",\"patterns\":[\"account balance\",\"transaction history\",\"credit score\",\"loan approval\",\"SWIFT code\",\"routing number\""
+    },
+    {
+      "endpoint": "/api/v1/inbound-templates/tpl-inbound-financial/enable",
+      "method": "POST",
+      "status": "200",
+      "expect": "200, disabled",
+      "body": "{\"enabled\":false,\"id\":\"tpl-inbound-financial\",\"status\":\"disabled\"}"
+    },
+    {
+      "endpoint": "/api/v1/inbound-templates/tpl-inbound-financial",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, verify enabled=false",
+      "body": "{\"id\":\"tpl-inbound-financial\",\"name\":\"银行/支付入站规则\",\"description\":\"银行/支付行业专属检测规则，覆盖账户数据、交易流水、合规交易、反洗钱和金融社工\",\"category\":\"industry\",\"rules\":[{\"name\":\"fin_account_cn\",\"patterns\":[\"账户余额\",\"交易流水\",\"银行卡号\",\"信用卡号\",\"贷款审批\",\"授信额度\",\"征信报告\",\"银行账号\",\"开户行\"],\"action\":\"warn\",\"category\":\"financial_data\",\"priority\":0,\"message\":\"\",\"type\":\"\",\"group\":\"\",\"shadow_mode\":false,\"enabled\":null},{\"name\":\"fin_account_en\",\"patterns\":[\"account balance\",\"transaction history\",\"credit score\",\"loan approval\",\"SWIFT code\",\"routing number\""
+    },
+    {
+      "endpoint": "/api/v1/llm/templates",
+      "method": "GET",
+      "status": "200",
+      "expect": "200, list returned",
+      "body": "{\"templates\":[{\"id\":\"tpl-llm-advertising\",\"name\":\"广告/营销 LLM 规则\",\"description\":\"广告/营销行业专属 LLM 规则\",\"category\":\"industry\",\"rules\":[{\"id\":\"tpl-advertising-req-001\",\"name\":\"导出用户画像拦截\",\"description\":\"检测请求中导出用户画像\",\"category\":\"user_tag\",\"direction\":\"request\",\"type\":\"keyword\",\"patterns\":[\"用户标签\",\"人群包\",\"DMP数据\",\"user tag\",\"audience segment\",\"DMP data\"],\"action\":\"warn\",\"rewrite_to\":\"\",\"enabled\":true,\"priority\":15,\"shadow_mode\":false},{\"id\":\"tpl-advertising-req-002\",\"name\":\"查询竞品投放拦截\",\"description\":\"检测请求中查询竞品投放"
+    },
+    {
+      "endpoint": "/api/v1/llm/templates/tpl-llm-financial/enable",
+      "method": "POST",
+      "status": "200",
+      "expect": "200, enabled",
+      "body": "{\"enabled\":true,\"id\":\"tpl-llm-financial\",\"status\":\"enabled\"}"
+    },
+    {
+      "endpoint": "/api/v1/llm/templates/non-existent-template/enable",
+      "method": "POST",
+      "status": "400",
+      "expect": "404 for missing template",
+      "body": "{\"error\":\"LLM 模板 \\\"non-existent-template\\\" 不存在\"}"
+    }
+  ],
+  "core": [
+    {
+      "endpoint": "/healthz",
+      "status": "200",
+      "body": "{\"audit\":{\"breakdown\":{\"inbound_block\":48,\"inbound_pass\":1825,\"inbound_policy_degraded\":6,\"inbound_ws_block\":3,\"inbound_ws_connect\":39,\"inbound_ws_disconnect\":39,\"inbound_ws_pass\":36,\"outbound_block\":145,\"outbound_pass\":1374,\"outbound_ws_pass\":75},\"total\":3590},\"checks\":{\"database\":{\"status\":\"ok\",\"l"
+    },
+    {
+      "endpoint": "/api/v1/stats",
+      "status": "200",
+      "body": "{\"breakdown\":{\"inbound_block\":48,\"inbound_pass\":1825,\"inbound_policy_degraded\":6,\"inbound_ws_block\":3,\"inbound_ws_connect\":39,\"inbound_ws_disconnect\":39,\"inbound_ws_pass\":36,\"outbound_block\":145,\"outbound_pass\":1374,\"outbound_ws_pass\":75},\"routes_total\":3,\"tenant\":\"default\",\"time_range\":\"all\",\"total"
+    },
+    {
+      "endpoint": "/api/v1/audit/logs?limit=5",
+      "status": "200",
+      "body": "{\"logs\":[{\"action\":\"pass\",\"app_id\":\"\",\"content_preview\":\"\",\"direction\":\"inbound\",\"id\":73172,\"latency_ms\":0.14,\"reason\":\"\",\"sender_id\":\"\",\"timestamp\":\"2026-03-28T08:46:02.494187069Z\",\"trace_id\":\"3d0088a5c1439199\",\"upstream_id\":\"\"},{\"action\":\"pass\",\"app_id\":\"\",\"content_preview\":\"{\\\"text\\\":\\\"my passwor"
+    },
+    {
+      "endpoint": "/api/v1/inbound-rules",
+      "status": "200",
+      "body": "{\"group_counts\":{\"injection\":9},\"rules\":[{\"name\":\"custom_block\",\"display_name\":\"自定义拦截关键词\",\"patterns_count\":2,\"action\":\"block\",\"category\":\"\",\"priority\":100,\"type\":\"keyword\",\"group\":\"injection\",\"shadow_mode\":false,\"enabled\":true},{\"name\":\"regex_base64_injection\",\"display_name\":\"Base64 编码注入\",\"patterns_"
+    },
+    {
+      "endpoint": "/api/v1/outbound-rules",
+      "status": "200",
+      "body": "{\"pii_patterns\":[{\"name\":\"身份证号\",\"pattern\":\"\\\\d{17}[\\\\dXx]\"},{\"name\":\"手机号\",\"pattern\":\"(?:^|\\\\D)1[3-9]\\\\d{9}(?:\\\\D|$)\"},{\"name\":\"银行卡号\",\"pattern\":\"(?:^|\\\\D)\\\\d{16,19}(?:\\\\D|$)\"}],\"rules\":[{\"action\":\"block\",\"display_name\":\"身份证号泄露\",\"enabled\":true,\"name\":\"pii_id_card\",\"patterns_count\":1,\"shadow_mode\":fals"
+    },
+    {
+      "endpoint": "/api/v1/upstreams",
+      "status": "200",
+      "body": "{\"healthy\":1,\"total\":1,\"total_users\":2,\"upstreams\":[{\"address\":\"127.0.0.1\",\"gateway_token_configured\":true,\"healthy\":true,\"id\":\"openclaw-local\",\"last_heartbeat\":\"2026-03-28T15:12:46Z\",\"load\":{},\"path_prefix\":\"\",\"port\":19444,\"static\":true,\"tags\":{\"type\":\"static\"},\"user_count\":2}]}"
+    },
+    {
+      "endpoint": "/api/v1/tenants",
+      "status": "200",
+      "body": "{\"tenants\":[{\"id\":\"default\",\"name\":\"默认租户\",\"description\":\"系统默认安全域\",\"created_at\":\"2026-03-18T05:17:06Z\",\"max_agents\":0,\"max_rules\":0,\"enabled\":true,\"strict_mode\":false,\"health_score\":0,\"im_calls\":3590,\"llm_calls\":1688,\"block_count\":193,\"user_count\":18,\"member_count\":0},{\"id\":\"chip-team\",\"name\":\"芯片研发团队"
+    },
+    {
+      "endpoint": "/api/v1/llm/overview",
+      "status": "200",
+      "body": "{\"avg_latency_ms\":1556.7,\"cost_alert_triggered\":false,\"cost_by_model\":[],\"cost_trend\":[],\"daily_limit_usd\":0,\"error_rate\":0.0047,\"estimated_cost_usd\":28.94,\"high_risk_24h\":0,\"input_tokens\":4064446,\"models\":[{\"count\":673,\"name\":\"gpt-4o\"},{\"count\":448,\"name\":\"claude-3.5-sonnet\"},{\"count\":416,\"name\":\"d"
+    },
+    {
+      "endpoint": "/api/v1/llm/rules",
+      "status": "200",
+      "body": "{\"rules\":[{\"id\":\"llm-pi-001\",\"name\":\"提取系统提示词\",\"description\":\"\",\"category\":\"prompt_injection\",\"direction\":\"request\",\"type\":\"keyword\",\"patterns\":[\"reveal your system prompt\",\"show me your instructions\",\"what are your rules\",\"ignore previous instructions\",\"disregard above\"],\"action\":\"warn\",\"rewrite_to\""
+    },
+    {
+      "endpoint": "/api/v1/llm/calls?limit=5",
+      "status": "200",
+      "body": "{\"records\":[{\"budget_exceeded\":false,\"budget_violations\":\"\",\"canary_leaked\":false,\"error_message\":\"\",\"has_tool_use\":false,\"id\":23586,\"latency_ms\":64.726,\"model\":\"\",\"request_tokens\":0,\"response_tokens\":0,\"status_code\":200,\"timestamp\":\"2026-03-28T14:51:16Z\",\"tool_count\":0,\"total_tokens\":0,\"trace_id\":\""
+    },
+    {
+      "endpoint": "/api/v1/honeypot/stats",
+      "status": "200",
+      "body": "{\"active_templates\":0,\"total_triggers\":0,\"total_detonated\":0,\"active_watermarks\":0}"
+    },
+    {
+      "endpoint": "/api/v1/honeypot/templates",
+      "status": "200",
+      "body": "[]"
+    },
+    {
+      "endpoint": "/api/v1/attack-chains",
+      "status": "200",
+      "body": "[{\"id\":\"chain-fcae553d29bd9b4b\",\"tenant_id\":\"default\",\"name\":\"Honeypot Detonation Chain\",\"severity\":\"high\",\"status\":\"active\",\"first_seen\":\"2026-03-26T03:23:51Z\",\"last_seen\":\"2026-03-26T03:48:38.906433847Z\",\"agents\":[\"sim-agent-canary\"],\"events\":[{\"timestamp\":\"2026-03-26T03:23:51Z\",\"agent_id\":\"sim-ag"
+    },
+    {
+      "endpoint": "/api/v1/behavior/profiles",
+      "status": "200",
+      "body": "{\"high_risk_count\":0,\"profiles\":[{\"agent_id\":\"agent-attacker-04\",\"tenant_id\":\"default\",\"display_name\":\"agent-attacker-04\",\"typical_tools\":[{\"tool_name\":\"bash_execute\",\"count\":64,\"percentage\":16,\"avg_tokens\":605,\"last_used\":\"2026-03-26T03:38:38Z\"},{\"tool_name\":\"file_delete\",\"count\":64,\"percentage\":16"
+    },
+    {
+      "endpoint": "/api/v1/anomaly/status",
+      "status": "200",
+      "body": "{\"alerts_24h\":2,\"baselines_ready\":5,\"enabled\":true,\"metrics_count\":6,\"total_alerts\":2}"
+    },
+    {
+      "endpoint": "/api/v1/redteam/reports",
+      "status": "200",
+      "body": "{\"reports\":[],\"total\":0}"
+    },
+    {
+      "endpoint": "/api/v1/leaderboard",
+      "status": "200",
+      "body": "{\"scores\":[{\"tenant_id\":\"chip-team\",\"tenant_name\":\"芯片研发团队\",\"health_score\":100,\"redteam_score\":0,\"incident_count\":0,\"block_rate\":0,\"total_requests\":0,\"blocked_count\":0,\"sla_status\":\"green\",\"sla_score\":100,\"rank\":1,\"trend\":\"stable\"},{\"tenant_id\":\"default\",\"tenant_name\":\"默认租户\",\"health_score\":85,\"redtea"
+    },
+    {
+      "endpoint": "/api/v1/health-score",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/session-replay",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/prompts",
+      "status": "200",
+      "body": "{\"tenant\":\"default\",\"total\":25,\"versions\":[{\"id\":135,\"hash\":\"0cdf0d3928bf8d45\",\"content\":\"You are a personal assistant running inside OpenClaw.\\n## Tooling\\nTool availability (filtered by policy):\\nTool names are case-sensitive. Call tools exactly as listed.\\n- read: Read file contents\\n- write: Cre"
+    },
+    {
+      "endpoint": "/api/v1/envelopes?limit=5",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/events?limit=5",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/taint/entries?limit=5",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/path-policies",
+      "status": "200",
+      "body": "{\"rules\":[{\"id\":\"pp-005\",\"name\":\"credential_any\",\"rule_type\":\"cumulative\",\"conditions\":\"{\\\"label\\\":\\\"CREDENTIAL-TAINTED\\\",\\\"threshold\\\":1}\",\"action\":\"block\",\"enabled\":false,\"priority\":5,\"description\":\"检测到任何凭据泄露时立即阻断\",\"tenant_id\":\"default\",\"created_at\":\"2026-03-25 14:05:20\",\"updated_at\":\"2026-03-25 1"
+    },
+    {
+      "endpoint": "/api/v1/tool-policies",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/ifc/variables?limit=5",
+      "status": "200",
+      "body": "{\"total\":5,\"variables\":[{\"id\":\"ifc-68bd7c851492fdbb\",\"trace_id\":\"3d0088a5c1439199\",\"name\":\"user_input\",\"label\":{\"confidentiality\":1,\"integrity\":2},\"source\":\"user_input\",\"parents\":[],\"created_at\":\"2026-03-28T08:46:02Z\"},{\"id\":\"ifc-dae0d51c4861b2c9\",\"trace_id\":\"d461e877034c6cf2\",\"name\":\"user_input\",\"l"
+    },
+    {
+      "endpoint": "/api/v1/ifc/source-rules",
+      "status": "200",
+      "body": "{\"rules\":[{\"source\":\"system_prompt\",\"label\":{\"confidentiality\":3,\"integrity\":3}},{\"source\":\"user_input\",\"label\":{\"confidentiality\":1,\"integrity\":2}},{\"source\":\"tool:web_fetch\",\"label\":{\"confidentiality\":0,\"integrity\":0}},{\"source\":\"tool:database_query\",\"label\":{\"confidentiality\":2,\"integrity\":1}},{\""
+    },
+    {
+      "endpoint": "/api/v1/counterfactual/verifications?limit=5",
+      "status": "200",
+      "body": "{\"total\":0,\"verifications\":[]}"
+    },
+    {
+      "endpoint": "/api/v1/plan-compiler/templates",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/capability/tool-mappings",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/plan-deviations?limit=5",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/api-keys",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/reports",
+      "status": "200",
+      "body": "{\"reports\":[]}"
+    },
+    {
+      "endpoint": "/api/v1/gateway/wss/status",
+      "status": "200",
+      "body": "{\"clients\":[],\"count\":0}"
+    },
+    {
+      "endpoint": "/api/v1/metrics",
+      "status": "404",
+      "body": ""
+    },
+    {
+      "endpoint": "/api/v1/realtime-metrics",
+      "status": "404",
+      "body": ""
+    }
+  ],
+  "abnormal": [
+    {
+      "scene": "空 body POST",
+      "endpoint": "/api/v1/inbound-templates/tpl-inbound-financial/enable",
+      "status": "400",
+      "expect": "400 not 500",
+      "body": "{\"error\":\"invalid JSON: EOF\"}"
+    },
+    {
+      "scene": "错误 JSON",
+      "endpoint": "/api/v1/inbound-templates/tpl-inbound-financial/enable",
+      "status": "400",
+      "expect": "400",
+      "body": "{\"error\":\"invalid JSON: unexpected EOF\"}"
+    },
+    {
+      "scene": "无 Authorization",
+      "endpoint": "/api/v1/stats",
+      "status": "401",
+      "expect": "401",
+      "body": "{\"error\":\"unauthorized\"}"
+    },
+    {
+      "scene": "超长 ID",
+      "endpoint": "/api/v1/llm/templates/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...",
+      "status": "400",
+      "expect": "400/404 not 500",
+      "body": "{\"error\":\"LLM 模板 \\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "checks": {
+    "detection_chain": {
+      "enable_status": "200",
+      "webhook_status": "405",
+      "audit_status": "200",
+      "audit_body": "{\"logs\":[{\"action\":\"pass\",\"app_id\":\"\",\"content_preview\":\"\",\"direction\":\"inbound\",\"id\":73173,\"latency_ms\":0.219,\"reason\":\"\",\"sender_id\":\"\",\"timestamp\":\"2026-03-28T15:25:54.479057165Z\",\"trace_id\":\"55ffb8dcccc183c7\",\"upstream_id\":\"\"},{\"action\":\"pass\",\"app_id\":\"\",\"content_preview\":\"\",\"direction\":\"inbound\",\"id\":73172,\"latency_ms\":0.14,\"reason\":\"\",\"sender_id\":\"\",\"timestamp\":\"2026-03-28T08:46:02.494187069Z\",\"trace_id\":\"3d0088a5c1439199\",\"upstream_id\":\"\"},{\"action\":\"pass\",\"app_id\":\"\",\"content_preview\":\"{\\\"text\\\":\\\"my password is P@ssw0rd123 and SSN 123-45-6789\\\"}\",\"direction\":\"outbound\",\"id\":73171,\"latency_ms\":0.378,\"reason\":\"\",\"sender_id\":\"\",\"timestamp\":\"2026-03-28T08:45:48.016562748Z\",\"trace_id\":\"239fff9233a98151\",\"upstream_id\":\"\"},{\"action\":\"pass\",\"app_id\":\"\",\"content_preview\":\"\",\"direction\":\"inbound\",\"id\":73170,\"latency_ms\":0.341,\"reason\":\"\",\"sender_id\":\"\",\"timestamp\":\"2026-03-28T08:45:47.966613588Z\",\"trace_id\":\"d461e877034c6cf2\",\"upstream_id\":\"\"},{\"action\":\"pass\",\"app_id\":\"alpha-3588352-9076736\",\"content_preview\":\"\",\"direction\":\"inbound\",\"id\":73169,\"latency_ms\":221.908,\"reason\":\"\",\"sender_id\":\"3588352-7WuMgcpxKkrEtvdKkk8I66natlEX32\",\"timestamp\":\"2026-03-28T02:05:12.674113862Z\",\"trace_"
+    },
+    "auto_review_e2e": {
+      "enable_status": "200",
+      "review_status": "200",
+      "status_after_review": "{\"config\":{\"enabled\":true,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"enabled\":true,\"rules\":[{\"rule_name\":\"prompt_injection_en\",\"expires_at\":\"0001-01-01T00:00:00Z\",\"is_manual\":true,\"reason\":\"manual\"}]}",
+      "restore_status": "200",
+      "status_after_restore": "{\"config\":{\"enabled\":true,\"window_seconds\":300,\"spike_threshold\":10,\"spike_ratio\":3,\"auto_review_ttl\":3600,\"llm_upstream_id\":\"\",\"llm_model\":\"\",\"llm_timeout_sec\":5,\"manual_review_rules\":null},\"enabled\":true,\"rules\":[]}"
+    }
+  },
+  "bugs": []
+}

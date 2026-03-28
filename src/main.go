@@ -259,6 +259,10 @@ func main() {
 
 	// v31.0: AC 智能分级（自动模式）
 	autoReviewMgr := NewAutoReviewManager(cfg.AutoReview, pool)
+	// 连接 LLM Proxy targets（用于 LLM 复核调用，而不是 UpstreamPool）
+	if cfg.LLMProxy.Enabled && len(cfg.LLMProxy.Targets) > 0 {
+		autoReviewMgr.llmTargets = cfg.LLMProxy.Targets
+	}
 	engine.autoReviewMgr = autoReviewMgr
 	if cfg.AutoReview.Enabled {
 		autoReviewMgr.Start()
