@@ -146,7 +146,11 @@ func (api *ManagementAPI) handleInboundTemplateEnable(w http.ResponseWriter, r *
 		return
 	}
 	if err := api.inboundEngine.EnableInboundTemplate(id, req.Enabled); err != nil {
-		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		if strings.Contains(err.Error(), "不存在") || strings.Contains(err.Error(), "not found") {
+			jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		} else {
+			jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	action := "disabled"
@@ -273,7 +277,12 @@ func (api *ManagementAPI) handleLLMTemplateEnable(w http.ResponseWriter, r *http
 		return
 	}
 	if err := api.llmRuleEngine.EnableLLMTemplate(id, req.Enabled); err != nil {
-		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		// 区分"不存在"和其他错误
+		if strings.Contains(err.Error(), "不存在") || strings.Contains(err.Error(), "not found") {
+			jsonResponse(w, 404, map[string]string{"error": err.Error()})
+		} else {
+			jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	action := "disabled"
