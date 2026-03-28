@@ -306,7 +306,7 @@
                           </div>
                         </div>
                         <!-- Gateway 远程配置 -->
-                        <div class="diag-card" v-if="up.gateway_status === 'connected'">
+                        <div class="diag-card diag-card-full" v-if="up.gateway_status === 'connected'">
                           <h4>⚙️ Gateway 配置
                             <button class="btn btn-xs btn-ghost" style="float:right" @click="loadGatewayConfig(up)" title="加载配置">
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -316,7 +316,7 @@
                             <button class="btn btn-sm btn-primary" @click="loadGatewayConfig(up)">加载当前配置</button>
                           </div>
                           <template v-else>
-                            <textarea v-model="gwConfigRaw" class="file-textarea" style="min-height:200px;max-height:400px;border:1px solid var(--border-subtle,#334155);border-radius:6px;margin:8px 0" spellcheck="false" @input="gwConfigDirty=true"></textarea>
+                            <textarea v-model="gwConfigRaw" class="file-textarea" style="min-height:420px;max-height:70vh;border:1px solid var(--border-subtle,#334155);border-radius:6px;margin:8px 0" spellcheck="false" @input="gwConfigDirty=true"></textarea>
                             <div class="tk-actions" style="gap:8px">
                               <button class="btn btn-sm btn-primary" @click="patchGatewayConfig(up)" :disabled="gwConfigSaving || !gwConfigDirty">{{ gwConfigSaving ? '保存中…' : '保存并应用' }}</button>
                               <span v-if="gwConfigDirty" class="badge-unsaved">未保存</span>
@@ -1722,6 +1722,7 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 @media(max-width:768px) { .diag-body{grid-template-columns:1fr} }
 .diag-card { background:var(--bg-surface,#1e293b); border:1px solid var(--border-subtle,#334155); border-radius:8px; padding:16px; }
 .diag-card h4 { font-size:14px; font-weight:600; color:var(--text-primary,#e2e8f0); margin-bottom:12px; }
+.diag-card-full { grid-column:1 / -1; }
 .diag-steps { margin-top:16px; display:flex; flex-direction:column; gap:10px; }
 .diag-step { display:flex; align-items:flex-start; gap:10px; padding:8px 10px; border-radius:6px; font-size:13px; color:var(--text-secondary,#94a3b8); }
 .ds-icon { font-size:16px; flex-shrink:0; margin-top:1px; }
@@ -2021,17 +2022,17 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 
 /* v29.0: 文件编辑器 */
 .aoc-files-view { padding:0; }
-.files-layout { display:flex; min-height:360px; }
-.files-sidebar { width:200px; border-right:1px solid var(--border-subtle,#334155); padding:8px; flex-shrink:0; }
+.files-layout { display:flex; min-height:520px; max-height:70vh; }
+.files-sidebar { width:220px; border-right:1px solid var(--border-subtle,#334155); padding:10px; flex-shrink:0; overflow-y:auto; }
 .files-agent-select { margin-bottom:8px; }
 .files-list { display:flex; flex-direction:column; gap:2px; }
 .file-item { display:flex; align-items:center; gap:6px; padding:5px 8px; border-radius:4px; cursor:pointer; font-size:13px; color:var(--text-secondary,#94a3b8); transition:background .15s; }
 .file-item:hover { background:rgba(99,102,241,.08); }
 .file-item.active { background:rgba(99,102,241,.15); color:#a5b4fc; }
-.files-editor { flex:1; display:flex; flex-direction:column; }
-.editor-header { display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border-subtle,#334155); }
-.badge-unsaved { font-size:10px; background:rgba(234,179,8,.2); color:#eab308; padding:1px 6px; border-radius:3px; }
-.file-textarea { flex:1; background:transparent; border:none; padding:12px; color:var(--text-primary,#e2e8f0); font-family:'JetBrains Mono','Fira Code',monospace; font-size:13px; line-height:1.6; resize:none; outline:none; min-height:300px; }
+.files-editor { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.editor-header { display:flex; align-items:center; gap:8px; padding:8px 14px; border-bottom:1px solid var(--border-subtle,#334155); background:rgba(15,23,42,.3); }
+.badge-unsaved { font-size:10px; background:rgba(234,179,8,.2); color:#eab308; padding:2px 8px; border-radius:3px; }
+.file-textarea { flex:1; background:rgba(15,23,42,.2); border:none; padding:14px 16px; color:var(--text-primary,#e2e8f0); font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace; font-size:13px; line-height:1.7; resize:none; outline:none; min-height:460px; tab-size:2; }
 
 /* v29.0: 心跳/设备 */
 .aoc-heartbeat-view { padding:12px 0; }
