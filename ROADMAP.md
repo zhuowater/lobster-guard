@@ -1,8 +1,8 @@
 # lobster-guard Roadmap
 
-> **当前版本：v29.0** · 242 commits · Go ~86,300 行 · Vue ~27,300 行 · 1151 测试 · 256+ API · 46 页面 · 72 Vue 文件 · 53 引擎 · 5 依赖
+> **当前版本：v30.0** · 250+ commits · Go ~100,000 行 · Vue ~30,300 行 · 1252 测试 · 365+ API · 50 页面 · 75 Vue 文件 · 53 引擎 · 5 依赖
 >
-> 更新时间：2026-03-26
+> 更新时间：2026-03-28
 
 ---
 
@@ -568,19 +568,40 @@
     - DOE 三级: info（多传了非敏感字段）/ warning（PII 跨 tool 传输）/ critical（敏感数据跨信任边界）
   - Dashboard: 数据流视图（tool call graph + 高亮 DOE 路径 + 字段级别 diff）
 
-### v27.x — Agent 身份 · MCP 安全网关 · 跨 Agent 安全 🔥🔥🔥
-> Phase 2 的基础设施 + MCP 安全生态卡位
+### v27.x — 租户策略闭环 · API Key 身份 · 行业模板 ✅ DONE
+> 6 大执行层断裂全部修复 + API Key 身份管理 + 入站行业模板中文化
+> 理论基础：Defence in Depth — 策略从配置到运行时的完整闭环验证
+
+- [x] v27.0 **租户策略闭环修复 + API Key 身份管理** ✅ (commit 9571346, 2026-03-26)
+  - **6 大执行层断裂全部修复**:
+    1. `proxy.go`: TenantID 不再写死 "default"，调 `resolveTenantID()`
+    2. `llm_proxy.go`: 从 Bearer sk-xxx 自动识别用户身份和租户
+    3. `TenantConfig.DisabledRules`: 检测时实际跳过被禁用的规则
+    4. `TenantConfig.ToolBlacklist`: LLM 代理中实际拦截黑名单工具（普通+SSE 双路径）
+    5. `PathPolicyEngine.Evaluate`: 按租户过滤规则（只执行该租户+default 的规则）
+    6. `PolicyTemplate`: 新增 TenantID 字段，支持 `BindTemplateToTenant()`
+  - **API Key 身份管理**: `apikey.go` (424 行), SHA-256 哈希存储, 热缓存, 日配额跨日重置, 6 个 API 端点
+  - **芯片行业模板**: tpl-semiconductor (6 规则), `pp-014`(chip_design_ip_leak), `pp-015`(chip_rtl_exfiltration)
+  - **Dashboard**: APIKeys.vue 管理页面（创建/编辑/轮换/删除）
+  - **四层验证**: L1 8/8, L2 6/6, L3 5/5, L4 11/11 = 30/30 全绿
+
+- [x] v27.1 **入站行业模板全面中文化 + Auto-discover** ✅ (2026-03-26)
+  - 40+ 入站行业模板全中文化（金融/政务/医疗/法律/教育等）
+  - Auto-discover 自动发现机制
+
+### v_future_27 — Agent 身份 · MCP 安全网关 · 跨 Agent 安全（原 v27 规划，推迟至 v32+）
+> Phase 3 的基础设施 + MCP 安全生态卡位
 > 理论基础：SMCP (arXiv:2602.01129) + MCPShield (arXiv:2602.14281) + MCPSec (arXiv:2601.17549)
 > 依赖：🔧 需要 OpenClaw 侧协议配合 + 新增 MCP Proxy 端口
 
-- [ ] v27.0 **Agent 身份识别协议**
+- [ ] **Agent 身份识别协议**
   - 定义 `X-Lobster-Agent-ID` / `X-Lobster-Agent-Name` / `X-Lobster-Session-Key` Header 规范
   - OutboundProxy 解析 Agent 元信息，审计日志增加 agent_id 维度
   - Agent 注册表：已知 Agent 列表 + 首次出现自动发现 + Dashboard 管理页面
   - 行为推断兜底：对不携带 Header 的流量，用 TraceCorrelator 时间窗口关联推断
   - Agent 维度聚合：安全事件 / 成本 / 行为画像 / IFC 违规 全部按 Agent 拆分
 
-- [ ] v27.1 **MCP 安全网关（:8445）**
+- [ ] **MCP 安全网关（:8445）**
   - 龙虾卫士新增第四个监听端口，作为 MCP 安全代理
   - **SMCP 五层安全（透明叠加，不改 MCP 协议）**:
     1. 统一身份管理: MCP Server 注册 + 证书/Token 认证
@@ -600,7 +621,7 @@
   - MCP 调用与 LLM tool_calls 通过 trace_id 关联
   - Dashboard: MCP 安全仪表盘（Server 注册表 · 信任分趋势 · 调用审计 · 威胁告警）
 
-- [ ] v27.2 **跨 Agent 安全 + 蠕虫检测**
+- [ ] **跨 Agent 安全 + 蠕虫检测**
   - 依赖 v27.0 Agent 身份识别
   - **跨 Agent 污染传播**: Agent A 的 TAINTED 输出 → 成为 Agent B 的输入 → v26.0 IFC 标签跨 Agent 传播
   - **蠕虫检测**: 检测 Agent→Agent 感染链模式
@@ -609,18 +630,39 @@
   - 与 v24.0 AttriGuard 联动：跨 Agent 的 tool call 也做反事实验证
   - 理论基础：洞见 #33/#35（蠕虫化 + 涌现安全）
 
-### v28.x — AI 安全运营副驾驶 · 自动化验证 🔥🔥
+### v28.x — AI Copilot 行业模板 · Fides 论文对齐 · Dashboard 引擎管理 ✅ DONE
+> LLM 规则行业模板 + Fides 论文核心概念对齐 + Dashboard 引擎独立启停
+> 理论基础：Fides (arXiv:2505.23643) PropagateWithTool + Selective Hide 对齐
+
+- [x] v28.0 **LLM 规则行业模板 + 租户绑定** ✅ (2026-03-27)
+  - 4 个 LLM 行业模板 × 4 条规则 = 16 条新增 LLM 规则
+  - LLM 租户绑定 (per-tenant AC): `bind-llm-template` API
+  - LLM/入站模板 CRUD: 11 个新 API
+  - 2 个新 Dashboard 页面
+  - proxy 联动: `CheckWithTenant()` 检测链路集成
+
+- [x] v28.0a-h **统一规则表 + Capability CRUD + 偏差修复** ✅ (2026-03-27)
+  - 模板页集成到统一管理界面
+  - Capability 工具映射完整 CRUD
+  - CaMeL 偏差检测器修复和优化
+
+- [x] v28.0i-k **Fides 论文对齐 + Dashboard 引擎开关** ✅ (2026-03-27)
+  - **PropagateWithTool**: 工具调用时自动标签传播（P-T/P-F 分离）
+  - **SelectiveHide**: LLM Proxy 在转发前扫描 tool result，基于标签驱动隐藏
+  - **Dashboard 6 引擎独立启停**: 每个高级引擎可在 Dashboard 单独开关
+
+### v_future_28 — AI 安全运营副驾驶 · 自动化验证（原 v28 规划，推迟至 v32+）
 > 安全运营智能化 + 论文 benchmark 接入
 > 理论基础：Nash 均衡（安全均衡需要被设计）
 
-- [ ] v28.0 **AI 安全运营副驾驶**
+- [ ] **AI 安全运营副驾驶**
   - 自然语言查询安全态势："过去 24 小时有什么异常？""这个用户为什么风险分飙升了？"
   - 攻击链智能分析："这 5 个事件之间有什么关联？""下一步攻击者可能做什么？"
   - **因果归因可解释性**（v24.1 联动）：副驾驶可以解释"这个 tool call 被拦截是因为反事实验证表明它是由外部数据驱动的"
   - **IFC 违规分析**（v26.0 联动）：副驾驶可以解释"这个数据流违反了机密性规则，因为 SECRET 数据流向了 PUBLIC 通道"
   - 元认知安全框架（Reflexive-Core 启发）：预检→安全分析→受控执行→合规验证
 
-- [ ] v28.1 **AgentDojo/AgentDyn Benchmark 自动化**
+- [ ] **AgentDojo/AgentDyn Benchmark 自动化**
   - 集成 AgentDojo (NeurIPS 2024) + AgentDyn (arXiv:2602.03117) 安全基准测试
   - 定期自动运行 benchmark，追踪防御效果随版本的变化：
     - Task Completion Rate（功能不退化）
@@ -629,16 +671,16 @@
   - CI/CD 集成：每次发版自动跑 benchmark，低于基线不允许合入
   - Dashboard: Benchmark 趋势页（每个版本的三个指标折线图）
 
-- [ ] v28.2 **Guardrail 市场 + OpenTelemetry**
+- [ ] **Guardrail 市场 + OpenTelemetry**
   - 社区贡献规则包（行业模板：金融/医疗/政务/教育）+ IFC 策略模板
   - 第三方检测器插件（基于 v19.2 SDK）
   - OpenTelemetry 接入：安全事件+IFC 标签 作为 span attribute 导出
 
-### v29.x — Gateway WSS RPC 远程管理 · 企业级网关运维 ✅
+### v29.x — Gateway WSS RPC 远程管理 · 企业级网关运维 ✅ DONE
 > 从 REST 调用升级到持久化 WSS RPC，直接复刻 OpenClaw Control UI 协议 | 理论基础：连接复用 + 状态同步优于轮询式管理
 > 依赖：✅ 纯网关层改造（无需 PostgreSQL / 多实例协调）
 
-- [x] v29.0 **Gateway WSS RPC 远程管理** ✅ (2026-03-28)
+- [x] v29.0 **Gateway WSS RPC 远程管理** ✅ (commit de2ab30+d15c2ae, 2026-03-28)
   - 从 RESTful `POST /tools/invoke` 升级为持久化 WSS RPC 连接
   - 复刻 OpenClaw Control UI WebSocket 协议：`challenge → connect → hello → ready`
   - 双路径架构：WSS RPC 优先，`tools/invoke` 自动 fallback
@@ -663,9 +705,58 @@
     - Diag tab：Gateway 配置编辑器（60vh）+ Gateway 控制（重启/更新）+ Token 管理
     - Agent tab：7 个子视图（仪表盘/卡片含 CRUD/协作/用户/Skills 安装更新卸载/文件编辑器/心跳设备/记忆搜索）
   - 配置新增：`default_gateway_origin` 全局默认 Origin（默认 `http://localhost`），上游 `gateway_origin` 可覆盖；同机部署只需 Gateway 增加 `controlUi.allowedOrigins: ["http://localhost"]`
-- [ ] v29.1 **弹性伸缩 + 零停机升级**
+- [ ] v29.1 **弹性伸缩 + 零停机升级**（推迟至 v32+）
   - 滚动更新：新旧版本共存期间路由无感知切换
   - 配置热同步：修改一个节点的配置自动同步到集群
+
+### v30.x — 质量硬化 · 模板统一 · AC 智能分级 · 架构治理 🔧
+> **Feature Freeze 一个月**：不加新功能，只做稳定性、可测量性、内部价值证明
+> 产品灵魂：**"让 AI Agent 不泄密、不越权、不失控"** — 所有功能必须落入这三个桶
+> 理论基础：Munger 逆向思维 — "先想想怎么会失败"
+
+- [x] v30.0 **行业模板系统统一** ✅ (commit f6bd81b, 2026-03-28)
+  - 删除旧 YAML 模板体系（`rules/*.yaml` 4 文件 + `rule_templates.go` + `rule_templates_test.go`）
+  - 统一为代码模板 + DB `enabled` 全局开关 + 租户绑定（并集不冲突）
+  - 入站+LLM 模板加 `Enabled` 字段，DB 表加 `enabled` 列（ALTER TABLE 幂等迁移）
+  - 检测链路三段并集：默认规则 → 全局启用模板 → 租户绑定模板
+  - API: `POST /inbound-templates/:id/enable` + `POST /llm/templates/:id/enable`
+  - 丰富核心模板：金融 3→9 条、政务 3→9 条、医疗 3→9 条、合规 2→4 条
+  - 合并 YAML 精华：反洗钱/BEC 社工/基因数据/精神健康/HIV/数据跨境等
+  - 净删 335 行（+593/-928）
+
+- [ ] v30.1 **AC 智能分级 + LLM 复核** 🔥（进行中）
+  - **自动发现**：block 短期激增（5 分钟窗口 ≥10 次且 ≥ 历史 3 倍）→ 自动降级为 review
+  - **LLM 复核**：review 规则命中时，调用上游 LLM 二次判别是否真正恶意
+  - **降级 TTL**：自动降级持续 1 小时后恢复，人工指定的 review 规则永久生效
+  - **滑动窗口统计**：每规则每分钟桶，后台 goroutine 30 秒一轮扫描
+  - 5 个新 API：status/config/manual-review/manual-restore/stats
+  - Dashboard: AC 分级 Tab（当前状态表格 + 参数配置 + LLM 复核统计）
+
+- [ ] v30.2 **api.go 架构拆分**（进行中）
+  - 9744 行 230 个 handler 拆分为 17 个功能域文件
+  - api.go 只保留 ManagementAPI struct + ServeHTTP 路由分发（~500 行）
+  - 拆分域：auth/upstream/rules/tenant/template/apikey/audit/llm/session/honeypot/behavior/report/config/route/prompt/demo/backup
+
+- [ ] v30.3 **引擎链路修复**（进行中）
+  - 蜜罐→攻击链打通：EventBus 发布 `honeypot_trigger` 事件
+  - 污点→IFC 统一：TaintTracker 标记时自动注册 IFC source 变量
+  - 提示语追踪→告警：prompt drift 超阈值时发布事件到 EventBus
+  - 租户入站规则持久化：`SetTenantRules()` 同时写 DB，重启自动恢复
+
+- [ ] v30.4 **Dashboard 系统设置中心**（进行中）
+  - Settings.vue 扩展为 4-Tab 配置中心
+  - Tab 1: 基础配置（已有）
+  - Tab 2: 检测引擎开关（22 个引擎统一 toggle 管理）
+  - Tab 3: AC 智能分级（配置 + 状态 + LLM 统计）
+  - Tab 4: 行业模板管理（入站+LLM 模板全局启用/禁用 toggle）
+  - 所有危险操作统一 ConfirmModal 确认
+
+- [ ] v30.5 **质量度量基线**（v30.4 后）
+  - 攻击数据集回归测试：Garak/HackAPrompt + 红队数据，500 样本 ground truth
+  - P/R/F1 基线建立
+  - 142 实战验证：启用 cybersecurity 模板 + 会话检测
+  - CI/CD: GitHub Actions `go test` + `vite build`
+  - 周报自动生成 → 蓝信团队群发送
 
 ### 未来探索
 
@@ -892,26 +983,43 @@ Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
   v24:     因果归因防御 (AttriGuard 反事实验证)        ✅
   v25:     控制流/数据流分离 (CaMeL 执行计划编译)      ✅
 ------- v29.0 当前版本 · 以下为规划 -------
-  v26:     信息流控制 (Fides IFC 变量级污点追踪)       ← 数学保证安全
+  v26:     信息流控制 (Fides IFC 变量级污点追踪)       ✅
+  v27:     租户策略闭环 + API Key 身份 + 行业模板     ✅
+  v28:     AI Copilot 模板 + Fides 对齐 + 引擎管理    ✅
+  v29:     Gateway WSS RPC 远程管理                   ✅
+------- v30.0 当前版本 · 以下为规划 -------
+  v30:     🔧 质量硬化（模板统一 + AC 智能分级 + 架构拆分 + 链路修复 + 设置中心）
 Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
-  v27:     Agent 身份 + MCP 安全网关 + 跨 Agent 蠕虫检测
-  v28:     AI 安全副驾驶 + Benchmark 自动化 + Guardrail 市场
-  v29:     Gateway WSS RPC 远程管理 + 企业级 Gateway 运维
+  v31:     P2 改进（出站行业模板 + Merkle 验证 UI + 金丝雀轮换 + 红队→规则闭环）
+  v32+:    Agent 身份 + MCP 安全网关 + 跨 Agent 蠕虫检测（原 v27 规划）
+  v33+:    AI 安全副驾驶 + Benchmark 自动化 + Guardrail 市场（原 v28 规划）
 
 产品定位演进:
   v1-v5:   AI Agent 安全网关（被动防御 — 规则匹配）
   v6-v13:  AI Agent 安全运营中心（防御 + 可视化 + 审计 + 合规）
   v14-v17: 安全治理 + 态势感知（治理 + 主动防御 + 智能分析）
   v18-v22: 可证明安全 + 自进化 + 信息流追踪（Phase 1 纯流量，把已有数据吃干榨净）
-  v23-v25: ✅ 学术前沿转化 Phase 2a（路径策略 + 因果推断 + CaMeL 执行计划）
-  v26:     🆕 可证明安全 2.0 — 信息流控制 IFC（变量级污点追踪）
-  v27-v28: MCP 安全网关 + AI 安全副驾驶（Phase 3 生态扩展）
-  v29:     企业级 Gateway 远程管理（WSS RPC + Dashboard 运维闭环）
+  v23-v26: ✅ 学术前沿转化（路径策略 + 因果推断 + CaMeL + IFC）
+  v27-v28: ✅ 租户闭环 + AI Copilot + Fides 对齐（产品打磨期）
+  v29:     ✅ 企业级 Gateway 远程管理（WSS RPC + Dashboard 运维闭环）
+  v30:     🔧 质量硬化（Feature Freeze，稳定性 + 测量 + 内部价值证明）
+  v31:     P2 改进（出站模板 + Merkle UI + 金丝雀 + 报告自动化）
+  v32+:    MCP 安全网关 + AI 安全副驾驶（Phase 3 生态扩展 → 商业化）
+
+产品灵魂：**龙虾卫士 — 让 AI Agent 不泄密、不越权、不失控**
+  不泄密 → IFC(v26) + 污点追踪(v20) + Selective Hide(v28) + 出站规则
+  不越权 → CaMeL(v25) + Capability(v25) + 路径策略(v23) + 工具策略(v20)
+  不失控 → 偏差检测(v25) + 反事实验证(v24) + 执行信封(v18) + 行为画像(v16)
+
+商业化路径：
+  内部验证（v30）→ pipeline 团队红队实战 → 安全周报 → 领导 Demo
+  → 产品化（v31）→ 安装包 + 文档 + 配置向导
+  → 商业化（v32+）→ 私有化部署、数据不出域、行业模板市场
 
 三个产品线:
-  A — Agent 防注入引擎（核心壁垒）  : v25 CaMeL + v24 AttriGuard + v19 语义检测
-  B — MCP 安全网关（市场热点卡位）   : v27 SMCP/MCPShield/MCPSec
-  C — 合规审计引擎（卖给政企）       : v26 IFC + v23 路径策略 + v12 合规报告
+  A — Agent 防注入引擎（核心壁垒）  : v25 CaMeL + v24 AttriGuard + v19 语义检测 + v30 AC 智能分级
+  B — MCP 安全网关（市场热点卡位）   : v32+ SMCP/MCPShield/MCPSec
+  C — 合规审计引擎（卖给政企）       : v26 IFC + v23 路径策略 + v12 合规报告 + v30 行业模板
 ```
 
 ### 每个版本的理论根基
@@ -925,9 +1033,13 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
 | **v24** | **因果推断** | **arXiv:2603.10749 AttriGuard** | **不问"输入像不像注入"，问"tool call 被谁驱动"** |
 | **v25** | **CaMeL 控制流分离** | **arXiv:2503.18813 Google** | **不检测坏的，编译好的 → 注入无通道可走** |
 | **v26** | **Bell-LaPadula IFC** | **arXiv:2505.23643 Microsoft Fides** | **每个变量有数学标签 → 安全是可证明的** |
-| v27 | SMCP + MCPShield | arXiv:2602.01129 / 2602.14281 | MCP 安全是架构问题 → 网关层透明加固 |
-| v28 | Nash 均衡 | AgentDojo / AgentDyn | 安全均衡需要被设计 → AI 辅助全局视角 |
-| v29 | 连接复用 + 状态同步 | OpenClaw Control UI WSS 协议 | 持久化 RPC 代替轮询式 REST，远程管理要像本地控制台一样实时 |
+| **v27** | **Defence in Depth** | — | **策略从配置到运行时必须闭环验证** |
+| **v28** | **Fides PropagateWithTool** | **arXiv:2505.23643** | **工具调用时标签自动传播 + 选择性隐藏** |
+| **v29** | **连接复用 + 状态同步** | OpenClaw Control UI WSS 协议 | **持久化 RPC 代替轮询式 REST** |
+| **v30** | **Munger 逆向思维** | — | **先想怎么会失败 → 质量硬化 > 功能堆砌** |
+| v31 | 帕累托改进 | — | P2 改进，边际成本最低的提升 |
+| v32+ | SMCP + MCPShield | arXiv:2602.01129 / 2602.14281 | MCP 安全是架构问题 → 网关层透明加固 |
+| v33+ | Nash 均衡 | AgentDojo / AgentDyn | 安全均衡需要被设计 → AI 辅助全局视角 |
 
 ### 每个版本的反直觉创新 🔥
 
@@ -940,9 +1052,13 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
 | **v24** | 🆕 不检查输入内容，**反事实重放问 LLM "没有外部数据你还这么做吗？"** |
 | **v25** | 🆕 不拦截 LLM 的 tool call，**先编译"允许做什么"再对比** — 注入在设计上无路可走 |
 | **v26** | 🆕 安全不是 if-else，是**数学定理** — 标签传播规则保证信息不泄露 |
-| v27 | MCP Server 说自己安全？**让龙虾卫士验证** — 信任要靠行为赢取不是声明 |
-| v28 | 安全运营不是看 Dashboard，是**跟安全助手对话** |
-| v29 | `POST /tools/invoke` 不是终点，**持久化 WSS RPC 才能做实时远程管理** |
+| **v27** | 🆕 策略配了不等于生效了 — **6 大断裂证明 "配置到运行时" 需要闭环验证** |
+| **v28** | 🆕 论文实现不等于产品 — **Fides 对齐需要 Selective Hide + PropagateWithTool 细节** |
+| **v29** | 🆕 `POST /tools/invoke` 不是终点，**持久化 WSS RPC 才能做实时远程管理** |
+| **v30** | 🆕 **停下来比冲刺更难** — 50 个引擎够了，质量 > 数量，AC 智能分级让规则自我进化 |
+| v31 | 出站也需要行业模板 — 不只挡进来的，**出去的也要按行业审查** |
+| v32+ | MCP Server 说自己安全？**让龙虾卫士验证** — 信任要靠行为赢取不是声明 |
+| v33+ | 安全运营不是看 Dashboard，是**跟安全助手对话** |
 
 ### 🆕 学术论文→产品功能 映射表
 
@@ -954,12 +1070,12 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
 | Fides/IFC (2505.23643) Microsoft | 2025.05 | 30 | **v26** | 双标签系统 + Quarantined LLM | 大 |
 | Dual Firewall (2502.01822) | 2025.02 | — | v25.0 融合 | 结构化入站 = Plan Template | — |
 | AgentRaft/DOE (2603.07557) | 2026.03 | — | v26.2 融合 | 跨 Tool 数据过度暴露检测 | — |
-| SMCP (2602.01129) | 2026.02 | — | v27.1 | MCP 五层安全透明叠加 | 中 |
-| MCPShield (2602.14281) | 2026.02 | — | v27.1 | MCP Tool 动态信任评分 | 小 |
-| MCPSec (2601.17549) | 2026.01 | — | v27.1 | 协议级加固 (52.8%→12.4% ASR) | 中 |
-| MCP Landscape (ACM TOSEM) | 2025 | 420 | v27 需求输入 | 16 种 MCP 威胁场景需求清单 | — |
-| AgentDojo (NeurIPS 2024) | 2024 | — | v28.1 | Benchmark 自动化测试 | 小 |
-| AgentDyn (2602.03117) | 2026.02 | — | v28.1 | 动态 Benchmark 测试 | 小 |
+| SMCP (2602.01129) | 2026.02 | — | v32+ | MCP 五层安全透明叠加 | 中 |
+| MCPShield (2602.14281) | 2026.02 | — | v32+ | MCP Tool 动态信任评分 | 小 |
+| MCPSec (2601.17549) | 2026.01 | — | v32+ | 协议级加固 (52.8%→12.4% ASR) | 中 |
+| MCP Landscape (ACM TOSEM) | 2025 | 420 | v32+ 需求输入 | 16 种 MCP 威胁场景需求清单 | — |
+| AgentDojo (NeurIPS 2024) | 2024 | — | v33+ | Benchmark 自动化测试 | 小 |
+| AgentDyn (2602.03117) | 2026.02 | — | v33+ | 动态 Benchmark 测试 | 小 |
 | AgentVigil (2505.05849) | 2025.05 | 28 | v19 已有 | 红队自动化（已通过 v14.2+v19 覆盖）| — |
 | SAFEFLOW (2506.07564) | 2025.06 | 12 | 未来探索 | 事务性 Agent 操作 | 大 |
 | Proof-of-Guardrail (2603.05786) | 2026.03 | — | 未来探索 | TEE 密码学审计证明 | 大 |
