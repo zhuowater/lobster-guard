@@ -859,3 +859,187 @@ func (c *GatewayWSClient) GWAgentFileSet(agentID, name, content string) (map[str
 		"content": content,
 	}, 10*time.Second)
 }
+
+// ==================== P0: Session 管理 ====================
+
+// GWSessionsPreview 获取 session 预览（含最后几条消息摘要）
+func (c *GatewayWSClient) GWSessionsPreview(sessionKey string) (map[string]interface{}, error) {
+	return c.Request("sessions.preview", map[string]interface{}{
+		"key": sessionKey,
+	}, 10*time.Second)
+}
+
+// GWSessionsReset 重置 session（清空历史但保留 session）
+func (c *GatewayWSClient) GWSessionsReset(sessionKey string) (map[string]interface{}, error) {
+	return c.Request("sessions.reset", map[string]interface{}{
+		"key": sessionKey,
+	}, 10*time.Second)
+}
+
+// GWSessionsCompact 压缩 session 上下文
+func (c *GatewayWSClient) GWSessionsCompact(sessionKey string) (map[string]interface{}, error) {
+	return c.Request("sessions.compact", map[string]interface{}{
+		"key": sessionKey,
+	}, 15*time.Second)
+}
+
+// ==================== P0: Chat 操作 ====================
+
+// GWChatSend 向 session 发送消息（触发 agent 回复）
+func (c *GatewayWSClient) GWChatSend(sessionKey, message string) (map[string]interface{}, error) {
+	return c.Request("chat.send", map[string]interface{}{
+		"sessionKey": sessionKey,
+		"message":    message,
+	}, 30*time.Second)
+}
+
+// GWChatAbort 中止正在生成的回复
+func (c *GatewayWSClient) GWChatAbort(sessionKey string) (map[string]interface{}, error) {
+	return c.Request("chat.abort", map[string]interface{}{
+		"sessionKey": sessionKey,
+	}, 10*time.Second)
+}
+
+// ==================== P0: Cron CRUD ====================
+
+// GWCronAdd 创建 cron 任务
+func (c *GatewayWSClient) GWCronAdd(job map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("cron.add", job, 10*time.Second)
+}
+
+// GWCronUpdate 更新 cron 任务
+func (c *GatewayWSClient) GWCronUpdate(jobID string, patch map[string]interface{}) (map[string]interface{}, error) {
+	params := map[string]interface{}{"id": jobID}
+	for k, v := range patch {
+		params[k] = v
+	}
+	return c.Request("cron.update", params, 10*time.Second)
+}
+
+// GWCronRemove 删除 cron 任务
+func (c *GatewayWSClient) GWCronRemove(jobID string) (map[string]interface{}, error) {
+	return c.Request("cron.remove", map[string]interface{}{"id": jobID}, 10*time.Second)
+}
+
+// ==================== P1: Agent 生命周期 ====================
+
+// GWAgentsCreate 创建 agent
+func (c *GatewayWSClient) GWAgentsCreate(params map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("agents.create", params, 15*time.Second)
+}
+
+// GWAgentsUpdate 更新 agent
+func (c *GatewayWSClient) GWAgentsUpdate(agentID string, patch map[string]interface{}) (map[string]interface{}, error) {
+	params := map[string]interface{}{"agentId": agentID}
+	for k, v := range patch {
+		params[k] = v
+	}
+	return c.Request("agents.update", params, 10*time.Second)
+}
+
+// GWAgentsDelete 删除 agent
+func (c *GatewayWSClient) GWAgentsDelete(agentID string) (map[string]interface{}, error) {
+	return c.Request("agents.delete", map[string]interface{}{"agentId": agentID}, 10*time.Second)
+}
+
+// ==================== P1: Config 修改 ====================
+
+// GWConfigPatch 部分修改 Gateway 配置（合并）
+func (c *GatewayWSClient) GWConfigPatch(patch map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("config.patch", patch, 15*time.Second)
+}
+
+// GWConfigApply 完整覆盖 Gateway 配置
+func (c *GatewayWSClient) GWConfigApply(raw string) (map[string]interface{}, error) {
+	return c.Request("config.apply", map[string]interface{}{"raw": raw}, 15*time.Second)
+}
+
+// ==================== P1: Skills 管理 ====================
+
+// GWSkillsBins 获取可用的 skill 仓库
+func (c *GatewayWSClient) GWSkillsBins(agentID string) (map[string]interface{}, error) {
+	params := map[string]interface{}{}
+	if agentID != "" {
+		params["agentId"] = agentID
+	}
+	return c.Request("skills.bins", params, 10*time.Second)
+}
+
+// GWSkillsInstall 安装技能
+func (c *GatewayWSClient) GWSkillsInstall(params map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("skills.install", params, 30*time.Second)
+}
+
+// GWSkillsUpdate 更新技能
+func (c *GatewayWSClient) GWSkillsUpdate(params map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("skills.update", params, 30*time.Second)
+}
+
+// ==================== P1: 心跳管理 ====================
+
+// GWSetHeartbeats 设置心跳配置
+func (c *GatewayWSClient) GWSetHeartbeats(params map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("set-heartbeats", params, 10*time.Second)
+}
+
+// GWWake 唤醒 agent
+func (c *GatewayWSClient) GWWake(params map[string]interface{}) (map[string]interface{}, error) {
+	return c.Request("wake", params, 10*time.Second)
+}
+
+// ==================== P1: 设备/节点配对 ====================
+
+// GWDevicePairApprove 批准设备配对
+func (c *GatewayWSClient) GWDevicePairApprove(requestID string) (map[string]interface{}, error) {
+	return c.Request("device.pair.approve", map[string]interface{}{"requestId": requestID}, 10*time.Second)
+}
+
+// GWDevicePairReject 拒绝设备配对
+func (c *GatewayWSClient) GWDevicePairReject(requestID string) (map[string]interface{}, error) {
+	return c.Request("device.pair.reject", map[string]interface{}{"requestId": requestID}, 10*time.Second)
+}
+
+// GWDeviceTokenRotate 轮换设备 token
+func (c *GatewayWSClient) GWDeviceTokenRotate(deviceID string) (map[string]interface{}, error) {
+	return c.Request("device.token.rotate", map[string]interface{}{"deviceId": deviceID}, 10*time.Second)
+}
+
+// GWDeviceTokenRevoke 吊销设备 token
+func (c *GatewayWSClient) GWDeviceTokenRevoke(deviceID string) (map[string]interface{}, error) {
+	return c.Request("device.token.revoke", map[string]interface{}{"deviceId": deviceID}, 10*time.Second)
+}
+
+// GWNodePairList 获取节点配对列表
+func (c *GatewayWSClient) GWNodePairList() (map[string]interface{}, error) {
+	return c.Request("node.pair.list", map[string]interface{}{}, 10*time.Second)
+}
+
+// GWNodePairApprove 批准节点配对
+func (c *GatewayWSClient) GWNodePairApprove(requestID string) (map[string]interface{}, error) {
+	return c.Request("node.pair.approve", map[string]interface{}{"requestId": requestID}, 10*time.Second)
+}
+
+// GWNodePairReject 拒绝节点配对
+func (c *GatewayWSClient) GWNodePairReject(requestID string) (map[string]interface{}, error) {
+	return c.Request("node.pair.reject", map[string]interface{}{"requestId": requestID}, 10*time.Second)
+}
+
+// GWNodeDescribe 获取节点详情
+func (c *GatewayWSClient) GWNodeDescribe(nodeID string) (map[string]interface{}, error) {
+	return c.Request("node.describe", map[string]interface{}{"node": nodeID}, 10*time.Second)
+}
+
+// GWNodeRename 重命名节点
+func (c *GatewayWSClient) GWNodeRename(nodeID, name string) (map[string]interface{}, error) {
+	return c.Request("node.rename", map[string]interface{}{"node": nodeID, "name": name}, 10*time.Second)
+}
+
+// ==================== P1: 系统事件 ====================
+
+// GWSystemEvent 注入系统事件到 session
+func (c *GatewayWSClient) GWSystemEvent(sessionKey, text string) (map[string]interface{}, error) {
+	return c.Request("system-event", map[string]interface{}{
+		"sessionKey": sessionKey,
+		"text":       text,
+	}, 10*time.Second)
+}

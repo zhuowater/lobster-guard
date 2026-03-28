@@ -393,6 +393,95 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleGatewayConfig(w, r)
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/usage") && method == "GET":
 		api.handleGatewayUsage(w, r)
+
+	// ===== v29.0 P0: Session 管理 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/session/reset") && method == "POST":
+		api.handleGatewaySessionReset(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/session/compact") && method == "POST":
+		api.handleGatewaySessionCompact(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/session") && method == "PATCH":
+		api.handleGatewaySessionPatch(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/session") && method == "DELETE":
+		api.handleGatewaySessionDelete(w, r)
+
+	// ===== v29.0 P0: Chat 操作 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/chat/send") && method == "POST":
+		api.handleGatewayChatSend(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/chat/abort") && method == "POST":
+		api.handleGatewayChatAbort(w, r)
+
+	// ===== v29.0 P0: Cron CRUD =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/cron/add") && method == "POST":
+		api.handleGatewayCronAdd(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/cron/update") && method == "PUT":
+		api.handleGatewayCronUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/cron/remove") && (method == "DELETE" || method == "POST"):
+		api.handleGatewayCronRemove(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/cron/run") && method == "POST":
+		api.handleGatewayCronRun(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/cron/runs") && method == "GET":
+		api.handleGatewayCronRuns(w, r)
+
+	// ===== v29.0 P1: Agent 生命周期 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents/create") && method == "POST":
+		api.handleGatewayAgentCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents/update") && method == "PUT":
+		api.handleGatewayAgentUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents/delete") && (method == "DELETE" || method == "POST"):
+		api.handleGatewayAgentDelete(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents/files") && method == "GET":
+		api.handleGatewayAgentFiles(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents/file") && method == "GET":
+		api.handleGatewayAgentFileGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/agents/file") && method == "PUT":
+		api.handleGatewayAgentFileSet(w, r)
+
+	// ===== v29.0 P1: Config 修改 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/config/schema") && method == "GET":
+		api.handleGatewayConfigSchema(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/config") && method == "PATCH":
+		api.handleGatewayConfigPatch(w, r)
+
+	// ===== v29.0 P1: Skills 管理 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/skills/bins") && method == "GET":
+		api.handleGatewaySkillsBins(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/skills/install") && method == "POST":
+		api.handleGatewaySkillsInstall(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/skills/update") && method == "POST":
+		api.handleGatewaySkillsUpdate(w, r)
+
+	// ===== v29.0 P1: 心跳管理 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/heartbeat") && method == "GET":
+		api.handleGatewayHeartbeat(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/heartbeat") && method == "PUT":
+		api.handleGatewaySetHeartbeats(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/wake") && method == "POST":
+		api.handleGatewayWake(w, r)
+
+	// ===== v29.0 P1: 设备配对 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/devices") && method == "GET":
+		api.handleGatewayDevicePairs(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/devices/approve") && method == "POST":
+		api.handleGatewayDevicePairAction(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/devices/reject") && method == "POST":
+		api.handleGatewayDevicePairAction(w, r)
+
+	// ===== v29.0 P1: 节点管理 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/node-pairs") && method == "GET":
+		api.handleGatewayNodePairs(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/node-pairs/approve") && method == "POST":
+		api.handleGatewayNodePairAction(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/node-pairs/reject") && method == "POST":
+		api.handleGatewayNodePairAction(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/nodes/describe") && method == "GET":
+		api.handleGatewayNodeDescribe(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/nodes/rename") && method == "POST":
+		api.handleGatewayNodeRename(w, r)
+
+	// ===== v29.0 P1: 系统事件 =====
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway/system-event") && method == "POST":
+		api.handleGatewaySystemEvent(w, r)
+
 	// v21.0: 上游 CRUD（带 ID 的路由必须在 health-check 之后匹配）
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/health-check") && method == "POST":
 		api.handleUpstreamHealthCheck(w, r)
