@@ -456,15 +456,18 @@ func loadInboundRulesFromFile(path string) ([]InboundRuleConfig, error) {
 // resolveInboundRules 根据配置决定使用哪套入站规则
 // 优先级: inbound_rules_file > inbound_rules > 默认硬编码
 func resolveInboundRules(cfg *Config) (rules []InboundRuleConfig, source string, err error) {
-	// 1. 外部文件
+	defaults := getDefaultInboundRules()
+
+	// 1. 外部文件 — 与默认规则 merge（同名覆盖，不同名追加）
 	if cfg.InboundRulesFile != "" {
-		rules, err = loadInboundRulesFromFile(cfg.InboundRulesFile)
+		fileRules, err := loadInboundRulesFromFile(cfg.InboundRulesFile)
 		if err != nil {
 			return nil, "", err
 		}
-		return rules, "file:" + cfg.InboundRulesFile, nil
+		merged := mergeInboundRules(defaults, fileRules)
+		return merged, "file+defaults:" + cfg.InboundRulesFile, nil
 	}
-	// 2. 内联配置
+	// 2. 内联配置（含 conf.d）— 与默认规则 merge
 	if len(cfg.InboundRules) > 0 {
 		// 验证
 		for i, rule := range cfg.InboundRules {
@@ -479,15 +482,41 @@ func resolveInboundRules(cfg *Config) (rules []InboundRuleConfig, source string,
 			} else if !validateInboundAction(rule.Action) {
 				return nil, "", fmt.Errorf("入站规则 %q 的 action %q 无效", rule.Name, rule.Action)
 			}
-			// v3.11: 验证 type 字段
 			if rule.Type != "" && rule.Type != "keyword" && rule.Type != "regex" {
 				return nil, "", fmt.Errorf("入站规则 %q 的 type %q 无效，必须是 keyword 或 regex", rule.Name, rule.Type)
 			}
 		}
-		return cfg.InboundRules, "config", nil
+		merged := mergeInboundRules(defaults, cfg.InboundRules)
+		return merged, "config+defaults", nil
 	}
-	// 3. 默认
+	// 3. 仅默认
 	return nil, "default", nil
+}
+
+// mergeInboundRules 合并默认规则和外部规则：外部同名覆盖，不同名追加
+func mergeInboundRules(defaults, overrides []InboundRuleConfig) []InboundRuleConfig {
+	byName := make(map[string]InboundRuleConfig, len(overrides))
+	for _, r := range overrides {
+		byName[r.Name] = r
+	}
+	var merged []InboundRuleConfig
+	seen := make(map[string]bool)
+	// 默认规则在前，如果外部有同名则用外部的
+	for _, d := range defaults {
+		if override, ok := byName[d.Name]; ok {
+			merged = append(merged, override)
+		} else {
+			merged = append(merged, d)
+		}
+		seen[d.Name] = true
+	}
+	// 外部独有的规则追加
+	for _, r := range overrides {
+		if !seen[r.Name] {
+			merged = append(merged, r)
+		}
+	}
+	return merged
 }
 
 // getDefaultInboundRules 返回硬编码的默认入站规则（用于导出和兜底）

@@ -261,7 +261,7 @@ func TestRuleEngine_FromConfig(t *testing.T) {
 
 	// version check
 	v := engine.Version()
-	if v.Source != "config" {
+	if !strings.HasPrefix(v.Source, "config") {
 		t.Fatalf("expected source 'config', got %s", v.Source)
 	}
 	if v.RuleCount != 3 {
@@ -504,14 +504,25 @@ func TestResolveInboundRules_Priority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveInboundRules failed: %v", err)
 	}
-	if !strings.HasPrefix(source, "file:") {
+	if !strings.HasPrefix(source, "file") {
 		t.Fatalf("expected file source, got %s", source)
 	}
-	if len(rules) != 1 || rules[0].Name != "from_file" {
-		t.Fatalf("expected file rule, got %+v", rules)
+	// v31: merge mode — file rule + defaults merged
+	hasFileRule := false
+	for _, r := range rules {
+		if r.Name == "from_file" {
+			hasFileRule = true
+			break
+		}
+	}
+	if !hasFileRule {
+		t.Fatalf("expected file rule 'from_file' in merged rules, got %d rules", len(rules))
+	}
+	if len(rules) <= 1 {
+		t.Fatalf("expected merge with defaults, got only %d rules", len(rules))
 	}
 
-	// Case 2: inline config when no file
+	// Case 2: inline config when no file — now merges with defaults
 	cfg2 := &Config{
 		InboundRules: []InboundRuleConfig{
 			{Name: "from_config", Patterns: []string{"config_pattern"}, Action: "warn"},
@@ -521,7 +532,7 @@ func TestResolveInboundRules_Priority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveInboundRules failed: %v", err)
 	}
-	if source != "config" {
+	if !strings.HasPrefix(source, "config") {
 		t.Fatalf("expected config source, got %s", source)
 	}
 
@@ -736,7 +747,7 @@ inbound_rules:
 	if result["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", result["status"])
 	}
-	if result["source"] != "config" {
+	if s, ok := result["source"].(string); !ok || (!strings.HasPrefix(s, "config")) {
 		t.Fatalf("expected source 'config', got %v", result["source"])
 	}
 
