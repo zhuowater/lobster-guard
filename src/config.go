@@ -632,7 +632,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-semiconductor",
 			Name:        "芯片行业入站规则",
 			Description: "芯片/半导体行业专属检测规则，覆盖 IP 保护和出口管制",
-			Category:    "industry",
+			Category:    "technology",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "chip_ip_keyword_cn", Patterns: []string{"RTL代码", "Verilog", "GDSII", "流片", "光罩", "制程节点", "晶圆", "EDA工具", "IP核", "芯片版图"}, Action: "warn", Category: "ip_protection"},
@@ -644,7 +644,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-financial",
 			Name:        "银行/支付入站规则",
 			Description: "银行/支付行业专属检测规则，覆盖账户数据、交易流水、合规交易、反洗钱和金融社工",
-			Category:    "industry",
+			Category:    "financial",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "fin_account_cn", Patterns: []string{"账户余额", "交易流水", "银行卡号", "信用卡号", "贷款审批", "授信额度", "征信报告", "银行账号", "开户行"}, Action: "warn", Category: "financial_data"},
@@ -662,7 +662,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-healthcare",
 			Name:        "医疗行业入站规则",
 			Description: "医疗行业专属检测规则，覆盖患者隐私、药品安全、基因数据、精神健康和医疗合规",
-			Category:    "industry",
+			Category:    "healthcare",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "health_phi_cn", Patterns: []string{"病历", "诊断报告", "处方", "医嘱", "化验单", "影像报告", "手术记录", "出院小结", "病历号", "就诊卡号", "医保卡号"}, Action: "warn", Category: "phi"},
@@ -694,7 +694,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-legal",
 			Name:        "法律行业入站规则",
 			Description: "法律行业专属检测规则，覆盖律师客户特权通信、案件卷宗和法律意见书保护",
-			Category:    "industry",
+			Category:    "services",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "legal_privilege", Patterns: []string{"律师函", "委托代理", "attorney-client privilege", "legal privilege", "privileged communication", "特权通信"}, Action: "warn", Category: "legal_privilege"},
@@ -706,7 +706,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-education",
 			Name:        "教育行业入站规则",
 			Description: "教育行业专属检测规则，覆盖学生数据保护、考试安全和学术诚信",
-			Category:    "industry",
+			Category:    "education",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "edu_student_data", Patterns: []string{"成绩单", "学籍信息", "FERPA", "student record", "transcript", "enrollment data", "学生档案"}, Action: "warn", Category: "student_data"},
@@ -718,7 +718,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-government",
 			Name:        "政务/政府入站规则",
 			Description: "政务行业专属检测规则，覆盖涉密信息、公民隐私、政策草案、跨境数据和社工攻击",
-			Category:    "industry",
+			Category:    "government",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "gov_classified", Patterns: []string{"机密文件", "秘密文件", "绝密", "秘密级", "top secret", "classified document", "confidential government", "state secret", "国家秘密", "定密依据", "保密法"}, Action: "block", Category: "classified"},
@@ -736,7 +736,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-energy",
 			Name:        "能源/电力入站规则",
 			Description: "能源行业专属检测规则，覆盖 SCADA 安全、电网调度和工控协议保护",
-			Category:    "industry",
+			Category:    "energy",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "energy_scada_block", Patterns: []string{"SCADA命令", "SCADA指令", "SCADA command", "SCADA control", "远程终端单元", "RTU command"}, Action: "block", Category: "scada_security"},
@@ -748,7 +748,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-automotive",
 			Name:        "汽车/自动驾驶入站规则",
 			Description: "汽车行业专属检测规则，覆盖 ECU 固件、OTA 升级和车辆追踪保护",
-			Category:    "industry",
+			Category:    "technology",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "auto_ecu_block", Patterns: []string{"ECU固件", "ECU刷写", "ECU firmware", "flash ECU", "电控单元固件", "ECU calibration"}, Action: "block", Category: "ecu_security"},
@@ -760,7 +760,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-ecommerce",
 			Name:        "电商/零售入站规则",
 			Description: "电商行业专属检测规则，覆盖价格操纵、竞品爬取和用户画像保护",
-			Category:    "industry",
+			Category:    "services",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "ecom_price_block", Patterns: []string{"批量改价", "价格操纵", "price manipulation", "bulk price change", "篡改价格", "price tampering"}, Action: "block", Category: "price_manipulation"},
@@ -772,7 +772,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-hr",
 			Name:        "人力资源入站规则",
 			Description: "人力资源行业专属检测规则，覆盖薪酬数据、绩效评估和员工档案保护",
-			Category:    "industry",
+			Category:    "services",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "hr_salary_block", Patterns: []string{"薪酬数据", "工资明细", "salary data", "compensation detail", "薪资报表", "payroll export"}, Action: "block", Category: "salary_data"},
@@ -784,7 +784,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 			ID:          "tpl-inbound-insurance",
 			Name:        "保险行业入站规则",
 			Description: "保险行业专属检测规则，覆盖理赔数据、精算模型和保单信息保护",
-			Category:    "industry",
+			Category:    "financial",
 			BuiltIn:     true,
 			Rules: []InboundRuleConfig{
 				{Name: "ins_claim_data", Patterns: []string{"理赔数据", "理赔记录", "claim data", "claim record", "出险记录", "insurance claim"}, Action: "warn", Category: "claim_data"},
@@ -797,7 +797,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-securities", Name: "证券/投行入站规则",
 			Description: "证券/投行行业专属检测规则，覆盖研报、IPO材料和持仓数据保护",
-			Category: "industry", BuiltIn: true,
+			Category: "financial", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "sec_research_draft", Patterns: []string{"研报草稿", "未公开研报", "draft research", "unpublished report", "投行项目", "路演材料", "roadshow material"}, Action: "warn", Category: "research_data"},
 				{Name: "sec_ipo_block", Patterns: []string{"IPO定价", "配售方案", "保荐材料", "IPO pricing", "share allocation", "underwriting"}, Action: "block", Category: "ipo_data"},
@@ -808,7 +808,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-fund", Name: "基金/资管入站规则",
 			Description: "基金/资管行业专属检测规则，覆盖净值预测、投资组合和风控模型保护",
-			Category: "industry", BuiltIn: true,
+			Category: "financial", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "fund_nav", Patterns: []string{"净值预测", "NAV forecast", "回撤数据", "夏普比率", "Sharpe ratio"}, Action: "warn", Category: "fund_data"},
 				{Name: "fund_portfolio", Patterns: []string{"基金持仓", "投资组合", "资产配置", "fund holding", "portfolio allocation", "asset allocation"}, Action: "warn", Category: "portfolio_data"},
@@ -819,7 +819,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-pharma", Name: "制药/生物科技入站规则",
 			Description: "制药/生物科技行业专属检测规则，覆盖药物配方、临床试验和GMP记录保护",
-			Category: "industry", BuiltIn: true,
+			Category: "healthcare", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "pharma_formula_block", Patterns: []string{"药物配方", "分子式", "合成路线", "drug formula", "molecular structure", "synthesis route", "原料药工艺", "API process"}, Action: "block", Category: "drug_formula"},
 				{Name: "pharma_clinical", Patterns: []string{"临床试验", "受试者数据", "IND申请", "clinical trial", "subject data", "IND filing", "生物等效性", "bioequivalence"}, Action: "warn", Category: "clinical_data"},
@@ -830,7 +830,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-robotics", Name: "机器人/自动化入站规则",
 			Description: "机器人/自动化行业专属检测规则，覆盖运动控制算法、安全区域和传感器参数保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "robot_algo_block", Patterns: []string{"运动控制算法", "逆运动学", "轨迹规划", "motion control algorithm", "inverse kinematics", "trajectory planning", "SLAM算法", "SLAM algorithm"}, Action: "block", Category: "control_algorithm"},
 				{Name: "robot_safety_block", Patterns: []string{"安全区域", "协作区域", "力控参数", "safety zone", "collaborative zone", "force control"}, Action: "warn", Category: "safety_config"},
@@ -841,7 +841,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-consumer-electronics", Name: "消费电子/家电入站规则",
 			Description: "消费电子/家电行业专属检测规则，覆盖BOM、模具图纸和供应商报价保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ce_bom", Patterns: []string{"产品BOM", "物料清单", "product BOM", "bill of materials", "成本结构", "cost structure"}, Action: "warn", Category: "bom_data"},
 				{Name: "ce_mold_block", Patterns: []string{"模具图纸", "模具参数", "开模费用", "mold drawing", "mold parameter", "tooling cost"}, Action: "block", Category: "mold_data"},
@@ -863,7 +863,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-civil-aviation", Name: "民航入站规则",
 			Description: "民航行业专属检测规则，覆盖适航数据、飞控参数和旅客PNR保护",
-			Category: "industry", BuiltIn: true,
+			Category: "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ca_airworthiness_block", Patterns: []string{"适航证", "适航数据", "飞行数据记录器", "airworthiness", "FDR"}, Action: "block", Category: "airworthiness"},
 				{Name: "ca_flight_control_block", Patterns: []string{"飞控参数", "FMS配置", "航路点", "ACARS", "flight control parameter", "FMS configuration", "waypoint", "ACARS"}, Action: "block", Category: "flight_control"},
@@ -874,7 +874,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-railway", Name: "铁路/高铁入站规则",
 			Description: "铁路/高铁行业专属检测规则，覆盖CTCS信号参数、调度运行图和线路限速保护",
-			Category: "industry", BuiltIn: true,
+			Category: "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "rail_ctcs_block", Patterns: []string{"CTCS", "列控系统", "ATP参数", "应答器", "轨道电路", "train control system", "ATP parameter", "balise", "track circuit"}, Action: "block", Category: "signal_system"},
 				{Name: "rail_dispatch", Patterns: []string{"运行图", "调度命令", "线路限速", "闭塞分区", "timetable", "dispatch command", "speed restriction", "block section"}, Action: "warn", Category: "dispatch_data"},
@@ -885,7 +885,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-metro", Name: "城市轨道/地铁入站规则",
 			Description: "城市轨道/地铁行业专属检测规则，覆盖CBTC参数、屏蔽门和客流数据保护",
-			Category: "industry", BuiltIn: true,
+			Category: "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "metro_cbtc_block", Patterns: []string{"CBTC", "ATO参数", "列车自动运行", "CBTC", "ATO parameter", "train automation"}, Action: "block", Category: "cbtc_data"},
 				{Name: "metro_psd", Patterns: []string{"屏蔽门", "站台门", "行车间隔", "platform screen door", "headway", "应急疏散", "emergency evacuation"}, Action: "warn", Category: "psd_data"},
@@ -896,7 +896,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-maritime", Name: "航运/港口入站规则",
 			Description: "航运/港口行业专属检测规则，覆盖AIS数据、海图和港口调度保护",
-			Category: "industry", BuiltIn: true,
+			Category: "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "maritime_ais", Patterns: []string{"AIS数据", "船舶位置", "MMSI", "IMO编号", "AIS data", "vessel position", "MMSI", "IMO number"}, Action: "warn", Category: "ais_data"},
 				{Name: "maritime_chart_block", Patterns: []string{"海图数据", "nautical chart"}, Action: "block", Category: "chart_data"},
@@ -907,7 +907,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-gaming", Name: "游戏行业入站规则",
 			Description: "游戏行业专属检测规则，覆盖反外挂策略、内购定价和虚拟资产保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "game_anticheat_block", Patterns: []string{"反外挂策略", "外挂检测", "游戏源码", "anti-cheat strategy", "cheat detection", "game source code"}, Action: "block", Category: "anticheat"},
 				{Name: "game_iap", Patterns: []string{"内购定价", "充值比例", "掉落概率", "抽卡概率", "in-app purchase pricing", "drop rate", "gacha rate"}, Action: "warn", Category: "iap_data"},
@@ -918,7 +918,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-advertising", Name: "广告/营销入站规则",
 			Description: "广告/营销行业专属检测规则，覆盖用户标签、投放策略和竞品数据保护",
-			Category: "industry", BuiltIn: true,
+			Category: "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ad_user_tag", Patterns: []string{"用户标签", "人群包", "DMP数据", "user tag", "audience segment", "DMP data"}, Action: "warn", Category: "user_tag"},
 				{Name: "ad_strategy", Patterns: []string{"投放策略", "出价策略", "千次展示成本", "广告素材库", "media plan", "bidding strategy", "CPM", "creative library"}, Action: "warn", Category: "ad_strategy"},
@@ -929,7 +929,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-social-media", Name: "社交平台入站规则",
 			Description: "社交平台行业专属检测规则，覆盖用户关系链、私信和推荐算法保护",
-			Category: "industry", BuiltIn: true,
+			Category: "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "social_graph_block", Patterns: []string{"用户关系链", "好友列表", "社交图谱", "social graph", "friend list"}, Action: "block", Category: "social_graph"},
 				{Name: "social_dm_block", Patterns: []string{"私信内容", "direct message", "用户行为日志", "user behavior log"}, Action: "block", Category: "private_message"},
@@ -940,7 +940,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-live-streaming", Name: "短视频/直播入站规则",
 			Description: "短视频/直播行业专属检测规则，覆盖主播收入、流量分发和MCN合约保护",
-			Category: "industry", BuiltIn: true,
+			Category: "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ls_revenue_block", Patterns: []string{"主播收入", "打赏分成", "礼物分成比例", "streamer revenue", "gift sharing ratio"}, Action: "block", Category: "streamer_revenue"},
 				{Name: "ls_traffic_block", Patterns: []string{"流量分发规则", "直播间权重", "推流地址", "直播源码", "traffic distribution rule", "live room weight", "streaming address", "source code"}, Action: "block", Category: "traffic_rule"},
@@ -951,7 +951,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-saas-cloud", Name: "SaaS/云服务入站规则",
 			Description: "SaaS/云服务行业专属检测规则，覆盖客户数据、多租户配置和API密钥保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "saas_customer_block", Patterns: []string{"客户数据隔离", "客户续约率", "客户流失率", "customer data isolation", "customer retention", "churn rate"}, Action: "block", Category: "customer_data"},
 				{Name: "saas_tenant", Patterns: []string{"多租户配置", "部署架构", "multi-tenant config", "deployment architecture"}, Action: "warn", Category: "tenant_config"},
@@ -962,7 +962,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-search-engine", Name: "搜索引擎入站规则",
 			Description: "搜索引擎行业专属检测规则，覆盖排名算法、搜索日志和广告竞价保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "se_ranking_block", Patterns: []string{"搜索排名算法", "排名因子", "索引策略", "ranking algorithm", "ranking factor", "indexing strategy"}, Action: "block", Category: "ranking_algo"},
 				{Name: "se_log", Patterns: []string{"搜索日志", "用户搜索词", "搜索意图", "search log", "search query", "search intent"}, Action: "warn", Category: "search_log"},
@@ -973,7 +973,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-local-services", Name: "外卖/本地生活入站规则",
 			Description: "外卖/本地生活行业专属检测规则，覆盖骑手轨迹、商户评分和用户地址保护",
-			Category: "industry", BuiltIn: true,
+			Category: "services", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ls_rider", Patterns: []string{"骑手轨迹", "配送路径", "运力调度", "rider trajectory", "delivery route", "capacity scheduling"}, Action: "warn", Category: "rider_data"},
 				{Name: "ls_merchant_block", Patterns: []string{"商户评分算法", "佣金比例", "抽成比例", "merchant scoring algorithm", "commission rate"}, Action: "block", Category: "merchant_algo"},
@@ -984,7 +984,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-cybersecurity", Name: "网络安全入站规则",
 			Description: "网络安全行业专属检测规则，覆盖漏洞数据、攻击payload和0day信息保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "cyber_vuln_block", Patterns: []string{"0day漏洞", "未公开漏洞", "漏洞利用代码", "PoC代码", "zero-day", "undisclosed vulnerability", "exploit code", "PoC code"}, Action: "block", Category: "vulnerability"},
 				{Name: "cyber_payload_block", Patterns: []string{"攻击载荷", "攻击工具链", "attack payload", "attack toolchain"}, Action: "block", Category: "attack_payload"},
@@ -995,7 +995,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-media-news", Name: "传媒/新闻入站规则",
 			Description: "传媒/新闻行业专属检测规则，覆盖未发布稿件、信息源和独家线索保护",
-			Category: "industry", BuiltIn: true,
+			Category: "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "news_unpub_block", Patterns: []string{"未发布稿件", "发稿计划", "新闻素材", "unpublished article", "publication schedule", "news material"}, Action: "block", Category: "unpublished"},
 				{Name: "news_source_block", Patterns: []string{"信息源", "匿名线人", "anonymous source", "confidential informant"}, Action: "block", Category: "news_source"},
@@ -1006,7 +1006,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-publishing", Name: "出版/版权入站规则",
 			Description: "出版/版权行业专属检测规则，覆盖未出版手稿、版税数据和DRM配置保护",
-			Category: "industry", BuiltIn: true,
+			Category: "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "pub_manuscript_block", Patterns: []string{"未出版手稿", "unpublished manuscript"}, Action: "block", Category: "manuscript"},
 				{Name: "pub_royalty", Patterns: []string{"版税数据", "稿费标准", "royalty data", "author fee", "印数", "首印量", "print run"}, Action: "warn", Category: "royalty_data"},
@@ -1017,7 +1017,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-telecom", Name: "电信/运营商入站规则",
 			Description: "电信/运营商行业专属检测规则，覆盖CDR通话记录、基站数据和用户号码保护",
-			Category: "industry", BuiltIn: true,
+			Category: "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "telecom_cdr_block", Patterns: []string{"通话记录", "CDR数据", "信令数据", "call detail record", "CDR data", "signaling data"}, Action: "block", Category: "cdr_data"},
 				{Name: "telecom_bs_block", Patterns: []string{"基站位置", "核心网配置", "监听接口", "DPI数据", "base station location", "core network config", "lawful interception", "DPI data"}, Action: "block", Category: "network_data"},
@@ -1028,7 +1028,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-logistics", Name: "物流/供应链入站规则",
 			Description: "物流/供应链行业专属检测规则，覆盖客户地址、仓储布局和供应商报价保护",
-			Category: "industry", BuiltIn: true,
+			Category: "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "logi_address", Patterns: []string{"客户收货地址", "customer shipping address"}, Action: "warn", Category: "address_data"},
 				{Name: "logi_warehouse", Patterns: []string{"仓储布局", "库位规划", "库存数据", "入库单", "出库单", "warehouse layout", "storage planning", "inventory data"}, Action: "warn", Category: "warehouse_data"},
@@ -1039,7 +1039,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-real-estate", Name: "房地产/物业入站规则",
 			Description: "房地产/物业行业专属检测规则，覆盖业主信息、房价数据和户型图纸保护",
-			Category: "industry", BuiltIn: true,
+			Category: "services", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "re_owner", Patterns: []string{"业主信息", "业主名单", "owner information", "owner list"}, Action: "warn", Category: "owner_data"},
 				{Name: "re_price", Patterns: []string{"房价数据", "成交底价", "楼盘均价", "物业费", "按揭数据", "property price", "transaction floor price", "average price", "property fee", "mortgage data"}, Action: "warn", Category: "price_data"},
@@ -1061,7 +1061,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-aerospace", Name: "航空航天入站规则",
 			Description: "航空航天行业专属检测规则，覆盖ITAR管制、卫星参数和飞控代码保护",
-			Category: "industry", BuiltIn: true,
+			Category: "defense", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "aero_itar_block", Patterns: []string{"ITAR管制", "ITAR controlled"}, Action: "block", Category: "itar_control"},
 				{Name: "aero_satellite_block", Patterns: []string{"卫星参数", "轨道数据", "TLE", "遥测数据", "遥控指令", "satellite parameter", "orbital data", "TLE", "telemetry data", "telecommand"}, Action: "block", Category: "satellite_data"},
@@ -1072,7 +1072,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-mining", Name: "矿业/资源入站规则",
 			Description: "矿业/资源行业专属检测规则，覆盖勘探数据、矿藏储量和环评数据保护",
-			Category: "industry", BuiltIn: true,
+			Category: "energy", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "mine_explore_block", Patterns: []string{"勘探数据", "矿藏储量", "品位数据", "exploration data", "mineral reserves", "ore grade"}, Action: "block", Category: "exploration_data"},
 				{Name: "mine_rights_block", Patterns: []string{"采矿权", "探矿权", "地质报告", "mining rights", "prospecting rights", "geological report"}, Action: "block", Category: "mining_rights"},
@@ -1094,7 +1094,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-hospitality", Name: "酒店/旅游入站规则",
 			Description: "酒店/旅游行业专属检测规则，覆盖旅客信息、VIP客户和定价策略保护",
-			Category: "industry", BuiltIn: true,
+			Category: "services", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "hotel_guest", Patterns: []string{"旅客信息", "PNR记录", "VIP客户", "客户偏好", "会员数据", "guest information", "PNR record", "VIP customer", "customer preference", "loyalty data"}, Action: "warn", Category: "guest_data"},
 				{Name: "hotel_pricing_block", Patterns: []string{"定价策略", "收益管理", "房价策略", "pricing strategy", "revenue management", "rate strategy"}, Action: "block", Category: "pricing_data"},
