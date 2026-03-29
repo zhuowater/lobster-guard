@@ -1,162 +1,66 @@
-# ============================================================
-# 龙虾卫士 v20.8.1 核心配置
-# 完整参考: config.yaml.full-example（776 行完整版）
-# 模块配置: conf.d/ 目录（可选，按需启用）
-# ============================================================
+# ===== Level 0: 快速开始（5 个必填字段） =====
+# 仅填写下面 5 组字段即可启动一个最小可用实例。
+listen_inbound: ":18443"          # 入站监听端口
+listen_outbound: ":18444"         # 出站监听端口
+management_port: 9090              # Dashboard / Management API 端口
+management_token: "your-secret-token"  # 管理 API 认证
+upstreams:
+  - id: "default"
+    address: "127.0.0.1"
+    port: 19444                    # 上游 Agent / Gateway 端口
 
-# --- 通道（必填）---
-# 支持: lanxin | feishu | dingtalk | wecom | generic
-channel: "lanxin"
-callbackKey: "YOUR_CALLBACK_KEY_BASE64"
-callbackSignToken: "YOUR_CALLBACK_SIGN_TOKEN"
+# ===== Level 1: 基础安全（推荐配置） =====
+# 推荐在上线前补齐以下字段，获得基础 IM 安全能力。
+channel_type: "lanxin"            # lanxin / feishu / dingtalk / wecom / generic
+encryption_key: "your-aes-key"    # 消息解密密钥（如通道需要）
+inbound_detect_enabled: true       # 入站检测开关
+outbound_audit_enabled: true       # 出站审计开关
+detect_timeout_ms: 200             # 单次检测超时
 
-# --- 接入模式 ---
-# mode: "webhook"          # webhook（默认）| bridge（长连接，飞书/钉钉）
+# 可选：如果你的通道使用回调验签，可一并填写
+# callbackKey: "your-callback-key"
+# callbackSignToken: "your-callback-sign-token"
 
-# --- 代理端口 ---
-inbound_listen: ":18443"   # IM 入站代理（消息平台 → Agent）
-outbound_listen: ":18444"  # IM 出站代理（Agent → 消息平台 API）
-openclaw_upstream: "http://localhost:18790"
-lanxin_upstream: "https://apigw.lx.qianxin.com"
+# ===== Level 2: 高级功能（按需启用） =====
+# 以下配置适合进阶场景：LLM Proxy、IFC、CaMeL、租户、API Key 等。
+# 不需要就保持注释即可，不影响基础功能。
 
-# --- LLM 代理（可选）---
 # llm_proxy:
 #   enabled: true
-#   listen: ":8445"
+#   listen: ":18445"
 #   targets:
 #     - name: "deepseek"
 #       upstream: "https://api.deepseek.com"
 #       path_prefix: "/v1/"
-#       strip_prefix: false         # 保持原路径转发
+#       strip_prefix: false
 #       api_key_header: "Authorization"
-#     - name: "qax-llm"
-#       upstream: "https://aip.b.qianxin-inc.cn"
-#       path_prefix: "/qax/v1/"
-#       strip_prefix: true          # /qax/v1/... → /v1/...（去掉前缀再转发）
-#       api_key_header: "Authorization"
-#   # strip_prefix 说明：
-#   #   当 strip_prefix: true 时，转发前去掉 path_prefix。
-#   #   用于将 OpenClaw LLM 流量透明引入龙虾卫士审计，无需修改上游 API 路径。
-#   #   例如 /qax/v1/chat/completions 会以 /v1/chat/completions 发送到上游。
 
-# --- 管理 ---
-management_listen: ":9090"
-management_token: "YOUR_MANAGEMENT_TOKEN"  # 🔴 生产环境必须配置，否则管理 API 无认证
+# ifc:
+#   enabled: true
+#   violation_action: warn
+#   quarantine_enabled: false
 
-# --- JWT 认证 ---
-auth:
-  enabled: true
-  jwt_secret: "your-jwt-secret-at-least-32-chars"  # 必须配置，否则重启后所有 token 失效
-  # token_expire_hours: 24
-  # default_password: ""     # 未设置时自动生成随机密码（查看启动日志），密码最少 8 位
+# plan_compiler:
+#   enabled: true
+#   strict_mode: false
 
-# --- 存储 & 日志 ---
-db_path: "/var/lib/lobster-guard/audit.db"
-log_level: "info"
-# log_format: "text"       # "text" | "json"
+# capability:
+#   enabled: true
+#   default_policy: allow
 
-# --- 安全检测（核心开关）---
-inbound_detect_enabled: true
-outbound_audit_enabled: true
+# deviation:
+#   enabled: true
+#   auto_repair: false
 
-# --- 服务注册 ---
-registration_enabled: true
-registration_token: "YOUR_REGISTRATION_TOKEN"
+# counterfactual:
+#   enabled: false
+#   mode: "async"
 
-# --- 路由策略 ---
-route_default_policy: "least-users"
-route_persist: true
+# api_keys:
+#   - name: "demo"
+#     key: "replace-me"
 
-# v29.0: Gateway WSS RPC 全局默认 Origin
-# 当上游未配置 gateway_origin 时使用此值
-# 需与 OpenClaw Gateway 的 controlUi.allowedOrigins 匹配
-default_gateway_origin: "http://localhost"
-
-# --- 静态上游 ---
-# 上游配置示例
-static_upstreams:
-  - id: "openclaw-local"
-    address: "127.0.0.1"
-    port: 19444
-    gateway_token: "your-gateway-token-here"
-    # gateway_origin: "https://your-domain.com"  # 可选，覆盖 default_gateway_origin
-    # path_prefix: "/api/v1"      # 可选：上游服务的路径前缀
-    # openclaw_config_path: "/root/.openclaw/openclaw.json"  # 可选：同机部署时直接读取配置，获取完整 agents/sessions 列表（绕过 tools/invoke 的 visibility 限制）
-
-# --- WebSocket 安全 ---
-# ws_allowed_origins:        # WebSocket Origin 白名单（空则允许全部）
-#   - "https://your-domain.com"
-
-# --- 白名单（跳过入站检测的 sender_id）---
-whitelist:
-  - "YOUR_ADMIN_SENDER_ID"
-
-# --- 执行信封（密码学审计链）---
-envelope_enabled: true
-envelope_secret_key: "your-hmac-secret-key-change-me"
-
-# --- 模块配置目录 ---
-# 默认 "conf.d"（相对于本文件），取消注释可自定义路径
-# conf_dir: "conf.d"
-#
-# conf.d/ 目录下每个 .yaml/.yml 文件按字母序加载，合并到此配置。
-# 不存在时静默跳过，单文件配置模式完全向后兼容。
-# 示例文件见 conf.d/ 目录。
-
-# v23.0 路径级策略引擎
-path_policy:
-  enabled: true
-
-# v24.0 反事实验证
-counterfactual:
-  enabled: false
-  mode: "async"              # sync | async
-  max_per_hour: 100          # 每小时最大验证次数
-  risk_threshold: 0.7        # 风险阈值
-  cache_ttl_sec: 300         # 缓存 TTL
-  timeout_sec: 5             # 单次验证超时
-  fuzzy_match: true          # 模糊匹配
-
-# v25.0 执行计划编译器 (CaMeL)
-plan_compiler:
-  enabled: true
-  match_threshold: 0.3       # 模板匹配阈值 (0-1)
-  max_active_plans: 1000     # 最大活跃计划数
-  strict_mode: false         # 严格模式(true=block, false=warn)
-  violation_action: warn     # 违规动作: warn | block | log
-
-# v25.1 Capability 权限系统
-capability:
-  enabled: true
-  default_policy: allow      # 默认策略: allow | deny
-
-# v25.2 偏差检测
-deviation:
-  enabled: true
-  auto_repair: false         # 自动修复
-  max_repairs: 5             # 最大修复次数
-
-# v30.0 AC 智能分级 (Auto-Review)
-auto_review:
-  enabled: false               # 启用后 block 规则可被自动/手动降级为 review
-  window_seconds: 300          # 滑动窗口大小（秒），检测 block 尖峰
-  spike_threshold: 10          # 窗口内 block 次数超过此值触发自动降级
-  spike_ratio: 3.0             # 相比历史均值的倍数阈值
-  auto_review_ttl: 3600        # 自动降级持续时间（秒），到期自动恢复为 block
-  llm_endpoint: ""             # LLM 复核端点 URL（优先级最高，如 https://api.deepseek.com）
-  llm_api_key: ""              # LLM API Key（内部调用用，Bearer token）
-  llm_model: "deepseek-chat"   # LLM 模型名称
-  llm_upstream_id: ""          # 或指定 LLM Proxy target 名（如 "deepseek"）
-  llm_timeout_sec: 10          # LLM 调用超时（秒）
-  manual_review_rules: []      # 永久 review 规则列表（不受 TTL 影响）
-
-# v26.0 信息流控制 (Fides IFC)
-ifc:
-  enabled: true
-  default_confidentiality: 1    # INTERNAL
-  default_integrity: 2          # MEDIUM
-  violation_action: warn        # block / warn / log
-  quarantine_enabled: false
-  quarantine_upstream: ""
-  hiding_enabled: false
-  hiding_threshold: 2           # CONFIDENTIAL
+# 兼容说明：
+# - 本示例使用更友好的向导字段名：listen_inbound / listen_outbound / management_port / upstreams / channel_type。
+# - 后端校验 API 会自动兼容这些别名。
+# - 真正部署时，也可以继续使用项目原生字段名（如 inbound_listen / static_upstreams / channel）。
