@@ -52,36 +52,36 @@ func getRequestIP(r *http.Request) string {
 // ============================================================
 
 type ManagementAPI struct {
-	pool           *UpstreamPool
-	routes         *RouteTable
-	logger         *AuditLogger
-	inboundEngine  *RuleEngine         // v3.5 入站规则引擎引用
-	outboundEngine *OutboundRuleEngine
-	cfg            *Config
-	cfgPath        string
-	managementToken string
+	pool              *UpstreamPool
+	routes            *RouteTable
+	logger            *AuditLogger
+	inboundEngine     *RuleEngine // v3.5 入站规则引擎引用
+	outboundEngine    *OutboundRuleEngine
+	cfg               *Config
+	cfgPath           string
+	managementToken   string
 	registrationToken string
-	inbound        *InboundProxy
-	channel        ChannelPlugin       // v3.4 通道引用
-	metrics        *MetricsCollector   // v3.4 指标采集器
-	ruleHits       *RuleHitStats       // v3.6 规则命中统计
-	userCache      *UserInfoCache      // v3.9 用户信息缓存
-	policyEng      *RoutePolicyEngine  // v3.9 路由策略引擎
-	alertNotifier  *AlertNotifier      // v3.10 告警通知器
-	wsProxy        *WSProxyManager     // v4.1 WebSocket 代理管理器
-	store          Store               // v4.2 存储抽象层
-	shutdownMgr    *ShutdownManager    // v4.2 关闭管理器
-	realtime       *RealtimeMetrics    // v5.0 实时监控
+	inbound           *InboundProxy
+	channel           ChannelPlugin      // v3.4 通道引用
+	metrics           *MetricsCollector  // v3.4 指标采集器
+	ruleHits          *RuleHitStats      // v3.6 规则命中统计
+	userCache         *UserInfoCache     // v3.9 用户信息缓存
+	policyEng         *RoutePolicyEngine // v3.9 路由策略引擎
+	alertNotifier     *AlertNotifier     // v3.10 告警通知器
+	wsProxy           *WSProxyManager    // v4.1 WebSocket 代理管理器
+	store             Store              // v4.2 存储抽象层
+	shutdownMgr       *ShutdownManager   // v4.2 关闭管理器
+	realtime          *RealtimeMetrics   // v5.0 实时监控
 	// v5.1 智能检测
-	sessionDetector *SessionDetector   // v5.1 会话检测器
-	llmDetector     *LLMDetector       // v5.1 LLM 检测器
-	detectCache     *DetectCache       // v5.1 检测缓存
+	sessionDetector *SessionDetector // v5.1 会话检测器
+	llmDetector     *LLMDetector     // v5.1 LLM 检测器
+	detectCache     *DetectCache     // v5.1 检测缓存
 	// v9.0 LLM 侧审计
-	llmAuditor      *LLMAuditor        // v9.0 LLM 审计器
-	llmRuleEngine   *LLMRuleEngine     // v10.0 LLM 规则引擎
-	llmProxy        *LLMProxy          // v10.1 LLM 代理引用（用于 canary token 操作）
-	gwManager       *GatewayWSManager  // v29.0 Gateway WSS 连接管理器
-	userProfileEng  *UserProfileEngine // v11.0 用户画像引擎
+	llmAuditor     *LLMAuditor        // v9.0 LLM 审计器
+	llmRuleEngine  *LLMRuleEngine     // v10.0 LLM 规则引擎
+	llmProxy       *LLMProxy          // v10.1 LLM 代理引用（用于 canary token 操作）
+	gwManager      *GatewayWSManager  // v29.0 Gateway WSS 连接管理器
+	userProfileEng *UserProfileEngine // v11.0 用户画像引擎
 	// v11.1 驾驶舱模式
 	healthScoreEng  *HealthScoreEngine
 	owaspMatrixEng  *OWASPMatrixEngine
@@ -180,14 +180,20 @@ func (api *ManagementAPI) checkManagementAuth(r *http.Request) bool {
 		return true // 未配置 token 时允许访问（启动时已有 🔴 警告，建议生产环境必须配置）
 	}
 	auth := r.Header.Get("Authorization")
-	if auth == "Bearer "+api.managementToken { return true }
+	if auth == "Bearer "+api.managementToken {
+		return true
+	}
 	// Cookie 方式（用于 Dashboard iframe/下载等无法设 header 的场景）
-	if cookie, err := r.Cookie("lg_token"); err == nil && cookie.Value == api.managementToken { return true }
+	if cookie, err := r.Cookie("lg_token"); err == nil && cookie.Value == api.managementToken {
+		return true
+	}
 	return false
 }
 
 func (api *ManagementAPI) checkRegistrationAuth(r *http.Request) bool {
-	if api.registrationToken == "" { return true }
+	if api.registrationToken == "" {
+		return true
+	}
 	auth := r.Header.Get("Authorization")
 	return auth == "Bearer "+api.registrationToken
 }
@@ -789,6 +795,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleConfigGet(w, r)
 	case path == "/api/v1/config/validate" && method == "GET":
 		api.handleConfigValidate(w, r)
+	case path == "/api/v1/config/validate" && method == "POST":
+		api.handleConfigValidatePost(w, r)
 	case path == "/api/v1/config/settings" && method == "PUT":
 		api.handleConfigSettingsUpdate(w, r)
 	case path == "/api/v1/alerts/test" && method == "POST":
@@ -797,6 +805,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleAlertsConfigUpdate(w, r)
 	case path == "/api/v1/system/diag" && method == "GET":
 		api.handleSystemDiag(w, r)
+	case path == "/api/v1/debug/sqlite-stats" && method == "GET":
+		api.handleSQLiteStats(w, r)
 	case path == "/api/v1/alerts/history" && method == "GET":
 		api.handleAlertsHistory(w, r)
 	case path == "/api/v1/alerts/config" && method == "GET":

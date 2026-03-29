@@ -12,6 +12,15 @@
     <div v-show="activeTab === 'config'">
       <Skeleton v-if="configLoading" type="text" />
       <template v-else>
+        <div class="card config-card" style="margin-bottom: 16px; border-color: rgba(99,102,241,.22); background: linear-gradient(135deg, rgba(49,46,129,.18), rgba(15,23,42,.96));">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+            <div>
+              <div class="card-title" style="color:#e0e7ff;">🚀 快速配置向导</div>
+              <div class="config-desc" style="margin-top:6px;color:#a5b4fc;">适合新手：4 步生成可下载的 config.yaml 模板，不会直接写入服务器。</div>
+            </div>
+            <button class="btn btn-sm btn-primary" style="background:#4f46e5;border-color:#6366f1;" @click="wizardVisible = true">打开向导</button>
+          </div>
+        </div>
         <div class="config-group-nav">
           <button v-for="g in configGroups" :key="g.key" class="config-group-btn" :class="{ active: activeGroup === g.key }" @click="activeGroup = g.key">{{ g.icon }} {{ g.label }}</button>
         </div>
@@ -99,6 +108,8 @@
       </template>
     </div>
 
+    <ConfigWizard :visible="wizardVisible" @close="wizardVisible = false" />
+
     <!-- Tab 2: 认证与安全 -->
     <div v-show="activeTab === 'auth'">
       <div class="card" style="margin-bottom:20px">
@@ -128,6 +139,62 @@
           <template #cell-mod_time="{ value }">{{ fmtTime(value) }}</template>
           <template #actions="{ row }"><button class="btn btn-danger btn-sm" @click="confirmDeleteBackup(row)">删除</button></template>
         </DataTable>
+      </div>
+    </div>
+
+
+    <!-- Tab: 数据库 -->
+    <div v-show="activeTab === 'database'">
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><span class="card-icon">🗄️</span><span class="card-title">SQLite 监控</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadSQLiteStats">刷新</button></div></div>
+        <Skeleton v-if="sqliteStatsLoading && !sqliteStats" type="text" />
+        <div v-else-if="sqliteStats" class="sqlite-panel">
+          <div class="sqlite-overview">
+            <div class="sqlite-stat-card">
+              <div class="sqlite-stat-label">数据库文件</div>
+              <div class="sqlite-stat-value">{{ sqliteStats.database?.size_human || '--' }}</div>
+              <div class="sqlite-stat-sub">{{ sqliteStats.database?.size_bytes || 0 }} B</div>
+            </div>
+            <div class="sqlite-stat-card">
+              <div class="sqlite-stat-label">WAL 文件</div>
+              <div class="sqlite-stat-value">{{ sqliteStats.database?.wal_size_human || '--' }}</div>
+              <div class="sqlite-stat-sub">{{ sqliteStats.database?.wal_size_bytes || 0 }} B</div>
+            </div>
+            <div class="sqlite-stat-card">
+              <div class="sqlite-stat-label">表数量</div>
+              <div class="sqlite-stat-value">{{ sqliteStats.table_count ?? '--' }}</div>
+              <div class="sqlite-stat-sub">page_count={{ sqliteStats.pragmas?.page_count ?? '--' }}</div>
+            </div>
+            <div class="sqlite-stat-card">
+              <div class="sqlite-stat-label">最近写入 QPS</div>
+              <div class="sqlite-stat-value">{{ formatQPS(sqliteStats.write_qps) }}</div>
+              <div class="sqlite-stat-sub">1 分钟 {{ sqliteStats.recent_writes_1m || 0 }} 次</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-header"><span class="card-icon">⚙️</span><span class="card-title">SQLite PRAGMA</span></div>
+            <div class="status-row"><span class="status-key">page_size</span><span class="status-val">{{ sqliteStats.pragmas?.page_size ?? '--' }}</span></div>
+            <div class="status-row"><span class="status-key">page_count</span><span class="status-val">{{ sqliteStats.pragmas?.page_count ?? '--' }}</span></div>
+            <div class="status-row"><span class="status-key">wal_autocheckpoint</span><span class="status-val">{{ sqliteStats.pragmas?.wal_autocheckpoint ?? '--' }}</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-icon">📊</span><span class="card-title">Top 10 表行数</span></div>
+            <div v-if="!(sqliteStats.tables || []).length" class="empty" style="padding:24px">暂无表数据</div>
+            <div v-else class="sqlite-bars">
+              <div v-for="table in sqliteStats.tables" :key="table.name" class="sqlite-bar-row">
+                <div class="sqlite-bar-head">
+                  <span class="sqlite-bar-name">{{ table.name }}</span>
+                  <span class="sqlite-bar-value">{{ table.rows }}</span>
+                </div>
+                <div class="sqlite-bar-track">
+                  <div class="sqlite-bar-fill" :style="{ width: sqliteBarWidth(table.rows) + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -360,6 +427,7 @@ import DataTable from '../components/DataTable.vue'
 import Icon from '../components/Icon.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import Skeleton from '../components/Skeleton.vue'
+import ConfigWizard from '../components/ConfigWizard.vue'
 
 const appState = inject('appState')
 const route = useRoute()
@@ -382,9 +450,13 @@ const tabs = [
   { key: 'templates', label: '行业模板', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
   { key: 'auth', label: '认证与安全', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
   { key: 'system', label: '系统信息', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>' },
+  { key: 'database', label: '数据库', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>' },
   { key: 'llm', label: 'LLM 代理', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44"/></svg>' },
 ]
 const activeTab = ref('config')
+
+const sqliteStatsLoading = ref(false)
+const sqliteStats = ref(null)
 
 const configGroups = [
   { key: 'basic', label: '配置基础', icon: '🌐' },
@@ -400,6 +472,7 @@ const configLoading = ref(true)
 const configSaving = ref(false)
 const showChangesPreview = ref(false)
 const originalConfig = ref({})
+const wizardVisible = ref(false)
 
 const form = reactive({
   inbound_listen: '', outbound_listen: '', management_listen: '',
@@ -621,6 +694,25 @@ function switchTab(key) {
   if (key === 'engines' && !enginesLoaded.value) loadEngineSettings()
   if (key === 'autoreview' && !arLoaded.value) loadAutoReview()
   if (key === 'templates' && !tplLoaded.value) { loadInboundTemplates(); loadLLMTemplates() }
+  if (key === 'database' && !sqliteStats.value) loadSQLiteStats()
+}
+
+async function loadSQLiteStats() {
+  sqliteStatsLoading.value = true
+  try { sqliteStats.value = await api('/api/v1/debug/sqlite-stats') }
+  catch (e) { showToast('加载 SQLite 监控失败: ' + e.message, 'error') }
+  sqliteStatsLoading.value = false
+}
+
+const sqliteTableMaxRows = computed(() => {
+  const rows = sqliteStats.value?.tables || []
+  return rows.reduce((m, it) => Math.max(m, Number(it.rows || 0)), 0) || 1
+})
+function sqliteBarWidth(rows) {
+  return Math.max(6, Math.round((Number(rows || 0) / sqliteTableMaxRows.value) * 100))
+}
+function formatQPS(v) {
+  return Number(v || 0).toFixed(2)
 }
 
 // === Tab 2: 检测引擎开关 ===
@@ -813,7 +905,7 @@ function scrollToSection(section) {
 }
 
 onMounted(() => {
-  loadConfig(); loadBackups(); loadLLMConfig(); loadAlertHistory()
+  loadConfig(); loadBackups(); loadLLMConfig(); loadAlertHistory(); loadSQLiteStats()
   const section = route.query.section
   if (section) { const poll = () => { if (!llmConfigLoading.value) scrollToSection(section); else setTimeout(poll, 100) }; poll() }
 })
@@ -965,6 +1057,22 @@ onMounted(() => {
 .ar-manual-item code { font-size: var(--text-sm); color: var(--color-primary); font-family: var(--font-mono); }
 .ar-add-rule { display: flex; gap: 8px; align-items: center; }
 .rule-name-code { font-size: var(--text-sm); color: var(--color-primary); font-family: var(--font-mono); }
+
+
+/* SQLite 监控 Tab */
+.sqlite-panel { display: flex; flex-direction: column; gap: 16px; }
+.sqlite-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 4px; }
+.sqlite-stat-card { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; }
+.sqlite-stat-label { font-size: var(--text-xs); color: var(--text-tertiary); margin-bottom: 6px; }
+.sqlite-stat-value { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); }
+.sqlite-stat-sub { font-size: var(--text-xs); color: var(--text-secondary); margin-top: 6px; font-family: var(--font-mono); }
+.sqlite-bars { display: flex; flex-direction: column; gap: 12px; }
+.sqlite-bar-row { display: flex; flex-direction: column; gap: 6px; }
+.sqlite-bar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+.sqlite-bar-name { color: var(--text-primary); font-family: var(--font-mono); }
+.sqlite-bar-value { color: var(--text-secondary); font-weight: 600; }
+.sqlite-bar-track { height: 10px; background: var(--bg-elevated); border-radius: 9999px; overflow: hidden; border: 1px solid var(--border-subtle); }
+.sqlite-bar-fill { height: 100%; background: linear-gradient(90deg, var(--color-primary), #22c55e); border-radius: 9999px; }
 
 /* 行业模板 Tab */
 .tpl-category-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: var(--text-xs); background: rgba(99,102,241,0.1); color: var(--color-primary); }

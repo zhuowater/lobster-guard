@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,24 +21,164 @@ import (
 // 审计日志
 // ============================================================
 
+type BatchAuditWriter struct {
+	ch      chan *AuditEntry
+	db      *sql.DB
+	batch   []*AuditEntry
+	ticker  *time.Ticker
+	maxSize int
+	maxWait time.Duration
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	closed  atomic.Bool
+}
+
+func NewBatchAuditWriter(db *sql.DB, maxSize int, maxWait time.Duration) *BatchAuditWriter {
+	if db == nil {
+		return nil
+	}
+	if maxSize <= 0 {
+		maxSize = 50
+	}
+	if maxWait <= 0 {
+		maxWait = 5 * time.Second
+	}
+	return &BatchAuditWriter{
+		ch:      make(chan *AuditEntry, maxSize*4),
+		db:      db,
+		batch:   make([]*AuditEntry, 0, maxSize),
+		maxSize: maxSize,
+		maxWait: maxWait,
+	}
+}
+
+func (bw *BatchAuditWriter) Start() {
+	if bw == nil {
+		return
+	}
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.ticker != nil {
+		return
+	}
+	bw.ticker = time.NewTicker(bw.maxWait)
+	bw.wg.Add(1)
+	go func() {
+		defer bw.wg.Done()
+		for {
+			select {
+			case entry, ok := <-bw.ch:
+				if !ok {
+					bw.flush()
+					return
+				}
+				if entry != nil {
+					bw.batch = append(bw.batch, entry)
+					if len(bw.batch) >= bw.maxSize {
+						bw.flush()
+					}
+				}
+			case <-bw.ticker.C:
+				bw.flush()
+			}
+		}
+	}()
+}
+
+func (bw *BatchAuditWriter) Write(entry *AuditEntry) bool {
+	if bw == nil || entry == nil || bw.closed.Load() {
+		return false
+	}
+	select {
+	case bw.ch <- entry:
+		return true
+	default:
+		return false
+	}
+}
+
+func (bw *BatchAuditWriter) Stop() {
+	if bw == nil {
+		return
+	}
+	if !bw.closed.CompareAndSwap(false, true) {
+		return
+	}
+	bw.mu.Lock()
+	if bw.ticker != nil {
+		bw.ticker.Stop()
+	}
+	close(bw.ch)
+	bw.mu.Unlock()
+	bw.wg.Wait()
+}
+
+func (bw *BatchAuditWriter) flush() {
+	if bw == nil || len(bw.batch) == 0 {
+		return
+	}
+	batch := bw.batch
+	bw.batch = make([]*AuditEntry, 0, bw.maxSize)
+	tx, err := bw.db.Begin()
+	if err != nil {
+		log.Printf("[audit] batch begin failed: %v", err)
+		return
+	}
+	stmt, err := tx.Prepare(`INSERT INTO audit_log
+		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		log.Printf("[audit] batch prepare failed: %v", err)
+		return
+	}
+	success := true
+	for _, entry := range batch {
+		if entry == nil {
+			continue
+		}
+		_, execErr := stmt.Exec(entry.Timestamp, entry.Direction, entry.SenderID, entry.Action, entry.Reason, entry.ContentPreview, entry.FullRequestHash, entry.LatencyMs, entry.UpstreamID, entry.AppID)
+		if execErr != nil {
+			success = false
+			log.Printf("[audit] batch exec failed: %v", execErr)
+			break
+		}
+	}
+	_ = stmt.Close()
+	if !success {
+		_ = tx.Rollback()
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("[audit] batch commit failed: %v", err)
+	}
+}
+
 type AuditLogger struct {
-	db        *sql.DB
-	mu        sync.Mutex
-	stmt      *sql.Stmt
-	stmtT     *sql.Stmt      // v14.0: 带 tenant_id 的 prepared statement
-	tenantMgr *TenantManager // v14.0: 用于自动解析租户
+	db          *sql.DB
+	mu          sync.Mutex
+	stmt        *sql.Stmt
+	stmtT       *sql.Stmt      // v14.0: 带 tenant_id 的 prepared statement
+	tenantMgr   *TenantManager // v14.0: 用于自动解析租户
+	batchWriter *BatchAuditWriter
 }
 
 func NewAuditLogger(db *sql.DB) (*AuditLogger, error) {
 	stmt, err := db.Prepare(`INSERT INTO audit_log
 		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id,trace_id)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-	if err != nil { return nil, err }
-	// v14.0: 带 tenant_id 的 prepared statement（如果列不存在则不初始化）
+	if err != nil {
+		return nil, err
+	}
 	stmtT, _ := db.Prepare(`INSERT INTO audit_log
 		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id,trace_id,tenant_id)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-	return &AuditLogger{db: db, stmt: stmt, stmtT: stmtT}, nil
+	logger := &AuditLogger{db: db, stmt: stmt, stmtT: stmtT}
+	logger.batchWriter = NewBatchAuditWriter(db, 50, 5*time.Second)
+	if logger.batchWriter != nil {
+		logger.batchWriter.Start()
+	}
+	return logger, nil
 }
 
 // SetTenantManager 设置租户管理器引用（用于自动解析租户）
@@ -52,22 +193,52 @@ func (al *AuditLogger) Log(dir, sender, action, reason, preview, hash string, la
 func (al *AuditLogger) LogWithTrace(dir, sender, action, reason, preview, hash string, latMs float64, upstreamID, appID, traceID string) {
 	go func() {
 		defer func() { recover() }()
-		al.mu.Lock(); defer al.mu.Unlock()
-		if rs := []rune(preview); len(rs) > 2000 { preview = string(rs[:2000]) + "..." }
-		// v14.0: 自动解析租户
+		if rs := []rune(preview); len(rs) > 2000 {
+			preview = string(rs[:2000]) + "..."
+		}
+		entry := &AuditEntry{
+			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
+			Direction:       dir,
+			SenderID:        sender,
+			Action:          action,
+			Reason:          reason,
+			ContentPreview:  preview,
+			FullRequestHash: hash,
+			LatencyMs:       latMs,
+			UpstreamID:      upstreamID,
+			AppID:           appID,
+		}
 		if al.tenantMgr != nil && al.stmtT != nil {
 			tenantID := al.tenantMgr.ResolveTenant(sender, appID)
-			al.stmtT.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, traceID, tenantID)
-		} else {
-			al.stmt.Exec(time.Now().UTC().Format(time.RFC3339Nano), dir, sender, action, reason, preview, hash, latMs, upstreamID, appID, traceID)
+			al.mu.Lock()
+			defer al.mu.Unlock()
+			_, _ = al.stmtT.Exec(entry.Timestamp, entry.Direction, entry.SenderID, entry.Action, entry.Reason, entry.ContentPreview, entry.FullRequestHash, entry.LatencyMs, entry.UpstreamID, entry.AppID, traceID, tenantID)
+			return
+		}
+		if al.batchWriter != nil && al.batchWriter.Write(entry) {
+			return
+		}
+		al.mu.Lock()
+		defer al.mu.Unlock()
+		if al.stmt != nil {
+			_, _ = al.stmt.Exec(entry.Timestamp, entry.Direction, entry.SenderID, entry.Action, entry.Reason, entry.ContentPreview, entry.FullRequestHash, entry.LatencyMs, entry.UpstreamID, entry.AppID, traceID)
 		}
 	}()
 }
 
 func (al *AuditLogger) Close() {
-	if al == nil { return }
-	if al.stmt != nil { al.stmt.Close() }
-	if al.stmtT != nil { al.stmtT.Close() }
+	if al == nil {
+		return
+	}
+	if al.batchWriter != nil {
+		al.batchWriter.Stop()
+	}
+	if al.stmt != nil {
+		al.stmt.Close()
+	}
+	if al.stmtT != nil {
+		al.stmtT.Close()
+	}
 }
 
 // DB returns the underlying database handle
@@ -93,26 +264,61 @@ func (al *AuditLogger) QueryLogsExTrace(direction, action, senderID, appID, q, t
 func (al *AuditLogger) QueryLogsExFull(direction, action, senderID, appID, q, traceID, from, to string, limit int) ([]map[string]interface{}, error) {
 	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
 	var args []interface{}
-	if direction != "" { query += ` AND direction=?`; args = append(args, direction) }
-	if action != "" { query += ` AND action=?`; args = append(args, action) }
-	if senderID != "" { query += ` AND sender_id=?`; args = append(args, senderID) }
-	if appID != "" { query += ` AND app_id=?`; args = append(args, appID) }
-	if q != "" { query += ` AND content_preview LIKE ?`; args = append(args, "%"+q+"%") }
-	if traceID != "" { query += ` AND trace_id=?`; args = append(args, traceID) }
-	if from != "" { query += ` AND timestamp >= ?`; args = append(args, from) }
-	if to != "" { query += ` AND timestamp <= ?`; args = append(args, to) }
+	if direction != "" {
+		query += ` AND direction=?`
+		args = append(args, direction)
+	}
+	if action != "" {
+		query += ` AND action=?`
+		args = append(args, action)
+	}
+	if senderID != "" {
+		query += ` AND sender_id=?`
+		args = append(args, senderID)
+	}
+	if appID != "" {
+		query += ` AND app_id=?`
+		args = append(args, appID)
+	}
+	if q != "" {
+		query += ` AND content_preview LIKE ?`
+		args = append(args, "%"+q+"%")
+	}
+	if traceID != "" {
+		query += ` AND trace_id=?`
+		args = append(args, traceID)
+	}
+	if from != "" {
+		query += ` AND timestamp >= ?`
+		args = append(args, from)
+	}
+	if to != "" {
+		query += ` AND timestamp <= ?`
+		args = append(args, to)
+	}
 	query += ` ORDER BY id DESC`
-	if limit <= 0 { limit = 50 }
-	if limit > 10000 { limit = 10000 }
-	query += ` LIMIT ?`; args = append(args, limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	query += ` LIMIT ?`
+	args = append(args, limit)
 
 	rows, err := al.db.Query(query, args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int; var ts, dir, sid, act, reason, preview, uid, aid, tid string; var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil { continue }
+		var id int
+		var ts, dir, sid, act, reason, preview, uid, aid, tid string
+		var latMs float64
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil {
+			continue
+		}
 		results = append(results, map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
@@ -126,7 +332,9 @@ func (al *AuditLogger) QueryLogsExFull(direction, action, senderID, appID, q, tr
 func (al *AuditLogger) CleanupOldLogs(retentionDays int) (int64, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
 	result, err := al.db.Exec(`DELETE FROM audit_log WHERE timestamp < ?`, cutoff)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	return result.RowsAffected()
 }
 
@@ -140,8 +348,16 @@ func (al *AuditLogger) AuditStats() map[string]interface{} {
 	var earliest, latest sql.NullString
 	al.db.QueryRow(`SELECT MIN(timestamp) FROM audit_log`).Scan(&earliest)
 	al.db.QueryRow(`SELECT MAX(timestamp) FROM audit_log`).Scan(&latest)
-	if earliest.Valid { stats["earliest"] = earliest.String } else { stats["earliest"] = nil }
-	if latest.Valid { stats["latest"] = latest.String } else { stats["latest"] = nil }
+	if earliest.Valid {
+		stats["earliest"] = earliest.String
+	} else {
+		stats["earliest"] = nil
+	}
+	if latest.Valid {
+		stats["latest"] = latest.String
+	} else {
+		stats["latest"] = nil
+	}
 
 	// 估算磁盘占用（SQLite page_count * page_size）
 	var pageCount, pageSize int
@@ -154,8 +370,12 @@ func (al *AuditLogger) AuditStats() map[string]interface{} {
 
 // Timeline 按小时聚合审计日志（v3.10）
 func (al *AuditLogger) Timeline(hours int) []map[string]interface{} {
-	if hours <= 0 { hours = 24 }
-	if hours > 168 { hours = 168 } // 最多 7 天
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 168 {
+		hours = 168
+	} // 最多 7 天
 	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
 	rows, err := al.db.Query(`
 		SELECT
@@ -167,7 +387,9 @@ func (al *AuditLogger) Timeline(hours int) []map[string]interface{} {
 		GROUP BY hour_bucket, action
 		ORDER BY hour_bucket ASC
 	`, since.Format(time.RFC3339))
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 	defer rows.Close()
 
 	// 收集数据
@@ -187,7 +409,9 @@ func (al *AuditLogger) Timeline(hours int) []map[string]interface{} {
 	// 生成完整的每小时时间线
 	hourMap := map[string]map[string]int{}
 	for _, d := range data {
-		if hourMap[d.hour] == nil { hourMap[d.hour] = map[string]int{} }
+		if hourMap[d.hour] == nil {
+			hourMap[d.hour] = map[string]int{}
+		}
 		hourMap[d.hour][d.action] = d.count
 	}
 
@@ -236,11 +460,14 @@ func (al *AuditLogger) StatsWithFilter(sinceRFC3339 string) map[string]interface
 		query = `SELECT direction, action, COUNT(*) FROM audit_log GROUP BY direction, action`
 	}
 	rows, err := al.db.Query(query, args...)
-	if err != nil { return stats }
+	if err != nil {
+		return stats
+	}
 	defer rows.Close()
 	breakdown := map[string]interface{}{}
 	for rows.Next() {
-		var dir, action string; var cnt int
+		var dir, action string
+		var cnt int
 		if rows.Scan(&dir, &action, &cnt) == nil {
 			breakdown[dir+"_"+action] = cnt
 		}
@@ -562,7 +789,6 @@ func ListArchives(archiveDir string) ([]map[string]interface{}, error) {
 	return archives, nil
 }
 
-
 // ============================================================
 // 数据库初始化
 // ============================================================
@@ -572,7 +798,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 		os.MkdirAll(dbPath[:idx], 0755)
 	}
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	// 确保数据库文件权限为 0600（仅 owner 可读写）
 	os.Chmod(dbPath, 0600)
 
@@ -716,7 +944,9 @@ func migrateUserRoutes(db *sql.DB) {
 
 	// 表存在，检查是否有 app_id 列
 	rows, err := db.Query(`PRAGMA table_info(user_routes)`)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	defer rows.Close()
 	hasAppID := false
 	for rows.Next() {
@@ -726,7 +956,9 @@ func migrateUserRoutes(db *sql.DB) {
 		var dfltValue sql.NullString
 		var pk int
 		if rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk) == nil {
-			if name == "app_id" { hasAppID = true }
+			if name == "app_id" {
+				hasAppID = true
+			}
 		}
 	}
 
@@ -790,4 +1022,3 @@ func migrateUserRoutes(db *sql.DB) {
 
 	log.Printf("[数据库迁移] 迁移完成，%d 条路由已升级到 v3.8 schema", len(oldData))
 }
-
