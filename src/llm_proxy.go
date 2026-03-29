@@ -840,15 +840,104 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var eventBuf bytes.Buffer
 
+	// v31.1: SSE 实时检测 — 累积 content delta, 每 512 字节过一次 AC 检测
+	var contentAccum strings.Builder // 累积所有 content delta
+	var sseBlocked bool
+	sseTenantIDEarly := auditCtx.TenantID
+	const sseCheckInterval = 512 // 字节阈值
+	lastCheckLen := 0
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		// 立刻转发给客户端
+
+		// 提取 SSE data 中的 content delta
+		if strings.HasPrefix(line, "data: ") && !sseBlocked {
+			dataPayload := line[6:]
+			if dataPayload != "[DONE]" {
+				// 尝试提取 choices[0].delta.content
+				var sseObj struct {
+					Choices []struct {
+						Delta struct {
+							Content string `json:"content"`
+						} `json:"delta"`
+					} `json:"choices"`
+				}
+				if json.Unmarshal([]byte(dataPayload), &sseObj) == nil && len(sseObj.Choices) > 0 {
+					contentAccum.WriteString(sseObj.Choices[0].Delta.Content)
+				}
+			}
+		}
+
+		// 累积到阈值则触发 AC 检测
+		if !sseBlocked && lp.ruleEngine != nil && contentAccum.Len()-lastCheckLen >= sseCheckInterval {
+			respMatches := lp.ruleEngine.CheckResponseWithTenant(contentAccum.String(), sseTenantIDEarly)
+			if len(respMatches) > 0 {
+				action, topMatch := HighestPriorityAction(respMatches)
+				// auto-review 检查
+				if action == "block" && lp.ruleEngine.autoReviewMgr != nil {
+					var rules []string
+					allInReview := true
+					for _, m := range respMatches {
+						rules = append(rules, m.RuleName)
+						lp.ruleEngine.autoReviewMgr.RecordBlock(m.RuleName)
+						if !lp.ruleEngine.autoReviewMgr.IsInReview(m.RuleName) {
+							allInReview = false
+						}
+					}
+					if allInReview {
+						action = lp.ruleEngine.autoReviewMgr.ReviewWithLLM(rules[0], contentAccum.String())
+					}
+				}
+				if action == "block" {
+					sseBlocked = true
+					log.Printf("[LLM规则] SSE 实时拦截: rule=%s category=%s 已累积 %d 字节",
+						topMatch.RuleID, topMatch.Category, contentAccum.Len())
+					// 发送错误 event 通知客户端
+					errEvent := fmt.Sprintf("event: error\ndata: {\"error\":\"Response blocked by security rule: %s\"}\n\n", topMatch.RuleName)
+					fmt.Fprint(w, errEvent)
+					if hasFlusher {
+						flusher.Flush()
+					}
+					// 记录审计
+					if lp.envelopeMgr != nil {
+						var rules []string
+						for _, m := range respMatches {
+							rules = append(rules, m.RuleName)
+						}
+						lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response_sse", contentAccum.String(), "block", rules, "")
+					}
+					// 不再转发后续内容，但继续 drain 上游
+					continue
+				}
+			}
+			lastCheckLen = contentAccum.Len()
+		}
+
+		if sseBlocked {
+			// drain 上游但不转发
+			eventBuf.WriteString(line + "\n")
+			continue
+		}
+
+		// 正常转发
 		fmt.Fprintf(w, "%s\n", line)
 		if hasFlusher {
 			flusher.Flush()
 		}
 		// 同时记录到审计缓冲
 		eventBuf.WriteString(line + "\n")
+	}
+
+	// 流结束: 最后一批未检测的内容也要检查
+	if !sseBlocked && lp.ruleEngine != nil && contentAccum.Len() > lastCheckLen {
+		respMatches := lp.ruleEngine.CheckResponseWithTenant(contentAccum.String(), sseTenantIDEarly)
+		if len(respMatches) > 0 {
+			action, topMatch := HighestPriorityAction(respMatches)
+			if action == "block" || action == "warn" {
+				log.Printf("[LLM规则] SSE 流结束检测: rule=%s action=%s 累积 %d 字节",
+					topMatch.RuleID, action, contentAccum.Len())
+			}
+		}
 	}
 
 	// 流结束，异步解析完整的审计数据
