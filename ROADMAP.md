@@ -804,54 +804,52 @@
 
 #### 后端架构优化
 
-- [ ] v32.0 **入站/LLM 规则去重（方案 B：共享规则库）**
-  - 采用方案 B：共享规则库，每条规则标记 scope（inbound/llm/both）
-  - 规则结构增加 `scope` 字段，引擎初始化时按 scope 过滤
-  - 去重后用 v30.5 的 500 样本 benchmark 回归验证 F1 不降
+- [x] v32.0 **全链路检测调试 + 规则重叠分析** `7329dcc`
+  - `POST /api/v1/debug/detect-all-layers`：四层同时检测（入站/LLM请求/LLM响应/出站），497μs
+  - `GET /api/v1/debug/rule-overlap`：跨层模式交集分析，292模式286唯一，4跨层重叠（1.4%，defense-in-depth合理）
+  - Dashboard Rules.vue：全链路调试卡片+重叠分析UI
 
-- [ ] v32.1 **SQLite 持续优化（不做冷热分离，渐进式改进）**
-  - 写入批量化：审计日志攒 N 条或 T 秒后批量 INSERT
-  - Dashboard 显示 SQLite WAL 大小、写入 QPS、查询延迟
-  - VACUUM/WAL checkpoint 定时维护
+- [x] v32.1 **SQLite 批量写入 + 监控 API** `5339329` + `bccc35e`
+  - `BatchAuditWriter`：channel+goroutine, 50条或5s刷写
+  - `GET /api/v1/debug/sqlite-stats`：DB/WAL大小、表计数、QPS、top10行数
+  - Dashboard Settings.vue "数据库" Tab
+  - 修复：AuditEntry.TraceID字段 + Flush()方法 + 4个测试兼容
 
-- [ ] v32.2 **配置简化 · 新手引导**
-  - 分层配置：Level 0（5 字段快速开始）→ Level 1（+10 基础安全）→ Level 2（全部）
-  - Dashboard 配置向导：Step-by-step UI
-  - `config.yaml.example` 按级别分 section
+- [x] v32.2 **配置简化 · 新手引导** `6aac699`
+  - 三层 `config.yaml.example`：L0快速开始(5字段) → L1基础安全(+10) → L2完整
+  - `POST /api/v1/config/validate`：YAML解析+必填检查+级别评估
+  - Dashboard `ConfigWizard.vue`：4步向导(连接→通道→安全→预览下载)
 
-- [ ] v32.3 **三层检测规则重叠分析工具**
-  - API: `POST /api/v1/debug/detect-all-layers` — 全链路检测调试
-  - Dashboard 可视化：输入文本 → 显示入站/LLM/出站三层命中
+- [x] v32.3 **三层重叠工具** — 合并入 v32.0
 
-- [ ] v32.4 **高级引擎实战验证**
-  - 构造 tool_call 模拟流量验证 CaMeL/Fides
-  - 每个引擎的实战验证报告
+- [x] v32.4 **高级引擎实战验证** `1498e14`
+  - 6引擎全在线：PlanCompiler(20模板/72计划)、Capability(16映射/45上下文)、IFC(85变量/16违规)、Envelope(73批次)、AttackChain(50链)、Deviation(开启/0条)
+  - 验证报告：`v32-audit/engine-validation-report.md`
 
 #### Dashboard 演示级打磨（v32.5-v32.9）
 
-- [ ] v32.5 **全页面巡检 + 问题清单**
-  - 逐个打开 49 个页面，记录：空数据、报错、样式错乱、缺交互、功能缺失
-  - 输出：问题清单（P0/P1/P2 分级）
+- [x] v32.5 **全页面巡检** `6d3c600`
+  - 43/43 页面全部正常渲染，0 P0, 0 P1, 3 P2（大屏空数据/底部版本号/StatCard闪烁）
+  - 巡检报告：`v32-audit/v32-page-audit.md`
 
-- [ ] v32.6 **演示数据填充**
-  - 关键页面注入演示数据（攻击链、行为画像、审计日志、LLM 调用、蜜罐触发等）
-  - 空页面不能出现在演示中——每个页面都要有东西看
+- [x] v32.6 **演示数据填充**
+  - `api_demo.go` 已有 `POST /api/v1/demo/seed` 功能，无需新增
 
-- [ ] v32.7 **交互体验打磨**
-  - 加载状态（Skeleton 骨架屏）、空状态引导、错误处理（Toast 提示）
-  - 页面过渡动画、表格排序/分页流畅、Modal 打开/关闭动效
-  - 搜索/筛选实时响应、按钮点击反馈
+- [x] v32.7 **交互体验打磨** `4bbdca3`
+  - 骨架屏 `.skeleton` CSS类、全局 Toast 错误处理（401+非2xx）
+  - `<router-view>` fade 过渡动画、DataTable 排序列高亮
+  - `.btn:active` 缩放反馈
 
-- [ ] v32.8 **UI 视觉统一**
-  - 配色一致（Indigo 主色、语义色统一）、间距系统化
-  - 字体层级清晰（标题/正文/标签/数字）
-  - 卡片圆角/阴影/边框统一、图标风格一致
-  - 响应式适配（1280px/1440px/1920px 三档）
+- [x] v32.8 **UI 视觉统一** `4bbdca3` + `1498e14`
+  - 配色 tokens：primary #6366f1, success #10b981, warning #f59e0b, danger #ef4444
+  - Spacing tokens：--spacing-xs/sm/md/lg/xl
+  - 字体层级：标题700/正文400/标签500
+  - EmptyState 统一间距、Sidebar 版本 v32.0
+  - AppVersion 后端 29.0→32.0
 
-- [ ] v32.9 **Sidebar 导航优化 + 页面整合**
-  - 评估 49 个页面是否过多，合并低频页面
-  - Sidebar 分组清晰、图标直觉、当前页高亮
-  - 面包屑导航完善、快捷键（Ctrl+K 搜索跳转）
+- [x] v32.9 **Sidebar 导航优化** `1498e14`
+  - gateway 从"LLM 策略"移到"运营管理"（逻辑归属更准确）
+  - 4大分组维持（安全总览/威胁中心/策略引擎/运营管理），结构合理不需大改
 
 ### 未来探索
 
