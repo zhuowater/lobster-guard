@@ -113,6 +113,25 @@ func (bw *BatchAuditWriter) Stop() {
 	bw.wg.Wait()
 }
 
+// ForceFlush 强制刷写当前缓冲区（测试用，等待 channel drain 后 flush）
+func (bw *BatchAuditWriter) ForceFlush() {
+	if bw == nil {
+		return
+	}
+	// 等 channel 中的条目被消费
+	for i := 0; i < 50; i++ {
+		if len(bw.ch) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// 手动触发 ticker（发送零 entry 让 goroutine 在下次 ticker.C 时 flush）
+	// 更直接的方式：停止 ticker 重建（太复杂），不如直接 flush
+	bw.mu.Lock()
+	bw.flush()
+	bw.mu.Unlock()
+}
+
 func (bw *BatchAuditWriter) flush() {
 	if bw == nil || len(bw.batch) == 0 {
 		return
@@ -125,8 +144,8 @@ func (bw *BatchAuditWriter) flush() {
 		return
 	}
 	stmt, err := tx.Prepare(`INSERT INTO audit_log
-		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`)
+		(timestamp,direction,sender_id,action,reason,content_preview,full_request_hash,latency_ms,upstream_id,app_id,trace_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		log.Printf("[audit] batch prepare failed: %v", err)
@@ -137,7 +156,7 @@ func (bw *BatchAuditWriter) flush() {
 		if entry == nil {
 			continue
 		}
-		_, execErr := stmt.Exec(entry.Timestamp, entry.Direction, entry.SenderID, entry.Action, entry.Reason, entry.ContentPreview, entry.FullRequestHash, entry.LatencyMs, entry.UpstreamID, entry.AppID)
+		_, execErr := stmt.Exec(entry.Timestamp, entry.Direction, entry.SenderID, entry.Action, entry.Reason, entry.ContentPreview, entry.FullRequestHash, entry.LatencyMs, entry.UpstreamID, entry.AppID, entry.TraceID)
 		if execErr != nil {
 			success = false
 			log.Printf("[audit] batch exec failed: %v", execErr)
@@ -207,6 +226,7 @@ func (al *AuditLogger) LogWithTrace(dir, sender, action, reason, preview, hash s
 			LatencyMs:       latMs,
 			UpstreamID:      upstreamID,
 			AppID:           appID,
+			TraceID:         traceID,
 		}
 		if al.tenantMgr != nil && al.stmtT != nil {
 			tenantID := al.tenantMgr.ResolveTenant(sender, appID)
@@ -224,6 +244,18 @@ func (al *AuditLogger) LogWithTrace(dir, sender, action, reason, preview, hash s
 			_, _ = al.stmt.Exec(entry.Timestamp, entry.Direction, entry.SenderID, entry.Action, entry.Reason, entry.ContentPreview, entry.FullRequestHash, entry.LatencyMs, entry.UpstreamID, entry.AppID, traceID)
 		}
 	}()
+}
+
+// Flush 强制将批量缓冲区中的条目写入 DB（测试用）
+// 通过 Stop + 重新 Start 实现完整 drain+flush
+func (al *AuditLogger) Flush() {
+	if al == nil || al.batchWriter == nil {
+		return
+	}
+	al.batchWriter.Stop()
+	// 重建 batchWriter（Stop 后不可复用）
+	al.batchWriter = NewBatchAuditWriter(al.batchWriter.db, al.batchWriter.maxSize, al.batchWriter.maxWait)
+	al.batchWriter.Start()
 }
 
 func (al *AuditLogger) Close() {

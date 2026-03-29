@@ -34,6 +34,7 @@ type AuditEntry struct {
 	LatencyMs      float64 `json:"latency_ms"`
 	UpstreamID     string  `json:"upstream_id"`
 	AppID          string  `json:"app_id"`
+	TraceID        string  `json:"trace_id,omitempty"`  // v32.1: batch 写入需要
 }
 
 // AuditFilter 审计日志查询过滤条件

@@ -541,8 +541,11 @@ func TestE2EFullPipeline(t *testing.T) {
 	if rec.Code != 403 { t.Fatalf("步骤4: PII应被拦截, 实际 %d", rec.Code) }
 	if env.lanxinAPI.count() != 1 { t.Fatal("步骤4: PII被拦截后蓝信计数不变") }
 
-	// 5. 等审计日志写入
+	// 5. 等审计日志写入 + flush 批量缓冲区
 	time.Sleep(300 * time.Millisecond)
+	if env.logger != nil {
+		env.logger.Flush()
+	}
 
 	// 6. 通过管理 API 查审计日志
 	req = httptest.NewRequest("GET", "/api/v1/audit/logs?limit=10", nil)

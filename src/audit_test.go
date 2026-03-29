@@ -38,6 +38,7 @@ func TestAuditLogger(t *testing.T) {
 	logger.Log("outbound", "", "pass", "", "正常消息", "hash456", 0.1, "up-1", "app-1")
 
 	time.Sleep(200 * time.Millisecond)
+	logger.Flush() // v32.1: 确保批量缓冲区写入 DB
 
 	logs, err := logger.QueryLogs("inbound", "block", "", 10)
 	if err != nil { t.Fatalf("查询失败: %v", err) }

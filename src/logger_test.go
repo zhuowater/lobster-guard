@@ -370,7 +370,9 @@ func TestAuditLogger_TraceID(t *testing.T) {
 
 	traceID := "abcdef1234567890"
 	logger.LogWithTrace("inbound", "user1", "block", "injection", "test content", "hash", 5.0, "up-1", "app-1", traceID)
-	time.Sleep(100 * time.Millisecond) // wait for async write
+	time.Sleep(500 * time.Millisecond)
+	logger.Flush() // v32.1: 确保批量缓冲区写入 DB
+	time.Sleep(100 * time.Millisecond) // extra wait after flush
 
 	// Query with trace_id filter
 	logs, err := logger.QueryLogsExTrace("", "", "", "", "", traceID, 10)
@@ -395,7 +397,8 @@ func TestAuditLogger_TraceID_EmptyFilter(t *testing.T) {
 
 	logger.LogWithTrace("inbound", "user1", "pass", "", "content1", "hash1", 1.0, "", "", "trace-aaa")
 	logger.LogWithTrace("inbound", "user2", "pass", "", "content2", "hash2", 2.0, "", "", "trace-bbb")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+	logger.Flush() // v32.1: 确保批量缓冲区写入 DB
 
 	// Query without trace_id filter should return both
 	logs, err := logger.QueryLogsExTrace("", "", "", "", "", "", 10)
