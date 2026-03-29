@@ -637,6 +637,11 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleSimulateTraffic(w, r)
 	case path == "/api/v1/detect/test" && method == "POST":
 		api.handleDetectTest(w, r)
+	// v32.0 全链路调试 API
+	case path == "/api/v1/debug/detect-all-layers" && method == "POST":
+		api.handleDetectAllLayers(w, r)
+	case path == "/api/v1/debug/rule-overlap" && method == "GET":
+		api.handleRuleOverlap(w, r)
 	// v31.0 统一行业模板 API
 	case path == "/api/v1/industry-templates" && method == "GET":
 		api.handleIndustryTemplateList(w, r)
