@@ -751,7 +751,7 @@
   - Tab 4: 行业模板管理（入站+LLM 模板全局启用/禁用 toggle）
   - 所有危险操作统一 ConfirmModal 确认
 
-- [ ] v30.5 **质量度量基线**（v30.4 后）
+- [x] v30.5 **质量度量基线**（v30.4 后）
   - 攻击数据集回归测试：Garak/HackAPrompt + 红队数据，500 样本 ground truth
   - P/R/F1 基线建立
   - 142 实战验证：启用 cybersecurity 模板 + 会话检测
