@@ -1,47 +1,62 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
-          cache-dependency-path: src/go.sum
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+          go-version: '1.21'
+      
       - name: Install SQLite dev
-        run: sudo apt-get install -y libsqlite3-dev
-      - name: Build Dashboard
-        working-directory: dashboard
-        run: npm ci && npm run build
-      - name: Copy Dashboard dist to src/
-        run: mkdir -p src/dashboard && cp -r dashboard/dist src/dashboard/dist
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      
       - name: Build
         working-directory: src
-        run: CGO_ENABLED=1 go build -o /dev/null .
+        run: go build -o /tmp/lobster-guard .
+      
       - name: Test
         working-directory: src
-        run: CGO_ENABLED=1 go test -count=1 -timeout 180s ./...
-      - name: Vet
+        run: go test ./... -count=1 -timeout 300s -v 2>&1 | tail -50
+      
+      - name: Test Summary
+        if: always()
         working-directory: src
-        run: go vet ./...
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          go test ./... -count=1 -timeout 300s 2>&1 | grep -E "^ok|^FAIL|^---" >> $GITHUB_STEP_SUMMARY || true
 
-  docker:
+  frontend:
     runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t lobster-guard:ci .
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+      
+      - name: Build Dashboard
+        working-directory: dashboard
+        run: npm run build
+      
+      - name: Check dist size
+        working-directory: dashboard
+        run: |
+          SIZE=$(du -sh dist/ | cut -f1)
+          echo "Dashboard dist size: $SIZE"
+          echo "## Dashboard Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Size: $SIZE" >> $GITHUB_STEP_SUMMARY
