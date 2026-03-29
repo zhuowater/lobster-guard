@@ -637,29 +637,41 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleSimulateTraffic(w, r)
 	case path == "/api/v1/detect/test" && method == "POST":
 		api.handleDetectTest(w, r)
-	// v27.1 入站规则行业模板 API
+	// v31.0 统一行业模板 API
+	case path == "/api/v1/industry-templates" && method == "GET":
+		api.handleIndustryTemplateList(w, r)
+	case path == "/api/v1/industry-templates" && method == "POST":
+		api.handleIndustryTemplateCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/industry-templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
+		api.handleIndustryTemplateEnable(w, r)
+	case strings.HasPrefix(path, "/api/v1/industry-templates/") && method == "GET":
+		api.handleIndustryTemplateGet(w, r)
+	case strings.HasPrefix(path, "/api/v1/industry-templates/") && method == "PUT":
+		api.handleIndustryTemplateUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/industry-templates/") && method == "DELETE":
+		api.handleIndustryTemplateDelete(w, r)
+
+	// 旧 API 保留，代理到统一行业模板
 	case path == "/api/v1/inbound-templates" && method == "GET":
 		api.handleInboundTemplateList(w, r)
 	case path == "/api/v1/inbound-templates" && method == "POST":
 		api.handleInboundTemplateCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
+		api.handleInboundTemplateEnable(w, r)
 	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "GET":
 		api.handleInboundTemplateGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "PUT":
 		api.handleInboundTemplateUpdate(w, r)
-	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
-		api.handleInboundTemplateEnable(w, r)
 	case strings.HasPrefix(path, "/api/v1/inbound-templates/") && method == "DELETE":
 		api.handleInboundTemplateDelete(w, r)
-
-	// v28.0 LLM 规则模板 API
 	case path == "/api/v1/llm/templates" && method == "GET":
 		api.handleLLMTemplateList(w, r)
 	case path == "/api/v1/llm/templates" && method == "POST":
 		api.handleLLMTemplateCreate(w, r)
-	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "GET":
-		api.handleLLMTemplateGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
 		api.handleLLMTemplateEnable(w, r)
+	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "GET":
+		api.handleLLMTemplateGet(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "PUT":
 		api.handleLLMTemplateUpdate(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "DELETE":

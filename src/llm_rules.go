@@ -2018,22 +2018,28 @@ func (e *LLMRuleEngine) rebuildGlobalLLMTemplateRules() {
 	if db == nil {
 		return
 	}
-	rows, err := db.Query(`SELECT rules_json FROM llm_rule_templates WHERE enabled=1`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
 	var allRules []LLMRule
-	for rows.Next() {
-		var rulesJSON string
-		if rows.Scan(&rulesJSON) != nil {
+	// v31.0: 从旧表 + 统一行业模板表 union 读取
+	for _, query := range []string{
+		`SELECT rules_json FROM llm_rule_templates WHERE enabled=1`,
+		`SELECT llm_rules_json FROM industry_templates WHERE enabled=1 AND llm_rules_json != '' AND llm_rules_json != '[]' AND llm_rules_json != 'null'`,
+	} {
+		rows, err := db.Query(query)
+		if err != nil {
 			continue
 		}
-		var rules []LLMRule
-		if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
-			continue
+		for rows.Next() {
+			var rulesJSON string
+			if rows.Scan(&rulesJSON) != nil {
+				continue
+			}
+			var rules []LLMRule
+			if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
+				continue
+			}
+			allRules = append(allRules, rules...)
 		}
-		allRules = append(allRules, rules...)
+		rows.Close()
 	}
 	// 编译为全局模板检测规则（复用 SetTenantLLMRules 的编译逻辑）
 	e.mu.Lock()

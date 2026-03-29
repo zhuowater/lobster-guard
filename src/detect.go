@@ -1065,22 +1065,28 @@ func (re *RuleEngine) GetEnabledInboundTemplateRules() []InboundRuleConfig {
 	if db == nil {
 		return nil
 	}
-	rows, err := db.Query(`SELECT rules_json FROM inbound_rule_templates WHERE enabled=1`)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
 	var allRules []InboundRuleConfig
-	for rows.Next() {
-		var rulesJSON string
-		if rows.Scan(&rulesJSON) != nil {
+	// v31.0: 从旧表 + 统一行业模板表 union 读取
+	for _, query := range []string{
+		`SELECT rules_json FROM inbound_rule_templates WHERE enabled=1`,
+		`SELECT inbound_rules_json FROM industry_templates WHERE enabled=1 AND inbound_rules_json != '' AND inbound_rules_json != '[]' AND inbound_rules_json != 'null'`,
+	} {
+		rows, err := db.Query(query)
+		if err != nil {
 			continue
 		}
-		var rules []InboundRuleConfig
-		if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
-			continue
+		for rows.Next() {
+			var rulesJSON string
+			if rows.Scan(&rulesJSON) != nil {
+				continue
+			}
+			var rules []InboundRuleConfig
+			if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
+				continue
+			}
+			allRules = append(allRules, rules...)
 		}
-		allRules = append(allRules, rules...)
+		rows.Close()
 	}
 	return allRules
 }
@@ -1422,8 +1428,9 @@ type OutboundRule struct {
 }
 
 type OutboundRuleEngine struct {
-	mu    sync.RWMutex
-	rules []OutboundRule
+	mu                  sync.RWMutex
+	rules               []OutboundRule
+	globalTemplateRules []OutboundRule
 }
 
 func NewOutboundRuleEngine(configs []OutboundRuleConfig) *OutboundRuleEngine {
@@ -1489,6 +1496,40 @@ func (ore *OutboundRuleEngine) Reload(configs []OutboundRuleConfig) {
 	newRules := compileOutboundRules(configs)
 	ore.mu.Lock(); ore.rules = newRules; ore.mu.Unlock()
 	log.Printf("[出站规则] 热更新完成，加载 %d 条规则", len(newRules))
+}
+
+func (ore *OutboundRuleEngine) RebuildGlobalTemplateRules(configs []OutboundRuleConfig) {
+	compiled := compileOutboundRules(configs)
+	ore.mu.Lock()
+	ore.globalTemplateRules = compiled
+	ore.mu.Unlock()
+	log.Printf("[出站规则] 全局模板规则已重建: %d 条", len(compiled))
+}
+
+func (ore *OutboundRuleEngine) InitGlobalTemplateRules(db *sql.DB) {
+	if db == nil {
+		ore.RebuildGlobalTemplateRules(nil)
+		return
+	}
+	rows, err := db.Query(`SELECT outbound_rules_json FROM industry_templates WHERE enabled=1`)
+	if err != nil {
+		ore.RebuildGlobalTemplateRules(nil)
+		return
+	}
+	defer rows.Close()
+	var allRules []OutboundRuleConfig
+	for rows.Next() {
+		var rulesJSON string
+		if rows.Scan(&rulesJSON) != nil {
+			continue
+		}
+		var rules []OutboundRuleConfig
+		if json.Unmarshal([]byte(rulesJSON), &rules) != nil {
+			continue
+		}
+		allRules = append(allRules, rules...)
+	}
+	ore.RebuildGlobalTemplateRules(allRules)
 }
 
 // GetRuleConfigs 返回当前规则的配置表示（用于 CRUD 和持久化）
@@ -1589,8 +1630,11 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 		ShadowMode bool
 	}
 	var matches []matchedOutbound
+	allRules := make([]OutboundRule, 0, len(ore.rules)+len(ore.globalTemplateRules))
+	allRules = append(allRules, ore.rules...)
+	allRules = append(allRules, ore.globalTemplateRules...)
 
-	for _, rule := range ore.rules {
+	for _, rule := range allRules {
 		// 跳过禁用的规则
 		if !rule.Enabled { continue }
 		for _, compiled := range rule.Regexps {

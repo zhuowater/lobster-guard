@@ -205,8 +205,11 @@ func main() {
 	engine.SetTenantDB(db)
 	// v28.0: 入站规则模板 DB 初始化
 	engine.SetInboundTemplateDB(db)
-	// v30.0: 初始化全局启用的行业模板 AC 自动机
+	// v31.0: 初始化统一行业模板系统（优先于旧模板）
+	initIndustryTemplateSystem(db)
+	// v30.0/v31.0: 初始化全局启用模板规则
 	engine.InitGlobalTemplateAC()
+	outboundEngine.InitGlobalTemplateRules(db)
 	// (v31.0 auto-review init moved below pool creation)
 
 	// v14.1: 初始化认证管理器
@@ -233,7 +236,8 @@ func main() {
 		llmRuleEngine.SetDB(logger.DB()) // Issue #7 fix: 命中计数持久化
 		llmRuleEngine.SetTenantDB(logger.DB())   // v28.0: LLM 规则租户绑定持久化
 		llmRuleEngine.SetTemplateDB(logger.DB())  // v28.0: LLM 规则模板持久化
-		llmRuleEngine.InitGlobalLLMTemplateRules() // v30.0: 初始化全局启用的 LLM 行业模板规则
+		initIndustryTemplateSystem(logger.DB())
+		llmRuleEngine.InitGlobalLLMTemplateRules() // v30.0/v31.0: 初始化全局启用的 LLM 行业模板规则
 		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则 (用户%d+默认补充)", len(llmRules), len(cfg.LLMProxy.Rules))
 
 		llmAuditor = NewLLMAuditor(logger.DB(), cfg.LLMProxy.AuditConfig, &cfg.LLMProxy)
