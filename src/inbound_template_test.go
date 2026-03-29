@@ -58,9 +58,16 @@ func TestListInboundTemplates(t *testing.T) {
 }
 
 func TestInboundTemplateCategories(t *testing.T) {
+	validCategories := map[string]bool{
+		"industry": true, "security": true, "compliance": true,
+		"financial": true, "government": true, "healthcare": true,
+		"technology": true, "services": true, "media": true,
+		"transport": true, "energy": true, "defense": true,
+		"education": true,
+	}
 	templates := getDefaultInboundTemplates()
 	for _, tpl := range templates {
-		if tpl.Category != "industry" && tpl.Category != "security" && tpl.Category != "compliance" {
+		if !validCategories[tpl.Category] {
 			t.Errorf("模板 %s category=%q 不在预期范围内", tpl.ID, tpl.Category)
 		}
 	}
