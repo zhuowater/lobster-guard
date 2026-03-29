@@ -11,14 +11,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v29.0-00d4ff?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v32.0-00d4ff?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/binary-single_file-00ff88?style=flat-square" alt="Single Binary">
   <img src="https://img.shields.io/badge/channels-5_platforms-ff6688?style=flat-square" alt="5 Channels">
-  <img src="https://img.shields.io/badge/tests-1172_passed-brightgreen?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/API-278+_routes-purple?style=flat-square" alt="API Routes">
-  <img src="https://img.shields.io/badge/dashboard-47_pages-orange?style=flat-square" alt="Dashboard">
+  <img src="https://img.shields.io/badge/tests-1252_passed-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/API-365+_routes-purple?style=flat-square" alt="API Routes">
+  <img src="https://img.shields.io/badge/dashboard-50_pages-orange?style=flat-square" alt="Dashboard">
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License">
 </p>
 
@@ -83,7 +83,7 @@
 | Go 代码行数 | ~86,300 行（源）+ ~33,600 行（测试）|
 | Vue 前端 | 46 页面 + 组件，72 文件 ~27,300 行 |
 | API 路由 | ~256+ 个 |
-| 测试函数 | 1172 个（全部通过）|
+| 测试函数 | 1252 个（全部通过）|
 | 引擎/组件 | 53 个 |
 | Git Commit | 242 个 |
 | 外部依赖 | 5 个（sqlite3 + yaml.v3 + uuid + gorilla/websocket + x/crypto）|
@@ -173,11 +173,11 @@ open http://localhost:9090/                  # 管理后台
 docker compose up -d
 
 # 或手动构建运行
-docker build -t lobster-guard:v29.0 .
+docker build -t lobster-guard:v32.0 .
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v29.0
+  lobster-guard:v32.0
 ```
 
 ### 6. Kubernetes 部署
@@ -373,6 +373,9 @@ lobster-guard/
 | **v25.1** | 🔐 **Capability Engine** — 数据级 capability 标签 · 权限传播 · 污染联动 |
 | **v25.2** | 📐 **Deviation Detector** — 计划偏差检测 · 自动修复 · Minor/Moderate/Critical 分级 |
 | **v29.0** | 📡 **Gateway WSS RPC 远程管理** — 持久化 WSS RPC（challenge → connect → hello → ready）· WSS RPC 优先 + `tools/invoke` 自动 fallback · 55 个 Gateway 管理端点 · GatewayMonitor 全面升级（Sessions/Cron/Diag/Agent）· `default_gateway_origin` / `gateway_origin` Origin 配置 |
+| **v30.0** | 🔧 **质量硬化** — 行业模板系统统一（删除旧 YAML 体系）· AC 智能分级 + LLM 复核（auto-review）· api.go 架构拆分（9744→1551 行 + 17 域文件）· 引擎链路修复 · Settings 7-Tab 配置中心 · 500 样本 F1 基线 |
+| **v31.0** | 🏭 **统一行业模板** — 40 行业 × 三维度（入站+LLM+出站）一键启用 · 代码默认规则 = benchmark 优化完整规则集 · PII 整合 · LLM 自动复核 · SSE 流式实时拦截 · AC+LLM 二审 F1=1.000 |
+| **v32.0** | 💎 **架构优化 + Dashboard 演示级打磨** — 全链路检测调试 API · 规则重叠分析 · SQLite 批量写入 + 监控 · 三级配置简化 + 向导 · 43 页面全量巡检（0 P0/P1）· 骨架屏/Toast/fade 过渡 · 配色 tokens/间距/字体统一 · AppVersion v32.0 |
 
 详细版本历史参见 [ROADMAP.md](ROADMAP.md)。
 
@@ -385,5 +388,5 @@ lobster-guard/
 ---
 
 <p align="center">
-  <sub>🦞 Built with Go, secured with care. v29.0 · 85 Go files · 86K lines · 1151 tests · 256+ APIs · 46 Dashboard pages · 53 engines</sub>
+  <sub>🦞 Built with Go, secured with care. v32.0 · 96K Go lines · 30K Vue lines · 1252 tests · 365+ APIs · 50 Dashboard pages · 53 engines · 5 deps</sub>
 </p>
