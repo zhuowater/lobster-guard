@@ -136,6 +136,20 @@ deviation:
   auto_repair: false         # 自动修复
   max_repairs: 5             # 最大修复次数
 
+# v30.0 AC 智能分级 (Auto-Review)
+auto_review:
+  enabled: false               # 启用后 block 规则可被自动/手动降级为 review
+  window_seconds: 300          # 滑动窗口大小（秒），检测 block 尖峰
+  spike_threshold: 10          # 窗口内 block 次数超过此值触发自动降级
+  spike_ratio: 3.0             # 相比历史均值的倍数阈值
+  auto_review_ttl: 3600        # 自动降级持续时间（秒），到期自动恢复为 block
+  llm_endpoint: ""             # LLM 复核端点 URL（优先级最高，如 https://api.deepseek.com）
+  llm_api_key: ""              # LLM API Key（内部调用用，Bearer token）
+  llm_model: "deepseek-chat"   # LLM 模型名称
+  llm_upstream_id: ""          # 或指定 LLM Proxy target 名（如 "deepseek"）
+  llm_timeout_sec: 10          # LLM 调用超时（秒）
+  manual_review_rules: []      # 永久 review 规则列表（不受 TTL 影响）
+
 # v26.0 信息流控制 (Fides IFC)
 ifc:
   enabled: true

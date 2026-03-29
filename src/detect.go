@@ -607,23 +607,17 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 
 	// v31.0: AC 智能分级 — block 前检查 auto-review
 	if r.Action == "block" && re.autoReviewMgr != nil && len(r.MatchedRules) > 0 {
-		// 记录所有命中规则到滑动窗口
-		for _, rule := range r.MatchedRules {
-			re.autoReviewMgr.RecordBlock(rule)
-		}
-		// 检查所有命中规则是否都处于 review 状态
+		// 记录所有命中规则到滑动窗口 + 检查是否全部处于 review 状态
 		allInReview := true
 		for _, rule := range r.MatchedRules {
+			re.autoReviewMgr.RecordBlock(rule)
 			if !re.autoReviewMgr.IsInReview(rule) {
 				allInReview = false
-				break
 			}
 		}
 		if allInReview {
-			r.Action = "review"
-			// 触发 LLM 复核（同步调用，受超时限制）
-			llmResult := re.autoReviewMgr.ReviewWithLLM(r.MatchedRules[0], text)
-			r.Action = llmResult
+			// 所有命中规则均已降级 → 触发 LLM 复核
+			r.Action = re.autoReviewMgr.ReviewWithLLM(r.MatchedRules[0], text)
 		}
 	}
 
