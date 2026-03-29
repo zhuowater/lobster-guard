@@ -1074,8 +1074,24 @@ Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
 Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
   v31:     P2 改进（出站模板 + 红队闭环 + Merkle UI + 金丝雀轮换 + 报告自动化）
   v32:     架构级优化（规则去重 + SQLite 分离 + 配置简化 + 高级引擎实战验证）
-  v33+:    Agent 身份 + MCP 安全网关 + 跨 Agent 蠕虫检测（原 v27 规划）
+  v33:     IM 安全前端模式 + MCP 安全网关（从透明代理升级为安全入口）
   v34+:    AI 安全副驾驶 + Benchmark 自动化 + Guardrail 市场（原 v28 规划）
+
+  --- v33 IM 安全前端模式详细规划 ---
+  核心思路: 龙虾卫士从"透明代理"升级为"安全前端"
+    - 现状: IM → OpenClaw蓝信插件 → OpenClaw → 龙虾卫士(出站审计)
+    - 目标: IM → 龙虾卫士(IM插件) → WSS RPC chat.send → OpenClaw(纯引擎) → 龙虾卫士(出站审计) → IM API发回
+    - OpenClaw 完全内网化，不暴露端口给 IM 平台
+  新增模块:
+    a) IM Sender: 每个通道插件增加 SendMessage() — 主动调蓝信/飞书/钉钉/企微 API 发消息
+    b) Chat Bridge: IM回调 → 入站检测 → WSS chat.send → 等回复 → 出站检测 → IM Sender
+    c) Agent Identity: 跨 Agent 蠕虫检测（原 v27 规划）
+  优势:
+    - IM 回调只配一处（龙虾卫士），不再两边都配
+    - 全链路 trace: 入站→处理→出站在同一进程内闭环
+    - 多 IM 统一入口，OpenClaw 只需 WSS 接口
+  依赖: v29 WSS RPC (chat.send 已就绪)
+  同期: MCP 安全网关 (SMCP/MCPShield/MCPSec)
 
 产品定位演进:
   v1-v5:   AI Agent 安全网关（被动防御 — 规则匹配）
