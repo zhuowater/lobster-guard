@@ -110,6 +110,8 @@ type LLMRuleEngine struct {
 	tenantDB        *sql.DB                           // 租户规则持久化
 	// v28.0 LLM 规则模板 DB
 	templateDB *sql.DB
+	// v31.1: LLM auto-review（复用入站的 AutoReviewManager）
+	autoReviewMgr *AutoReviewManager
 	// v30.0 全局启用的行业模板规则
 	globalTemplateRules  []LLMRule
 	globalTplReqAC       *AhoCorasick

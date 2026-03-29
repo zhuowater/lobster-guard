@@ -621,12 +621,12 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 		}
 	}
 
-	// PII detection
-	for i, pat := range re.piiRe {
-		if pat.MatchString(text) { r.PIIs = append(r.PIIs, re.piiNames[i]) }
-	}
-	if len(r.PIIs) > 0 && r.Action == "pass" {
-		r.Action = "warn"; r.Reasons = append(r.Reasons, "pii_detected")
+	// PII detection — v31.1: PII 规则已合并到 InboundRuleConfig (type=regex, group=pii)
+	// 统一规则体系的 regex 检测已在上方执行，此处仅做兼容性 PIIs 字段填充
+	for _, rule := range r.MatchedRules {
+		if strings.HasPrefix(rule, "pii_") {
+			r.PIIs = append(r.PIIs, rule)
+		}
 	}
 	return r
 }

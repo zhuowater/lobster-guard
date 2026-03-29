@@ -622,6 +622,10 @@ func getDefaultInboundRules() []InboundRuleConfig {
 		{Name: "confidential_document", DisplayName: "机密文件", Patterns: []string{
 			"商业秘密", "内部文件", "confidential", "trade secret", "NDA", "保密协议",
 		}, Action: "warn", Category: "confidential"},
+		// v31.1: PII 检测规则（从独立 DetectPII 合并到统一规则体系）
+		{Name: "pii_id_card", DisplayName: "身份证号", Patterns: []string{`\d{17}[\dXx]`}, Action: "warn", Category: "pii", Type: "regex", Group: "pii"},
+		{Name: "pii_phone_cn", DisplayName: "手机号", Patterns: []string{`(?:^|\D)1[3-9]\d{9}(?:\D|$)`}, Action: "warn", Category: "pii", Type: "regex", Group: "pii"},
+		{Name: "pii_bank_card", DisplayName: "银行卡号", Patterns: []string{`(?:^|\D)\d{16,19}(?:\D|$)`}, Action: "warn", Category: "pii", Type: "regex", Group: "pii"},
 	}
 }
 

@@ -268,6 +268,9 @@ func main() {
 		autoReviewMgr.llmTargets = cfg.LLMProxy.Targets
 	}
 	engine.autoReviewMgr = autoReviewMgr
+	if llmRuleEngine != nil {
+		llmRuleEngine.autoReviewMgr = autoReviewMgr // v31.1: LLM 引擎共享 auto-review
+	}
 	if cfg.AutoReview.Enabled {
 		autoReviewMgr.Start()
 		fmt.Printf("[初始化] ✅ AC 智能分级已启用 (窗口=%ds, 阈值=%d, TTL=%ds)\n",

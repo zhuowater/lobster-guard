@@ -239,6 +239,21 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for _, m := range reqMatches {
 				llmReqRules = append(llmReqRules, m.RuleName)
 			}
+			// v31.1: LLM auto-review — block 前检查是否需要 LLM 二审
+			if action == "block" && lp.ruleEngine.autoReviewMgr != nil && len(llmReqRules) > 0 {
+				allInReview := true
+				for _, rule := range llmReqRules {
+					lp.ruleEngine.autoReviewMgr.RecordBlock(rule)
+					if !lp.ruleEngine.autoReviewMgr.IsInReview(rule) {
+						allInReview = false
+					}
+				}
+				if allInReview {
+					action = lp.ruleEngine.autoReviewMgr.ReviewWithLLM(llmReqRules[0], string(bodyBytes))
+					llmReqDecision = action
+					log.Printf("[LLM规则] auto-review: %s → %s rule=%s", "block", action, llmReqRules[0])
+				}
+			}
 			switch action {
 			case "block":
 				log.Printf("[LLM规则] 请求被阻断: rule=%s category=%s pattern=%q",
@@ -481,6 +496,21 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				llmRespDecision = action
 				for _, m := range respMatches {
 					llmRespRules = append(llmRespRules, m.RuleName)
+				}
+				// v31.1: LLM 响应 auto-review
+				if action == "block" && lp.ruleEngine.autoReviewMgr != nil && len(llmRespRules) > 0 {
+					allInReview := true
+					for _, rule := range llmRespRules {
+						lp.ruleEngine.autoReviewMgr.RecordBlock(rule)
+						if !lp.ruleEngine.autoReviewMgr.IsInReview(rule) {
+							allInReview = false
+						}
+					}
+					if allInReview {
+						action = lp.ruleEngine.autoReviewMgr.ReviewWithLLM(llmRespRules[0], string(respBody))
+						llmRespDecision = action
+						log.Printf("[LLM规则] 响应 auto-review: %s → %s rule=%s", "block", action, llmRespRules[0])
+					}
 				}
 				switch action {
 				case "block":
