@@ -1,0 +1,16 @@
+{
+  "config": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "healthz": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "plan_templates": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "plan_plans": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "cap_mappings": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "cap_contexts": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "ifc_sources": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "ifc_variables": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "ifc_violations": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "deviations": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "envelopes": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "envelope_batches": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "attack_chains": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n",
+  "plan_plans_options": "curl: (7) Failed to connect to 10.44.96.142 port 8080 after 0 ms: Couldn't connect to server\n"
+}

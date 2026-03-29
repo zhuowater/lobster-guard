@@ -20,7 +20,7 @@ const TABS = {
     icon: 'settings',
     groups: [
       { label: 'IM 策略', routes: ['rules', 'routes', 'upstream'] },
-      { label: 'LLM 策略', routes: ['llm-rules', 'llm-targets', 'tools', 'cache', 'gateway', 'plan-compiler', 'agent', 'ab-testing'] },
+      { label: 'LLM 策略', routes: ['llm-rules', 'llm-targets', 'tools', 'cache', 'plan-compiler', 'agent', 'ab-testing'] },
       { label: '治理引擎', routes: ['path-policy', 'counterfactual', 'capability', 'deviations', 'ifc'] },
       { label: '系统策略', routes: ['evolution', 'envelopes', 'events'] }
     ]
@@ -28,7 +28,7 @@ const TABS = {
   ops: {
     label: '运营管理',
     icon: 'bar-chart',
-    routes: ['reports', 'leaderboard', 'tenants', 'apikeys', 'users', 'llm', 'ops', 'settings', 'gateway-monitor']
+    routes: ['reports', 'leaderboard', 'tenants', 'apikeys', 'users', 'llm', 'ops', 'settings', 'gateway', 'gateway-monitor']
   }
 }
 
