@@ -226,7 +226,7 @@ function escHtml(s) {
 
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--text-primary); }
-th.sorted { color: var(--text-primary); }
+th.sorted { color: var(--text-primary); background: linear-gradient(180deg, var(--color-primary-dim), rgba(99,102,241,0.04)); box-shadow: inset 0 -1px 0 var(--color-primary); }
 .sort-icon { font-size: 0.55rem; margin-left: 2px; color: var(--text-tertiary); }
 th.sorted .sort-icon { color: var(--color-primary); }
 .sort-icon-neutral { font-size: 0.5rem; letter-spacing: -2px; opacity: .4; }
@@ -244,7 +244,7 @@ th.sorted .sort-icon { color: var(--color-primary); }
 
 .dt-pagination {
   display: flex; justify-content: space-between; align-items: center;
-  margin-top: var(--space-3); padding-top: var(--space-2);
+  margin-top: var(--space-3); padding-top: var(--spacing-sm);
   border-top: 1px solid var(--border-subtle);
   font-size: var(--text-sm); color: var(--text-secondary);
 }

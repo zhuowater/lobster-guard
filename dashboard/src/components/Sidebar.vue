@@ -6,7 +6,7 @@
       <span class="sidebar-logo" :class="{'strict-logo': strictMode}">🦞</span>
       <div class="sidebar-brand-text">
         <div class="sidebar-brand-title">龙虾卫士</div>
-        <div class="sidebar-brand-sub">Lobster Guard</div>
+        <div class="sidebar-brand-sub">Lobster Guard v32.0</div>
       </div>
     </div>
     <div class="sidebar-nav">

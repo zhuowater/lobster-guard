@@ -14,7 +14,7 @@
       <Topbar @toggle-mobile="mobileOpen = !mobileOpen" />
       <div class="content-area">
         <router-view v-slot="{ Component }">
-          <transition name="page" mode="out-in">
+          <transition name="fade" mode="out-in">
             <component :is="Component" />
           </transition>
         </router-view>
@@ -76,7 +76,11 @@ onUnmounted(() => {
 }
 .sidebar-overlay.show { display: block; }
 
-.page-enter-active { animation: page-in .15s ease-out both; }
-.page-leave-active { animation: page-in .1s ease-in reverse; }
-@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.fade-enter-active, .fade-leave-active {
+  transition: opacity var(--transition-normal), transform var(--transition-normal);
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
 </style>

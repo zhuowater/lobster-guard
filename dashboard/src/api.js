@@ -1,5 +1,5 @@
 /** @module api - API 调用封装（v14.1: JWT 认证 + 401 自动跳转 + tenant 注入） */
-import { getCurrentTenant, getAuthToken, logoutUser } from './stores/app.js'
+import { getCurrentTenant, getAuthToken, logoutUser, showToast } from './stores/app.js'
 
 const TOKEN_KEY = 'lobster_guard_token'
 const AUTH_TOKEN_KEY = 'lg_auth_token'
@@ -80,9 +80,23 @@ export async function api(path, opts = {}) {
   const res = await fetch(url, opts)
   if (res.status === 401) {
     handle401()
+    showToast('登录已过期，请重新登录', 'error')
     throw new Error('Unauthorized')
   }
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) {
+    let message = 'HTTP ' + res.status
+    try {
+      const data = await res.clone().json()
+      message = data?.error || data?.message || message
+    } catch {
+      try {
+        const raw = await res.text()
+        if (raw) message = raw
+      } catch {}
+    }
+    showToast(message, 'error')
+    throw new Error(message)
+  }
   return res.json()
 }
 
@@ -133,7 +147,13 @@ export async function downloadFile(url, filename) {
   const res = await fetch(url, { headers })
   if (res.status === 401) {
     handle401()
+    showToast('登录已过期，请重新登录', 'error')
     throw new Error('Unauthorized')
+  }
+  if (!res.ok) {
+    const message = '下载失败：HTTP ' + res.status
+    showToast(message, 'error')
+    throw new Error(message)
   }
   const blob = await res.blob()
   const a = document.createElement('a')

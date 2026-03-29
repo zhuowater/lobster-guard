@@ -25,7 +25,7 @@ defineEmits(['action'])
 <style scoped>
 .empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: var(--space-12) var(--space-5);
+  padding: var(--spacing-xl) var(--spacing-md);
   text-align: center;
 }
 .empty-state-icon {
@@ -38,7 +38,7 @@ defineEmits(['action'])
   width: 48px; height: 48px; stroke: var(--text-disabled);
 }
 .empty-state-title {
-  font-size: var(--text-lg); color: var(--text-secondary); font-weight: 500;
+  font-size: var(--text-lg); color: var(--text-secondary); font-weight: 700;
   margin-bottom: var(--space-2);
 }
 .empty-state-desc {
