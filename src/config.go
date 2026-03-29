@@ -604,6 +604,9 @@ func getDefaultInboundRules() []InboundRuleConfig {
 		// ============================================================
 		// 其他 — 敏感信息/合规
 		// ============================================================
+		{Name: "regex_role_injection", DisplayName: "角色标签注入", Type: "regex", Patterns: []string{
+			"(?i)\\[system\\]", "(?i)###\\s*system", "(?i)<<system>>",
+		}, Action: "block", Category: "injection", Group: "injection"},
 		{Name: "base64_injection", DisplayName: "Base64 混淆注入", Type: "regex", Patterns: []string{
 			"(?i)base64[\\s_-]*(decode|encode)", "(?i)atob\\s*\\(", "(?i)btoa\\s*\\(",
 		}, Action: "warn", Category: "obfuscation"},
