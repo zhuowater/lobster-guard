@@ -6,6 +6,7 @@ const routes = [
   { path: '/', redirect: '/overview' },
   { path: '/login', name: 'login', component: () => import('./views/Login.vue'), meta: { title: '登录', public: true } },
   { path: '/overview', name: 'overview', component: () => import('./views/Overview.vue'), meta: { title: '概览', icon: 'bar-chart', group: 'im' } },
+  { path: '/security-overview', name: 'security-overview', component: () => import('./views/SecurityOverview.vue'), meta: { title: '安全总览', icon: 'shield', group: 'im' } },
   { path: '/custom', name: 'custom-dashboard', component: () => import('./views/CustomDashboard.vue'), meta: { title: '自定义大屏', icon: 'palette', group: 'dashboard' } },
   { path: '/upstream', name: 'upstream', component: () => import('./views/Upstream.vue'), meta: { title: '上游', icon: 'link', group: 'im' } },
   { path: '/routes', name: 'routes', component: () => import('./views/Routes.vue'), meta: { title: '路由', icon: 'git-branch', group: 'im' } },

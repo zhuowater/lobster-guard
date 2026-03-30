@@ -4,7 +4,7 @@ const TABS = {
   overview: {
     label: '安全总览',
     icon: 'shield',
-    routes: ['overview', 'custom-dashboard', 'anomaly', 'monitor']
+    routes: ['overview', 'security-overview', 'custom-dashboard', 'anomaly', 'monitor']
   },
   threat: {
     label: '威胁中心',
