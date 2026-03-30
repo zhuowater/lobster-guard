@@ -333,8 +333,40 @@ func (api *ManagementAPI) handleUpstreamProfileList(w http.ResponseWriter, r *ht
 	if profiles == nil {
 		profiles = []UpstreamSecurityProfile{}
 	}
+	// 分段统计
+	var s80, s60, s40, s20, sLow, totalUsers int
+	var totalScore float64
+	for _, p := range profiles {
+		totalScore += p.SecurityScore
+		totalUsers += p.UserCount
+		switch {
+		case p.SecurityScore > 80:
+			s80++
+		case p.SecurityScore > 60:
+			s60++
+		case p.SecurityScore > 40:
+			s40++
+		case p.SecurityScore > 20:
+			s20++
+		default:
+			sLow++
+		}
+	}
+	avg := 0.0
+	if len(profiles) > 0 {
+		avg = totalScore / float64(len(profiles))
+	}
 	jsonResponse(w, 200, map[string]interface{}{
-		"profiles": profiles,
-		"total":    len(profiles),
+		"profiles":    profiles,
+		"total":       len(profiles),
+		"total_users": totalUsers,
+		"avg_score":   avg,
+		"segments": map[string]int{
+			"gt80":  s80,
+			"61_80": s60,
+			"41_60": s40,
+			"20_40": s20,
+			"lt20":  sLow,
+		},
 	})
 }

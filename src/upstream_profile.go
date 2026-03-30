@@ -18,6 +18,7 @@ type UpstreamSecurityProfile struct {
 	UpdatedAt     string              `json:"updated_at"`
 	SecurityScore float64             `json:"security_score"`
 	RiskLevel     string              `json:"risk_level"`
+	UserCount     int                 `json:"user_count"`
 	Dimensions    []SecurityDimension `json:"dimensions"`
 	Traffic       TrafficOverview     `json:"traffic"`
 	EngineAlerts  EngineAlertSummary  `json:"engine_alerts"`
@@ -107,6 +108,9 @@ func (e *UpstreamProfileEngine) BuildProfile(upstreamID string) (*UpstreamSecuri
 		UpstreamID: upstreamID,
 		UpdatedAt:  now.Format(time.RFC3339),
 	}
+
+	// 0. 绑定用户数
+	e.db.QueryRow(`SELECT COUNT(*) FROM user_routes WHERE upstream_id=?`, upstreamID).Scan(&p.UserCount)
 
 	// 1. 流量概览 (24h)
 	p.Traffic = e.queryTraffic(upstreamID, since24h)

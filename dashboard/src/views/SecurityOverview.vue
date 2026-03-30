@@ -3,50 +3,57 @@
     <!-- L0: 粒子英雄区 -->
     <div class="so-hero" ref="heroRef">
       <canvas ref="canvas" class="so-canvas"></canvas>
-      <!-- 中心评分 -->
-      <div class="so-center">
-        <svg viewBox="0 0 160 160" class="so-center-svg">
-          <circle cx="80" cy="80" r="68" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/>
-          <circle cx="80" cy="80" r="68" fill="none" :stroke="levelColor(avgLevel)" stroke-width="6" stroke-linecap="round"
-            :stroke-dasharray="(avgScore/100*427)+' 427'" transform="rotate(-90 80 80)" style="transition:stroke-dasharray 1.2s"/>
-          <text x="80" y="72" text-anchor="middle" fill="white" font-size="38" font-weight="800">{{ Math.round(avgScore) }}</text>
-          <text x="80" y="92" text-anchor="middle" :fill="levelColor(avgLevel)" font-size="12" font-weight="600">{{ levelLabel(avgLevel) }}</text>
-          <text x="80" y="108" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10">全局安全评分</text>
-        </svg>
-      </div>
-      <!-- 统计卡片 -->
-      <div class="so-stats">
-        <div class="so-stat-card" :class="{ active: filter === 'all' }" @click="setFilter('all')">
-          <div class="so-stat-num">{{ profiles.length }}</div>
-          <div class="so-stat-label">上游实例</div>
+      <!-- 上层覆盖: Treemap + 甜甜圈 + 分段统计 -->
+      <div class="so-overlay">
+        <!-- 左: Treemap -->
+        <div class="so-treemap-wrap">
+          <div class="so-treemap" ref="treemapRef">
+            <div v-for="p in treemapItems" :key="p.upstream_id" class="so-tm-cell"
+              :style="{ width: p.w+'%', height: p.h+'%', left: p.x+'%', top: p.y+'%', background: levelColor(p.risk_level) + '55', borderColor: levelColor(p.risk_level) }"
+              :class="{ 'so-tm-active': filter === p.risk_level }"
+              @click="toggleDetail(p.upstream_id)"
+              :title="p.upstream_id + ' — ' + Math.round(p.security_score) + '分 / ' + p.user_count + '人'">
+              <div class="so-tm-id">{{ p.upstream_id }}</div>
+              <div class="so-tm-score" :style="{ color: levelColor(p.risk_level) }">{{ Math.round(p.security_score) }}</div>
+              <div class="so-tm-users">👤 {{ p.user_count }}</div>
+            </div>
+          </div>
         </div>
-        <div class="so-stat-card" :class="{ active: filter === 'critical' }" @click="setFilter('critical')">
-          <div class="so-stat-num so-c-critical">{{ countByLevel('critical') + countByLevel('high') }}</div>
-          <div class="so-stat-label">🔴 高危实例</div>
-        </div>
-        <div class="so-stat-card" :class="{ active: filter === 'medium' }" @click="setFilter('medium')">
-          <div class="so-stat-num so-c-medium">{{ countByLevel('medium') }}</div>
-          <div class="so-stat-label">🟡 中等风险</div>
-        </div>
-        <div class="so-stat-card" :class="{ active: filter === 'safe' }" @click="setFilter('safe')">
-          <div class="so-stat-num so-c-safe">{{ countByLevel('safe') + countByLevel('low') }}</div>
-          <div class="so-stat-label">🟢 安全</div>
-        </div>
-        <div class="so-stat-card">
-          <div class="so-stat-num">{{ totalAlerts }}</div>
-          <div class="so-stat-label">24h 总告警</div>
-        </div>
-      </div>
-      <!-- 维度环 -->
-      <div class="so-dim-rings">
-        <div v-for="(dim,i) in avgDimensions" :key="i" class="so-dim-ring" :class="{ active: sortDim === i }" @click="toggleSort(i)">
-          <svg viewBox="0 0 52 52">
-            <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
-            <circle cx="26" cy="26" r="22" fill="none" :stroke="levelColor(dimLevel(dim.score))" stroke-width="3" stroke-linecap="round"
-              :stroke-dasharray="(dim.score/20*138)+' 138'" transform="rotate(-90 26 26)"/>
-            <text x="26" y="29" text-anchor="middle" fill="white" font-size="11" font-weight="700">{{ dim.score.toFixed(0) }}</text>
-          </svg>
-          <div class="so-dim-label">{{ dim.icon }} {{ dim.name }}</div>
+        <!-- 右: 甜甜圈 + 分段 + 维度 -->
+        <div class="so-right-panel">
+          <!-- 甜甜圈 -->
+          <div class="so-donut-area">
+            <svg viewBox="0 0 140 140" class="so-donut-svg">
+              <circle cx="70" cy="70" r="55" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="14"/>
+              <circle v-for="(seg,i) in donutSegments" :key="i" cx="70" cy="70" r="55" fill="none"
+                :stroke="seg.color" stroke-width="14" stroke-linecap="butt"
+                :stroke-dasharray="seg.dash" :stroke-dashoffset="seg.offset"
+                style="transition: stroke-dasharray .6s"/>
+              <text x="70" y="64" text-anchor="middle" fill="white" font-size="28" font-weight="800">{{ profiles.length }}</text>
+              <text x="70" y="80" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">实例</text>
+              <text x="70" y="94" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="9">👤 {{ apiData.total_users || 0 }}</text>
+            </svg>
+          </div>
+          <!-- 5档分段 -->
+          <div class="so-segments">
+            <div v-for="seg in segmentList" :key="seg.key" class="so-seg-item" :class="{ active: filter === seg.key }" @click="setFilter(seg.key)">
+              <span class="so-seg-dot" :style="{ background: seg.color }"></span>
+              <span class="so-seg-count">{{ seg.count }}</span>
+              <span class="so-seg-label">{{ seg.label }}</span>
+            </div>
+          </div>
+          <!-- 维度环 -->
+          <div class="so-dim-rings">
+            <div v-for="(dim,i) in avgDimensions" :key="i" class="so-dim-ring" :class="{ active: sortDim === i }" @click="toggleSort(i)">
+              <svg viewBox="0 0 44 44">
+                <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
+                <circle cx="22" cy="22" r="18" fill="none" :stroke="levelColor(dimLevel(dim.score))" stroke-width="3" stroke-linecap="round"
+                  :stroke-dasharray="(dim.score/20*113)+' 113'" transform="rotate(-90 22 22)"/>
+                <text x="22" y="25" text-anchor="middle" fill="white" font-size="10" font-weight="700">{{ dim.score.toFixed(0) }}</text>
+              </svg>
+              <div class="so-dim-label">{{ dim.icon }}</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -64,6 +71,7 @@
           <tr>
             <th style="width:40px">#</th>
             <th>实例 ID</th>
+            <th style="width:55px">👤</th>
             <th style="width:90px" class="so-th-click" @click="toggleSort(-1)">总评分 {{ sortDim===-1?'▼':'' }}</th>
             <th v-for="(d,i) in dimNames" :key="i" style="width:70px" class="so-th-click" @click="toggleSort(i)">{{ d.icon }} {{ sortDim===i?'▼':'' }}</th>
             <th style="width:70px">等级</th>
@@ -79,6 +87,7 @@
                 <span class="so-id-dot" :style="{ background: levelColor(p.risk_level) }"></span>
                 {{ p.upstream_id }}
               </td>
+              <td class="so-user-count">{{ p.user_count || 0 }}</td>
               <td>
                 <div class="so-score-cell">
                   <svg viewBox="0 0 36 36" class="so-mini-ring">
@@ -195,6 +204,7 @@ import { api } from '../api.js'
 
 // === State ===
 const profiles = ref([])
+const apiData = ref({})
 const loading = ref(true)
 const filter = ref('all')
 const sortDim = ref(-1) // -1 = total score, 0-4 = dimension index
@@ -234,11 +244,56 @@ const avgDimensions = computed(() => {
 })
 const totalAlerts = computed(() => profiles.value.reduce((s, p) => s + dimAlertTotal(p), 0))
 
+// Treemap layout — squarified, area = user_count
+const treemapItems = computed(() => {
+  if (!profiles.value.length) return []
+  const items = [...profiles.value].sort((a, b) => (b.user_count||1) - (a.user_count||1))
+  const total = items.reduce((s, p) => s + Math.max(p.user_count||1, 1), 0)
+  // Simple horizontal slice layout
+  let y = 0
+  return items.map(p => {
+    const ratio = Math.max(p.user_count||1, 1) / total
+    const h = Math.max(ratio * 100, 12) // min 12% height
+    const item = { ...p, x: 0, y, w: 100, h: Math.min(h, 100 - y), user_count: p.user_count||0 }
+    y += item.h
+    return item
+  })
+})
+
+// Donut segments
+const segmentList = computed(() => {
+  const segs = apiData.value.segments || {}
+  return [
+    { key: 'gt80', color: '#22c55e', count: segs.gt80||0, label: '>80 分' },
+    { key: '61_80', color: '#6366f1', count: segs['61_80']||0, label: '61-80' },
+    { key: '41_60', color: '#eab308', count: segs['41_60']||0, label: '41-60' },
+    { key: '20_40', color: '#f97316', count: segs['20_40']||0, label: '20-40' },
+    { key: 'lt20', color: '#ef4444', count: segs.lt20||0, label: '<20 分' },
+  ]
+})
+const donutSegments = computed(() => {
+  const total = profiles.value.length || 1
+  const circ = 2 * Math.PI * 55 // ~345.6
+  let offset = 0
+  return segmentList.value.map(seg => {
+    const arc = (seg.count / total) * circ
+    const r = { color: seg.color, dash: `${arc} ${circ - arc}`, offset: -offset + '' }
+    offset += arc
+    return r
+  })
+})
+
 const filteredProfiles = computed(() => {
   let list = [...profiles.value]
-  if (filter.value === 'critical') list = list.filter(p => p.risk_level === 'critical' || p.risk_level === 'high')
-  else if (filter.value === 'medium') list = list.filter(p => p.risk_level === 'medium')
-  else if (filter.value === 'safe') list = list.filter(p => p.risk_level === 'safe' || p.risk_level === 'low')
+  const f = filter.value
+  if (f === 'gt80') list = list.filter(p => p.security_score > 80)
+  else if (f === '61_80') list = list.filter(p => p.security_score > 60 && p.security_score <= 80)
+  else if (f === '41_60') list = list.filter(p => p.security_score > 40 && p.security_score <= 60)
+  else if (f === '20_40') list = list.filter(p => p.security_score > 20 && p.security_score <= 40)
+  else if (f === 'lt20') list = list.filter(p => p.security_score <= 20)
+  else if (f === 'critical') list = list.filter(p => p.risk_level === 'critical' || p.risk_level === 'high')
+  else if (f === 'medium') list = list.filter(p => p.risk_level === 'medium')
+  else if (f === 'safe') list = list.filter(p => p.risk_level === 'safe' || p.risk_level === 'low')
   // Sort
   if (sortDim.value === -1) {
     list.sort((a, b) => a.security_score - b.security_score) // lowest first (most dangerous)
@@ -436,6 +491,7 @@ function onResize() {
 onMounted(async () => {
   try {
     const data = await api('/api/v1/upstream-profiles')
+    apiData.value = data
     profiles.value = data.profiles || []
   } catch(e) { /* ignore */ }
   loading.value = false
@@ -456,23 +512,33 @@ onUnmounted(() => {
 <style scoped>
 .so-page { padding: 0; }
 /* === L0 Hero === */
-.so-hero { position: relative; min-height: 380px; background: #0f172a; border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
+.so-hero { position: relative; min-height: 340px; background: #0f172a; border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
 .so-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.so-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 2; pointer-events: none; }
-.so-center-svg { width: 160px; height: 160px; filter: drop-shadow(0 0 20px rgba(99,102,241,0.3)); }
-.so-stats { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; gap: 10px; }
-.so-stat-card { background: rgba(15,23,42,0.65); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 16px; text-align: center; cursor: pointer; transition: all .2s; min-width: 90px; }
-.so-stat-card:hover, .so-stat-card.active { border-color: #6366f1; background: rgba(99,102,241,0.12); }
-.so-stat-num { font-size: 22px; font-weight: 800; color: rgba(255,255,255,0.9); }
-.so-stat-label { font-size: 10px; color: rgba(255,255,255,0.45); margin-top: 2px; }
-.so-c-critical { color: #ef4444; }
-.so-c-medium { color: #eab308; }
-.so-c-safe { color: #22c55e; }
-.so-dim-rings { position: absolute; top: 14px; right: 16px; z-index: 2; display: flex; gap: 8px; }
+/* Overlay: treemap left, stats right */
+.so-overlay { position: relative; z-index: 2; display: flex; gap: 16px; padding: 16px; min-height: 310px; }
+.so-treemap-wrap { flex: 1; min-width: 0; }
+.so-treemap { position: relative; width: 100%; height: 100%; min-height: 280px; border-radius: 8px; overflow: hidden; }
+.so-tm-cell { position: absolute; border: 1px solid; border-radius: 6px; padding: 6px 8px; cursor: pointer; transition: all .2s; display: flex; flex-direction: column; justify-content: center; overflow: hidden; backdrop-filter: blur(6px); }
+.so-tm-cell:hover { transform: scale(1.02); z-index: 3; box-shadow: 0 0 20px rgba(99,102,241,0.3); }
+.so-tm-active { box-shadow: 0 0 15px rgba(99,102,241,0.4); }
+.so-tm-id { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.so-tm-score { font-size: 22px; font-weight: 800; }
+.so-tm-users { font-size: 10px; color: rgba(255,255,255,0.5); }
+.so-right-panel { flex: 0 0 200px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.so-donut-area { }
+.so-donut-svg { width: 140px; height: 140px; filter: drop-shadow(0 0 12px rgba(99,102,241,0.2)); }
+.so-segments { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.so-seg-item { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; cursor: pointer; transition: background .15s; font-size: 12px; }
+.so-seg-item:hover, .so-seg-item.active { background: rgba(255,255,255,0.06); }
+.so-seg-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.so-seg-count { font-weight: 700; color: rgba(255,255,255,0.9); min-width: 20px; }
+.so-seg-label { color: rgba(255,255,255,0.45); }
+.so-dim-rings { display: flex; gap: 6px; justify-content: center; }
 .so-dim-ring { text-align: center; cursor: pointer; opacity: 0.7; transition: all .2s; }
 .so-dim-ring:hover, .so-dim-ring.active { opacity: 1; transform: scale(1.1); }
-.so-dim-ring svg { width: 48px; height: 48px; }
-.so-dim-label { font-size: 9px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+.so-dim-ring svg { width: 40px; height: 40px; }
+.so-dim-label { font-size: 9px; color: rgba(255,255,255,0.5); }
+.so-user-count { font-weight: 600; color: rgba(255,255,255,0.6); text-align: center; }
 
 /* === L1 Rank === */
 .so-rank-section { background: var(--bg-surface, #1e293b); border: 1px solid var(--border-subtle, #334155); border-radius: 12px; padding: 16px 20px; }
@@ -546,9 +612,9 @@ onUnmounted(() => {
 .sp-trend-svg { width:100%; background:rgba(255,255,255,0.02); border-radius:6px; }
 
 @media (max-width:768px) {
-  .so-stats { flex-wrap: wrap; gap: 6px; }
-  .so-stat-card { min-width: 70px; padding: 6px 10px; }
-  .so-dim-rings { position: static; justify-content: center; margin-top: 8px; }
+  .so-overlay { flex-direction: column; }
+  .so-right-panel { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .so-segments { flex-direction: row; flex-wrap: wrap; width: auto; }
   .sp-traffic-grid { grid-template-columns: repeat(3,1fr); }
   .sp-engine-grid { grid-template-columns: repeat(3,1fr); }
 }
