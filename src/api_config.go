@@ -993,6 +993,19 @@ func (api *ManagementAPI) handleConfigValidate(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// handleConfigSettingsGet GET /api/v1/config/settings — 返回当前运行配置（引擎开关等）
+func (api *ManagementAPI) handleConfigSettingsGet(w http.ResponseWriter, r *http.Request) {
+	// 将 Config 结构体序列化为 map 以支持前端嵌套路径取值
+	data, err := json.Marshal(api.cfg)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": "serialize config failed"})
+		return
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	jsonResponse(w, 200, result)
+}
+
 // handleConfigSettingsUpdate PUT /api/v1/config/settings — 批量更新配置字段并持久化
 func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	var req map[string]interface{}

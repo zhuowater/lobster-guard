@@ -801,6 +801,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleConfigValidate(w, r)
 	case path == "/api/v1/config/validate" && method == "POST":
 		api.handleConfigValidatePost(w, r)
+	case path == "/api/v1/config/settings" && method == "GET":
+		api.handleConfigSettingsGet(w, r)
 	case path == "/api/v1/config/settings" && method == "PUT":
 		api.handleConfigSettingsUpdate(w, r)
 	case path == "/api/v1/alerts/test" && method == "POST":
