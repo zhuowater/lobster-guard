@@ -40,7 +40,7 @@
           </div>
           <div class="filter-group">
             <select v-model="filterDirection" class="filter-select"><option value="">全部方向</option><option value="inbound">入站</option><option value="outbound">出站</option></select>
-            <select v-model="filterAction" class="filter-select"><option value="">所有动作</option><option value="block">block</option><option value="warn">warn</option><option value="log">log</option></select>
+            <select v-model="filterAction" class="filter-select"><option value="">所有动作</option><option value="block">block</option><option value="review">review</option><option value="warn">warn</option><option value="log">log</option></select>
             <select v-model="filterGroup" class="filter-select"><option value="">所有分组</option><option v-for="g in allGroups" :key="g" :value="g">{{ g }}</option></select>
           </div>
         </div>
@@ -49,6 +49,7 @@
           <button class="btn btn-ghost btn-sm" @click="batchAction('block')">批量拦截</button>
           <button class="btn btn-ghost btn-sm" @click="batchAction('warn')">批量警告</button>
           <button class="btn btn-ghost btn-sm" @click="batchAction('log')">批量记录</button>
+          <button class="btn btn-ghost btn-sm" @click="batchSetReview">批量 Review</button>
           <button class="btn btn-danger btn-sm" @click="confirmBatchDelete">批量删除</button>
           <button class="btn btn-ghost btn-sm" @click="selectedRules = []">取消</button>
         </div>
@@ -56,19 +57,20 @@
           <template #cell-select="{ row }"><input type="checkbox" class="rule-checkbox" :checked="selectedRules.includes(row._key)" @click.stop="toggleSelectRule(row._key)" /></template>
           <template #cell-direction="{ row }"><span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span></template>
           <template #cell-name="{ row }"><span class="rule-name" :class="{ 'high-priority': (row.priority || 0) >= 80 }">{{ row.display_name || row.name }}</span><span v-if="row.display_name" class="rule-id-hint" :title="row.name">{{ row.name }}</span><span v-if="(row.priority || 0) >= 80" class="priority-badge" title="高优先级">🔥</span><span v-if="row.shadow_mode" class="shadow-badge" title="影子模式：仅记录不拦截">👻</span></template>
-          <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
+          <template #cell-action="{ row }"><span v-if="isInReview(row.name) && row.action === 'block'" class="tag tag-review" title="LLM 自动复核中">review</span><span v-else class="tag" :class="actTag(row.action)">{{ row.action }}</span></template>
           <template #cell-type="{ value }"><span class="tag tag-info">{{ value || 'keyword' }}</span></template>
           <template #cell-priority="{ row }"><span class="priority-num" :class="priorityClass(row.priority)">{{ row.priority ?? '--' }}</span></template>
           <template #cell-group="{ value }"><span v-if="value" class="tag" :style="{ background: groupColor(value), color: '#fff' }">{{ value }}</span><span v-else class="text-muted">--</span></template>
           <template #expand="{ row }">
             <div class="rule-expand-detail">
               <div class="expand-row"><b>名称:</b> {{ row.display_name || row.name }}<span v-if="row.display_name" style="color:var(--text-secondary);font-size:.75rem;margin-left:8px">({{ row.name }})</span></div>
-              <div class="expand-row"><b>方向:</b> <span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'" style="font-size:.72rem">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span> | <b>类型:</b> {{ row.type || 'keyword' }} | <b>动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> | <b>优先级:</b> {{ row.priority ?? '--' }}</div>
+              <div class="expand-row"><b>方向:</b> <span class="tag" :class="row._direction === 'inbound' ? 'tag-success' : 'tag-info'" style="font-size:.72rem">{{ row._direction === 'inbound' ? '入站' : '出站' }}</span> | <b>类型:</b> {{ row.type || 'keyword' }} | <b>动作:</b> <span v-if="isInReview(row.name) && row.action === 'block'" class="tag tag-review" style="font-size:.72rem">review</span><span v-else class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> | <b>优先级:</b> {{ row.priority ?? '--' }}<span v-if="isInReview(row.name)" style="margin-left:8px;font-size:.72rem;color:var(--color-warning)">⚡ LLM 复核中 ({{ getReviewReason(row.name) }})</span></div>
               <div class="expand-row" v-if="row.message"><b>自定义消息:</b> {{ row.message }}</div>
               <div v-if="row.patterns && row.patterns.length" class="expand-row"><b>模式 ({{ row.patterns.length }}):</b><pre class="pattern-pre">{{ row.patterns.join('\n') }}</pre></div>
             </div>
           </template>
           <template #actions="{ row }">
+            <button v-if="row.action === 'block' && row._direction === 'inbound'" class="btn btn-sm" :class="isInReview(row.name) ? 'btn-review-active' : 'btn-ghost'" @click.stop="toggleReview(row)" :title="isInReview(row.name) ? '恢复为 block' : '设为 LLM Review'" style="margin-right:4px">{{ isInReview(row.name) ? '🔍' : '🔎' }}</button>
             <button class="btn btn-sm" :class="row.shadow_mode ? 'btn-warning' : 'btn-ghost'" @click.stop="toggleShadow(row)" :title="row.shadow_mode ? '切换为正常模式' : '切换为影子模式'" style="margin-right:4px">{{ row.shadow_mode ? '👻' : '🛡️' }}</button>
             <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row, row._direction)" title="编辑"><Icon name="edit" :size="12" /></button>
             <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row, row._direction)" style="margin-left:4px" title="删除"><Icon name="trash" :size="12" /></button>
@@ -485,7 +487,13 @@ const filteredAllRules = computed(() => {
     )
   }
   if (filterDirection.value) list = list.filter(r => r._direction === filterDirection.value)
-  if (filterAction.value) list = list.filter(r => r.action === filterAction.value)
+  if (filterAction.value) {
+    if (filterAction.value === 'review') {
+      list = list.filter(r => r.action === 'block' && isInReview(r.name))
+    } else {
+      list = list.filter(r => r.action === filterAction.value)
+    }
+  }
   if (filterGroup.value) list = list.filter(r => r.group === filterGroup.value)
   return list
 })
@@ -547,6 +555,41 @@ const confirmTitle = ref('')
 const confirmMessage = ref('')
 const confirmType = ref('warning')
 let confirmAction = null
+
+// ====== Auto-Review Status ======
+const reviewRules = ref([]) // Array of { rule_name, is_manual, reason }
+async function loadReviewStatus() {
+  try {
+    const d = await api('/api/v1/auto-review/status')
+    reviewRules.value = d.rules || []
+  } catch { reviewRules.value = [] }
+}
+function isInReview(ruleName) {
+  return reviewRules.value.some(r => r.rule_name === ruleName)
+}
+function getReviewReason(ruleName) {
+  const r = reviewRules.value.find(r => r.rule_name === ruleName)
+  if (!r) return ''
+  return r.is_manual ? '手动指定' : '自动降级'
+}
+async function toggleReview(row) {
+  const inReview = isInReview(row.name)
+  const endpoint = inReview ? 'restore' : 'review'
+  try {
+    await apiPost(`/api/v1/auto-review/rules/${row.name}/${endpoint}`, {})
+    showToast(`${row.display_name || row.name} → ${inReview ? '恢复 block' : 'LLM Review 模式'}`, 'success')
+    loadReviewStatus()
+  } catch (e) { showToast('操作失败: ' + e.message, 'error') }
+}
+async function batchSetReview() {
+  const keys = [...selectedRules.value]; if (!keys.length) return; let success = 0; let failed = 0
+  for (const key of keys) {
+    const rule = allRules.value.find(r => r._key === key); if (!rule || rule.action !== 'block' || rule._direction !== 'inbound') continue
+    try { await apiPost(`/api/v1/auto-review/rules/${rule.name}/review`, {}); success++ } catch { failed++ }
+  }
+  showToast('批量设为 Review: 成功 ' + success + ' 条' + (failed ? ', 失败 ' + failed + ' 条' : ''), failed ? 'error' : 'success')
+  selectedRules.value = []; loadReviewStatus()
+}
 
 const debugText = ref('')
 const debugResult = ref(null)
@@ -888,7 +931,7 @@ async function loadOverlap() {
   overlapLoading.value = false
 }
 
-onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTemplates() })
+onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTemplates(); loadReviewStatus() })
 </script>
 
 <style scoped>
@@ -918,6 +961,10 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTem
 .shadow-badge { margin-left: 4px; font-size: .75rem; opacity: .8; }
 .btn-warning { background: #f59e0b; color: #fff; border: none; }
 .btn-warning:hover { background: #d97706; }
+.tag-review { background: rgba(168, 85, 247, .15); color: #a855f7; border: 1px solid rgba(168, 85, 247, .3); animation: reviewPulse 2s infinite; }
+@keyframes reviewPulse { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
+.btn-review-active { background: rgba(168, 85, 247, .15); color: #a855f7; border: 1px solid rgba(168, 85, 247, .3); }
+.btn-review-active:hover { background: rgba(168, 85, 247, .25); }
 .rule-name { font-weight: 500; }
 .rule-name.high-priority { color: #ff6b6b; }
 .rule-id-hint { display: inline-block; margin-left: 6px; font-size: .72rem; color: var(--text-secondary); opacity: .6; font-family: var(--font-mono); }
