@@ -412,15 +412,7 @@
             <div class="ar-stat-card"><div class="ar-stat-value" style="color:var(--color-warning)">{{ arStats.avg_latency_ms != null ? arStats.avg_latency_ms.toFixed(0) + 'ms' : '--' }}</div><div class="ar-stat-label">平均延迟</div></div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header"><span class="card-icon">✏️</span><span class="card-title">人工 Review 规则</span>
-            <div class="card-actions"><div class="ar-add-rule"><input v-model="newReviewRule" class="cfg-input" style="width:180px" placeholder="规则名称" @keyup.enter="addReviewRule" /><button class="btn btn-sm btn-primary" @click="addReviewRule" :disabled="!newReviewRule.trim()">添加</button></div></div>
-          </div>
-          <div v-if="!arManualRules.length" class="empty" style="padding:24px"><div class="empty-icon">📝</div>暂无人工 Review 规则</div>
-          <div v-else class="ar-manual-list">
-            <div v-for="(rule, idx) in arManualRules" :key="rule" class="ar-manual-item"><code>{{ rule }}</code><button class="btn btn-xs btn-ghost" style="color:var(--color-danger)" @click="confirmRemoveManualRule(rule, idx)">移除</button></div>
-          </div>
-        </div>
+        <!-- 人工 Review 规则已移除：review 现在是规则的第四种 action，直接在规则编辑器里设置 -->
       </template>
     </div>
 
@@ -864,8 +856,7 @@ const arConfig = reactive({ enabled: false, window_sec: 300, spike_threshold: 10
 const showArKey = ref(false)
 const arRules = ref([])
 const arStats = ref({})
-const arManualRules = ref([])
-const newReviewRule = ref('')
+// arManualRules removed: review is now a direct rule action
 
 async function loadAutoReview() {
   arLoading.value = true
@@ -887,7 +878,7 @@ async function loadAutoReview() {
       arConfig.llm_timeout_sec = c.llm_timeout_sec || 10
     }
     arRules.value = status.rules || []
-    arManualRules.value = status.manual_review_rules || []
+    // manual_review_rules no longer used in UI
     arStats.value = stats || {}
     arLoaded.value = true
   } catch (e) { showToast('加载 AC 分级失败: ' + e.message, 'error') }
@@ -923,21 +914,6 @@ async function doRestoreRule(r) {
   try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(r.name) + '/restore', {}); showToast('已恢复 ' + r.name, 'success'); loadAutoReview() }
   catch (e) { showToast('恢复失败: ' + e.message, 'error') }
   r.restoring = false
-}
-
-async function addReviewRule() {
-  const name = newReviewRule.value.trim()
-  if (!name) return
-  try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(name) + '/review', { manual: true }); arManualRules.value.push(name); newReviewRule.value = ''; showToast('已添加', 'success') }
-  catch (e) { showToast('添加失败: ' + e.message, 'error') }
-}
-
-function confirmRemoveManualRule(rule, idx) {
-  confirmTitle.value = '移除规则'; confirmMessage.value = '确认移除人工 Review 规则 "' + rule + '"？'
-  confirmType.value = 'danger'; confirmAction = async () => {
-    try { await apiPost('/api/v1/auto-review/rules/' + encodeURIComponent(rule) + '/restore', {}); arManualRules.value.splice(idx, 1); showToast('已移除', 'success') }
-    catch (e) { showToast('移除失败: ' + e.message, 'error') }
-  }; confirmVisible.value = true
 }
 
 function formatTTL(sec) {
