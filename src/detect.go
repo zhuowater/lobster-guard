@@ -24,7 +24,7 @@ const (
 	LevelMedium
 	LevelLow
 )
-type Rule struct { Name string; Level RuleLevel; Category string; Priority int; Message string; Group string; ShadowMode bool; Enabled bool }
+type Rule struct { Name string; Level RuleLevel; Action string; Category string; Priority int; Message string; Group string; ShadowMode bool; Enabled bool }
 
 // isEnabled 解析 *bool 指针，nil 默认为 true（旧配置兼容）
 func isEnabled(p *bool) bool {
@@ -61,6 +61,7 @@ type RegexRule struct {
 	Name       string
 	Pattern    *regexp.Regexp
 	Level      RuleLevel
+	Action     string
 	Category   string
 	Priority   int
 	Message    string
@@ -97,7 +98,7 @@ type RuleEngine struct {
 // actionToLevel 将 action 字符串映射到 RuleLevel
 func actionToLevel(action string) RuleLevel {
 	switch action {
-	case "block":
+	case "block", "review":
 		return LevelHigh
 	case "warn":
 		return LevelMedium
@@ -121,7 +122,7 @@ func buildACFromConfigs(configs []InboundRuleConfig) (*AhoCorasick, []Rule) {
 		level := actionToLevel(cfg.Action)
 		for _, p := range cfg.Patterns {
 			patterns = append(patterns, p)
-			rules = append(rules, Rule{Name: cfg.Name, Level: level, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message, Group: cfg.Group, ShadowMode: cfg.ShadowMode, Enabled: isEnabled(cfg.Enabled)})
+			rules = append(rules, Rule{Name: cfg.Name, Level: level, Action: cfg.Action, Category: cfg.Category, Priority: cfg.Priority, Message: cfg.Message, Group: cfg.Group, ShadowMode: cfg.ShadowMode, Enabled: isEnabled(cfg.Enabled)})
 		}
 	}
 	if len(patterns) == 0 {
@@ -149,6 +150,7 @@ func buildRegexRules(configs []InboundRuleConfig) []RegexRule {
 				Name:       cfg.Name,
 				Pattern:    compiled,
 				Level:      level,
+				Action:     cfg.Action,
 				Category:   cfg.Category,
 				Priority:   cfg.Priority,
 				Message:    cfg.Message,
@@ -424,6 +426,8 @@ type DetectResult struct { Action string; Reasons []string; PIIs []string; Messa
 func actionWeight(action string) int {
 	switch action {
 	case "block":
+		return 4
+	case "review":
 		return 3
 	case "warn":
 		return 2
@@ -486,7 +490,8 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 		if !isRuleApplicable(rule.Group, applicableGroups) {
 			continue
 		}
-		action := levelToAction(rule.Level)
+		action := rule.Action
+		if action == "" { action = levelToAction(rule.Level) }
 		if existing, ok := matchesByName[rule.Name]; ok {
 			// Same rule name (different pattern), keep if higher priority or higher action weight
 			if rule.Priority > existing.Priority ||
@@ -533,7 +538,7 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 		if !matched {
 			continue
 		}
-		action := levelToAction(rr.Level)
+		action := rr.Action; if action == "" { action = levelToAction(rr.Level) }
 		if existing, ok := matchesByName[rr.Name]; ok {
 			if rr.Priority > existing.Priority ||
 				(rr.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
@@ -605,9 +610,13 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 		}
 	}
 
-	// v31.0: AC 智能分级 — block 前检查 auto-review
-	if r.Action == "block" && re.autoReviewMgr != nil && len(r.MatchedRules) > 0 {
-		// 记录所有命中规则到滑动窗口 + 检查是否全部处于 review 状态
+	// v31.0: AC 智能分级 — review 动作触发 LLM 复核
+	// 同时保留自动降级: block 规则如果被 autoReviewMgr 判定为突增也走 LLM
+	if r.Action == "review" && re.autoReviewMgr != nil && len(r.MatchedRules) > 0 {
+		// review 动作: 直接走 LLM 复核
+		r.Action = re.autoReviewMgr.ReviewWithLLM(r.MatchedRules[0], text)
+	} else if r.Action == "block" && re.autoReviewMgr != nil && len(r.MatchedRules) > 0 {
+		// block 动作: 记录到滑动窗口，突增时自动降级为 LLM 复核
 		allInReview := true
 		for _, rule := range r.MatchedRules {
 			re.autoReviewMgr.RecordBlock(rule)
@@ -616,7 +625,6 @@ func (re *RuleEngine) DetectWithAppID(text, appID string) DetectResult {
 			}
 		}
 		if allInReview {
-			// 所有命中规则均已降级 → 触发 LLM 复核
 			r.Action = re.autoReviewMgr.ReviewWithLLM(r.MatchedRules[0], text)
 		}
 	}
@@ -1142,7 +1150,7 @@ func (re *RuleEngine) DetectGlobalTemplates(text string) DetectResult {
 				continue
 			}
 			rule := rules[idx]
-			action := levelToAction(rule.Level)
+			action := rule.Action; if action == "" { action = levelToAction(rule.Level) }
 			if existing, ok := matchesByName[rule.Name]; ok {
 				if rule.Priority > existing.Priority ||
 					(rule.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
@@ -1162,7 +1170,7 @@ func (re *RuleEngine) DetectGlobalTemplates(text string) DetectResult {
 			continue
 		}
 		if rr.Pattern.MatchString(text) {
-			action := levelToAction(rr.Level)
+			action := rr.Action; if action == "" { action = levelToAction(rr.Level) }
 			if existing, ok := matchesByName[rr.Name]; ok {
 				if rr.Priority > existing.Priority {
 					existing.Level = rr.Level
@@ -1311,7 +1319,7 @@ func (re *RuleEngine) DetectTenantRules(tenantID, text string) DetectResult {
 				continue
 			}
 			rule := rules[idx]
-			action := levelToAction(rule.Level)
+			action := rule.Action; if action == "" { action = levelToAction(rule.Level) }
 			if existing, ok := matchesByName[rule.Name]; ok {
 				if rule.Priority > existing.Priority ||
 					(rule.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {
@@ -1351,7 +1359,7 @@ func (re *RuleEngine) DetectTenantRules(tenantID, text string) DetectResult {
 		if !matched {
 			continue
 		}
-		action := levelToAction(rr.Level)
+		action := rr.Action; if action == "" { action = levelToAction(rr.Level) }
 		if existing, ok := matchesByName[rr.Name]; ok {
 			if rr.Priority > existing.Priority ||
 				(rr.Priority == existing.Priority && actionWeight(action) > actionWeight(existing.Action)) {

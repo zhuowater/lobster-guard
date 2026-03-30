@@ -37,6 +37,7 @@
               <label>动作</label>
               <select v-model="form.action">
                 <option value="block">block (拦截)</option>
+                <option value="review">review (LLM复核)</option>
                 <option value="warn">warn (警告)</option>
                 <option value="log">log (记录)</option>
               </select>

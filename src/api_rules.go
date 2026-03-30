@@ -266,8 +266,8 @@ func (api *ManagementAPI) handleAddOutboundRule(w http.ResponseWriter, r *http.R
 	if req.Action == "" {
 		req.Action = "log"
 	}
-	if req.Action != "block" && req.Action != "warn" && req.Action != "log" {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/warn/log"})
+	if !validateInboundAction(req.Action) {
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
 		return
 	}
 
@@ -301,8 +301,8 @@ func (api *ManagementAPI) handleUpdateOutboundRule(w http.ResponseWriter, r *htt
 		jsonResponse(w, 400, map[string]string{"error": "pattern or patterns required"})
 		return
 	}
-	if req.Action != "" && req.Action != "block" && req.Action != "warn" && req.Action != "log" {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/warn/log"})
+	if req.Action != "" && !validateInboundAction(req.Action) {
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
 		return
 	}
 
@@ -389,7 +389,7 @@ func (api *ManagementAPI) handleAddInboundRule(w http.ResponseWriter, r *http.Re
 		req.Action = "block"
 	}
 	if !validateInboundAction(req.Action) {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/warn/log"})
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
 		return
 	}
 	if req.Type != "" && req.Type != "keyword" && req.Type != "regex" {
@@ -441,7 +441,7 @@ func (api *ManagementAPI) handleUpdateInboundRule(w http.ResponseWriter, r *http
 		return
 	}
 	if req.Action != "" && !validateInboundAction(req.Action) {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/warn/log"})
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
 		return
 	}
 	if req.Type != "" && req.Type != "keyword" && req.Type != "regex" {

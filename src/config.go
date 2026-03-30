@@ -432,7 +432,7 @@ func (cfg *Config) IsMetricsEnabled() bool {
 // validateInboundAction 验证入站规则的 action 字段
 func validateInboundAction(action string) bool {
 	switch action {
-	case "block", "warn", "log":
+	case "block", "review", "warn", "log":
 		return true
 	default:
 		return false
