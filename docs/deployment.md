@@ -50,13 +50,13 @@ sudo systemctl enable lobster-guard
 
 ```bash
 # 构建镜像
-docker build -t lobster-guard:v22.4 .
+docker build -t lobster-guard:v33.0 .
 
 # 运行
 docker run -d --name lobster-guard \
   -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
   -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-  lobster-guard:v22.4
+  lobster-guard:v33.0
 
 # 或 Docker Compose 一键启动
 docker compose up -d

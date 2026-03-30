@@ -1,4 +1,4 @@
-# 📡 API 参考（~227 路由）
+# 📡 API 参考（487 路由）
 
 > 返回 [README](../README.md)
 
@@ -96,7 +96,7 @@
 | GET | `/api/v1/metrics/realtime` | 实时统计 |
 | GET | `/api/v1/ws/connections` | WebSocket 连接列表 |
 
-> 以上为主要 API 摘要，完整 ~227 路由参见源码 `src/api.go`。
+> 以上为主要 API 摘要，完整 487 路由参见源码 `src/api.go`。
 
 ## API 调用示例
 
@@ -237,7 +237,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | GET | `/api/v1/gateway/log` | 网关日志 |
 | GET/PUT | `/api/v1/gateway/config` | 网关配置 |
 
-### Dashboard 企业级打磨 (v20.7)
+### Dashboard 企业级打磨 (v33.0)
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | PUT | `/api/v1/config/settings` | 批量更新配置（回写 config.yaml + 内存） |
