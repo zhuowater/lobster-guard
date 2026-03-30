@@ -186,6 +186,7 @@
             <span class="tag tag-success">{{ enabledCount }} 已启用</span>
             <span class="tag tag-info">{{ industryTemplates.length }} 个行业</span>
           </span>
+          <button class="btn btn-sm" @click="openCreateIndustryTemplate">新建模板</button>
           <button class="btn btn-ghost btn-sm" @click="loadIndustryTemplates">刷新</button>
         </div>
       </div>
@@ -209,10 +210,14 @@
                 <div class="industry-desc">{{ tpl.description }}</div>
               </div>
             </div>
-            <label class="toggle-switch" @click.stop>
-              <input type="checkbox" :checked="tpl.enabled" @change="toggleIndustryTemplate(tpl)" />
-              <span class="toggle-slider"></span>
-            </label>
+            <div class="industry-card-actions">
+              <button class="btn btn-ghost btn-xs" @click.stop="openEditIndustryTemplate(tpl)" title="编辑模板"><Icon name="edit" :size="12" /></button>
+              <button class="btn btn-danger btn-xs" @click.stop="confirmDeleteIndustryTemplate(tpl)" title="删除模板"><Icon name="trash" :size="12" /></button>
+              <label class="toggle-switch" @click.stop>
+                <input type="checkbox" :checked="tpl.enabled" @change="toggleIndustryTemplate(tpl)" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
           </div>
 
           <div class="industry-card-stats">
@@ -243,37 +248,58 @@
             <div v-if="detailLoading" style="padding:12px;text-align:center;color:var(--text-secondary)">加载中...</div>
             <div v-else>
               <div v-if="detailData.inbound_rules && detailData.inbound_rules.length" class="detail-section">
-                <div class="detail-section-title">🛡️ 入站规则 ({{ detailData.inbound_rules.length }})</div>
-                <div v-for="rule in detailData.inbound_rules" :key="rule.name" class="detail-rule">
+                <div class="detail-section-title">🛡️ 入站规则 ({{ detailData.inbound_rules.length }}) <button class="btn btn-ghost btn-xs" @click="openAddTplRule('inbound')">+ 添加</button></div>
+                <div v-for="(rule, idx) in detailData.inbound_rules" :key="rule.name" class="detail-rule">
                   <div class="detail-rule-header">
                     <span class="detail-rule-name">{{ rule.display_name || rule.name }}</span>
                     <span class="tag" :class="actTag(rule.action)" style="font-size:.7rem">{{ rule.action }}</span>
                     <span class="tag tag-info" style="font-size:.7rem">{{ rule.type || 'keyword' }}</span>
+                    <span class="detail-rule-actions">
+                      <button class="btn btn-ghost btn-xs" @click="openEditTplRule('inbound', idx)" title="编辑"><Icon name="edit" :size="10" /></button>
+                      <button class="btn btn-danger btn-xs" @click="removeTplRule('inbound', idx)" title="删除"><Icon name="trash" :size="10" /></button>
+                    </span>
                   </div>
                   <div class="detail-rule-patterns">{{ (rule.patterns || []).length }} 个匹配模式</div>
                 </div>
               </div>
+              <div v-if="!detailData.inbound_rules || !detailData.inbound_rules.length" class="detail-section">
+                <div class="detail-section-title">🛡️ 入站规则 (0) <button class="btn btn-ghost btn-xs" @click="openAddTplRule('inbound')">+ 添加</button></div>
+              </div>
               <div v-if="detailData.llm_rules && detailData.llm_rules.length" class="detail-section">
-                <div class="detail-section-title">🤖 LLM 规则 ({{ detailData.llm_rules.length }})</div>
-                <div v-for="rule in detailData.llm_rules" :key="rule.id || rule.name" class="detail-rule">
+                <div class="detail-section-title">🤖 LLM 规则 ({{ detailData.llm_rules.length }}) <button class="btn btn-ghost btn-xs" @click="openAddTplRule('llm')">+ 添加</button></div>
+                <div v-for="(rule, idx) in detailData.llm_rules" :key="rule.id || rule.name" class="detail-rule">
                   <div class="detail-rule-header">
                     <span class="detail-rule-name">{{ rule.name }}</span>
                     <span class="tag" :class="actTag(rule.action)" style="font-size:.7rem">{{ rule.action }}</span>
                     <span class="tag tag-info" style="font-size:.7rem">{{ rule.direction || 'both' }}</span>
+                    <span class="detail-rule-actions">
+                      <button class="btn btn-ghost btn-xs" @click="openEditTplRule('llm', idx)" title="编辑"><Icon name="edit" :size="10" /></button>
+                      <button class="btn btn-danger btn-xs" @click="removeTplRule('llm', idx)" title="删除"><Icon name="trash" :size="10" /></button>
+                    </span>
                   </div>
                   <div class="detail-rule-patterns">{{ (rule.patterns || []).length }} 个匹配模式</div>
                 </div>
               </div>
+              <div v-if="!detailData.llm_rules || !detailData.llm_rules.length" class="detail-section">
+                <div class="detail-section-title">🤖 LLM 规则 (0) <button class="btn btn-ghost btn-xs" @click="openAddTplRule('llm')">+ 添加</button></div>
+              </div>
               <div v-if="detailData.outbound_rules && detailData.outbound_rules.length" class="detail-section">
-                <div class="detail-section-title">📤 出站规则 ({{ detailData.outbound_rules.length }})</div>
-                <div v-for="rule in detailData.outbound_rules" :key="rule.name" class="detail-rule">
+                <div class="detail-section-title">📤 出站规则 ({{ detailData.outbound_rules.length }}) <button class="btn btn-ghost btn-xs" @click="openAddTplRule('outbound')">+ 添加</button></div>
+                <div v-for="(rule, idx) in detailData.outbound_rules" :key="rule.name" class="detail-rule">
                   <div class="detail-rule-header">
                     <span class="detail-rule-name">{{ rule.name }}</span>
                     <span class="tag" :class="actTag(rule.action)" style="font-size:.7rem">{{ rule.action }}</span>
                     <span class="tag tag-info" style="font-size:.7rem">regex</span>
+                    <span class="detail-rule-actions">
+                      <button class="btn btn-ghost btn-xs" @click="openEditTplRule('outbound', idx)" title="编辑"><Icon name="edit" :size="10" /></button>
+                      <button class="btn btn-danger btn-xs" @click="removeTplRule('outbound', idx)" title="删除"><Icon name="trash" :size="10" /></button>
+                    </span>
                   </div>
                   <div class="detail-rule-patterns">{{ (rule.patterns || []).length }} 个匹配模式</div>
                 </div>
+              </div>
+              <div v-if="!detailData.outbound_rules || !detailData.outbound_rules.length" class="detail-section">
+                <div class="detail-section-title">📤 出站规则 (0) <button class="btn btn-ghost btn-xs" @click="openAddTplRule('outbound')">+ 添加</button></div>
               </div>
               <div v-if="!detailData.inbound_rules?.length && !detailData.llm_rules?.length && !detailData.outbound_rules?.length" style="padding:12px;text-align:center;color:var(--text-secondary)">
                 该模板暂无规则
@@ -307,6 +333,83 @@
     </Teleport>
 
     <RuleEditor :visible="editorVisible" :rule="editingRule" :direction="editingDirection" :errors="editorErrors" @close="closeEditor" @save="saveRule" />
+
+    <!-- Industry Template Editor Modal -->
+    <Teleport to="body">
+      <div v-if="showTplEditor" class="modal-overlay" @click.self="showTplEditor = false">
+        <div class="import-panel" style="width:520px">
+          <div class="import-header">
+            <span style="font-weight:600;flex:1">{{ editingTpl ? '编辑行业模板' : '新建行业模板' }}</span>
+            <button class="editor-close" @click="showTplEditor = false">✕</button>
+          </div>
+          <div class="import-body">
+            <div class="tpl-form-row"><label>模板 ID</label><input v-model="tplForm.id" class="tpl-form-input" placeholder="如 my-custom-template" :disabled="!!editingTpl" /></div>
+            <div class="tpl-form-row"><label>名称</label><input v-model="tplForm.name" class="tpl-form-input" placeholder="如 我的自定义模板" /></div>
+            <div class="tpl-form-row"><label>描述</label><input v-model="tplForm.description" class="tpl-form-input" placeholder="简要描述模板用途" /></div>
+            <div class="tpl-form-row">
+              <label>分类</label>
+              <select v-model="tplForm.category" class="tpl-form-input">
+                <option value="">选择分类</option>
+                <option v-for="(meta, key) in categoryMeta" :key="key" :value="key">{{ meta.icon }} {{ meta.label }}</option>
+                <option value="other">📦 其他</option>
+              </select>
+            </div>
+          </div>
+          <div class="import-footer">
+            <button class="btn btn-ghost btn-sm" @click="showTplEditor = false">取消</button>
+            <button class="btn btn-sm" @click="saveIndustryTemplate" :disabled="!tplForm.id || !tplForm.name">{{ editingTpl ? '保存修改' : '创建模板' }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Template Rule Editor Modal -->
+    <Teleport to="body">
+      <div v-if="showTplRuleEditor" class="modal-overlay" @click.self="showTplRuleEditor = false">
+        <div class="import-panel" style="width:600px">
+          <div class="import-header">
+            <span style="font-weight:600;flex:1">{{ editingTplRuleIdx >= 0 ? '编辑模板规则' : '添加模板规则' }} ({{ tplRuleLayerLabel }})</span>
+            <button class="editor-close" @click="showTplRuleEditor = false">✕</button>
+          </div>
+          <div class="import-body">
+            <div class="tpl-form-row"><label>规则名称</label><input v-model="tplRuleForm.name" class="tpl-form-input" placeholder="规则唯一标识" /></div>
+            <div class="tpl-form-row" v-if="tplRuleForm.display_name !== undefined"><label>显示名称</label><input v-model="tplRuleForm.display_name" class="tpl-form-input" placeholder="中文显示名（可选）" /></div>
+            <div class="tpl-form-row">
+              <label>动作</label>
+              <select v-model="tplRuleForm.action" class="tpl-form-input">
+                <option value="block">block</option>
+                <option value="warn">warn</option>
+                <option value="log">log</option>
+              </select>
+            </div>
+            <div class="tpl-form-row" v-if="editingTplRuleLayer !== 'outbound'">
+              <label>类型</label>
+              <select v-model="tplRuleForm.type" class="tpl-form-input">
+                <option value="keyword">keyword</option>
+                <option value="regex">regex</option>
+              </select>
+            </div>
+            <div class="tpl-form-row" v-if="editingTplRuleLayer === 'llm'">
+              <label>方向</label>
+              <select v-model="tplRuleForm.direction" class="tpl-form-input">
+                <option value="request">request</option>
+                <option value="response">response</option>
+                <option value="both">both</option>
+              </select>
+            </div>
+            <div class="tpl-form-row">
+              <label>匹配模式（每行一个）</label>
+              <textarea v-model="tplRulePatternsText" rows="6" class="import-textarea" placeholder="每行输入一个模式"></textarea>
+            </div>
+          </div>
+          <div class="import-footer">
+            <button class="btn btn-ghost btn-sm" @click="showTplRuleEditor = false">取消</button>
+            <button class="btn btn-sm" @click="saveTplRule" :disabled="!tplRuleForm.name">保存</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <ConfirmModal :visible="confirmVisible" :title="confirmTitle" :message="confirmMessage" :type="confirmType" @confirm="doConfirm" @cancel="confirmVisible = false" />
   </div>
 </template>
@@ -529,6 +632,141 @@ async function toggleDetail(id) {
     detailData.value = {}
   }
   detailLoading.value = false
+}
+
+// ====== Industry Template CRUD ======
+const showTplEditor = ref(false)
+const editingTpl = ref(null)
+const tplForm = ref({ id: '', name: '', description: '', category: '' })
+
+function openCreateIndustryTemplate() {
+  editingTpl.value = null
+  tplForm.value = { id: '', name: '', description: '', category: '' }
+  showTplEditor.value = true
+}
+function openEditIndustryTemplate(tpl) {
+  editingTpl.value = tpl
+  tplForm.value = { id: tpl.id, name: tpl.name, description: tpl.description || '', category: tpl.category || '' }
+  showTplEditor.value = true
+}
+async function saveIndustryTemplate() {
+  try {
+    if (editingTpl.value) {
+      await apiPut(`/api/v1/industry-templates/${editingTpl.value.id}`, tplForm.value)
+      showToast('模板已更新: ' + tplForm.value.name, 'success')
+    } else {
+      await apiPost('/api/v1/industry-templates', tplForm.value)
+      showToast('模板已创建: ' + tplForm.value.name, 'success')
+    }
+    showTplEditor.value = false
+    loadIndustryTemplates()
+  } catch (e) { showToast('操作失败: ' + e.message, 'error') }
+}
+function confirmDeleteIndustryTemplate(tpl) {
+  confirmTitle.value = '删除行业模板'
+  confirmMessage.value = `确认删除模板 "${tpl.name}"？该模板下的所有规则将被移除，此操作不可恢复。`
+  confirmType.value = 'danger'
+  confirmAction = async () => {
+    try {
+      await apiDelete(`/api/v1/industry-templates/${tpl.id}`)
+      showToast('模板已删除: ' + tpl.name, 'success')
+      if (expandedIndustry.value === tpl.id) { expandedIndustry.value = null; detailData.value = {} }
+      loadIndustryTemplates()
+    } catch (e) { showToast('删除失败: ' + e.message, 'error') }
+  }
+  confirmVisible.value = true
+}
+
+// ====== Template Rule CRUD ======
+const showTplRuleEditor = ref(false)
+const editingTplRuleLayer = ref('inbound')
+const editingTplRuleIdx = ref(-1)
+const tplRuleForm = ref({ name: '', display_name: '', action: 'block', type: 'keyword', direction: 'both', patterns: [] })
+const tplRulePatternsText = ref('')
+const tplRuleLayerLabel = computed(() => {
+  const m = { inbound: '🛡️ 入站', llm: '🤖 LLM', outbound: '📤 出站' }
+  return m[editingTplRuleLayer.value] || editingTplRuleLayer.value
+})
+
+function openAddTplRule(layer) {
+  editingTplRuleLayer.value = layer
+  editingTplRuleIdx.value = -1
+  tplRuleForm.value = { name: '', display_name: '', action: 'block', type: layer === 'outbound' ? 'regex' : 'keyword', direction: 'both', patterns: [] }
+  tplRulePatternsText.value = ''
+  showTplRuleEditor.value = true
+}
+function openEditTplRule(layer, idx) {
+  editingTplRuleLayer.value = layer
+  editingTplRuleIdx.value = idx
+  const ruleKey = layer === 'llm' ? 'llm_rules' : layer === 'outbound' ? 'outbound_rules' : 'inbound_rules'
+  const rule = detailData.value[ruleKey]?.[idx]
+  if (!rule) return
+  tplRuleForm.value = { name: rule.name || '', display_name: rule.display_name || '', action: rule.action || 'block', type: rule.type || 'keyword', direction: rule.direction || 'both', patterns: [...(rule.patterns || [])] }
+  tplRulePatternsText.value = (rule.patterns || []).join('\n')
+  showTplRuleEditor.value = true
+}
+async function saveTplRule() {
+  const tplId = expandedIndustry.value
+  if (!tplId) return
+  const layer = editingTplRuleLayer.value
+  const ruleKey = layer === 'llm' ? 'llm_rules' : layer === 'outbound' ? 'outbound_rules' : 'inbound_rules'
+  const patterns = tplRulePatternsText.value.split('\n').map(s => s.trim()).filter(Boolean)
+  const ruleData = { ...tplRuleForm.value, patterns }
+  // Build updated template with modified rules
+  const updatedRules = [...(detailData.value[ruleKey] || [])]
+  if (editingTplRuleIdx.value >= 0) {
+    updatedRules[editingTplRuleIdx.value] = ruleData
+  } else {
+    updatedRules.push(ruleData)
+  }
+  const payload = {
+    id: tplId,
+    name: detailData.value.name,
+    description: detailData.value.description,
+    category: detailData.value.category,
+    inbound_rules: ruleKey === 'inbound_rules' ? updatedRules : (detailData.value.inbound_rules || []),
+    llm_rules: ruleKey === 'llm_rules' ? updatedRules : (detailData.value.llm_rules || []),
+    outbound_rules: ruleKey === 'outbound_rules' ? updatedRules : (detailData.value.outbound_rules || []),
+  }
+  try {
+    await apiPut(`/api/v1/industry-templates/${tplId}`, payload)
+    showToast('规则已保存', 'success')
+    showTplRuleEditor.value = false
+    // Refresh detail
+    const d = await api(`/api/v1/industry-templates/${tplId}`)
+    detailData.value = d
+    loadIndustryTemplates()
+  } catch (e) { showToast('保存失败: ' + e.message, 'error') }
+}
+async function removeTplRule(layer, idx) {
+  const tplId = expandedIndustry.value
+  if (!tplId) return
+  const ruleKey = layer === 'llm' ? 'llm_rules' : layer === 'outbound' ? 'outbound_rules' : 'inbound_rules'
+  const ruleName = detailData.value[ruleKey]?.[idx]?.name || '该规则'
+  confirmTitle.value = '删除模板规则'
+  confirmMessage.value = `确认从模板中删除规则 "${ruleName}"？`
+  confirmType.value = 'danger'
+  confirmAction = async () => {
+    const updatedRules = [...(detailData.value[ruleKey] || [])]
+    updatedRules.splice(idx, 1)
+    const payload = {
+      id: tplId,
+      name: detailData.value.name,
+      description: detailData.value.description,
+      category: detailData.value.category,
+      inbound_rules: ruleKey === 'inbound_rules' ? updatedRules : (detailData.value.inbound_rules || []),
+      llm_rules: ruleKey === 'llm_rules' ? updatedRules : (detailData.value.llm_rules || []),
+      outbound_rules: ruleKey === 'outbound_rules' ? updatedRules : (detailData.value.outbound_rules || []),
+    }
+    try {
+      await apiPut(`/api/v1/industry-templates/${tplId}`, payload)
+      showToast('规则已删除', 'success')
+      const d = await api(`/api/v1/industry-templates/${tplId}`)
+      detailData.value = d
+      loadIndustryTemplates()
+    } catch (e) { showToast('删除失败: ' + e.message, 'error') }
+  }
+  confirmVisible.value = true
 }
 
 function openCreateEditor() { editingRule.value = null; editingDirection.value = 'inbound'; editorErrors.value = {}; editorVisible.value = true }
@@ -783,6 +1021,17 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTem
 .overlap-pattern { font-size: .78rem; color: var(--color-warning); background: rgba(245, 158, 11, .1); padding: 2px 6px; border-radius: 4px; }
 .overlap-tags { margin-top: 6px; display: flex; gap: 4px; }
 .overlap-rules { margin-top: 4px; font-size: .72rem; color: var(--text-tertiary); }
+
+.industry-card-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.btn-xs { padding: 2px 6px; font-size: .7rem; border-radius: 4px; }
+.detail-rule-actions { margin-left: auto; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
+.detail-rule:hover .detail-rule-actions { opacity: 1; }
+.detail-section-title .btn { margin-left: 8px; font-size: .7rem; vertical-align: middle; }
+.tpl-form-row { margin-bottom: 12px; }
+.tpl-form-row label { display: block; font-size: .78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.tpl-form-input { width: 100%; background: var(--bg-base); color: var(--text-primary); border: 1px solid var(--border-default); border-radius: 6px; padding: 8px 10px; font-size: .82rem; outline: none; transition: border-color .2s; }
+.tpl-form-input:focus { border-color: var(--color-primary); }
+.tpl-form-input:disabled { opacity: .5; cursor: not-allowed; }
 
 @media (max-width: 1200px) { .debug-layers { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 768px) { .debug-layers { grid-template-columns: 1fr; } }
