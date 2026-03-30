@@ -2482,7 +2482,15 @@ func (api *ManagementAPI) handleGatewayExecApprovals(w http.ResponseWriter, r *h
 	if !ok { jsonResponse(w, 404, map[string]string{"error": "upstream not found"}); return }
 	if up.GatewayToken == "" { jsonResponse(w, 400, map[string]string{"error": "gateway_token_not_configured"}); return }
 	payload, err := api.rpcCall(up, "exec.approvals.list", map[string]interface{}{})
-	if err != nil { jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()}); return }
+	if err != nil {
+		// Gateway 不支持此方法时优雅降级为空列表
+		if strings.Contains(err.Error(), "unknown method") {
+			jsonResponse(w, 200, map[string]interface{}{"items": []interface{}{}, "source": "not_supported"})
+			return
+		}
+		jsonResponse(w, 502, map[string]interface{}{"error": "rpc_failed", "message": err.Error()})
+		return
+	}
 	jsonResponse(w, 200, payload)
 }
 
