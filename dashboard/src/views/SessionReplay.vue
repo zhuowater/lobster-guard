@@ -54,7 +54,7 @@
       <!-- Session Cards -->
       <div v-else class="session-list">
         <div v-for="s in sorted" :key="s.trace_id" class="session-card" :class="['risk-'+s.risk_level,{'has-sec':hasSec(s)}]">
-          <div class="sc-main" @click="go(s.trace_id)">
+          <div class="sc-main" @click="go(s.session_id || s.trace_id)">
             <div class="sc-top">
               <div class="sc-top-l"><span class="sc-trace mono" v-html="hl(s.trace_id)"></span><span class="risk-badge" :class="'badge-'+s.risk_level">{{ rlabel(s.risk_level) }}</span></div>
               <div class="sc-top-r"><span class="sc-dur"><Icon name="clock" :size="12" /> {{ fmtDur(s.duration_ms) }}</span><span class="sc-time">{{ fmtTime(s.start_time) }}</span></div>
@@ -66,7 +66,7 @@
           </div>
           <div class="sc-footer">
             <button class="btn-expand" @click.stop="togExp(s.trace_id)"><span class="expand-arrow" :class="{rotated:expId===s.trace_id}">▾</span> {{ expId===s.trace_id?'收起':'预览' }}</button>
-            <button class="btn-play" @click.stop="go(s.trace_id)"><Icon name="play" :size="12" /> 查看回放</button>
+            <button class="btn-play" @click.stop="go(s.session_id || s.trace_id)"><Icon name="play" :size="12" /> 查看回放</button>
           </div>
           <div v-if="expId===s.trace_id" class="preview-panel">
             <div v-if="pvLoading" class="pv-loading">加载中...</div>
@@ -162,7 +162,7 @@ async function togExp(id){
   pvLoading.value=false
 }
 function go(id){
-  try{sessionStorage.setItem('lg_rf',JSON.stringify({...f,sortMode:sortMode.value,page:page.value}));sessionStorage.setItem('lg_nav_ids',JSON.stringify(sessions.value.map(s=>s.trace_id)))}catch{}
+  try{sessionStorage.setItem('lg_rf',JSON.stringify({...f,sortMode:sortMode.value,page:page.value}));sessionStorage.setItem('lg_nav_ids',JSON.stringify(sessions.value.map(s=>s.session_id||s.trace_id)))}catch{}
   router.push('/sessions/'+encodeURIComponent(id))
 }
 function fc(){ page.value=1; load() }

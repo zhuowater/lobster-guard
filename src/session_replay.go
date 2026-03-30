@@ -40,6 +40,7 @@ func NewSessionReplayEngine(db *sql.DB) *SessionReplayEngine {
 // SessionSummary 会话摘要（列表用）
 type SessionSummary struct {
 	TraceID        string   `json:"trace_id"`
+	SessionID      string   `json:"session_id,omitempty"`
 	StartTime      string   `json:"start_time"`
 	EndTime        string   `json:"end_time"`
 	DurationMs     float64  `json:"duration_ms"`
@@ -108,33 +109,46 @@ func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, err
 	var events []TimelineEvent
 
 	// 0. 双向关联：收集所有相关的 trace_id
-	imTraceIDs := []string{traceID}  // 用于查 audit_log
-	llmTraceIDs := []string{traceID} // 用于查 llm_calls
+	imTraceIDs := []string{}  // 用于查 audit_log
+	llmTraceIDs := []string{} // 用于查 llm_calls
 
-	// 如果 traceID 是 LLM trace，查它的 im_trace_id
-	var linkedIMTrace string
-	e.db.QueryRow(`SELECT COALESCE(im_trace_id,'') FROM llm_calls WHERE trace_id=? LIMIT 1`, traceID).Scan(&linkedIMTrace)
-	if linkedIMTrace != "" && linkedIMTrace != traceID {
-		imTraceIDs = append(imTraceIDs, linkedIMTrace)
-	}
+	// 如果传入的是 session_id（以 sess- 开头），直接用 session_id 聚合
+	var sessionID string
+	if strings.HasPrefix(traceID, "sess-") || strings.HasPrefix(traceID, "session-") {
+		sessionID = traceID
+	} else {
+		imTraceIDs = append(imTraceIDs, traceID)
+		llmTraceIDs = append(llmTraceIDs, traceID)
 
-	// 如果 traceID 是 IM trace，查所有关联的 LLM trace_id
-	linkedLLMRows, err := e.db.Query(`SELECT DISTINCT trace_id FROM llm_calls WHERE im_trace_id=?`, traceID)
-	if err == nil {
-		defer linkedLLMRows.Close()
-		for linkedLLMRows.Next() {
-			var lt string
-			if linkedLLMRows.Scan(&lt) == nil && lt != traceID {
-				llmTraceIDs = append(llmTraceIDs, lt)
+		// 如果 traceID 是 LLM trace，查它的 im_trace_id
+		var linkedIMTrace string
+		e.db.QueryRow(`SELECT COALESCE(im_trace_id,'') FROM llm_calls WHERE trace_id=? LIMIT 1`, traceID).Scan(&linkedIMTrace)
+		if linkedIMTrace != "" && linkedIMTrace != traceID {
+			imTraceIDs = append(imTraceIDs, linkedIMTrace)
+		}
+
+		// 如果 traceID 是 IM trace，查所有关联的 LLM trace_id
+		linkedLLMRows, err := e.db.Query(`SELECT DISTINCT trace_id FROM llm_calls WHERE im_trace_id=?`, traceID)
+		if err == nil {
+			defer linkedLLMRows.Close()
+			for linkedLLMRows.Next() {
+				var lt string
+				if linkedLLMRows.Scan(&lt) == nil && lt != traceID {
+					llmTraceIDs = append(llmTraceIDs, lt)
+				}
 			}
 		}
-	}
 
-	// 同一个 session_id 下的所有 IM 和 LLM trace 也要关联进来
-	var sessionID string
-	e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE trace_id=? AND session_id != '' LIMIT 1`, traceID).Scan(&sessionID)
-	if sessionID == "" && linkedIMTrace != "" {
-		e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE im_trace_id=? AND session_id != '' LIMIT 1`, linkedIMTrace).Scan(&sessionID)
+		// 路径1: traceID 是 LLM trace → llm_calls.trace_id 匹配
+		e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE trace_id=? AND session_id != '' LIMIT 1`, traceID).Scan(&sessionID)
+		// 路径2: traceID 是 IM trace → llm_calls.im_trace_id 匹配（修复多轮会话详情只显示第一轮的 bug）
+		if sessionID == "" {
+			e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE im_trace_id=? AND session_id != '' LIMIT 1`, traceID).Scan(&sessionID)
+		}
+		// 路径3: linkedIMTrace 非空时再试
+		if sessionID == "" && linkedIMTrace != "" {
+			e.db.QueryRow(`SELECT COALESCE(session_id,'') FROM llm_calls WHERE im_trace_id=? AND session_id != '' LIMIT 1`, linkedIMTrace).Scan(&sessionID)
+		}
 	}
 	if sessionID != "" {
 		// 拉同 session 下所有 IM trace 和 LLM trace
@@ -165,6 +179,9 @@ func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, err
 	}
 
 	// 1. 从 audit_log 查 IM 事件（所有关联的 IM trace_id）
+	if len(imTraceIDs) == 0 {
+		imTraceIDs = append(imTraceIDs, "__none__") // 占位符，不会匹配任何记录
+	}
 	imPlaceholders := make([]string, len(imTraceIDs))
 	imArgs := make([]interface{}, len(imTraceIDs))
 	for i, id := range imTraceIDs {
@@ -191,6 +208,9 @@ func (e *SessionReplayEngine) GetTimeline(traceID string) (*SessionTimeline, err
 	}
 
 	// 2. 从 llm_calls 查 LLM 调用（所有关联的 LLM trace_id + im_trace_id 匹配）
+	if len(llmTraceIDs) == 0 {
+		llmTraceIDs = append(llmTraceIDs, "__none__")
+	}
 	llmPlaceholders := make([]string, len(llmTraceIDs))
 	llmArgs := make([]interface{}, len(llmTraceIDs))
 	for i, id := range llmTraceIDs {
@@ -553,6 +573,7 @@ func (e *SessionReplayEngine) sessionSummary(sessionID string) *SessionSummary {
 
 	s := &SessionSummary{
 		TraceID:   representativeTrace,
+		SessionID: sessionID,
 		RiskLevel: "low",
 		Tags:      []string{},
 	}
