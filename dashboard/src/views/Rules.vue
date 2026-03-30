@@ -67,6 +67,8 @@
               <b style="color:var(--color-primary)">类型:</b> {{ row.type || 'keyword' }} |
               <b style="color:var(--color-primary)">动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> |
               <b style="color:var(--color-primary)">优先级:</b> {{ row.priority ?? '--' }}
+              <template v-if="row.shadow_mode !== undefined"> | <b style="color:var(--color-primary)">影子模式:</b> <span :style="{ color: row.shadow_mode ? '#f59e0b' : 'var(--color-success)' }">{{ row.shadow_mode ? '👻 是' : '🛡️ 否' }}</span></template>
+              <template v-if="row.enabled !== undefined"> | <b style="color:var(--color-primary)">启用:</b> {{ row.enabled !== false ? '✅' : '❌' }}</template>
             </div>
             <div v-if="row.description" style="margin-top:4px;color:var(--text-secondary)">{{ row.description }}</div>
             <div v-if="row.patterns && row.patterns.length"><b style="color:var(--color-primary)">模式:</b>
@@ -74,7 +76,18 @@
             </div>
           </div>
         </template>
+        <template #cell-name="{ row }">
+          <span>{{ row.display_name || row.name }}</span>
+          <span v-if="row.display_name" style="margin-left:6px;font-size:.72rem;color:var(--text-secondary);opacity:.6;font-family:var(--font-mono)">{{ row.name }}</span>
+          <span v-if="row.shadow_mode" style="margin-left:4px;font-size:.75rem;opacity:.8" title="影子模式：仅记录不拦截">👻</span>
+          <span v-if="!row.enabled && row.enabled !== undefined" style="margin-left:4px;font-size:.72rem;color:var(--text-secondary)">(已禁用)</span>
+        </template>
         <template #actions="{ row }">
+          <button v-if="row._direction === 'inbound' || row._direction === 'outbound'"
+            class="btn btn-sm" :class="row.shadow_mode ? 'btn-warning' : 'btn-ghost'"
+            @click.stop="toggleShadow(row)"
+            :title="row.shadow_mode ? '切换为正常模式' : '切换为影子模式'"
+            style="margin-right:4px">{{ row.shadow_mode ? '👻' : '🛡️' }}</button>
           <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row)" title="编辑">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -582,6 +595,17 @@ async function loadLLMRules() {
   try { const d = await api('/api/v1/llm/rules'); llmRules.value = d.rules || [] } catch { llmRules.value = [] }
 }
 
+async function toggleShadow(row) {
+  const direction = row._direction
+  const basePath = direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
+  try {
+    const res = await apiPost(basePath + '/toggle-shadow', { name: row.name })
+    const mode = res.shadow_mode ? '影子模式 👻' : '正常模式 🛡️'
+    showToast(`${row.display_name || row.name} → ${mode}`, 'success')
+    if (direction === 'outbound') loadOutbound(); else loadInbound()
+  } catch (e) { showToast('切换失败: ' + e.message, 'error') }
+}
+
 function openCreateEditor() {
   editingRule.value = null
   editorVisible.value = true
@@ -943,4 +967,6 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadLLMRules();
 .overlap-rules { margin-top: 4px; font-size: .72rem; color: var(--text-tertiary); }
 .filter-select { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 6px 10px; font-size: var(--text-sm); outline: none; }
 .filter-select:focus { border-color: var(--color-primary); }
+.btn-warning { background: #f59e0b; color: #fff; border: none; }
+.btn-warning:hover { background: #d97706; }
 </style>
