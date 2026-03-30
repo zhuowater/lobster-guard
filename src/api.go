@@ -164,6 +164,8 @@ type ManagementAPI struct {
 	// v32.13-v32.14
 	canaryRotator   *CanaryRotator
 	reportScheduler *ReportScheduler
+	// v33.0 上游安全画像引擎
+	upstreamProfileEng *UpstreamProfileEngine
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -361,6 +363,11 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/api/v1/upstreams/gateway/overview" && method == "GET":
 		api.handleGatewayOverview(w, r)
 	// v22.0: Gateway Token 管理
+	// v33.0 上游安全画像
+	case path == "/api/v1/upstream-profiles" && method == "GET":
+		api.handleUpstreamProfileList(w, r)
+	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/security-profile") && method == "GET":
+		api.handleUpstreamSecurityProfile(w, r)
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway-token/status") && method == "GET":
 		api.handleGatewayTokenStatus(w, r)
 	case strings.HasPrefix(path, "/api/v1/upstreams/") && strings.HasSuffix(path, "/gateway-token") && method == "PUT":

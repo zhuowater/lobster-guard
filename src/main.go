@@ -589,6 +589,10 @@ func main() {
 	// v16.0: Agent 行为画像引擎
 	behaviorProfileEng := NewBehaviorProfileEngine(logger.DB())
 	mgmtAPI.behaviorProfileEng = behaviorProfileEng
+
+	// v33.0: 上游安全画像引擎
+	mgmtAPI.upstreamProfileEng = NewUpstreamProfileEngine(logger.DB())
+	fmt.Println("[初始化] ✅ 上游安全画像引擎已就绪 (5维评分 + 14表聚合 + 7天趋势)")
 	fmt.Println("[初始化] ✅ Agent 行为画像引擎已就绪 (语义行为模式 + 突变检测 + 风险评估)")
 
 	// v16.1: 攻击链引擎

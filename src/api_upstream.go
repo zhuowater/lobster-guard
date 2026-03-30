@@ -291,3 +291,50 @@ func (api *ManagementAPI) handleUpstreamHealthCheck(w http.ResponseWriter, r *ht
 // ============================================================
 
 // handleDiscoveryStatus GET /api/v1/discovery/status — 返回 K8s 发现状态
+
+// ============================================================
+// v33.0 上游安全画像 API
+// ============================================================
+
+// handleUpstreamSecurityProfile GET /api/v1/upstreams/{id}/security-profile
+func (api *ManagementAPI) handleUpstreamSecurityProfile(w http.ResponseWriter, r *http.Request) {
+	if api.upstreamProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "upstream profile engine not available"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/upstreams/")
+	id = strings.TrimSuffix(id, "/security-profile")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "upstream id required"})
+		return
+	}
+	profile, err := api.upstreamProfileEng.BuildProfile(id)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, profile)
+}
+
+// handleUpstreamProfileList GET /api/v1/upstream-profiles
+func (api *ManagementAPI) handleUpstreamProfileList(w http.ResponseWriter, r *http.Request) {
+	if api.upstreamProfileEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "upstream profile engine not available"})
+		return
+	}
+	var ids []string
+	api.pool.mu.RLock()
+	for id := range api.pool.upstreams {
+		ids = append(ids, id)
+	}
+	api.pool.mu.RUnlock()
+
+	profiles := api.upstreamProfileEng.ListProfiles(ids)
+	if profiles == nil {
+		profiles = []UpstreamSecurityProfile{}
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"profiles": profiles,
+		"total":    len(profiles),
+	})
+}

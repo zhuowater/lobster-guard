@@ -354,6 +354,89 @@
                           </template>
                         </div>
                       </div>
+                      <!-- Security Profile Tab -->
+                      <div v-if="activeTab === 'security'" class="dtab-body security-profile-tab">
+                        <div v-if="securityLoading" class="dtab-empty">加载安全画像中...</div>
+                        <div v-else-if="!securityProfile" class="dtab-empty">暂无安全画像数据</div>
+                        <template v-else>
+                          <!-- 顶部: 评分 + 雷达图 -->
+                          <div class="sp-top">
+                            <div class="sp-score-ring">
+                              <svg viewBox="0 0 120 120" class="sp-ring-svg">
+                                <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8"/>
+                                <circle cx="60" cy="60" r="50" fill="none" :stroke="spColor(securityProfile.risk_level)" stroke-width="8" stroke-linecap="round"
+                                  :stroke-dasharray="(securityProfile.security_score / 100 * 314) + ' 314'" stroke-dashoffset="0" transform="rotate(-90 60 60)" style="transition:stroke-dasharray .8s"/>
+                                <text x="60" y="55" text-anchor="middle" fill="white" font-size="28" font-weight="bold">{{ Math.round(securityProfile.security_score) }}</text>
+                                <text x="60" y="72" text-anchor="middle" :fill="spColor(securityProfile.risk_level)" font-size="11">{{ spLabel(securityProfile.risk_level) }}</text>
+                              </svg>
+                            </div>
+                            <!-- 5维雷达图 -->
+                            <div class="sp-radar">
+                              <svg viewBox="0 0 200 200" class="sp-radar-svg">
+                                <polygon :points="radarBg(5, 100)" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                                <polygon :points="radarBg(5, 70)" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+                                <polygon :points="radarBg(5, 40)" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+                                <line v-for="i in 5" :key="'rl'+i" x1="100" y1="100" :x2="radarPt(i-1,5,100).x" :y2="radarPt(i-1,5,100).y" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+                                <polygon :points="radarData(securityProfile.dimensions)" fill="rgba(99,102,241,0.25)" stroke="#6366f1" stroke-width="2"/>
+                                <circle v-for="(d,i) in securityProfile.dimensions" :key="'rd'+i" :cx="radarPt(i,5,d.score/20*100).x" :cy="radarPt(i,5,d.score/20*100).y" r="3" fill="#6366f1"/>
+                                <text v-for="(d,i) in securityProfile.dimensions" :key="'rt'+i" :x="radarPt(i,5,115).x" :y="radarPt(i,5,115).y" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="9">{{ d.icon }} {{ d.name }}</text>
+                              </svg>
+                            </div>
+                          </div>
+                          <!-- 维度卡片 -->
+                          <div class="sp-dims">
+                            <div v-for="d in securityProfile.dimensions" :key="d.name" class="sp-dim-card" :style="{ borderLeftColor: spColor(d.level) }">
+                              <div class="sp-dim-head"><span class="sp-dim-icon">{{ d.icon }}</span><span class="sp-dim-name">{{ d.name }}</span><span class="sp-dim-score" :style="{ color: spColor(d.level) }">{{ d.score }}/20</span></div>
+                              <div class="sp-dim-detail">{{ d.details }}</div>
+                              <div class="sp-dim-alerts" v-if="d.alerts > 0">⚠️ {{ d.alerts }} 条告警</div>
+                            </div>
+                          </div>
+                          <!-- 流量概览 -->
+                          <div class="sp-traffic">
+                            <h4 class="sp-section-title">📊 24h 流量概览</h4>
+                            <div class="sp-traffic-grid">
+                              <div class="sp-tcard"><div class="sp-tnum">{{ securityProfile.traffic.total_im_requests }}</div><div class="sp-tlabel">IM 请求</div></div>
+                              <div class="sp-tcard"><div class="sp-tnum">{{ securityProfile.traffic.total_llm_calls }}</div><div class="sp-tlabel">LLM 调用</div></div>
+                              <div class="sp-tcard"><div class="sp-tnum">{{ securityProfile.traffic.total_tool_calls }}</div><div class="sp-tlabel">工具调用</div></div>
+                              <div class="sp-tcard sp-tcard-block"><div class="sp-tnum">{{ securityProfile.traffic.blocked_requests }}</div><div class="sp-tlabel">🔴 拦截</div></div>
+                              <div class="sp-tcard sp-tcard-warn"><div class="sp-tnum">{{ securityProfile.traffic.warned_requests }}</div><div class="sp-tlabel">🟡 告警</div></div>
+                              <div class="sp-tcard sp-tcard-review"><div class="sp-tnum">{{ securityProfile.traffic.reviewed_requests }}</div><div class="sp-tlabel">💜 复核</div></div>
+                            </div>
+                          </div>
+                          <!-- 引擎告警汇总 -->
+                          <div class="sp-engines">
+                            <h4 class="sp-section-title">🦞 引擎告警汇总 (24h)</h4>
+                            <div class="sp-engine-grid">
+                              <div v-for="ea in engineAlertCards" :key="ea.key" class="sp-engine-card" :class="{ 'sp-engine-hot': ea.count > 0 && !ea.positive, 'sp-engine-good': ea.count > 0 && ea.positive }">
+                                <div class="sp-engine-icon">{{ ea.icon }}</div>
+                                <div class="sp-engine-count" :class="{ 'sp-engine-count-hot': ea.count > 0 && !ea.positive, 'sp-engine-count-good': ea.count > 0 && ea.positive }">{{ ea.count }}</div>
+                                <div class="sp-engine-label">{{ ea.label }}</div>
+                              </div>
+                            </div>
+                          </div>
+                          <!-- Top 风险事件 -->
+                          <div class="sp-risk-events" v-if="securityProfile.top_risk_events && securityProfile.top_risk_events.length > 0">
+                            <h4 class="sp-section-title">🔥 Top 风险事件</h4>
+                            <div v-for="(ev,i) in securityProfile.top_risk_events" :key="i" class="sp-risk-row">
+                              <span class="sp-risk-sev" :class="'sp-sev-'+ev.severity">{{ ev.severity === 'high' ? '🔴' : '🟡' }}</span>
+                              <span class="sp-risk-time">{{ ev.timestamp?.slice(11,19) || '' }}</span>
+                              <span class="sp-risk-engine">{{ ev.engine }}</span>
+                              <span class="sp-risk-summary">{{ ev.summary?.slice(0,80) }}</span>
+                            </div>
+                          </div>
+                          <!-- 7天趋势 -->
+                          <div class="sp-trend" v-if="securityProfile.trend && securityProfile.trend.length > 0">
+                            <h4 class="sp-section-title">📈 7 天安全趋势</h4>
+                            <svg viewBox="0 0 400 120" class="sp-trend-svg">
+                              <line v-for="i in 5" :key="'tg'+i" x1="40" :y1="10+i*20" x2="390" :y2="10+i*20" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                              <text v-for="(d,i) in securityProfile.trend" :key="'td'+i" :x="40+i*50" y="118" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="9">{{ d.date?.slice(5) }}</text>
+                              <polyline :points="trendLine(securityProfile.trend)" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round"/>
+                              <circle v-for="(d,i) in securityProfile.trend" :key="'tc'+i" :cx="40+i*50" :cy="110 - d.security_score" r="3" fill="#6366f1"/>
+                              <text v-for="(d,i) in securityProfile.trend" :key="'tv'+i" :x="40+i*50" :y="110 - d.security_score - 8" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="8">{{ Math.round(d.security_score) }}</text>
+                            </svg>
+                          </div>
+                        </template>
+                      </div>
                       <!-- Agent Tab (AOC per-upstream) -->
                       <div v-if="activeTab === 'agent'" class="dtab-body aoc-section aoc-inline">
                         <div class="section-header">
@@ -890,6 +973,8 @@ const sessions = ref([])
 const cronJobs = ref([])
 const diagRunning = ref(false)
 const diagResult = ref(null)
+const securityProfile = ref(null)
+const securityLoading = ref(false)
 // Session history state
 const expandedSessionKey = ref(null)
 const sessionMessages = ref([])
@@ -914,6 +999,7 @@ const tabs = [
   { key: 'cron', icon: svgIcon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'), label: '定时任务' },
   { key: 'diag', icon: svgIcon('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'), label: '诊断' },
   { key: 'agent', icon: svgIcon('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'), label: 'Agent' },
+  { key: 'security', icon: svgIcon('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'), label: '安全画像' },
 ]
 
 // === Computed ===
@@ -1782,7 +1868,41 @@ async function toggleExpand(up) {
   expandedId.value = up.id; activeTab.value = 'sessions'; diagResult.value = null; expandedSessionKey.value = null; sessionMessages.value = []
   if (up.token_configured && up.gateway_status !== 'not_configured') await loadTabData(up.id, 'sessions')
 }
-async function switchTab(tab, id) { activeTab.value = tab; expandedSessionKey.value = null; sessionMessages.value = []; if (tab === 'agent') { aocView.value = 'dashboard'; await loadTabData(id, 'cron') } else if (tab !== 'diag') await loadTabData(id, tab) }
+async function switchTab(tab, id) { activeTab.value = tab; expandedSessionKey.value = null; sessionMessages.value = []; if (tab === 'agent') { aocView.value = 'dashboard'; await loadTabData(id, 'cron') } else if (tab === 'security') { await loadSecurityProfile(id) } else if (tab !== 'diag') await loadTabData(id, tab) }
+async function loadSecurityProfile(id) {
+  securityLoading.value = true; securityProfile.value = null
+  try { securityProfile.value = await api(`/api/v1/upstreams/${encodeURIComponent(id)}/security-profile`) }
+  catch(e) { securityProfile.value = null }
+  finally { securityLoading.value = false }
+}
+// Security profile helpers
+function spColor(level) { return { safe:'#22c55e', low:'#6366f1', medium:'#eab308', high:'#f97316', critical:'#ef4444' }[level] || '#6366f1' }
+function spLabel(level) { return { safe:'安全', low:'良好', medium:'中等', high:'较高风险', critical:'高危' }[level] || level }
+function radarPt(i, n, r) { const a = (Math.PI*2*i/n) - Math.PI/2; return { x: Math.round(100 + r*0.8*Math.cos(a)), y: Math.round(100 + r*0.8*Math.sin(a)) } }
+function radarBg(n, r) { return Array.from({length:n},(_,i)=>{ const p=radarPt(i,n,r); return p.x+','+p.y }).join(' ') }
+function radarData(dims) { if(!dims) return ''; return dims.map((d,i)=>{ const p=radarPt(i,dims.length,d.score/20*100); return p.x+','+p.y }).join(' ') }
+function trendLine(trend) { if(!trend) return ''; return trend.map((d,i)=>(40+i*50)+','+(110-d.security_score)).join(' ') }
+const engineAlertCards = computed(() => {
+  const a = securityProfile.value?.engine_alerts || {}
+  return [
+    { key:'inbound', icon:'🛡️', label:'入站检测', count: a.inbound_detections||0 },
+    { key:'chains', icon:'⛓️', label:'攻击链', count: a.attack_chains||0 },
+    { key:'llm', icon:'🤖', label:'LLM规则', count: a.llm_rule_hits||0 },
+    { key:'singularity', icon:'🔮', label:'蜜罐暴露', count: a.singularity_exposes||0 },
+    { key:'honeypot', icon:'🍯', label:'蜜罐深度', count: a.honeypot_deep||0 },
+    { key:'ifc', icon:'🔒', label:'IFC违规', count: a.ifc_violations||0 },
+    { key:'hidden', icon:'🙈', label:'IFC隐藏', count: a.ifc_hidden||0, positive: true },
+    { key:'taint', icon:'☣️', label:'污染追踪', count: a.taint_events||0 },
+    { key:'reversal', icon:'✅', label:'污染逆转', count: a.taint_reversals||0, positive: true },
+    { key:'outbound', icon:'🚫', label:'出站拦截', count: a.outbound_blocks||0 },
+    { key:'plan', icon:'📋', label:'计划偏离', count: a.plan_deviations||0 },
+    { key:'cap', icon:'🔑', label:'能力拒绝', count: a.capability_denials||0 },
+    { key:'anomaly', icon:'📊', label:'行为异常', count: a.behavior_anomalies||0 },
+    { key:'envelope', icon:'📜', label:'信封失败', count: a.envelope_failures||0 },
+    { key:'cf', icon:'🔄', label:'反事实', count: a.counterfactual_flags||0 },
+    { key:'evolution', icon:'🧬', label:'进化规则', count: a.evolution_rules||0, positive: true },
+  ]
+})
 async function loadTabData(id, tab) {
   detailLoading.value = true
   try {
@@ -2468,4 +2588,50 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .mem-text { font-size:13px; color:#e2e8f0; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
 .mem-score { font-size:11px; font-weight:700; color:#818cf8; background:rgba(99,102,241,.14); padding:3px 8px; border-radius:999px; }
 
+/* === Security Profile Tab === */
+.security-profile-tab { padding: 8px 0; }
+.sp-top { display:flex; gap:24px; align-items:center; margin-bottom:20px; flex-wrap:wrap; }
+.sp-score-ring { flex:0 0 130px; }
+.sp-ring-svg { width:130px; height:130px; }
+.sp-radar { flex:1; min-width:200px; max-width:280px; }
+.sp-radar-svg { width:100%; height:auto; }
+.sp-dims { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; margin-bottom:18px; }
+.sp-dim-card { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-left:3px solid; border-radius:8px; padding:10px 12px; }
+.sp-dim-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.sp-dim-icon { font-size:14px; }
+.sp-dim-name { font-weight:600; font-size:13px; color:rgba(255,255,255,0.9); flex:1; }
+.sp-dim-score { font-weight:700; font-size:14px; }
+.sp-dim-detail { font-size:11px; color:rgba(255,255,255,0.5); }
+.sp-dim-alerts { font-size:11px; color:#f97316; margin-top:4px; }
+.sp-section-title { font-size:13px; font-weight:600; color:rgba(255,255,255,0.8); margin:0 0 10px; }
+.sp-traffic { margin-bottom:18px; }
+.sp-traffic-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+.sp-tcard { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px; text-align:center; }
+.sp-tnum { font-size:20px; font-weight:700; color:rgba(255,255,255,0.9); }
+.sp-tlabel { font-size:10px; color:rgba(255,255,255,0.5); margin-top:2px; }
+.sp-tcard-block { border-color:rgba(239,68,68,0.3); }
+.sp-tcard-block .sp-tnum { color:#ef4444; }
+.sp-tcard-warn { border-color:rgba(234,179,8,0.3); }
+.sp-tcard-warn .sp-tnum { color:#eab308; }
+.sp-tcard-review { border-color:rgba(168,85,247,0.3); }
+.sp-tcard-review .sp-tnum { color:#a855f7; }
+.sp-engines { margin-bottom:18px; }
+.sp-engine-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.sp-engine-card { background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px; text-align:center; transition:all .2s; }
+.sp-engine-hot { border-color:rgba(234,179,8,0.3); background:rgba(234,179,8,0.05); }
+.sp-engine-icon { font-size:18px; margin-bottom:2px; }
+.sp-engine-count { font-size:18px; font-weight:700; color:rgba(255,255,255,0.4); }
+.sp-engine-count-hot { color:#eab308; }
+.sp-engine-good { border-color:rgba(34,197,94,0.3); background:rgba(34,197,94,0.05); }
+.sp-engine-count-good { color:#22c55e; }
+.sp-engine-label { font-size:9px; color:rgba(255,255,255,0.4); }
+.sp-risk-events { margin-bottom:18px; }
+.sp-risk-row { display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; }
+.sp-risk-sev { font-size:12px; }
+.sp-risk-time { color:rgba(255,255,255,0.4); font-family:monospace; font-size:11px; min-width:60px; }
+.sp-risk-engine { background:rgba(99,102,241,0.15); color:#a5b4fc; padding:1px 6px; border-radius:4px; font-size:10px; min-width:50px; text-align:center; }
+.sp-risk-summary { color:rgba(255,255,255,0.7); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sp-trend { margin-bottom:10px; }
+.sp-trend-svg { width:100%; height:auto; background:rgba(255,255,255,0.02); border-radius:8px; }
+@media (max-width:768px) { .sp-traffic-grid { grid-template-columns:repeat(3,1fr); } .sp-engine-grid { grid-template-columns:repeat(3,1fr); } }
 </style>
