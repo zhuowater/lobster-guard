@@ -128,6 +128,41 @@ Agent    ──► :8445  ──► LLM API (Anthropic/OpenAI)
 | LLMCache | v20.3 | TF-IDF 语义缓存 + 租户隔离 |
 | APIGateway | v20.4 | JWT + APIKey + 灰度路由 |
 
+## Phase 2 架构扩展 (v23-v26)
+
+### 新增引擎
+| 引擎 | 版本 | 说明 |
+|------|------|------|
+| PathPolicyEngine | v23.0 | 路径级策略(序列/累计/条件规则) + 风险仪表 |
+| CounterfactualVerifier | v24.0 | 反事实对照验证 + 归因报告 + 自适应策略 |
+| PlanCompiler | v25.0 | CaMeL 意图→执行计划编译(20+ 模板) |
+| CapabilityEngine | v25.1 | 数据级能力标签(Sources 并集 + Labels 交集 + TrustScore) |
+| DeviationDetector | v25.2 | 计划偏差检测 + 策略化自动修复 |
+| IFCEngine | v26.0 | Bell-LaPadula 双标签(Confidentiality + Integrity) |
+| IFCQuarantine | v26.1 | 隔离 LLM 路由(基于信息流级别) |
+| SelectiveHide | v26.2 | Fides HIDE 函数(tool result 标签驱动隐藏) |
+| DOEDetector | v26.3 | 数据所有者意图检测 |
+
+## Phase 3 架构扩展 (v27-v33)
+
+### 新增引擎
+| 引擎 | 版本 | 说明 |
+|------|------|------|
+| APIKeyAuth | v27.0 | SHA-256 哈希存储 + 热缓存 + 日配额 |
+| GatewayWSClient | v29.0 | 持久化 WSS RPC(复刻 OpenClaw Control UI 协议) |
+| GatewayWSManager | v29.0 | 多上游 WSS 连接池管理 |
+| BatchAuditWriter | v32.1 | SQLite 批量写入(channel 缓冲) + 监控 |
+| AutoReviewEngine | v31.1 | AC + LLM 双层审查(auto-review 降级逻辑) |
+| UpstreamProfileEngine | v33.0 | Per-upstream 5 维安全评分(16 引擎 × 14 表) |
+
+### 三层数据安全模型
+
+| 层 | 来源 | 作用 | 评估方式 |
+|---|------|------|---------|
+| IFC (v26, Fides) | 数据"什么密级" | 流向控制 | 格积(lattice) |
+| Capability (v25, CaMeL) | 数据"从哪来" | 来源追溯 | 集合运算 |
+| Deviation (v25, CaMeL) | LLM"想干什么" | 行为合规 | 计划 vs 实际对比 |
+
 ### 数据流增强
 
 ```
@@ -211,10 +246,12 @@ LLM Proxy 支持 `strip_prefix` 选项，在转发前去掉 `path_prefix`：
 
 用于将 OpenClaw 的 LLM 流量透明引入龙虾卫士审计，无需修改上游 API 路径。
 
-### 安全层级
-1. **L1 模式匹配** — AC自动机 + 正则 (μs级)
-2. **L2 语义分析** — TF-IDF四维检测 (ms级)
-3. **L3 行为分析** — 画像 + 基线 + 攻击链 (秒级)
-4. **L4 密码学保证** — HMAC信封 + Merkle Tree (防篡改)
-5. **L5 自进化** — 对抗变异 + 规则自动生成 (分钟级)
-6. **L6 污染追踪** — IM↔LLM trace 关联 + SSE 流式逆转 (全链路)
+### 安全层级 (v33.0)
+1. **L1 模式匹配** — AC 自动机 + 正则 + 行业模板(40×12) (μs 级)
+2. **L2 语义分析** — TF-IDF 四维检测 + LLM auto-review (ms-s 级)
+3. **L3 行为分析** — 画像 + 基线 + 攻击链 + 路径策略 (秒级)
+4. **L4 密码学保证** — HMAC 信封 + Merkle Tree + 金丝雀轮换 (防篡改)
+5. **L5 自进化** — 对抗变异 + 规则自动生成 + 建议审批 (分钟级)
+6. **L6 污染追踪** — IM↔LLM trace + SSE 逆转 + IFC 信息流控制 (全链路)
+7. **L7 意图验证** — CaMeL 执行计划 + 偏差检测 + Capability 权限 (决策级)
+8. **L8 安全画像** — 5 维评分 + 16 引擎聚合 + 比率评分 + 趋势 (运营级)

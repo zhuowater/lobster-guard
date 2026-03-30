@@ -88,15 +88,171 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/users` | 用户列表 |
-| POST | `/api/v1/users` | 创建用户（v18）|
-| PUT | `/api/v1/users/:id` | 更新用户（v18）|
-| DELETE | `/api/v1/users/:id` | 删除用户（v18）|
+| POST | `/api/v1/users` | 创建用户 |
+| PUT | `/api/v1/users/:id` | 更新用户 |
+| DELETE | `/api/v1/users/:id` | 删除用户 |
 | POST | `/api/v1/backup` | 创建数据库备份 |
 | GET | `/api/v1/backups` | 列出备份 |
 | GET | `/api/v1/metrics/realtime` | 实时统计 |
-| GET | `/api/v1/ws/connections` | WebSocket 连接列表 |
+| GET | `/api/v1/config/settings` | 配置设置(含引擎开关) |
+| PUT | `/api/v1/config/settings` | 更新配置设置 |
+| GET | `/api/v1/config/validate` | 配置校验 |
+| GET | `/api/v1/config/view` | 配置 YAML 查看 |
 
-> 以上为主要 API 摘要，完整 487 路由参见源码 `src/api.go`。
+## 路径策略引擎 (v23)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/path-policies` | 路径策略列表 |
+| POST | `/api/v1/path-policies` | 添加策略规则 |
+| PUT | `/api/v1/path-policies/:id` | 更新策略 |
+| DELETE | `/api/v1/path-policies/:id` | 删除策略 |
+| GET | `/api/v1/path-policies/stats` | 路径统计 |
+| GET | `/api/v1/path-policies/risk-gauge` | 实时风险仪表 |
+| GET | `/api/v1/path-policies/templates` | 策略模板(含 AI Act) |
+| POST | `/api/v1/path-policies/templates` | 创建策略模板 |
+
+## 反事实验证 (v24)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/counterfactual/reports` | 验证报告 |
+| GET | `/api/v1/counterfactual/verifications` | 验证记录 |
+| GET | `/api/v1/counterfactual/cost` | 成本追踪 |
+| GET | `/api/v1/counterfactual/effectiveness` | 效果评估 |
+| GET | `/api/v1/counterfactual/adaptive-config` | 自适应配置 |
+| PUT | `/api/v1/counterfactual/adaptive-config` | 更新自适应配置 |
+| GET | `/api/v1/counterfactual/high-risk-tools` | 高风险工具列表 |
+| POST | `/api/v1/counterfactual/high-risk-tools` | 添加高风险工具 |
+| DELETE | `/api/v1/counterfactual/cache` | 清空验证缓存 |
+
+## CaMeL 执行计划编译器 (v25)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/plans/compile` | 编译用户意图为执行计划 |
+| POST | `/api/v1/plans/evaluate` | 评估 tool_call 是否符合计划 |
+| GET | `/api/v1/plans/templates` | 模板列表(22个,6分类) |
+| POST | `/api/v1/plans/templates` | 创建自定义模板 |
+| PUT | `/api/v1/plans/templates/:id` | 更新模板 |
+| DELETE | `/api/v1/plans/templates/:id` | 删除模板 |
+| GET | `/api/v1/plans/active` | 活跃计划 |
+| GET | `/api/v1/plans/violations` | 违规记录 |
+| GET | `/api/v1/plans/stats` | 编译器统计 |
+
+## Capability 权限系统 (v25)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/capabilities/mappings` | 工具→权限映射 |
+| PUT | `/api/v1/capabilities/mappings/:tool` | 更新映射 |
+| POST | `/api/v1/capabilities/contexts` | 初始化权限上下文 |
+| GET | `/api/v1/capabilities/evaluations` | 权限评估记录 |
+| GET | `/api/v1/capabilities/stats` | 权限统计 |
+
+## 偏差检测 (v25)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/deviations/check` | 检查偏离计划 |
+| GET | `/api/v1/deviations` | 偏差记录 |
+| GET | `/api/v1/deviations/stats` | 偏差统计 |
+| GET | `/api/v1/deviations/config` | 检测器配置 |
+| PUT | `/api/v1/deviations/config` | 更新配置 |
+| GET | `/api/v1/deviations/repair-policies` | 修复策略 |
+| PUT | `/api/v1/deviations/repair-policies/:id` | 更新修复策略 |
+
+## IFC 信息流控制 (v26)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/ifc/sources` | IFC 数据源规则 |
+| POST | `/api/v1/ifc/sources` | 添加来源规则 |
+| GET | `/api/v1/ifc/tool-requirements` | 工具要求 |
+| POST | `/api/v1/ifc/tool-requirements` | 添加工具要求 |
+| GET | `/api/v1/ifc/violations` | IFC 违规记录 |
+| GET | `/api/v1/ifc/quarantine` | 隔离 LLM 路由 |
+| GET | `/api/v1/ifc/variables` | IFC 变量 |
+| GET | `/api/v1/ifc/config` | IFC 配置 |
+| PUT | `/api/v1/ifc/config` | 更新 IFC 配置 |
+
+## API Key 管理 (v27)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/apikeys` | API Key 列表 |
+| POST | `/api/v1/apikeys` | 创建 API Key |
+| PUT | `/api/v1/apikeys/:id` | 更新 API Key |
+| DELETE | `/api/v1/apikeys/:id` | 删除 API Key |
+| POST | `/api/v1/apikeys/:id/rotate` | 轮换 Key |
+| POST | `/api/v1/apikeys/:id/bind` | 绑定租户 |
+
+## Gateway 远程管理 (v29)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/gateway-monitor/upstreams` | 监控的上游 Gateway 列表 |
+| PUT | `/api/v1/gateway-monitor/upstreams/:id` | 配置上游 Gateway Token/Origin |
+| GET | `/api/v1/gateway-monitor/upstreams/:id/wss-status` | WSS 连接状态 |
+| POST | `/api/v1/gateway-monitor/upstreams/:id/wss-connect` | 手动建立 WSS |
+| POST | `/api/v1/gateway/rpc/:method` | WSS RPC 代理(88 methods) |
+| POST | `/api/v1/tools/invoke` | tools/invoke fallback |
+
+## 行业模板 (v31)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/industry-templates` | 行业模板列表(40×12) |
+| POST | `/api/v1/industry-templates` | 创建模板 |
+| PUT | `/api/v1/industry-templates/:id` | 更新模板 |
+| DELETE | `/api/v1/industry-templates/:id` | 删除模板 |
+| POST | `/api/v1/industry-templates/:id/toggle` | 启用/禁用模板 |
+
+## 检测调试 (v32)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/debug/detect-all-layers` | 全链路四层检测 |
+| GET | `/api/v1/sqlite/stats` | SQLite 统计 |
+| GET | `/api/v1/sqlite/batch-stats` | 批量写入统计 |
+
+## 安全画像 (v33)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/upstreams/:id/security-profile` | 单个上游安全画像(5维评分) |
+| GET | `/api/v1/upstream-profiles` | 全部上游画像+分段统计 |
+
+## Auto-Review (v31)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/auto-review/status` | 自动审查状态 |
+| GET | `/api/v1/auto-review/stats` | 审查统计 |
+| POST | `/api/v1/auto-review/rules/:id/review` | 触发 LLM 复核 |
+| POST | `/api/v1/auto-review/rules/:id/restore` | 恢复规则 |
+
+## 规则建议 + 进化 (v32)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/rule-suggestions` | 建议队列 |
+| POST | `/api/v1/rule-suggestions/:id/accept` | 接受建议 |
+| POST | `/api/v1/rule-suggestions/:id/reject` | 拒绝建议 |
+| POST | `/api/v1/evolution/accept/:id` | 接受进化规则 |
+| POST | `/api/v1/evolution/reject/:id` | 拒绝进化规则 |
+
+## Merkle 审计 + 金丝雀 (v32)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/envelopes/merkle/batches` | Merkle 批次列表 |
+| POST | `/api/v1/envelopes/merkle/verify-batch` | 批量验证 |
+| GET | `/api/v1/canary/status` | 金丝雀状态 |
+| POST | `/api/v1/canary/rotate` | 手动轮换 |
+| GET | `/api/v1/canary/history` | 轮换历史 |
+
+> 以上为 v23-v33 新增 API 摘要。完整 487 路由参见源码 `src/api.go`。
 
 ## API 调用示例
 
