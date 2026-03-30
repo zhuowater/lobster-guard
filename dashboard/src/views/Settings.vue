@@ -369,9 +369,16 @@
           </div>
           <div class="ar-params">
             <div class="ar-param"><span class="ar-param-label">窗口时间</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.window_sec" class="cfg-input-num" min="10" max="3600" step="10" /><span class="cfg-unit">秒</span></div></div>
-            <div class="ar-param"><span class="ar-param-label">FP阈值</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.fp_threshold" class="cfg-input-num" min="1" max="100" step="1" /></div></div>
-            <div class="ar-param"><span class="ar-param-label">降级倍数</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.downgrade_multiplier" class="cfg-input-num" min="1" max="10" step="0.5" /><span class="cfg-unit">x</span></div></div>
-            <div class="ar-param"><span class="ar-param-label">TTL</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.ttl_sec" class="cfg-input-num" min="60" max="86400" step="60" /><span class="cfg-unit">秒</span></div></div>
+            <div class="ar-param"><span class="ar-param-label">突增阈值</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.spike_threshold" class="cfg-input-num" min="1" max="100" step="1" /><span class="cfg-unit">次</span></div></div>
+            <div class="ar-param"><span class="ar-param-label">突增倍数</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.spike_ratio" class="cfg-input-num" min="1" max="20" step="0.5" /><span class="cfg-unit">x</span></div></div>
+            <div class="ar-param"><span class="ar-param-label">Review TTL</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.auto_review_ttl" class="cfg-input-num" min="60" max="86400" step="60" /><span class="cfg-unit">秒</span></div></div>
+          </div>
+          <div class="card-header" style="margin-top:16px;padding:0"><span class="card-icon">🤖</span><span class="card-title" style="font-size:.9rem">LLM 复核上游</span></div>
+          <div class="ar-params" style="margin-top:8px">
+            <div class="ar-param"><span class="ar-param-label">Base URL</span><input v-model="arConfig.llm_endpoint" class="cfg-input-text" placeholder="https://api.deepseek.com" /></div>
+            <div class="ar-param"><span class="ar-param-label">模型名称</span><input v-model="arConfig.llm_model" class="cfg-input-text" placeholder="deepseek-chat" /></div>
+            <div class="ar-param"><span class="ar-param-label">API Key</span><div class="cfg-inline" style="position:relative"><input :type="showArKey ? 'text' : 'password'" v-model="arConfig.llm_api_key" class="cfg-input-text" placeholder="sk-..." style="flex:1;padding-right:32px" /><button class="btn btn-ghost btn-xs" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)" @click="showArKey=!showArKey">{{ showArKey ? '🙈' : '👁️' }}</button></div></div>
+            <div class="ar-param"><span class="ar-param-label">超时</span><div class="cfg-inline"><input type="number" v-model.number="arConfig.llm_timeout_sec" class="cfg-input-num" min="1" max="30" step="1" /><span class="cfg-unit">秒</span></div></div>
           </div>
           <div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-sm btn-primary" @click="saveAutoReviewConfig" :disabled="arSaving">{{ arSaving ? '保存中...' : '保存配置' }}</button></div>
         </div>
@@ -853,7 +860,8 @@ async function toggleEngine(eng, event) {
 const arLoading = ref(false)
 const arLoaded = ref(false)
 const arSaving = ref(false)
-const arConfig = reactive({ enabled: false, window_sec: 300, fp_threshold: 5, downgrade_multiplier: 2, ttl_sec: 3600 })
+const arConfig = reactive({ enabled: false, window_sec: 300, spike_threshold: 10, spike_ratio: 3, auto_review_ttl: 3600, llm_endpoint: '', llm_model: '', llm_api_key: '', llm_timeout_sec: 10 })
+const showArKey = ref(false)
 const arRules = ref([])
 const arStats = ref({})
 const arManualRules = ref([])
@@ -867,11 +875,16 @@ async function loadAutoReview() {
       api('/api/v1/auto-review/stats').catch(() => ({}))
     ])
     if (status.config) {
-      arConfig.enabled = status.config.enabled !== false
-      arConfig.window_sec = status.config.window_sec || 300
-      arConfig.fp_threshold = status.config.fp_threshold || 5
-      arConfig.downgrade_multiplier = status.config.downgrade_multiplier || 2
-      arConfig.ttl_sec = status.config.ttl_sec || 3600
+      const c = status.config
+      arConfig.enabled = c.enabled !== false
+      arConfig.window_sec = c.window_seconds || 300
+      arConfig.spike_threshold = c.spike_threshold || 10
+      arConfig.spike_ratio = c.spike_ratio || 3
+      arConfig.auto_review_ttl = c.auto_review_ttl || 3600
+      arConfig.llm_endpoint = c.llm_endpoint || ''
+      arConfig.llm_model = c.llm_model || ''
+      arConfig.llm_api_key = c.llm_api_key || ''
+      arConfig.llm_timeout_sec = c.llm_timeout_sec || 10
     }
     arRules.value = status.rules || []
     arManualRules.value = status.manual_review_rules || []
@@ -884,7 +897,7 @@ async function loadAutoReview() {
 async function saveAutoReviewConfig() {
   arSaving.value = true
   try {
-    await apiPost('/api/v1/auto-review/config', { enabled: arConfig.enabled, window_sec: arConfig.window_sec, fp_threshold: arConfig.fp_threshold, downgrade_multiplier: arConfig.downgrade_multiplier, ttl_sec: arConfig.ttl_sec })
+    await apiPost('/api/v1/auto-review/config', { enabled: arConfig.enabled, window_seconds: arConfig.window_sec, spike_threshold: arConfig.spike_threshold, spike_ratio: arConfig.spike_ratio, auto_review_ttl: arConfig.auto_review_ttl, llm_endpoint: arConfig.llm_endpoint, llm_model: arConfig.llm_model, llm_api_key: arConfig.llm_api_key, llm_timeout_sec: arConfig.llm_timeout_sec })
     showToast('AC 分级配置已保存', 'success')
   } catch (e) { showToast('保存失败: ' + e.message, 'error') }
   arSaving.value = false
@@ -1028,6 +1041,9 @@ onMounted(() => {
 .cfg-input-wide { width: 360px; }
 .cfg-input-num { width: 100px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); padding: 6px 10px; font-size: var(--text-sm); outline: none; font-family: var(--font-mono); }
 .cfg-input-num:focus { border-color: var(--color-primary); }
+.cfg-input-text { width: 100%; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); padding: 6px 10px; font-size: var(--text-sm); outline: none; }
+.cfg-input-text:focus { border-color: var(--color-primary); }
+.cfg-input-text::placeholder { color: var(--text-tertiary); }
 .cfg-select { background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); padding: 6px 10px; font-size: var(--text-sm); outline: none; min-width: 140px; cursor: pointer; }
 .cfg-select:focus { border-color: var(--color-primary); }
 .cfg-inline { display: flex; align-items: center; gap: var(--space-2); }
