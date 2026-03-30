@@ -33,8 +33,6 @@
           <option value="">全部方向 ({{ allUnifiedRules.length }})</option>
           <option value="inbound">入站 ({{ allUnifiedRules.filter(r=>r._direction==='inbound').length }})</option>
           <option value="outbound">出站 ({{ allUnifiedRules.filter(r=>r._direction==='outbound').length }})</option>
-          <option value="llm_request">LLM 请求 ({{ allUnifiedRules.filter(r=>r._direction==='llm_request').length }})</option>
-          <option value="llm_response">LLM 响应 ({{ allUnifiedRules.filter(r=>r._direction==='llm_response').length }})</option>
         </select>
         <select v-model="filterAction" class="filter-select" style="min-width:80px">
           <option value="">全部动作</option>
@@ -409,9 +407,6 @@ const outboundColumns = [
   { key: 'patterns_count', label: '模式数', sortable: true },
 ]
 
-// LLM rules
-const llmRules = ref([])
-
 // 统一规则表 columns
 const unifiedColumns = [
   { key: '_direction', label: '方向', sortable: true },
@@ -427,13 +422,7 @@ const unifiedColumns = [
 const allUnifiedRules = computed(() => {
   const inbound = (inboundRules.value || []).map(r => ({ ...r, _direction: 'inbound', patterns_count: r.patterns_count ?? (r.patterns ? r.patterns.length : '--') }))
   const outbound = (outboundRules.value || []).map(r => ({ ...r, _direction: 'outbound', patterns_count: r.patterns_count ?? (r.patterns ? r.patterns.length : '--') }))
-  const llm = (llmRules.value || []).map(r => ({
-    ...r,
-    _direction: r.direction === 'response' ? 'llm_response' : r.direction === 'both' ? 'llm_request' : 'llm_request',
-    patterns_count: r.patterns ? r.patterns.length : '--',
-    group: r.category || ''
-  }))
-  return [...inbound, ...outbound, ...llm]
+  return [...inbound, ...outbound]
 })
 
 // 过滤后的规则
@@ -449,11 +438,11 @@ const filteredUnifiedRules = computed(() => {
 })
 
 function directionLabel(d) {
-  const m = { inbound: '入站', outbound: '出站', llm_request: 'LLM 请求', llm_response: 'LLM 响应' }
+  const m = { inbound: '入站', outbound: '出站' }
   return m[d] || d
 }
 function directionTag(d) {
-  const m = { inbound: 'tag-success', outbound: 'tag-info', llm_request: 'tag-warn', llm_response: 'tag-block' }
+  const m = { inbound: 'tag-success', outbound: 'tag-info' }
   return m[d] || 'tag-info'
 }
 
@@ -589,10 +578,6 @@ async function loadOutbound() {
   outboundLoading.value = true
   try { const d = await api('/api/v1/outbound-rules'); outboundRules.value = d.rules || [] } catch { outboundRules.value = [] }
   outboundLoading.value = false
-}
-
-async function loadLLMRules() {
-  try { const d = await api('/api/v1/llm/rules'); llmRules.value = d.rules || [] } catch { llmRules.value = [] }
 }
 
 async function toggleShadow(row) {
@@ -746,7 +731,7 @@ async function loadOverlap() {
   overlapLoading.value = false
 }
 
-onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadLLMRules(); loadIndustryTemplates() })
+onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTemplates() })
 </script>
 
 <style scoped>
