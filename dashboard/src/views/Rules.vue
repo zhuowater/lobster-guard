@@ -27,50 +27,68 @@
           <button class="btn btn-ghost btn-sm" @click="showImport = true" title="从 YAML 导入规则">导入</button>
         </div>
       </div>
-      <div class="tab-header">
-        <button class="tab-btn" :class="{ active: activeTab === 'inbound' }" @click="activeTab = 'inbound'">入站规则</button>
-        <button class="tab-btn" :class="{ active: activeTab === 'outbound' }" @click="activeTab = 'outbound'">出站规则</button>
+      <!-- 统一规则管理（入站+出站+LLM 合并） -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <select v-model="filterDirection" class="filter-select" style="min-width:100px">
+          <option value="">全部方向 ({{ allUnifiedRules.length }})</option>
+          <option value="inbound">入站 ({{ allUnifiedRules.filter(r=>r._direction==='inbound').length }})</option>
+          <option value="outbound">出站 ({{ allUnifiedRules.filter(r=>r._direction==='outbound').length }})</option>
+          <option value="llm_request">LLM 请求 ({{ allUnifiedRules.filter(r=>r._direction==='llm_request').length }})</option>
+          <option value="llm_response">LLM 响应 ({{ allUnifiedRules.filter(r=>r._direction==='llm_response').length }})</option>
+        </select>
+        <select v-model="filterAction" class="filter-select" style="min-width:80px">
+          <option value="">全部动作</option>
+          <option value="block">block</option>
+          <option value="warn">warn</option>
+          <option value="log">log</option>
+          <option value="rewrite">rewrite</option>
+        </select>
+        <input v-model="filterSearch" type="text" class="filter-select" style="min-width:160px" placeholder="搜索名称/模式...">
+        <span style="margin-left:auto;font-size:var(--text-xs);color:var(--text-secondary)">
+          显示 {{ filteredUnifiedRules.length }} / {{ allUnifiedRules.length }} 条规则
+        </span>
       </div>
 
-      <!-- Inbound -->
-      <div v-show="activeTab === 'inbound'">
-        <DataTable :columns="inboundColumns" :data="inboundRules" :loading="inboundLoading" empty-text="暂无入站规则" :expandable="true">
-          <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
-          <template #cell-type="{ value }"><span class="tag tag-info">{{ value || 'keyword' }}</span></template>
-          <template #cell-group="{ value }">
-            <span v-if="value" class="tag" :style="{ background: groupColor(value), color: '#fff' }">{{ value }}</span>
-            <span v-else>--</span>
-          </template>
-          <template #expand="{ row }">
-            <div style="font-size:.82rem">
-              <div><b style="color:var(--color-primary)">名称:</b> {{ row.name }}</div>
-              <div><b style="color:var(--color-primary)">类型:</b> {{ row.type || 'keyword' }} | <b style="color:var(--color-primary)">动作:</b> {{ row.action }} | <b style="color:var(--color-primary)">优先级:</b> {{ row.priority ?? '--' }}</div>
-              <div v-if="row.patterns && row.patterns.length"><b style="color:var(--color-primary)">模式:</b>
-                <pre style="background:var(--bg-base);padding:8px;border-radius:var(--radius-md);margin-top:4px;font-size:var(--text-xs);overflow-x:auto;color:var(--color-success);border:1px solid var(--border-subtle)">{{ row.patterns.join('\n') }}</pre>
-              </div>
+      <DataTable :columns="unifiedColumns" :data="filteredUnifiedRules" :loading="inboundLoading" empty-text="暂无规则" :expandable="true">
+        <template #cell-_direction="{ value }">
+          <span class="tag" :class="directionTag(value)">{{ directionLabel(value) }}</span>
+        </template>
+        <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
+        <template #cell-type="{ value }"><span class="tag tag-info">{{ value || 'keyword' }}</span></template>
+        <template #cell-group="{ value }">
+          <span v-if="value" class="tag" :style="{ background: groupColor(value), color: '#fff' }">{{ value }}</span>
+          <span v-else>--</span>
+        </template>
+        <template #expand="{ row }">
+          <div style="font-size:.82rem">
+            <div><b style="color:var(--color-primary)">名称:</b> {{ row.name }}</div>
+            <div>
+              <b style="color:var(--color-primary)">方向:</b> <span class="tag" :class="directionTag(row._direction)" style="font-size:.72rem">{{ directionLabel(row._direction) }}</span> |
+              <b style="color:var(--color-primary)">类型:</b> {{ row.type || 'keyword' }} |
+              <b style="color:var(--color-primary)">动作:</b> <span class="tag" :class="actTag(row.action)" style="font-size:.72rem">{{ row.action }}</span> |
+              <b style="color:var(--color-primary)">优先级:</b> {{ row.priority ?? '--' }}
             </div>
-          </template>
-          <template #actions="{ row }">
-            <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row)" title="编辑">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            </button>
-            <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row)" style="margin-left:4px" title="删除">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
-          </template>
-        </DataTable>
-        <div class="rule-meta" v-if="inboundMeta">
-          版本: {{ inboundMeta.version }} 来源: {{ inboundMeta.source }} 加载: {{ fmtTime(inboundMeta.loaded_at) }}
-        </div>
-        <div style="margin-top:12px"><button class="btn btn-sm" @click="reloadInbound">热更新入站规则</button></div>
+            <div v-if="row.description" style="margin-top:4px;color:var(--text-secondary)">{{ row.description }}</div>
+            <div v-if="row.patterns && row.patterns.length"><b style="color:var(--color-primary)">模式:</b>
+              <pre style="background:var(--bg-base);padding:8px;border-radius:var(--radius-md);margin-top:4px;font-size:var(--text-xs);overflow-x:auto;color:var(--color-success);border:1px solid var(--border-subtle)">{{ row.patterns.join('\n') }}</pre>
+            </div>
+          </div>
+        </template>
+        <template #actions="{ row }">
+          <button class="btn btn-ghost btn-sm" @click.stop="openEditEditor(row)" title="编辑">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn btn-danger btn-sm" @click.stop="confirmDeleteRule(row)" style="margin-left:4px" title="删除">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </template>
+      </DataTable>
+      <div class="rule-meta" v-if="inboundMeta">
+        版本: {{ inboundMeta.version }} 来源: {{ inboundMeta.source }} 加载: {{ fmtTime(inboundMeta.loaded_at) }}
       </div>
-
-      <!-- Outbound -->
-      <div v-show="activeTab === 'outbound'">
-        <DataTable :columns="outboundColumns" :data="outboundRules" :loading="outboundLoading" empty-text="暂无出站规则" :expandable="false">
-          <template #cell-action="{ value }"><span class="tag" :class="actTag(value)">{{ value }}</span></template>
-        </DataTable>
-        <div style="margin-top:12px"><button class="btn btn-sm" @click="reloadOutbound">热更新出站规则</button></div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn btn-sm" @click="reloadInbound">热更新入站规则</button>
+        <button class="btn btn-sm" @click="reloadOutbound">热更新出站规则</button>
       </div>
     </div>
 
@@ -338,7 +356,12 @@ import Icon from '../components/Icon.vue'
 import RuleEditor from '../components/RuleEditor.vue'
 import RegexTester from '../components/RegexTester.vue'
 
-const activeTab = ref('inbound')
+const activeTab = ref('rules')
+
+// 统一规则过滤
+const filterDirection = ref('')
+const filterAction = ref('')
+const filterSearch = ref('')
 
 // Rule hits
 const ruleHits = ref([])
@@ -372,6 +395,54 @@ const outboundColumns = [
   { key: 'action', label: '动作', sortable: true },
   { key: 'patterns_count', label: '模式数', sortable: true },
 ]
+
+// LLM rules
+const llmRules = ref([])
+
+// 统一规则表 columns
+const unifiedColumns = [
+  { key: '_direction', label: '方向', sortable: true },
+  { key: 'name', label: '名称', sortable: true },
+  { key: 'action', label: '动作', sortable: true },
+  { key: 'type', label: '类型', sortable: true },
+  { key: 'priority', label: '优先级', sortable: true },
+  { key: 'patterns_count', label: '模式数', sortable: true },
+  { key: 'group', label: '分组', sortable: true },
+]
+
+// 合并入站+出站+LLM 到一个数组
+const allUnifiedRules = computed(() => {
+  const inbound = (inboundRules.value || []).map(r => ({ ...r, _direction: 'inbound', patterns_count: r.patterns_count ?? (r.patterns ? r.patterns.length : '--') }))
+  const outbound = (outboundRules.value || []).map(r => ({ ...r, _direction: 'outbound', patterns_count: r.patterns_count ?? (r.patterns ? r.patterns.length : '--') }))
+  const llm = (llmRules.value || []).map(r => ({
+    ...r,
+    _direction: r.direction === 'response' ? 'llm_response' : r.direction === 'both' ? 'llm_request' : 'llm_request',
+    patterns_count: r.patterns ? r.patterns.length : '--',
+    group: r.category || ''
+  }))
+  return [...inbound, ...outbound, ...llm]
+})
+
+// 过滤后的规则
+const filteredUnifiedRules = computed(() => {
+  let list = allUnifiedRules.value
+  if (filterDirection.value) list = list.filter(r => r._direction === filterDirection.value)
+  if (filterAction.value) list = list.filter(r => (r.action || '').toLowerCase() === filterAction.value)
+  if (filterSearch.value) {
+    const q = filterSearch.value.toLowerCase()
+    list = list.filter(r => (r.name || '').toLowerCase().includes(q) || (r.patterns || []).some(p => p.toLowerCase().includes(q)))
+  }
+  return list
+})
+
+function directionLabel(d) {
+  const m = { inbound: '入站', outbound: '出站', llm_request: 'LLM 请求', llm_response: 'LLM 响应' }
+  return m[d] || d
+}
+function directionTag(d) {
+  const m = { inbound: 'tag-success', outbound: 'tag-info', llm_request: 'tag-warn', llm_response: 'tag-block' }
+  return m[d] || 'tag-info'
+}
 
 // ====== Industry Templates (v31.0) ======
 const industryTemplates = ref([])
@@ -505,6 +576,10 @@ async function loadOutbound() {
   outboundLoading.value = true
   try { const d = await api('/api/v1/outbound-rules'); outboundRules.value = d.rules || [] } catch { outboundRules.value = [] }
   outboundLoading.value = false
+}
+
+async function loadLLMRules() {
+  try { const d = await api('/api/v1/llm/rules'); llmRules.value = d.rules || [] } catch { llmRules.value = [] }
 }
 
 function openCreateEditor() {
@@ -647,7 +722,7 @@ async function loadOverlap() {
   overlapLoading.value = false
 }
 
-onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTemplates() })
+onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadLLMRules(); loadIndustryTemplates() })
 </script>
 
 <style scoped>
@@ -866,4 +941,6 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTem
 }
 .overlap-tags { margin-top: 6px; display: flex; gap: 4px; }
 .overlap-rules { margin-top: 4px; font-size: .72rem; color: var(--text-tertiary); }
+.filter-select { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 6px 10px; font-size: var(--text-sm); outline: none; }
+.filter-select:focus { border-color: var(--color-primary); }
 </style>
