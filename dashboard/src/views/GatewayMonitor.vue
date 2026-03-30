@@ -1245,7 +1245,7 @@ async function openFile(f) {
   fileUnsaved.value = false
   try {
     const res = await api(`/api/v1/upstreams/${expandedId.value}/gateway/agents/file?agentId=${encodeURIComponent(fileAgentId.value)}&name=${encodeURIComponent(f.name)}`)
-    fileContent.value = res.content || ''
+    fileContent.value = res?.file?.content || res?.content || ''
   } catch (e) { fileContent.value = '// 加载失败: ' + e.message }
 }
 
