@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 🦞 龙虾卫士 CLI — v20.7
-# 覆盖：系统状态 / IM 安全 / LLM 安全 / 威胁分析 / 安全治理 / 运维 / Phase 1 新功能
+# 🦞 龙虾卫士 CLI — v33.0
+# 覆盖：系统状态 / IM 安全 / LLM 安全 / 威胁分析 / 安全画像 / 安全治理 / 运维
 set -euo pipefail
 
-VERSION="20.6"
+VERSION="33.0"
 BASE_URL="${LOBSTER_GUARD_URL:-http://10.44.96.142:9090}"
 TOKEN="${LOBSTER_GUARD_TOKEN:-}"
 REG_TOKEN="${LOBSTER_GUARD_REG_TOKEN:-}"
@@ -112,62 +112,17 @@ cmd_sessions()         { api_get "/api/v1/governance/sessions"; }
 cmd_generate_report()  { api_post "/api/v1/governance/reports/generate" "{\"type\":\"${1}\"}"; }
 cmd_reports()          { api_get "/api/v1/governance/reports"; }
 
-# ── 执行信封 · 密码学审计 (v18) ─────────────────────────────
-cmd_envelopes()       { api_get "/api/v1/envelopes?limit=${1:-20}"; }
-cmd_envelope_verify() { api_get "/api/v1/envelopes/${1}/verify"; }
-cmd_merkle_batches()  { api_get "/api/v1/envelopes/merkle/batches"; }
-cmd_merkle_verify()   { api_get "/api/v1/envelopes/merkle/${1}/verify"; }
-
-# ── 事件总线 · Webhook (v18) ──────────────────────────────
-cmd_events()          { api_get "/api/v1/events?limit=${1:-50}"; }
-cmd_event_subs()      { api_get "/api/v1/events/subscriptions"; }
-cmd_event_sub_add()   { api_post "/api/v1/events/subscriptions" "{\"url\":\"${1}\",\"events\":${2:-\"[\\\"*\\\"]\"}}"; }
-cmd_event_sub_del()   { api_delete "/api/v1/events/subscriptions/${1}"; }
-cmd_event_test()      { api_post "/api/v1/events/test" "{\"subscription_id\":\"${1}\"}"; }
-
-# ── 自进化引擎 (v19) ─────────────────────────────────────
-cmd_evolution_status() { api_get "/api/v1/evolution/status"; }
-cmd_evolution_run()    { api_post "/api/v1/evolution/run"; }
-cmd_evolution_log()    { api_get "/api/v1/evolution/log?limit=${1:-20}"; }
-cmd_evolution_rules()  { api_get "/api/v1/evolution/generated-rules"; }
-
-# ── 语义检测 (v19) ───────────────────────────────────────
-cmd_semantic_status()  { api_get "/api/v1/semantic/status"; }
-cmd_semantic_test()    { api_post "/api/v1/semantic/analyze" "{\"text\":\"${1}\"}"; }
-cmd_semantic_patterns(){ api_get "/api/v1/semantic/patterns"; }
-
-# ── 奇点蜜罐 (v18/v19) ──────────────────────────────────
-cmd_singularity()       { api_get "/api/v1/singularity/budget"; }
-cmd_singularity_map()   { api_get "/api/v1/singularity/map"; }
-cmd_loyalty()           { api_get "/api/v1/honeypot/loyalty"; }
-
-# ── 工具策略 · tool_calls (v20) ──────────────────────────
-cmd_tool_policies()    { api_get "/api/v1/tool-policies"; }
-cmd_tool_policy_add()  { api_post "/api/v1/tool-policies" "{\"tool\":\"${1}\",\"action\":\"${2:-warn}\"}"; }
-cmd_tool_policy_del()  { api_delete "/api/v1/tool-policies/${1}"; }
-cmd_tool_evaluate()    { api_post "/api/v1/tool-policies/evaluate" "{\"tool_calls\":${1}}"; }
-cmd_tool_events()      { api_get "/api/v1/tool-policies/events?limit=${1:-20}"; }
-
-# ── 污染追踪 (v20) ───────────────────────────────────────
-cmd_taint_scan()       { api_post "/api/v1/taint/scan" "{\"text\":\"${1}\"}"; }
-cmd_taint_trace()      { api_get "/api/v1/taint/trace/${1}"; }
-cmd_taint_propagation(){ api_get "/api/v1/taint/propagation?limit=${1:-20}"; }
-cmd_taint_reverse()    { api_post "/api/v1/taint/reverse" "{\"trace_id\":\"${1}\",\"template\":\"${2:-soft}\"}"; }
-cmd_taint_config()     { api_get "/api/v1/taint/config"; }
-
-# ── 响应缓存 (v20) ───────────────────────────────────────
-cmd_cache_status()     { api_get "/api/v1/cache/status"; }
-cmd_cache_entries()    { api_get "/api/v1/cache/entries?limit=${1:-20}"; }
-cmd_cache_query()      { api_post "/api/v1/cache/query" "{\"text\":\"${1}\"}"; }
-cmd_cache_clear()      { api_post "/api/v1/cache/clear"; }
-cmd_cache_evict()      { api_delete "/api/v1/cache/entries/${1}"; }
-
-# ── API 网关 (v20) ───────────────────────────────────────
-cmd_gateway_status()   { api_get "/api/v1/gateway/status"; }
-cmd_gateway_routes()   { api_get "/api/v1/gateway/routes"; }
-cmd_gateway_jwt()      { api_post "/api/v1/gateway/jwt/validate" "{\"token\":\"${1}\"}"; }
-cmd_gateway_logs()     { api_get "/api/v1/gateway/logs?limit=${1:-50}"; }
-cmd_gateway_config()   { api_get "/api/v1/gateway/config"; }
+# ── Gateway 远程管理 (v29.0) ───────────────────────────────
+cmd_gw_restart()    { api_post "/api/v1/upstreams/${1}/gateway/restart"; }
+cmd_gw_update()     { api_post "/api/v1/upstreams/${1}/gateway/update"; }
+cmd_gw_config()     { api_get "/api/v1/upstreams/${1}/gateway/config"; }
+cmd_gw_sessions()   { api_get "/api/v1/upstreams/${1}/gateway/sessions"; }
+cmd_gw_approvals()  { api_get "/api/v1/upstreams/${1}/gateway/exec-approvals"; }
+cmd_gw_memory()     {
+  local upstream_id="$1"
+  local query="${2:-}"
+  api_post "/api/v1/upstreams/${upstream_id}/gateway/memory/search" "{\"query\":\"${query}\"}"
+}
 
 # ── 运维 ──────────────────────────────────────────────────
 cmd_backup()        { api_post "/api/v1/backup"; }
@@ -204,9 +159,18 @@ cmd_report() {
 }
 
 # ── 帮助 ──────────────────────────────────────────────────
+# === 安全画像 (v33.0) ===
+cmd_security_profile() {
+  local uid="${1:?用法: security-profile <upstream_id>}"
+  api_get "/api/v1/upstreams/${uid}/security-profile" | jq '{score: .security_score, level: .risk_level, users: .user_count, dimensions: [.dimensions[] | {(.name): .score}]}'
+}
+cmd_security_profiles() {
+  api_get "/api/v1/upstream-profiles" | jq '{total: .total, users: .total_users, avg: .avg_score, segments: .segments, profiles: [.profiles[] | {id: .upstream_id, score: .security_score, level: .risk_level, users: .user_count}]}'
+}
+
 cmd_help() {
 cat <<'EOF'
-🦞 龙虾卫士 CLI v20.7
+🦞 龙虾卫士 CLI v29.0
 
 系统状态:
   status / healthz        健康检查
@@ -258,62 +222,17 @@ LLM 安全:
   generate-report <type>  生成报告
   reports                 报告列表
 
-执行信封 (v18):
-  envelopes [limit]       信封列表
-  envelope-verify <id>    验证信封完整性
-  merkle-batches          Merkle 批次列表
-  merkle-verify <id>      验证 Merkle 批次
+安全画像 (v33.0):
+  security-profile <id>       单个上游安全画像（5维评分）
+  security-profiles           全部上游安全画像列表 + 分段统计
 
-事件总线 (v18):
-  events [limit]          事件列表
-  event-subs              Webhook 订阅列表
-  event-sub-add <url>     添加 Webhook 订阅
-  event-sub-del <id>      删除订阅
-  event-test <id>         测试订阅推送
-
-自进化引擎 (v19):
-  evolution-status        自进化状态
-  evolution-run           手动触发一次进化
-  evolution-log [limit]   进化日志
-  evolution-rules         自动生成的规则
-
-语义检测 (v19):
-  semantic-status         语义引擎状态
-  semantic-test <text>    分析文本
-  semantic-patterns       模式库列表
-
-奇点蜜罐 (v18/v19):
-  singularity             奇点预算概览
-  singularity-map         奇点拓扑图
-  loyalty                 攻击者忠诚度排行
-
-工具策略 (v20):
-  tool-policies           策略列表
-  tool-policy-add <t> [a] 添加工具策略
-  tool-policy-del <id>    删除工具策略
-  tool-evaluate <json>    评估 tool_calls
-  tool-events [limit]     策略事件日志
-
-污染追踪 (v20):
-  taint-scan <text>       扫描文本 PII 标签
-  taint-trace <trace_id>  查看污染链
-  taint-propagation [n]   传播记录列表
-  taint-reverse <id> [t]  触发逆转 (soft/hard/stealth)
-  taint-config            污染追踪配置
-
-响应缓存 (v20):
-  cache-status            缓存命中率统计
-  cache-entries [limit]   缓存条目列表
-  cache-query <text>      查询缓存匹配
-  cache-clear             清空全部缓存
-  cache-evict <id>        淘汰指定条目
-
-API 网关 (v20):
-  gateway-status          网关状态
-  gateway-routes          路由列表
-  gateway-jwt <token>     校验 JWT
-  gateway-logs [limit]    网关日志
-  gateway-config          网关配置
+Gateway 远程管理:
+  gw-restart <upstream_id>    远程重启 Gateway
+  gw-update <upstream_id>     触发 Gateway 自更新
+  gw-config <upstream_id>     查看 Gateway 配置
+  gw-sessions <upstream_id>   列出 Gateway 会话
+  gw-approvals <upstream_id>  查看待审批命令
+  gw-memory <upstream_id> <q> 搜索 Agent 记忆
 
 运维:
   backup                  创建备份
@@ -386,62 +305,17 @@ main() {
     generate-report)    cmd_generate_report "$@" ;;
     reports)            cmd_reports ;;
 
-    # 执行信封 · 密码学审计 (v18)
-    envelopes)          cmd_envelopes "$@" ;;
-    envelope-verify)    cmd_envelope_verify "$@" ;;
-    merkle-batches)     cmd_merkle_batches ;;
-    merkle-verify)      cmd_merkle_verify "$@" ;;
+    # 安全画像 (v33.0)
+    security-profile)   cmd_security_profile "$@" ;;
+    security-profiles)  cmd_security_profiles ;;
 
-    # 事件总线 (v18)
-    events)             cmd_events "$@" ;;
-    event-subs)         cmd_event_subs ;;
-    event-sub-add)      cmd_event_sub_add "$@" ;;
-    event-sub-del)      cmd_event_sub_del "$@" ;;
-    event-test)         cmd_event_test "$@" ;;
-
-    # 自进化引擎 (v19)
-    evolution-status)   cmd_evolution_status ;;
-    evolution-run)      cmd_evolution_run ;;
-    evolution-log)      cmd_evolution_log "$@" ;;
-    evolution-rules)    cmd_evolution_rules ;;
-
-    # 语义检测 (v19)
-    semantic-status)    cmd_semantic_status ;;
-    semantic-test)      cmd_semantic_test "$@" ;;
-    semantic-patterns)  cmd_semantic_patterns ;;
-
-    # 奇点蜜罐 (v18/v19)
-    singularity)        cmd_singularity ;;
-    singularity-map)    cmd_singularity_map ;;
-    loyalty)            cmd_loyalty ;;
-
-    # 工具策略 (v20)
-    tool-policies)      cmd_tool_policies ;;
-    tool-policy-add)    cmd_tool_policy_add "$@" ;;
-    tool-policy-del)    cmd_tool_policy_del "$@" ;;
-    tool-evaluate)      cmd_tool_evaluate "$@" ;;
-    tool-events)        cmd_tool_events "$@" ;;
-
-    # 污染追踪 (v20)
-    taint-scan)         cmd_taint_scan "$@" ;;
-    taint-trace)        cmd_taint_trace "$@" ;;
-    taint-propagation)  cmd_taint_propagation "$@" ;;
-    taint-reverse)      cmd_taint_reverse "$@" ;;
-    taint-config)       cmd_taint_config ;;
-
-    # 响应缓存 (v20)
-    cache-status)       cmd_cache_status ;;
-    cache-entries)      cmd_cache_entries "$@" ;;
-    cache-query)        cmd_cache_query "$@" ;;
-    cache-clear)        cmd_cache_clear ;;
-    cache-evict)        cmd_cache_evict "$@" ;;
-
-    # API 网关 (v20)
-    gateway-status)     cmd_gateway_status ;;
-    gateway-routes)     cmd_gateway_routes ;;
-    gateway-jwt)        cmd_gateway_jwt "$@" ;;
-    gateway-logs)       cmd_gateway_logs "$@" ;;
-    gateway-config)     cmd_gateway_config ;;
+    # Gateway 远程管理
+    gw-restart)         cmd_gw_restart "$@" ;;
+    gw-update)          cmd_gw_update "$@" ;;
+    gw-config)          cmd_gw_config "$@" ;;
+    gw-sessions)        cmd_gw_sessions "$@" ;;
+    gw-approvals)       cmd_gw_approvals "$@" ;;
+    gw-memory)          cmd_gw_memory "$@" ;;
 
     # 运维
     backup)             cmd_backup ;;

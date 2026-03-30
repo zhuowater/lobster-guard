@@ -1,4 +1,4 @@
-# 🦞 龙虾卫士 · 系统运维 — v22.4
+# 🦞 龙虾卫士 · 系统运维 — v33.0
 
 龙虾卫士管理平台的系统运维子技能，覆盖健康检查、安全诊断、备份恢复、态势感知、认证管理等核心运维操作。所有 API 基于 `http://10.44.96.142:9090`，需 `Authorization: Bearer <token>` 认证（健康检查与指标端点除外）。
 
@@ -75,6 +75,15 @@
 | POST | `/api/v1/demo/seed` | 注入演示数据 | ✅ |
 | DELETE | `/api/v1/demo/clear` | 清除演示数据 | ✅ |
 
+### Gateway 远程控制 (v29.0)
+
+| 方法 | 端点 | 说明 | 认证 |
+|------|------|------|------|
+| POST | `/api/v1/upstreams/{id}/gateway/restart` | 重启上游 Gateway | ✅ |
+| POST | `/api/v1/upstreams/{id}/gateway/update` | 触发自更新 | ✅ |
+| GET | `/api/v1/upstreams/{id}/gateway/config` | 获取配置 | ✅ |
+| PATCH | `/api/v1/upstreams/{id}/gateway/config` | 修改配置（需 `baseHash`） | ✅ |
+
 ### 认证管理
 
 | 方法 | 端点 | 说明 | 认证 |
@@ -128,6 +137,10 @@
 | 用户管理 | `GET/POST /api/v1/auth/users` | "创建用户" |
 | 操作审计 | `GET /api/v1/op-audit` | "查看操作日志" |
 | 综合概览 | `GET /api/v1/overview/summary` | "首页概览" |
+| 远程重启 Gateway | `POST /api/v1/upstreams/{id}/gateway/restart` | "重启上游 Gateway" |
+| 远程自更新 Gateway | `POST /api/v1/upstreams/{id}/gateway/update` | "更新上游 Gateway" |
+| 查看 Gateway 配置 | `GET /api/v1/upstreams/{id}/gateway/config` | "查看 Gateway 配置" |
+| 修改 Gateway 配置 | `PATCH /api/v1/upstreams/{id}/gateway/config` | "修改 Gateway 配置" |
 
 ---
 
@@ -156,3 +169,39 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" http://10.44.96.142:9090/api/v
 ## CLI 工具
 
 完整命令行工具见 `../lobster-cli.sh`，支持所有运维命令的快捷调用。
+
+---
+
+## v22.x Gateway Monitor 运维
+
+### 上游 Gateway 状态检查
+
+```bash
+# 检查上游 Gateway 连通性
+curl -s -H "Authorization: Bearer $TOKEN" http://10.44.96.142:9090/api/v1/gateway-monitor/upstreams | jq .
+
+# 调用上游 Gateway 的 tools/invoke
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"tool": "status"}' http://10.44.96.142:9090/api/v1/tools/invoke | jq .
+```
+
+### 部署验证命令
+
+```bash
+# 验证所有端口可达
+for port in 18443 18444 8445 9090; do
+  echo -n "Port $port: "; curl -s -o /dev/null -w "%{http_code}" http://10.44.96.142:$port/healthz 2>/dev/null || echo "N/A"
+done
+
+# 验证 Dashboard 3 模式
+curl -s -H "Authorization: Bearer $TOKEN" http://10.44.96.142:9090/api/v1/overview/summary | jq '.dashboard_modes'
+
+# 验证 AOC 功能
+curl -s -H "Authorization: Bearer $TOKEN" http://10.44.96.142:9090/api/v1/aoc/dashboard | jq .
+
+# 验证 SVG 图标加载
+curl -s http://10.44.96.142:9090/ | grep -c 'svg' 
+```
+
+> Phase 1 新功能请见对应子技能：执行信封 `../envelope/`、事件总线 `../event-bus/`、自进化 `../evolution/`、语义检测 `../semantic/`、奇点蜜罐 `../singularity/`、工具策略 `../tool-policy/`、污染追踪 `../taint/`、响应缓存 `../cache/`、API网关 `../gateway/`
+> v29.0 新功能：Gateway 远程控制（restart / update / config）、WSS RPC 远程管理、AOC（8 视图）— 详见 `../gateway/SKILL.md`
