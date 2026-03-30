@@ -33,6 +33,15 @@ func (a *ManagementAPI) handleSuggestionList(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// extractReviewer 从请求中提取操作者身份
+func (a *ManagementAPI) extractReviewer(r *http.Request) string {
+	user, ok := a.checkAuth(r)
+	if ok && user != nil && user.Username != "" {
+		return user.Username
+	}
+	return "admin"
+}
+
 // handleSuggestionAccept POST /api/v1/suggestions/:id/accept — 接受建议
 func (a *ManagementAPI) handleSuggestionAccept(w http.ResponseWriter, r *http.Request) {
 	if a.suggestionQueue == nil {
@@ -43,7 +52,7 @@ func (a *ManagementAPI) handleSuggestionAccept(w http.ResponseWriter, r *http.Re
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/suggestions/")
 	id = strings.TrimSuffix(id, "/accept")
 
-	reviewer := "admin" // TODO: 从 JWT 获取
+	reviewer := a.extractReviewer(r)
 	if err := a.suggestionQueue.Accept(id, reviewer); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			jsonResponse(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -71,7 +80,7 @@ func (a *ManagementAPI) handleSuggestionReject(w http.ResponseWriter, r *http.Re
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 
-	reviewer := "admin"
+	reviewer := a.extractReviewer(r)
 	if err := a.suggestionQueue.Reject(id, reviewer, body.Reason); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			jsonResponse(w, http.StatusNotFound, map[string]string{"error": err.Error()})

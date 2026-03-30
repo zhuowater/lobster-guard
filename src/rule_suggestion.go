@@ -137,6 +137,7 @@ func (sq *SuggestionQueue) List(status string, limit int) ([]RuleSuggestion, err
 		var reviewedStr sql.NullString
 		err := rows.Scan(&s.ID, &createdStr, &s.Source, &s.SourceDetail, &s.RuleName, &s.RuleType, &patternsStr, &s.Action, &s.Category, &s.Engine, &s.Reason, &s.Status, &reviewedStr, &s.ReviewedBy, &s.RejectReason)
 		if err != nil {
+			log.Printf("[建议队列] scan error: %v", err)
 			continue
 		}
 		s.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
@@ -204,19 +205,22 @@ func (sq *SuggestionQueue) Accept(id string, reviewedBy string) error {
 }
 
 // persistAcceptedRule 将接受的规则追加写入 conf.d/rules-suggestions.yaml
+// 文件格式必须是 Config 结构体（conf.d 加载器 yaml.Unmarshal 到 Config）
 func (sq *SuggestionQueue) persistAcceptedRule(s RuleSuggestion) {
 	confDir := "/etc/lobster-guard/conf.d"
 	filePath := confDir + "/rules-suggestions.yaml"
 
-	// 读取已有内容
-	var existing []InboundRuleConfig
+	// 读取已有内容（Config 格式）
+	var wrapper struct {
+		InboundRules []InboundRuleConfig `yaml:"inbound_rules"`
+	}
 	data, err := os.ReadFile(filePath)
 	if err == nil {
-		yaml.Unmarshal(data, &existing)
+		yaml.Unmarshal(data, &wrapper)
 	}
 
 	// 追加新规则
-	existing = append(existing, InboundRuleConfig{
+	wrapper.InboundRules = append(wrapper.InboundRules, InboundRuleConfig{
 		Name:     s.RuleName,
 		Patterns: s.Patterns,
 		Action:   s.Action,
@@ -226,7 +230,7 @@ func (sq *SuggestionQueue) persistAcceptedRule(s RuleSuggestion) {
 	})
 
 	// 写回
-	out, err := yaml.Marshal(existing)
+	out, err := yaml.Marshal(wrapper)
 	if err != nil {
 		log.Printf("[建议队列] 持久化失败: %v", err)
 		return

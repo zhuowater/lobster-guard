@@ -343,6 +343,14 @@ func (api *ManagementAPI) handleReportScheduleUpdate(w http.ResponseWriter, r *h
 		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
 		return
 	}
+	// 校验 cron 表达式（简易：5 或 6 段空格分隔）
+	if req.Cron != "" {
+		fields := strings.Fields(req.Cron)
+		if len(fields) < 5 || len(fields) > 6 {
+			jsonResponse(w, 400, map[string]string{"error": fmt.Sprintf("invalid cron expression: expected 5-6 fields, got %d", len(fields))})
+			return
+		}
+	}
 	api.cfg.ReportSchedule.Enabled = req.Enabled
 	api.cfg.ReportSchedule.Cron = req.Cron
 	api.cfg.ReportSchedule.WebhookURL = req.WebhookURL
@@ -379,10 +387,14 @@ func (api *ManagementAPI) handleEngineToggle(w http.ResponseWriter, r *http.Requ
 	name := strings.TrimPrefix(r.URL.Path, "/api/v1/engines/")
 	name = strings.TrimSuffix(name, "/toggle")
 	var req struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonResponse(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Enabled == nil {
+		jsonResponse(w, 400, map[string]string{"error": "missing required field: enabled"})
 		return
 	}
 	mapping := map[string]struct {
@@ -398,9 +410,9 @@ func (api *ManagementAPI) handleEngineToggle(w http.ResponseWriter, r *http.Requ
 		jsonResponse(w, 404, map[string]string{"error": "unknown engine"})
 		return
 	}
-	*m.ptr = req.Enabled
-	_ = api.persistRawSection(m.key, map[string]interface{}{"enabled": req.Enabled})
-	jsonResponse(w, 200, map[string]interface{}{"ok": true, "name": name, "enabled": req.Enabled})
+	*m.ptr = *req.Enabled
+	_ = api.persistRawSection(m.key, map[string]interface{}{"enabled": *req.Enabled})
+	jsonResponse(w, 200, map[string]interface{}{"ok": true, "name": name, "enabled": *req.Enabled})
 }
 
 // handleEngineToggleGet GET /api/v1/engines/:name/toggle — 获取引擎当前状态
