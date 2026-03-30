@@ -23,7 +23,6 @@
     <!-- Tab Header -->
     <div class="tab-header">
       <button class="tab-btn" :class="{ active: activeTab === 'rules' }" @click="activeTab = 'rules'">LLM 规则<span class="tab-badge" v-if="rules.length">{{ filteredRules.length }}</span></button>
-      <button class="tab-btn" :class="{ active: activeTab === 'templates' }" @click="activeTab = 'templates'">规则模板<span class="tab-badge" v-if="llmTemplates.length">{{ llmTemplates.length }}</span></button>
     </div>
 
     <!-- ========== Rules Tab ========== -->
@@ -260,119 +259,7 @@
 
     </div><!-- end Rules Tab -->
 
-    <!-- ========== Templates Tab ========== -->
-    <div v-show="activeTab === 'templates'">
-      <div class="tpl-stat-row">
-        <div class="tpl-stat-card"><div class="tpl-stat-value">{{ llmTemplates.length }}</div><div class="tpl-stat-label">模板总数</div></div>
-        <div class="tpl-stat-card"><div class="tpl-stat-value" style="color:var(--color-primary)">{{ tplBuiltInCount }}</div><div class="tpl-stat-label">内置模板</div></div>
-        <div class="tpl-stat-card"><div class="tpl-stat-value" style="color:var(--color-success)">{{ tplCustomCount }}</div><div class="tpl-stat-label">自定义模板</div></div>
-        <div class="tpl-stat-card"><div class="tpl-stat-value" style="color:var(--color-warning)">{{ tplTotalRuleCount }}</div><div class="tpl-stat-label">规则总数</div></div>
-      </div>
-      <div class="filter-bar card" style="margin-bottom:16px">
-        <div class="filter-bar-inner">
-          <div class="search-box">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input v-model="tplSearchText" class="search-input" placeholder="搜索模板名称或描述..." />
-            <button v-if="tplSearchText" class="search-clear" @click="tplSearchText = ''" title="清除">&times;</button>
-          </div>
-          <div class="filter-selects">
-            <select v-model="tplFilterCategory" class="filter-select">
-              <option value="">全部类别</option>
-              <option value="industry">行业</option>
-              <option value="security">安全</option>
-              <option value="compliance">合规</option>
-            </select>
-            <button class="btn btn-sm" @click="openCreateTemplate">新建模板</button>
-            <button class="btn btn-ghost btn-sm" @click="loadLLMTemplates">刷新</button>
-          </div>
-        </div>
-      </div>
-      <div class="tpl-grid">
-        <div v-for="tpl in filteredLLMTemplates" :key="tpl.id" class="tpl-card" :class="{ 'tpl-card-builtin': tpl.built_in }">
-          <div class="tpl-card-header">
-            <div class="tpl-card-title">
-              <span class="tpl-name">{{ tpl.name }}</span>
-              <span v-if="tpl.built_in" class="tpl-badge tpl-badge-builtin">内置</span>
-              <span v-else class="tpl-badge tpl-badge-custom">自定义</span>
-              <span class="tpl-badge tpl-badge-category">{{ tplCategoryLabel(tpl.category) }}</span>
-            </div>
-            <div class="tpl-card-actions">
-              <button class="btn btn-ghost btn-sm" @click="toggleTplExpand(tpl.id)">{{ tplExpandedIds[tpl.id] ? '收起' : '展开规则' }}</button>
-              <button class="btn btn-ghost btn-sm" @click="openEditTemplate(tpl)">编辑</button>
-              <button class="btn btn-danger btn-sm" :disabled="tpl.built_in" @click="confirmDeleteTemplate(tpl)">删除</button>
-            </div>
-          </div>
-          <div class="tpl-card-desc">{{ tpl.description || '暂无描述' }}</div>
-          <div class="tpl-card-meta">
-            <span class="tpl-meta-tag">ID: {{ tpl.id }}</span>
-            <span class="tpl-meta-tag">{{ (tpl.rules || []).length }} 条规则</span>
-          </div>
-          <div v-if="tplExpandedIds[tpl.id]" class="tpl-rules-detail">
-            <div class="tpl-rules-title">规则列表</div>
-            <div v-if="!tpl.rules || tpl.rules.length === 0" style="padding:8px 0;color:var(--text-tertiary);font-size:.85rem">暂无规则</div>
-            <div v-for="(rule, idx) in (tpl.rules || [])" :key="idx" class="tpl-rule-item">
-              <div class="tpl-rule-header">
-                <span class="tpl-rule-name">{{ rule.name }}</span>
-                <span class="tag" :class="actTag(rule.action)" style="font-size:.7rem">{{ rule.action }}</span>
-                <span class="tag tag-info" style="font-size:.7rem">{{ rule.type || 'keyword' }}</span>
-                <span style="font-size:.7rem;color:var(--text-tertiary)">{{ rule.category }}</span>
-                <span v-if="rule.direction" class="tag" :style="dirStyle(rule.direction)" style="font-size:.7rem">{{ dirLabel(rule.direction) }}</span>
-              </div>
-              <div class="tpl-rule-patterns">
-                模式: <code v-for="(p, pi) in (rule.patterns || []).slice(0, 5)" :key="pi">{{ p }}</code>
-                <span v-if="(rule.patterns || []).length > 5" style="color:var(--color-primary);font-style:italic">+{{ rule.patterns.length - 5 }} 更多</span>
-              </div>
-              <div v-if="rule.rewrite_to" class="tpl-rule-msg">Rewrite: <code>{{ rule.rewrite_to }}</code></div>
-              <div v-if="rule.message" class="tpl-rule-msg">提示: {{ rule.message }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div v-if="filteredLLMTemplates.length === 0 && !tplLoading" style="text-align:center;padding:32px;color:var(--text-tertiary)">
-        <div style="font-size:2rem;margin-bottom:8px">📋</div>
-        <div>暂无匹配的 LLM 规则模板</div>
-      </div>
-    </div><!-- end Templates Tab -->
-
-    <!-- Template Create/Edit Modal -->
-    <div v-if="showTplModal" class="modal-overlay" @click.self="showTplModal = false">
-      <div class="modal-box" style="max-width:800px">
-        <div class="modal-header">
-          <h3>{{ tplIsEdit ? '编辑 LLM 规则模板' : '创建 LLM 规则模板' }}</h3>
-          <button class="modal-close" @click="showTplModal = false">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>模板 ID</label>
-            <input v-model="tplForm.id" :disabled="tplIsEdit" class="input" placeholder="如 llm-tpl-xxx" />
-          </div>
-          <div class="form-group">
-            <label>名称 <span class="required">*</span></label>
-            <input v-model="tplForm.name" class="input" placeholder="模板名称" />
-          </div>
-          <div class="form-group">
-            <label>描述</label>
-            <input v-model="tplForm.description" class="input" placeholder="模板描述" />
-          </div>
-          <div class="form-group">
-            <label>类别</label>
-            <select v-model="tplForm.category" class="input"><option value="industry">行业</option><option value="security">安全</option><option value="compliance">合规</option></select>
-          </div>
-          <div class="form-group">
-            <label>规则 (JSON 数组)</label>
-            <textarea v-model="tplForm.rulesJSON" rows="12" class="input" style="font-family:var(--font-mono);font-size:var(--text-xs);resize:vertical" placeholder='[{"name":"规则1","patterns":["关键词1"],"action":"block","direction":"request"}]'></textarea>
-            <div v-if="tplJsonError" style="color:var(--color-danger);font-size:var(--text-xs);margin-top:4px">{{ tplJsonError }}</div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showTplModal = false">取消</button>
-          <button class="btn" @click="submitTemplate" :disabled="tplSubmitting">{{ tplSubmitting ? '提交中...' : (tplIsEdit ? '保存' : '创建') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Template Delete Confirm -->
-    <ConfirmModal v-if="deleteTplTarget" :visible="!!deleteTplTarget" type="danger" title="删除模板" :message="deleteTplMessage" confirm-text="删除" @confirm="doDeleteTemplate" @cancel="deleteTplTarget=null"/>
+    <!-- LLM 规则模板已统一到行业模板 (入站规则页 → 行业安全模板) -->
   </div>
 </template>
 
@@ -414,18 +301,7 @@ const testerText = ref('')
 const testerDirection = ref('request')
 const testerResults = ref(null)
 
-// Template state
-const llmTemplates = ref([])
-const tplLoading = ref(false)
-const tplSearchText = ref('')
-const tplFilterCategory = ref('')
-const tplExpandedIds = reactive({})
-const showTplModal = ref(false)
-const tplIsEdit = ref(false)
-const tplSubmitting = ref(false)
-const deleteTplTarget = ref(null)
-const tplForm = reactive({ id: '', name: '', description: '', category: 'industry', rulesJSON: '' })
-const tplJsonError = ref('')
+// Template state removed — LLM templates unified into industry templates (Rules.vue)
 
 const categoryOptions = [
   { value: 'prompt_injection', label: 'Prompt Injection' },
@@ -504,25 +380,6 @@ const totalHits = computed(() => {
   let sum = 0
   for (const h of Object.values(hits.value)) sum += (h.count || 0) + (h.shadow_hits || 0)
   return sum
-})
-
-// Template computed
-const deleteTplMessage = computed(() => {
-  if (!deleteTplTarget.value) return ''
-  return '确定删除模板 "' + (deleteTplTarget.value.name || deleteTplTarget.value.id) + '"？此操作不可恢复。'
-})
-const tplBuiltInCount = computed(() => llmTemplates.value.filter(t => t.built_in).length)
-const tplCustomCount = computed(() => llmTemplates.value.filter(t => !t.built_in).length)
-const tplTotalRuleCount = computed(() => llmTemplates.value.reduce((acc, t) => acc + (t.rules || []).length, 0))
-
-const filteredLLMTemplates = computed(() => {
-  let list = llmTemplates.value
-  if (tplSearchText.value) {
-    const q = tplSearchText.value.toLowerCase()
-    list = list.filter(t => t.name.toLowerCase().includes(q) || (t.description||'').toLowerCase().includes(q))
-  }
-  if (tplFilterCategory.value) list = list.filter(t => t.category === tplFilterCategory.value)
-  return list
 })
 
 const regexValidation = computed(() => {
@@ -709,61 +566,7 @@ function runTest() {
 }
 
 // Template methods
-async function loadLLMTemplates() {
-  tplLoading.value = true
-  try {
-    const data = await api('/api/v1/llm/templates')
-    llmTemplates.value = data.templates || []
-  } catch {} finally { tplLoading.value = false }
-}
-
-function toggleTplExpand(id) { tplExpandedIds[id] = !tplExpandedIds[id] }
-function tplCategoryLabel(c) { return { industry:'行业', security:'安全', compliance:'合规' }[c] || c }
-
-function openCreateTemplate() {
-  tplIsEdit.value = false
-  Object.assign(tplForm, { id: '', name: '', description: '', category: 'industry', rulesJSON: '[]' })
-  tplJsonError.value = ''
-  showTplModal.value = true
-}
-
-function openEditTemplate(tpl) {
-  tplIsEdit.value = true
-  Object.assign(tplForm, { id: tpl.id, name: tpl.name, description: tpl.description || '', category: tpl.category || 'industry', rulesJSON: JSON.stringify(tpl.rules || [], null, 2) })
-  tplJsonError.value = ''
-  showTplModal.value = true
-}
-
-async function submitTemplate() {
-  tplJsonError.value = ''
-  let parsedRules
-  try { parsedRules = JSON.parse(tplForm.rulesJSON) } catch (e) { tplJsonError.value = 'JSON 语法错误: ' + e.message; return }
-  if (!Array.isArray(parsedRules)) { tplJsonError.value = '规则必须是 JSON 数组'; return }
-  tplSubmitting.value = true
-  try {
-    const body = { id: tplForm.id, name: tplForm.name, description: tplForm.description, category: tplForm.category, rules: parsedRules }
-    if (tplIsEdit.value) await apiPut('/api/v1/llm/templates/' + tplForm.id, body)
-    else await apiPost('/api/v1/llm/templates', body)
-    showToast(tplIsEdit.value ? '模板已更新' : '模板已创建', 'success')
-    showTplModal.value = false
-    loadLLMTemplates()
-  } catch (e) { showToast('操作失败: ' + (e.message||e), 'error') }
-  finally { tplSubmitting.value = false }
-}
-
-function confirmDeleteTemplate(tpl) { deleteTplTarget.value = tpl }
-
-async function doDeleteTemplate() {
-  if (!deleteTplTarget.value) return
-  try {
-    await api('/api/v1/llm/templates/' + deleteTplTarget.value.id, { method: 'DELETE' })
-    showToast('模板已删除', 'success')
-    deleteTplTarget.value = null
-    loadLLMTemplates()
-  } catch (e) { showToast('删除失败: ' + (e.message||e), 'error') }
-}
-
-onMounted(() => { if (route.query.category) filterCategory.value = route.query.category; loadData(); loadLLMTemplates() })
+onMounted(() => { if (route.query.category) filterCategory.value = route.query.category; loadData() })
 watch(() => route.query.category, v => { filterCategory.value = v || '' })
 </script>
 
@@ -934,40 +737,8 @@ textarea.input { resize: vertical; }
 /* Tab Badge */
 .tab-badge { display: inline-block; background: var(--color-primary-dim, rgba(99, 102, 241, 0.15)); color: var(--color-primary); font-size: .7rem; font-weight: 600; padding: 1px 6px; border-radius: 10px; margin-left: 6px; min-width: 20px; text-align: center; }
 
-/* Templates Tab */
-.tpl-stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
-.tpl-stat-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px; text-align: center; }
-.tpl-stat-value { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); }
-.tpl-stat-label { font-size: .75rem; color: var(--text-tertiary); margin-top: 2px; }
-
-.tpl-grid { }
-.tpl-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-bottom: 10px; padding: 14px 16px; background: var(--bg-surface); transition: box-shadow .2s; }
-.tpl-card:hover { box-shadow: 0 4px 16px rgba(99,102,241,0.08); }
-.tpl-card-builtin { border-left: 3px solid var(--color-primary); }
-.tpl-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; flex-wrap: wrap; gap: 8px; }
-.tpl-card-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tpl-name { font-weight: 600; font-size: .95rem; color: var(--text-primary); }
-.tpl-card-actions { display: flex; gap: 4px; }
-.tpl-card-desc { color: var(--text-secondary); font-size: .82rem; margin-bottom: 6px; }
-.tpl-card-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-.tpl-meta-tag { font-size: .72rem; padding: 2px 8px; border-radius: 4px; background: var(--bg-elevated, var(--bg-base)); color: var(--text-tertiary); }
-.tpl-badge { padding: 2px 8px; border-radius: 4px; font-size: .68rem; font-weight: 600; }
-.tpl-badge-builtin { background: rgba(99,102,241,0.12); color: var(--color-primary); }
-.tpl-badge-custom { background: rgba(16,185,129,0.12); color: var(--color-success); }
-.tpl-badge-category { background: rgba(245,158,11,0.12); color: var(--color-warning); }
-
-.tpl-rules-detail { margin-top: 10px; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
-.tpl-rules-title { font-weight: 600; font-size: .85rem; margin-bottom: 8px; color: var(--text-primary); }
-.tpl-rule-item { padding: 8px; margin-bottom: 6px; background: var(--bg-elevated, var(--bg-base)); border-radius: 4px; border: 1px solid var(--border-subtle); }
-.tpl-rule-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tpl-rule-name { font-weight: 500; font-size: .85rem; }
-.tpl-rule-patterns { font-size: .75rem; color: var(--text-tertiary); margin-top: 4px; }
-.tpl-rule-patterns code { background: var(--bg-surface, var(--bg-base)); padding: 1px 4px; border-radius: 2px; margin: 0 2px; font-size: .7rem; }
-.tpl-rule-msg { font-size: .78rem; color: var(--text-secondary); margin-top: 2px; }
-
 @media (max-width:768px) {
   .stat-row { grid-template-columns: repeat(2,1fr); }
-  .tpl-stat-row { grid-template-columns: repeat(2, 1fr); }
   .form-row { grid-template-columns: 1fr; }
   .filter-bar-inner { flex-direction: column; }
   .search-box { min-width: 100%; }
