@@ -831,6 +831,15 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleStrictModeSet(w, r)
 	case path == "/api/v1/notifications" && method == "GET":
 		api.handleNotifications(w, r)
+	// v32.14: 报告定时 API (must precede wildcard /api/v1/reports/ routes)
+	case path == "/api/v1/reports/schedule" && method == "GET":
+		api.handleReportScheduleGet(w, r)
+	case path == "/api/v1/reports/schedule" && method == "PUT":
+		api.handleReportScheduleUpdate(w, r)
+	case path == "/api/v1/reports/generate-now" && method == "POST":
+		api.handleReportGenerateNow(w, r)
+	case path == "/api/v1/reports/runs" && method == "GET":
+		api.handleReportRuns(w, r)
 	// v12.0 报告引擎 API
 	case path == "/api/v1/reports/generate" && method == "POST":
 		api.handleReportGenerate(w, r)
@@ -1132,16 +1141,6 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleCanaryRotateNow(w, r)
 	case path == "/api/v1/canary/history" && method == "GET":
 		api.handleCanaryHistory(w, r)
-
-	// v32.14: 报告定时 API
-	case path == "/api/v1/reports/schedule" && method == "GET":
-		api.handleReportScheduleGet(w, r)
-	case path == "/api/v1/reports/schedule" && method == "PUT":
-		api.handleReportScheduleUpdate(w, r)
-	case path == "/api/v1/reports/generate-now" && method == "POST":
-		api.handleReportGenerateNow(w, r)
-	case path == "/api/v1/reports/runs" && method == "GET":
-		api.handleReportRuns(w, r)
 
 	// v32.15: 引擎开关 API
 	case strings.HasPrefix(path, "/api/v1/engines/") && strings.HasSuffix(path, "/toggle") && method == "POST":

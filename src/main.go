@@ -678,6 +678,16 @@ func main() {
 	}
 	fmt.Println("[初始化] ✅ 规则建议队列已启用")
 
+	// v32.13: 金丝雀令牌自动轮换
+	canaryRotator := NewCanaryRotator(mgmtAPI)
+	mgmtAPI.canaryRotator = canaryRotator
+	fmt.Println("[初始化] ✅ 金丝雀轮换已启用")
+
+	// v32.14: 报告定时生成
+	reportScheduler := NewReportScheduler(mgmtAPI)
+	mgmtAPI.reportScheduler = reportScheduler
+	fmt.Println("[初始化] ✅ 报告定时器已启用")
+
 	// v18.3: 自适应决策引擎
 	var adaptiveEngine *AdaptiveDecisionEngine
 	if cfg.AdaptiveDecision.Enabled {
