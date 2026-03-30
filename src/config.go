@@ -413,8 +413,22 @@ func loadConfDir(cfg *Config, mainConfigPath string) error {
 		if err != nil {
 			return fmt.Errorf("读取模块配置 %s 失败: %w", f, err)
 		}
+		// 保存已有规则 slice — yaml.Unmarshal 对 slice 是替换不是追加
+		prevInbound := append([]InboundRuleConfig{}, cfg.InboundRules...)
+		prevOutbound := append([]OutboundRuleConfig{}, cfg.OutboundRules...)
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return fmt.Errorf("解析模块配置 %s 失败: %w", filepath.Base(f), err)
+		}
+		// conf.d 多文件的同名 slice 字段追加合并（去重在 mergeInboundRules 处理）
+		if len(prevInbound) > 0 && len(cfg.InboundRules) > 0 {
+			cfg.InboundRules = appendUniqueInbound(prevInbound, cfg.InboundRules)
+		} else if len(cfg.InboundRules) == 0 {
+			cfg.InboundRules = prevInbound
+		}
+		if len(prevOutbound) > 0 && len(cfg.OutboundRules) > 0 {
+			cfg.OutboundRules = appendUniqueOutbound(prevOutbound, cfg.OutboundRules)
+		} else if len(cfg.OutboundRules) == 0 {
+			cfg.OutboundRules = prevOutbound
 		}
 		log.Printf("[config] 加载模块配置: %s", filepath.Base(f))
 	}
@@ -511,6 +525,42 @@ func resolveInboundRules(cfg *Config) (rules []InboundRuleConfig, source string,
 }
 
 // mergeInboundRules 合并默认规则和外部规则：外部同名覆盖，不同名追加
+// appendUniqueInbound 追加入站规则，同名规则后者覆盖前者
+func appendUniqueInbound(prev, next []InboundRuleConfig) []InboundRuleConfig {
+	byName := make(map[string]int, len(prev))
+	result := append([]InboundRuleConfig{}, prev...)
+	for i, r := range result {
+		byName[r.Name] = i
+	}
+	for _, r := range next {
+		if idx, ok := byName[r.Name]; ok {
+			result[idx] = r // 同名覆盖
+		} else {
+			byName[r.Name] = len(result)
+			result = append(result, r)
+		}
+	}
+	return result
+}
+
+// appendUniqueOutbound 追加出站规则，同名规则后者覆盖前者
+func appendUniqueOutbound(prev, next []OutboundRuleConfig) []OutboundRuleConfig {
+	byName := make(map[string]int, len(prev))
+	result := append([]OutboundRuleConfig{}, prev...)
+	for i, r := range result {
+		byName[r.Name] = i
+	}
+	for _, r := range next {
+		if idx, ok := byName[r.Name]; ok {
+			result[idx] = r
+		} else {
+			byName[r.Name] = len(result)
+			result = append(result, r)
+		}
+	}
+	return result
+}
+
 func mergeInboundRules(defaults, overrides []InboundRuleConfig) []InboundRuleConfig {
 	byName := make(map[string]InboundRuleConfig, len(overrides))
 	for _, r := range overrides {

@@ -135,7 +135,7 @@ outbound_rules:
 	if err := os.MkdirAll(confDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// conf.d 只定义一条规则 — 应完整替换主配置的 2 条
+	// conf.d 定义一条新规则 — 应追加到主配置的 2 条之后
 	if err := os.WriteFile(filepath.Join(confDir, "rules.yaml"), []byte(`
 outbound_rules:
   - name: "rule_x"
@@ -148,11 +148,65 @@ outbound_rules:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(cfg.OutboundRules) != 1 {
-		t.Fatalf("expected 1 outbound rule (replaced), got %d", len(cfg.OutboundRules))
+	if len(cfg.OutboundRules) != 3 {
+		t.Fatalf("expected 3 outbound rules (merged), got %d", len(cfg.OutboundRules))
 	}
-	if cfg.OutboundRules[0].Name != "rule_x" {
-		t.Errorf("expected rule name=rule_x, got %q", cfg.OutboundRules[0].Name)
+	names := make(map[string]bool)
+	for _, r := range cfg.OutboundRules {
+		names[r.Name] = true
+	}
+	if !names["rule_a"] || !names["rule_b"] || !names["rule_x"] {
+		t.Errorf("expected rule_a, rule_b, rule_x; got %v", names)
+	}
+}
+
+// 测试6b: conf.d 多文件同名规则后者覆盖前者（追加合并）
+func TestLoadConfDir_SliceMerge_SameNameOverride(t *testing.T) {
+	mainPath, confDir := setupTestConfig(t, ``)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// file1 定义 rule_a=block
+	if err := os.WriteFile(filepath.Join(confDir, "01-rules.yaml"), []byte(`
+inbound_rules:
+  - name: "rule_a"
+    patterns: ["aaa"]
+    action: "block"
+  - name: "rule_b"
+    patterns: ["bbb"]
+    action: "warn"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// file2 定义 rule_a=review（同名，应覆盖）+ rule_c（新增）
+	if err := os.WriteFile(filepath.Join(confDir, "02-override.yaml"), []byte(`
+inbound_rules:
+  - name: "rule_a"
+    patterns: ["aaa"]
+    action: "review"
+  - name: "rule_c"
+    patterns: ["ccc"]
+    action: "log"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.InboundRules) != 3 {
+		t.Fatalf("expected 3 inbound rules, got %d", len(cfg.InboundRules))
+	}
+	for _, r := range cfg.InboundRules {
+		if r.Name == "rule_a" && r.Action != "review" {
+			t.Errorf("rule_a should be overridden to review, got %q", r.Action)
+		}
+		if r.Name == "rule_b" && r.Action != "warn" {
+			t.Errorf("rule_b should remain warn, got %q", r.Action)
+		}
+		if r.Name == "rule_c" && r.Action != "log" {
+			t.Errorf("rule_c should be log, got %q", r.Action)
+		}
 	}
 }
 
