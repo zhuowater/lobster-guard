@@ -1789,7 +1789,7 @@ async function loadTabData(id, tab) {
     if (tab === 'sessions') {
       const [d, approvals] = await Promise.all([
         api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/sessions`),
-        api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/exec-approvals`)
+        api(`/api/v1/upstreams/${encodeURIComponent(id)}/gateway/exec-approvals`).catch(() => ({ items: [] }))
       ])
       sessions.value = d.error ? [] : (Array.isArray(d.sessions) ? d.sessions : [])
       execApprovals.value = approvals.error ? [] : (Array.isArray(approvals.items) ? approvals.items : (Array.isArray(approvals.approvals) ? approvals.approvals : (Array.isArray(approvals) ? approvals : [])))
