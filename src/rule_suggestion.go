@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 // RuleSuggestion 规则建议
@@ -148,13 +150,12 @@ func (sq *SuggestionQueue) List(status string, limit int) ([]RuleSuggestion, err
 	return results, nil
 }
 
-// Accept 接受建议 → 热更新到规则引擎
+// Accept 接受建议 → 持久化到 conf.d + 热更新到规则引擎
 func (sq *SuggestionQueue) Accept(id string, reviewedBy string) error {
 	if sq.db == nil {
 		return fmt.Errorf("database not available")
 	}
 	sq.mu.Lock()
-	defer sq.mu.Unlock()
 
 	// 查询建议
 	var s RuleSuggestion
@@ -162,14 +163,24 @@ func (sq *SuggestionQueue) Accept(id string, reviewedBy string) error {
 	err := sq.db.QueryRow(`SELECT id, rule_name, rule_type, patterns, action, category, engine, status FROM rule_suggestions WHERE id = ?`, id).
 		Scan(&s.ID, &s.RuleName, &s.RuleType, &patternsStr, &s.Action, &s.Category, &s.Engine, &statusStr)
 	if err != nil {
+		sq.mu.Unlock()
 		return fmt.Errorf("suggestion not found: %w", err)
 	}
 	if statusStr != "pending" {
+		sq.mu.Unlock()
 		return fmt.Errorf("suggestion already %s", statusStr)
 	}
 	json.Unmarshal([]byte(patternsStr), &s.Patterns)
 
-	// 应用到规则引擎
+	// 更新 DB 状态（先更新，释放锁后再 Reload，避免锁竞争）
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = sq.db.Exec(`UPDATE rule_suggestions SET status = 'accepted', reviewed_at = ?, reviewed_by = ? WHERE id = ?`, now, reviewedBy, id)
+	sq.mu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	// 应用到规则引擎 + 持久化（锁外操作，Reload 自带锁）
 	if s.Engine == "inbound" && sq.ruleEngine != nil {
 		configs := sq.ruleEngine.GetRuleConfigs()
 		newRule := InboundRuleConfig{
@@ -183,13 +194,46 @@ func (sq *SuggestionQueue) Accept(id string, reviewedBy string) error {
 		}
 		configs = append(configs, newRule)
 		sq.ruleEngine.Reload(configs, "suggestion-accept")
-		log.Printf("[建议队列] 接受规则: %s → 热更新到入站引擎 (%d patterns)", s.RuleName, len(s.Patterns))
+
+		// 持久化到 conf.d/rules-suggestions.yaml（重启后不丢失）
+		sq.persistAcceptedRule(s)
+
+		log.Printf("[建议队列] 接受规则: %s → 热更新+持久化 (%d patterns)", s.RuleName, len(s.Patterns))
+	}
+	return nil
+}
+
+// persistAcceptedRule 将接受的规则追加写入 conf.d/rules-suggestions.yaml
+func (sq *SuggestionQueue) persistAcceptedRule(s RuleSuggestion) {
+	confDir := "/etc/lobster-guard/conf.d"
+	filePath := confDir + "/rules-suggestions.yaml"
+
+	// 读取已有内容
+	var existing []InboundRuleConfig
+	data, err := os.ReadFile(filePath)
+	if err == nil {
+		yaml.Unmarshal(data, &existing)
 	}
 
-	// 更新状态
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = sq.db.Exec(`UPDATE rule_suggestions SET status = 'accepted', reviewed_at = ?, reviewed_by = ? WHERE id = ?`, now, reviewedBy, id)
-	return err
+	// 追加新规则
+	existing = append(existing, InboundRuleConfig{
+		Name:     s.RuleName,
+		Patterns: s.Patterns,
+		Action:   s.Action,
+		Category: s.Category,
+		Type:     s.RuleType,
+		Group:    "suggestion-accepted",
+	})
+
+	// 写回
+	out, err := yaml.Marshal(existing)
+	if err != nil {
+		log.Printf("[建议队列] 持久化失败: %v", err)
+		return
+	}
+	if err := os.WriteFile(filePath, out, 0644); err != nil {
+		log.Printf("[建议队列] 写入 %s 失败: %v", filePath, err)
+	}
 }
 
 // Reject 拒绝建议

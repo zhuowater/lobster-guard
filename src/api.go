@@ -1146,7 +1146,7 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1/engines/") && strings.HasSuffix(path, "/toggle") && method == "POST":
 		api.handleEngineToggle(w, r)
 	case strings.HasPrefix(path, "/api/v1/engines/") && strings.HasSuffix(path, "/toggle") && method == "GET":
-		api.handleEngineToggle(w, r)
+		api.handleEngineToggleGet(w, r)
 
 	// v32.12: Merkle 批量验证 API
 	case path == "/api/v1/envelopes/verify" && method == "POST":

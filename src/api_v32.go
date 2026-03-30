@@ -23,15 +23,16 @@ type CanaryRotationRecord struct {
 }
 
 type CanaryRotator struct {
-	mu          sync.RWMutex
-	api         *ManagementAPI
-	interval    time.Duration
-	enabled     bool
-	createdAt   time.Time
-	lastRotated time.Time
-	history     []CanaryRotationRecord
-	ticker      *time.Ticker
-	stopCh      chan struct{}
+	mu             sync.RWMutex
+	api            *ManagementAPI
+	interval       time.Duration
+	enabled        bool
+	createdAt      time.Time
+	lastRotated    time.Time
+	history        []CanaryRotationRecord
+	graceTokens    map[string]time.Time // 旧 token → 过期时间（轮换后 grace period）
+	ticker         *time.Ticker
+	stopCh         chan struct{}
 }
 
 func NewCanaryRotator(api *ManagementAPI) *CanaryRotator {
@@ -39,7 +40,7 @@ func NewCanaryRotator(api *ManagementAPI) *CanaryRotator {
 	if hours <= 0 {
 		hours = 24
 	}
-	r := &CanaryRotator{api: api, interval: time.Duration(hours) * time.Hour, enabled: api.cfg.CanaryRotation.Enabled, stopCh: make(chan struct{}), createdAt: time.Now().UTC()}
+	r := &CanaryRotator{api: api, interval: time.Duration(hours) * time.Hour, enabled: api.cfg.CanaryRotation.Enabled, stopCh: make(chan struct{}), createdAt: time.Now().UTC(), graceTokens: make(map[string]time.Time)}
 	if api.cfg.LLMProxy.Security.CanaryToken.Token != "" {
 		r.lastRotated = time.Now().UTC()
 	}
@@ -106,6 +107,16 @@ func (r *CanaryRotator) Rotate() (string, error) {
 		return "", err
 	}
 	oldToken := r.api.cfg.LLMProxy.Security.CanaryToken.Token
+	// Grace period: 旧 token 保留 5 分钟，避免轮换瞬间漏检泄露
+	if oldToken != "" {
+		r.graceTokens[oldToken] = time.Now().UTC().Add(5 * time.Minute)
+	}
+	// 清理过期的 grace tokens
+	for tok, exp := range r.graceTokens {
+		if time.Now().UTC().After(exp) {
+			delete(r.graceTokens, tok)
+		}
+	}
 	r.api.cfg.LLMProxy.Security.CanaryToken.Token = newToken
 	r.api.cfg.LLMProxy.Security.CanaryToken.Enabled = true
 	now := time.Now().UTC()
@@ -143,6 +154,23 @@ func (r *CanaryRotator) Status() map[string]interface{} {
 		"interval_hours":   int(r.interval.Hours()),
 	}
 }
+// IsCanaryLeaked 检查文本中是否包含当前或 grace period 内的旧 canary token
+func (r *CanaryRotator) IsCanaryLeaked(text string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	currentToken := r.api.cfg.LLMProxy.Security.CanaryToken.Token
+	if currentToken != "" && strings.Contains(text, currentToken) {
+		return true
+	}
+	now := time.Now().UTC()
+	for tok, exp := range r.graceTokens {
+		if now.Before(exp) && strings.Contains(text, tok) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *CanaryRotator) GetRotationHistory(limit int) []CanaryRotationRecord {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -373,4 +401,21 @@ func (api *ManagementAPI) handleEngineToggle(w http.ResponseWriter, r *http.Requ
 	*m.ptr = req.Enabled
 	_ = api.persistRawSection(m.key, map[string]interface{}{"enabled": req.Enabled})
 	jsonResponse(w, 200, map[string]interface{}{"ok": true, "name": name, "enabled": req.Enabled})
+}
+
+// handleEngineToggleGet GET /api/v1/engines/:name/toggle — 获取引擎当前状态
+func (api *ManagementAPI) handleEngineToggleGet(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/engines/")
+	name = strings.TrimSuffix(name, "/toggle")
+	mapping := map[string]*bool{
+		"plan-compiler":      &api.cfg.PlanCompiler.Enabled,
+		"capability-engine":  &api.cfg.Capability.Enabled,
+		"deviation-detector": &api.cfg.Deviation.Enabled,
+	}
+	ptr, ok := mapping[name]
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "unknown engine"})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"name": name, "enabled": *ptr})
 }
