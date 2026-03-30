@@ -19,12 +19,12 @@ import (
 
 // LLMProxyConfig LLM 侧反向代理配置（v9.0, v10.0 新增 Rules）
 type LLMProxyConfig struct {
-	Enabled      bool              `yaml:"enabled" json:"enabled"`
-	Listen       string            `yaml:"listen" json:"listen"`
-	Targets      []LLMTargetConfig `yaml:"targets" json:"targets"`
-	AuditConfig  LLMAuditConfig    `yaml:"audit" json:"audit"`
-	TimeoutSec   int               `yaml:"timeout_sec" json:"timeout_sec"`
-	MaxBodyBytes int64             `yaml:"max_body_bytes" json:"max_body_bytes,omitempty"`
+	Enabled      bool               `yaml:"enabled" json:"enabled"`
+	Listen       string             `yaml:"listen" json:"listen"`
+	Targets      []LLMTargetConfig  `yaml:"targets" json:"targets"`
+	AuditConfig  LLMAuditConfig     `yaml:"audit" json:"audit"`
+	TimeoutSec   int                `yaml:"timeout_sec" json:"timeout_sec"`
+	MaxBodyBytes int64              `yaml:"max_body_bytes" json:"max_body_bytes,omitempty"`
 	CostAlert    LLMCostAlertConfig `yaml:"cost_alert" json:"cost_alert"`
 	Security     LLMSecurityConfig  `yaml:"security" json:"security"`
 	Rules        []LLMRule          `yaml:"rules" json:"rules"`
@@ -38,10 +38,10 @@ type LLMCostAlertConfig struct {
 
 // LLMSecurityConfig LLM 安全策略配置（v9.1, v10.1 Canary Token + Response Budget）
 type LLMSecurityConfig struct {
-	ScanPIIInResponse   bool     `yaml:"scan_pii_in_response" json:"scan_pii_in_response"`
-	BlockHighRiskTools  bool     `yaml:"block_high_risk_tools" json:"block_high_risk_tools"`
-	HighRiskToolList    []string `yaml:"high_risk_tool_list" json:"high_risk_tool_list"`
-	PromptInjectionScan bool     `yaml:"prompt_injection_scan" json:"prompt_injection_scan"`
+	ScanPIIInResponse   bool                 `yaml:"scan_pii_in_response" json:"scan_pii_in_response"`
+	BlockHighRiskTools  bool                 `yaml:"block_high_risk_tools" json:"block_high_risk_tools"`
+	HighRiskToolList    []string             `yaml:"high_risk_tool_list" json:"high_risk_tool_list"`
+	PromptInjectionScan bool                 `yaml:"prompt_injection_scan" json:"prompt_injection_scan"`
 	CanaryToken         CanaryTokenConfig    `yaml:"canary_token" json:"canary_token"`
 	ResponseBudget      ResponseBudgetConfig `yaml:"response_budget" json:"response_budget"`
 }
@@ -86,14 +86,14 @@ type InboundRuleConfig struct {
 	Name        string   `yaml:"name" json:"name"`
 	DisplayName string   `yaml:"display_name,omitempty" json:"display_name,omitempty"` // 中文显示名称
 	Patterns    []string `yaml:"patterns" json:"patterns"`
-	Action      string   `yaml:"action" json:"action"`     // block / warn / log
-	Category    string   `yaml:"category" json:"category"` // prompt_injection / jailbreak / command_injection / pii 等
-	Priority    int      `yaml:"priority" json:"priority"` // v3.6 优先级权重，数字越大越高，默认 0
-	Message     string   `yaml:"message" json:"message"`   // v3.6 自定义拦截提示，为空则用默认
-	Type        string   `yaml:"type" json:"type"`         // v3.11 规则类型: "keyword"（默认，AC 自动机）或 "regex"（正则）
-	Group       string   `yaml:"group" json:"group"`       // v3.11 规则分组标签（如 "jailbreak"/"injection"/"social_engineering"/"pii"）
-	ShadowMode  bool  `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
-	Enabled     *bool `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
+	Action      string   `yaml:"action" json:"action"`           // block / warn / log
+	Category    string   `yaml:"category" json:"category"`       // prompt_injection / jailbreak / command_injection / pii 等
+	Priority    int      `yaml:"priority" json:"priority"`       // v3.6 优先级权重，数字越大越高，默认 0
+	Message     string   `yaml:"message" json:"message"`         // v3.6 自定义拦截提示，为空则用默认
+	Type        string   `yaml:"type" json:"type"`               // v3.11 规则类型: "keyword"（默认，AC 自动机）或 "regex"（正则）
+	Group       string   `yaml:"group" json:"group"`             // v3.11 规则分组标签（如 "jailbreak"/"injection"/"social_engineering"/"pii"）
+	ShadowMode  bool     `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
+	Enabled     *bool    `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
 }
 
 // RuleBindingConfig 规则绑定配置（v3.11 按 app_id 绑定规则组）
@@ -125,67 +125,67 @@ type InboundRuleTemplate struct {
 }
 
 type Config struct {
-	Channel              string               `yaml:"channel"` // "lanxin" (default) | "feishu" | "generic"
-	Mode                 string               `yaml:"mode"`    // "webhook" (default) | "bridge"
-	CallbackKey          string               `yaml:"callbackKey"`
-	CallbackSignToken    string               `yaml:"callbackSignToken"`
-	FeishuEncryptKey        string            `yaml:"feishu_encrypt_key"`
-	FeishuVerificationToken string            `yaml:"feishu_verification_token"`
-	FeishuAppID             string            `yaml:"feishu_app_id"`
-	FeishuAppSecret         string            `yaml:"feishu_app_secret"`
-	DingtalkToken           string            `yaml:"dingtalk_token"`
-	DingtalkAesKey          string            `yaml:"dingtalk_aes_key"`
-	DingtalkCorpId          string            `yaml:"dingtalk_corp_id"`
-	DingtalkClientID        string            `yaml:"dingtalk_client_id"`
-	DingtalkClientSecret    string            `yaml:"dingtalk_client_secret"`
-	WecomToken              string            `yaml:"wecom_token"`
-	WecomEncodingAesKey     string            `yaml:"wecom_encoding_aes_key"`
-	WecomCorpId             string            `yaml:"wecom_corp_id"`
-	WecomCorpSecret         string            `yaml:"wecom_corp_secret"`      // v3.9 企微用户信息获取
-	LanxinAppID             string            `yaml:"lanxin_app_id"`          // v3.9 蓝信用户信息获取
-	LanxinAppSecret         string            `yaml:"lanxin_app_secret"`      // v3.9 蓝信用户信息获取
-	RoutePolicies           []RoutePolicyConfig `yaml:"route_policies"`       // v3.9 路由策略
-	GenericSenderHeader  string               `yaml:"generic_sender_header"`
-	GenericTextField     string               `yaml:"generic_text_field"`
-	InboundListen        string               `yaml:"inbound_listen"`
-	OutboundListen       string               `yaml:"outbound_listen"`
-	OpenClawUpstream     string               `yaml:"openclaw_upstream"`
-	LanxinUpstream       string               `yaml:"lanxin_upstream"`
-	DBPath               string               `yaml:"db_path"`
-	LogLevel             string               `yaml:"log_level"`
-	DetectTimeoutMs      int                  `yaml:"detect_timeout_ms"`
-	InboundDetectEnabled bool                 `yaml:"inbound_detect_enabled"`
-	OutboundAuditEnabled bool                 `yaml:"outbound_audit_enabled"`
-	ManagementListen     string               `yaml:"management_listen"`
-	ManagementToken      string               `yaml:"management_token"`
-	RegistrationEnabled  bool                 `yaml:"registration_enabled"`
-	RegistrationToken    string               `yaml:"registration_token"`
-	HeartbeatIntervalSec int                  `yaml:"heartbeat_interval_sec"`
-	HeartbeatTimeoutCount int                 `yaml:"heartbeat_timeout_count"`
-	RouteDefaultPolicy   string               `yaml:"route_default_policy"`
-	RoutePersist         bool                 `yaml:"route_persist"`
-	OutboundRules        []OutboundRuleConfig `yaml:"outbound_rules"`
-	Whitelist            []string             `yaml:"whitelist"`
-	DefaultGatewayOrigin string               `yaml:"default_gateway_origin"` // v29.0: 全局默认 Gateway Origin，默认 http://localhost
-	StaticUpstreams      []StaticUpstreamConfig `yaml:"static_upstreams"`
-	RateLimit            RateLimiterConfig    `yaml:"rate_limit"`
-	MetricsEnabled       *bool                `yaml:"metrics_enabled"`       // 默认 true
-	InboundRules         []InboundRuleConfig  `yaml:"inbound_rules"`         // v3.5 自定义入站规则
-	InboundRulesFile     string               `yaml:"inbound_rules_file"`    // v3.5 外部规则文件路径
+	Channel                 string                 `yaml:"channel"` // "lanxin" (default) | "feishu" | "generic"
+	Mode                    string                 `yaml:"mode"`    // "webhook" (default) | "bridge"
+	CallbackKey             string                 `yaml:"callbackKey"`
+	CallbackSignToken       string                 `yaml:"callbackSignToken"`
+	FeishuEncryptKey        string                 `yaml:"feishu_encrypt_key"`
+	FeishuVerificationToken string                 `yaml:"feishu_verification_token"`
+	FeishuAppID             string                 `yaml:"feishu_app_id"`
+	FeishuAppSecret         string                 `yaml:"feishu_app_secret"`
+	DingtalkToken           string                 `yaml:"dingtalk_token"`
+	DingtalkAesKey          string                 `yaml:"dingtalk_aes_key"`
+	DingtalkCorpId          string                 `yaml:"dingtalk_corp_id"`
+	DingtalkClientID        string                 `yaml:"dingtalk_client_id"`
+	DingtalkClientSecret    string                 `yaml:"dingtalk_client_secret"`
+	WecomToken              string                 `yaml:"wecom_token"`
+	WecomEncodingAesKey     string                 `yaml:"wecom_encoding_aes_key"`
+	WecomCorpId             string                 `yaml:"wecom_corp_id"`
+	WecomCorpSecret         string                 `yaml:"wecom_corp_secret"` // v3.9 企微用户信息获取
+	LanxinAppID             string                 `yaml:"lanxin_app_id"`     // v3.9 蓝信用户信息获取
+	LanxinAppSecret         string                 `yaml:"lanxin_app_secret"` // v3.9 蓝信用户信息获取
+	RoutePolicies           []RoutePolicyConfig    `yaml:"route_policies"`    // v3.9 路由策略
+	GenericSenderHeader     string                 `yaml:"generic_sender_header"`
+	GenericTextField        string                 `yaml:"generic_text_field"`
+	InboundListen           string                 `yaml:"inbound_listen"`
+	OutboundListen          string                 `yaml:"outbound_listen"`
+	OpenClawUpstream        string                 `yaml:"openclaw_upstream"`
+	LanxinUpstream          string                 `yaml:"lanxin_upstream"`
+	DBPath                  string                 `yaml:"db_path"`
+	LogLevel                string                 `yaml:"log_level"`
+	DetectTimeoutMs         int                    `yaml:"detect_timeout_ms"`
+	InboundDetectEnabled    bool                   `yaml:"inbound_detect_enabled"`
+	OutboundAuditEnabled    bool                   `yaml:"outbound_audit_enabled"`
+	ManagementListen        string                 `yaml:"management_listen"`
+	ManagementToken         string                 `yaml:"management_token"`
+	RegistrationEnabled     bool                   `yaml:"registration_enabled"`
+	RegistrationToken       string                 `yaml:"registration_token"`
+	HeartbeatIntervalSec    int                    `yaml:"heartbeat_interval_sec"`
+	HeartbeatTimeoutCount   int                    `yaml:"heartbeat_timeout_count"`
+	RouteDefaultPolicy      string                 `yaml:"route_default_policy"`
+	RoutePersist            bool                   `yaml:"route_persist"`
+	OutboundRules           []OutboundRuleConfig   `yaml:"outbound_rules"`
+	Whitelist               []string               `yaml:"whitelist"`
+	DefaultGatewayOrigin    string                 `yaml:"default_gateway_origin"` // v29.0: 全局默认 Gateway Origin，默认 http://localhost
+	StaticUpstreams         []StaticUpstreamConfig `yaml:"static_upstreams"`
+	RateLimit               RateLimiterConfig      `yaml:"rate_limit"`
+	MetricsEnabled          *bool                  `yaml:"metrics_enabled"`    // 默认 true
+	InboundRules            []InboundRuleConfig    `yaml:"inbound_rules"`      // v3.5 自定义入站规则
+	InboundRulesFile        string                 `yaml:"inbound_rules_file"` // v3.5 外部规则文件路径
 	// v3.10 审计日志增强 + 告警通知
-	AuditRetentionDays   int                  `yaml:"audit_retention_days"`  // v3.10 日志保留天数，默认 30
-	AlertWebhook         string               `yaml:"alert_webhook"`         // v3.10 告警 webhook URL
-	AlertMinInterval     int                  `yaml:"alert_min_interval"`    // v3.10 最小告警间隔秒数，默认 60
-	AlertFormat          string               `yaml:"alert_format"`          // v3.10 告警格式: "generic" (默认) 或 "lanxin"
+	AuditRetentionDays int    `yaml:"audit_retention_days"` // v3.10 日志保留天数，默认 30
+	AlertWebhook       string `yaml:"alert_webhook"`        // v3.10 告警 webhook URL
+	AlertMinInterval   int    `yaml:"alert_min_interval"`   // v3.10 最小告警间隔秒数，默认 60
+	AlertFormat        string `yaml:"alert_format"`         // v3.10 告警格式: "generic" (默认) 或 "lanxin"
 	// v3.11 正则规则 + 规则分组
-	RuleBindings         []RuleBindingConfig        `yaml:"rule_bindings"`          // v3.11 按 app_id 绑定规则组
-	OutboundPIIPatterns  []OutboundPIIPatternConfig `yaml:"outbound_pii_patterns"`  // v3.11 出站 PII 正则可配置化
+	RuleBindings        []RuleBindingConfig        `yaml:"rule_bindings"`         // v3.11 按 app_id 绑定规则组
+	OutboundPIIPatterns []OutboundPIIPatternConfig `yaml:"outbound_pii_patterns"` // v3.11 出站 PII 正则可配置化
 	// v4.1 WebSocket 代理
-	WSMode             string `yaml:"ws_mode"`              // "inspect"（默认）或 "passthrough"
-	WSIdleTimeout      int    `yaml:"ws_idle_timeout"`      // 空闲超时秒数，默认 300
-	WSMaxDuration      int    `yaml:"ws_max_duration"`      // 最大连接时长秒数，默认 3600
-	WSMaxConnections   int    `yaml:"ws_max_connections"`   // 最大并发 WebSocket 连接数，默认 100
-	WSAllowedOrigins   []string `yaml:"ws_allowed_origins"`   // WebSocket 允许的 Origin 白名单，空则允许全部
+	WSMode           string   `yaml:"ws_mode"`            // "inspect"（默认）或 "passthrough"
+	WSIdleTimeout    int      `yaml:"ws_idle_timeout"`    // 空闲超时秒数，默认 300
+	WSMaxDuration    int      `yaml:"ws_max_duration"`    // 最大连接时长秒数，默认 3600
+	WSMaxConnections int      `yaml:"ws_max_connections"` // 最大并发 WebSocket 连接数，默认 100
+	WSAllowedOrigins []string `yaml:"ws_allowed_origins"` // WebSocket 允许的 Origin 白名单，空则允许全部
 	// v4.2 高可用
 	ShutdownTimeout    int    `yaml:"shutdown_timeout"`     // 优雅关闭超时秒数，默认 30
 	BackupDir          string `yaml:"backup_dir"`           // 备份目录，默认 /var/lib/lobster-guard/backups/
@@ -196,31 +196,31 @@ type Config struct {
 	AuditArchiveEnabled bool   `yaml:"audit_archive_enabled"` // 是否启用审计日志归档
 	AuditArchiveDir     string `yaml:"audit_archive_dir"`     // 归档目录，默认 /var/lib/lobster-guard/archives/
 	// v5.1 智能检测
-	RuleTemplates          []string `yaml:"rule_templates"`           // [已弃用v30.0] 改为 DB 全局开关，通过 Dashboard 启用
-	DetectPipeline         []string `yaml:"detect_pipeline"`          // 检测链顺序: ["keyword", "regex", "pii"]
-	SessionDetectEnabled   bool     `yaml:"session_detect_enabled"`   // 会话检测开关
-	SessionRiskThreshold   float64  `yaml:"session_risk_threshold"`   // 风险积分阈值（默认 10）
-	SessionWindow          int      `yaml:"session_window"`           // 会话上下文窗口（默认 20）
-	SessionDecayRate       float64  `yaml:"session_decay_rate"`       // 每小时积分衰减（默认 1）
-	LLMDetectEnabled       bool     `yaml:"llm_detect_enabled"`       // LLM 检测开关（默认 false）
-	LLMDetectEndpoint      string   `yaml:"llm_detect_endpoint"`      // LLM API 端点
-	LLMDetectAPIKey        string   `yaml:"llm_detect_api_key"`       // LLM API 密钥
-	LLMDetectModel         string   `yaml:"llm_detect_model"`         // LLM 模型名称
-	LLMDetectTimeout       int      `yaml:"llm_detect_timeout"`       // LLM 超时秒数（默认 5）
-	LLMDetectMode          string   `yaml:"llm_detect_mode"`          // async / sync（默认 async）
-	LLMDetectPrompt        string   `yaml:"llm_detect_prompt"`        // 自定义 LLM system prompt
-	DetectCacheTTL         int      `yaml:"detect_cache_ttl"`         // 检测缓存 TTL 秒（默认 300）
-	DetectCacheSize        int      `yaml:"detect_cache_size"`        // 检测缓存大小（默认 1000）
+	RuleTemplates        []string `yaml:"rule_templates"`         // [已弃用v30.0] 改为 DB 全局开关，通过 Dashboard 启用
+	DetectPipeline       []string `yaml:"detect_pipeline"`        // 检测链顺序: ["keyword", "regex", "pii"]
+	SessionDetectEnabled bool     `yaml:"session_detect_enabled"` // 会话检测开关
+	SessionRiskThreshold float64  `yaml:"session_risk_threshold"` // 风险积分阈值（默认 10）
+	SessionWindow        int      `yaml:"session_window"`         // 会话上下文窗口（默认 20）
+	SessionDecayRate     float64  `yaml:"session_decay_rate"`     // 每小时积分衰减（默认 1）
+	LLMDetectEnabled     bool     `yaml:"llm_detect_enabled"`     // LLM 检测开关（默认 false）
+	LLMDetectEndpoint    string   `yaml:"llm_detect_endpoint"`    // LLM API 端点
+	LLMDetectAPIKey      string   `yaml:"llm_detect_api_key"`     // LLM API 密钥
+	LLMDetectModel       string   `yaml:"llm_detect_model"`       // LLM 模型名称
+	LLMDetectTimeout     int      `yaml:"llm_detect_timeout"`     // LLM 超时秒数（默认 5）
+	LLMDetectMode        string   `yaml:"llm_detect_mode"`        // async / sync（默认 async）
+	LLMDetectPrompt      string   `yaml:"llm_detect_prompt"`      // 自定义 LLM system prompt
+	DetectCacheTTL       int      `yaml:"detect_cache_ttl"`       // 检测缓存 TTL 秒（默认 300）
+	DetectCacheSize      int      `yaml:"detect_cache_size"`      // 检测缓存大小（默认 1000）
 	// v9.0 LLM 代理
-	LLMProxy               LLMProxyConfig `yaml:"llm_proxy" json:"llm_proxy"` // LLM 侧反向代理配置
+	LLMProxy LLMProxyConfig `yaml:"llm_proxy" json:"llm_proxy"` // LLM 侧反向代理配置
 	// v14.1 登录认证
-	Auth                   AuthConfig     `yaml:"auth" json:"auth"`
+	Auth AuthConfig `yaml:"auth" json:"auth"`
 	// v18.0 后台调度
-	ChainAnalysisIntervalMin   int `yaml:"chain_analysis_interval_min"`   // 攻击链自动分析间隔（分钟），默认 5
-	BehaviorScanIntervalMin    int `yaml:"behavior_scan_interval_min"`    // 行为画像自动扫描间隔（分钟），默认 10
+	ChainAnalysisIntervalMin int `yaml:"chain_analysis_interval_min"` // 攻击链自动分析间隔（分钟），默认 5
+	BehaviorScanIntervalMin  int `yaml:"behavior_scan_interval_min"`  // 行为画像自动扫描间隔（分钟），默认 10
 	// v17.3 IM↔LLM 会话关联
-	SessionIdleTimeoutMin      int `yaml:"session_idle_timeout_min"`      // 会话空闲超时（分钟），默认 60。同一用户超过此时间没发新消息则切新会话
-	SessionFPWindowSec         int `yaml:"session_fp_window_sec"`         // 内容指纹匹配窗口（秒），默认 300。LLM 请求在此窗口内匹配 IM 消息指纹
+	SessionIdleTimeoutMin int `yaml:"session_idle_timeout_min"` // 会话空闲超时（分钟），默认 60。同一用户超过此时间没发新消息则切新会话
+	SessionFPWindowSec    int `yaml:"session_fp_window_sec"`    // 内容指纹匹配窗口（秒），默认 300。LLM 请求在此窗口内匹配 IM 消息指纹
 	// v18.0 执行信封 — 密码学审计链
 	EnvelopeEnabled   bool   `yaml:"envelope_enabled"`    // 开关，默认 false
 	EnvelopeSecretKey string `yaml:"envelope_secret_key"` // HMAC 签名密钥（必须配置才能启用）
@@ -237,7 +237,7 @@ type Config struct {
 	AdaptiveDecision AdaptiveDecisionConfig `yaml:"adaptive_decision"`
 	Singularity      SingularityConfig      `yaml:"singularity"`
 	// v19.1 语义检测引擎
-	SemanticDetector SemanticConfig         `yaml:"semantic_detector"`
+	SemanticDetector SemanticConfig `yaml:"semantic_detector"`
 	// v19.2 蜜罐深度交互
 	HoneypotDeep HoneypotDeepConfig `yaml:"honeypot_deep"`
 	// v20.0 工具策略引擎
@@ -269,6 +269,23 @@ type Config struct {
 	IFC IFCConfig `yaml:"ifc" json:"ifc"`
 	// v31.0 AC 智能分级（自动模式）
 	AutoReview RuleAutoReviewConfig `yaml:"auto_review" json:"auto_review"`
+	// v32.13 金丝雀自动轮换
+	CanaryRotation CanaryRotationConfig `yaml:"canary_rotation" json:"canary_rotation"`
+	// v32.14 定时报告
+	ReportSchedule ReportScheduleConfig `yaml:"report_schedule" json:"report_schedule"`
+}
+
+// CanaryRotationConfig 金丝雀自动轮换配置
+type CanaryRotationConfig struct {
+	Enabled       bool `yaml:"enabled" json:"enabled"`
+	IntervalHours int  `yaml:"interval_hours" json:"interval_hours"`
+}
+
+// ReportScheduleConfig 定时报告配置
+type ReportScheduleConfig struct {
+	Enabled    bool   `yaml:"enabled" json:"enabled"`
+	Cron       string `yaml:"cron" json:"cron"`
+	WebhookURL string `yaml:"webhook_url" json:"webhook_url"`
 }
 
 // DiscoveryConfig K8s 服务发现配置（v21.0）
@@ -279,12 +296,12 @@ type DiscoveryConfig struct {
 // K8sDiscoveryConfig K8s 发现具体配置
 type K8sDiscoveryConfig struct {
 	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	Kubeconfig         string `yaml:"kubeconfig" json:"kubeconfig"`                   // 空字符串 = InCluster 模式
-	Namespace          string `yaml:"namespace" json:"namespace"`                     // 目标 namespace
-	Service            string `yaml:"service" json:"service"`                         // Service 名称
-	PortName           string `yaml:"port_name" json:"port_name"`                     // 端口名，默认 "gateway"
-	LabelSelector      string `yaml:"label_selector" json:"label_selector"`           // 可选，Pod 标签选择器
-	SyncInterval       int    `yaml:"sync_interval" json:"sync_interval"`             // 同步间隔秒数，默认 15
+	Kubeconfig         string `yaml:"kubeconfig" json:"kubeconfig"`                     // 空字符串 = InCluster 模式
+	Namespace          string `yaml:"namespace" json:"namespace"`                       // 目标 namespace
+	Service            string `yaml:"service" json:"service"`                           // Service 名称
+	PortName           string `yaml:"port_name" json:"port_name"`                       // 端口名，默认 "gateway"
+	LabelSelector      string `yaml:"label_selector" json:"label_selector"`             // 可选，Pod 标签选择器
+	SyncInterval       int    `yaml:"sync_interval" json:"sync_interval"`               // 同步间隔秒数，默认 15
 	InsecureSkipVerify bool   `yaml:"insecure_skip_verify" json:"insecure_skip_verify"` // 跳过 TLS 验证（开发用）
 }
 
@@ -297,9 +314,9 @@ type EventBusConfig struct {
 
 // AuthConfig 认证配置（v14.1）
 type AuthConfig struct {
-	Enabled          bool   `yaml:"enabled" json:"enabled"`                     // 默认 false，向后兼容
-	JWTSecret        string `yaml:"jwt_secret" json:"-"`                        // JWT 签名密钥
-	DefaultPassword  string `yaml:"default_password" json:"-"`                  // 初始管理员密码
+	Enabled          bool   `yaml:"enabled" json:"enabled"`                       // 默认 false，向后兼容
+	JWTSecret        string `yaml:"jwt_secret" json:"-"`                          // JWT 签名密钥
+	DefaultPassword  string `yaml:"default_password" json:"-"`                    // 初始管理员密码
 	TokenExpireHours int    `yaml:"token_expire_hours" json:"token_expire_hours"` // JWT 过期时间（小时）
 }
 
@@ -309,10 +326,10 @@ type OutboundRuleConfig struct {
 	Pattern     string   `yaml:"pattern"`
 	Patterns    []string `yaml:"patterns"`
 	Action      string   `yaml:"action"`
-	Priority    int      `yaml:"priority"` // v3.6 优先级权重，数字越大越高，默认 0
-	Message     string   `yaml:"message"`  // v3.6 自定义拦截提示，为空则用默认
-	ShadowMode  bool  `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
-	Enabled     *bool `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
+	Priority    int      `yaml:"priority"`                       // v3.6 优先级权重，数字越大越高，默认 0
+	Message     string   `yaml:"message"`                        // v3.6 自定义拦截提示，为空则用默认
+	ShadowMode  bool     `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
+	Enabled     *bool    `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
 }
 
 type StaticUpstreamConfig struct {
@@ -801,7 +818,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-securities", Name: "证券/投行入站规则",
 			Description: "证券/投行行业专属检测规则，覆盖研报、IPO材料和持仓数据保护",
-			Category: "financial", BuiltIn: true,
+			Category:    "financial", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "sec_research_draft", Patterns: []string{"研报草稿", "未公开研报", "draft research", "unpublished report", "投行项目", "路演材料", "roadshow material"}, Action: "warn", Category: "research_data"},
 				{Name: "sec_ipo_block", Patterns: []string{"IPO定价", "配售方案", "保荐材料", "IPO pricing", "share allocation", "underwriting"}, Action: "block", Category: "ipo_data"},
@@ -812,7 +829,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-fund", Name: "基金/资管入站规则",
 			Description: "基金/资管行业专属检测规则，覆盖净值预测、投资组合和风控模型保护",
-			Category: "financial", BuiltIn: true,
+			Category:    "financial", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "fund_nav", Patterns: []string{"净值预测", "NAV forecast", "回撤数据", "夏普比率", "Sharpe ratio"}, Action: "warn", Category: "fund_data"},
 				{Name: "fund_portfolio", Patterns: []string{"基金持仓", "投资组合", "资产配置", "fund holding", "portfolio allocation", "asset allocation"}, Action: "warn", Category: "portfolio_data"},
@@ -823,7 +840,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-pharma", Name: "制药/生物科技入站规则",
 			Description: "制药/生物科技行业专属检测规则，覆盖药物配方、临床试验和GMP记录保护",
-			Category: "healthcare", BuiltIn: true,
+			Category:    "healthcare", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "pharma_formula_block", Patterns: []string{"药物配方", "分子式", "合成路线", "drug formula", "molecular structure", "synthesis route", "原料药工艺", "API process"}, Action: "block", Category: "drug_formula"},
 				{Name: "pharma_clinical", Patterns: []string{"临床试验", "受试者数据", "IND申请", "clinical trial", "subject data", "IND filing", "生物等效性", "bioequivalence"}, Action: "warn", Category: "clinical_data"},
@@ -834,7 +851,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-robotics", Name: "机器人/自动化入站规则",
 			Description: "机器人/自动化行业专属检测规则，覆盖运动控制算法、安全区域和传感器参数保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "robot_algo_block", Patterns: []string{"运动控制算法", "逆运动学", "轨迹规划", "motion control algorithm", "inverse kinematics", "trajectory planning", "SLAM算法", "SLAM algorithm"}, Action: "block", Category: "control_algorithm"},
 				{Name: "robot_safety_block", Patterns: []string{"安全区域", "协作区域", "力控参数", "safety zone", "collaborative zone", "force control"}, Action: "warn", Category: "safety_config"},
@@ -845,7 +862,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-consumer-electronics", Name: "消费电子/家电入站规则",
 			Description: "消费电子/家电行业专属检测规则，覆盖BOM、模具图纸和供应商报价保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ce_bom", Patterns: []string{"产品BOM", "物料清单", "product BOM", "bill of materials", "成本结构", "cost structure"}, Action: "warn", Category: "bom_data"},
 				{Name: "ce_mold_block", Patterns: []string{"模具图纸", "模具参数", "开模费用", "mold drawing", "mold parameter", "tooling cost"}, Action: "block", Category: "mold_data"},
@@ -856,7 +873,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-heavy-industry", Name: "重工/装备制造入站规则",
 			Description: "重工/装备制造行业专属检测规则，覆盖焊接工艺、压力容器和特种设备数据保护",
-			Category: "industry", BuiltIn: true,
+			Category:    "industry", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "hi_welding", Patterns: []string{"焊接工艺", "WPS", "焊接规程", "welding procedure", "welding specification"}, Action: "warn", Category: "welding_data"},
 				{Name: "hi_pressure_block", Patterns: []string{"压力容器", "锅炉参数", "管道设计", "pressure vessel", "boiler parameter", "piping design"}, Action: "block", Category: "pressure_data"},
@@ -867,7 +884,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-civil-aviation", Name: "民航入站规则",
 			Description: "民航行业专属检测规则，覆盖适航数据、飞控参数和旅客PNR保护",
-			Category: "transport", BuiltIn: true,
+			Category:    "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ca_airworthiness_block", Patterns: []string{"适航证", "适航数据", "飞行数据记录器", "airworthiness", "FDR"}, Action: "block", Category: "airworthiness"},
 				{Name: "ca_flight_control_block", Patterns: []string{"飞控参数", "FMS配置", "航路点", "ACARS", "flight control parameter", "FMS configuration", "waypoint", "ACARS"}, Action: "block", Category: "flight_control"},
@@ -878,7 +895,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-railway", Name: "铁路/高铁入站规则",
 			Description: "铁路/高铁行业专属检测规则，覆盖CTCS信号参数、调度运行图和线路限速保护",
-			Category: "transport", BuiltIn: true,
+			Category:    "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "rail_ctcs_block", Patterns: []string{"CTCS", "列控系统", "ATP参数", "应答器", "轨道电路", "train control system", "ATP parameter", "balise", "track circuit"}, Action: "block", Category: "signal_system"},
 				{Name: "rail_dispatch", Patterns: []string{"运行图", "调度命令", "线路限速", "闭塞分区", "timetable", "dispatch command", "speed restriction", "block section"}, Action: "warn", Category: "dispatch_data"},
@@ -889,7 +906,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-metro", Name: "城市轨道/地铁入站规则",
 			Description: "城市轨道/地铁行业专属检测规则，覆盖CBTC参数、屏蔽门和客流数据保护",
-			Category: "transport", BuiltIn: true,
+			Category:    "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "metro_cbtc_block", Patterns: []string{"CBTC", "ATO参数", "列车自动运行", "CBTC", "ATO parameter", "train automation"}, Action: "block", Category: "cbtc_data"},
 				{Name: "metro_psd", Patterns: []string{"屏蔽门", "站台门", "行车间隔", "platform screen door", "headway", "应急疏散", "emergency evacuation"}, Action: "warn", Category: "psd_data"},
@@ -900,7 +917,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-maritime", Name: "航运/港口入站规则",
 			Description: "航运/港口行业专属检测规则，覆盖AIS数据、海图和港口调度保护",
-			Category: "transport", BuiltIn: true,
+			Category:    "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "maritime_ais", Patterns: []string{"AIS数据", "船舶位置", "MMSI", "IMO编号", "AIS data", "vessel position", "MMSI", "IMO number"}, Action: "warn", Category: "ais_data"},
 				{Name: "maritime_chart_block", Patterns: []string{"海图数据", "nautical chart"}, Action: "block", Category: "chart_data"},
@@ -911,7 +928,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-gaming", Name: "游戏行业入站规则",
 			Description: "游戏行业专属检测规则，覆盖反外挂策略、内购定价和虚拟资产保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "game_anticheat_block", Patterns: []string{"反外挂策略", "外挂检测", "游戏源码", "anti-cheat strategy", "cheat detection", "game source code"}, Action: "block", Category: "anticheat"},
 				{Name: "game_iap", Patterns: []string{"内购定价", "充值比例", "掉落概率", "抽卡概率", "in-app purchase pricing", "drop rate", "gacha rate"}, Action: "warn", Category: "iap_data"},
@@ -922,7 +939,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-advertising", Name: "广告/营销入站规则",
 			Description: "广告/营销行业专属检测规则，覆盖用户标签、投放策略和竞品数据保护",
-			Category: "media", BuiltIn: true,
+			Category:    "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ad_user_tag", Patterns: []string{"用户标签", "人群包", "DMP数据", "user tag", "audience segment", "DMP data"}, Action: "warn", Category: "user_tag"},
 				{Name: "ad_strategy", Patterns: []string{"投放策略", "出价策略", "千次展示成本", "广告素材库", "media plan", "bidding strategy", "CPM", "creative library"}, Action: "warn", Category: "ad_strategy"},
@@ -933,7 +950,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-social-media", Name: "社交平台入站规则",
 			Description: "社交平台行业专属检测规则，覆盖用户关系链、私信和推荐算法保护",
-			Category: "media", BuiltIn: true,
+			Category:    "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "social_graph_block", Patterns: []string{"用户关系链", "好友列表", "社交图谱", "social graph", "friend list"}, Action: "block", Category: "social_graph"},
 				{Name: "social_dm_block", Patterns: []string{"私信内容", "direct message", "用户行为日志", "user behavior log"}, Action: "block", Category: "private_message"},
@@ -944,7 +961,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-live-streaming", Name: "短视频/直播入站规则",
 			Description: "短视频/直播行业专属检测规则，覆盖主播收入、流量分发和MCN合约保护",
-			Category: "media", BuiltIn: true,
+			Category:    "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ls_revenue_block", Patterns: []string{"主播收入", "打赏分成", "礼物分成比例", "streamer revenue", "gift sharing ratio"}, Action: "block", Category: "streamer_revenue"},
 				{Name: "ls_traffic_block", Patterns: []string{"流量分发规则", "直播间权重", "推流地址", "直播源码", "traffic distribution rule", "live room weight", "streaming address", "source code"}, Action: "block", Category: "traffic_rule"},
@@ -955,7 +972,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-saas-cloud", Name: "SaaS/云服务入站规则",
 			Description: "SaaS/云服务行业专属检测规则，覆盖客户数据、多租户配置和API密钥保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "saas_customer_block", Patterns: []string{"客户数据隔离", "客户续约率", "客户流失率", "customer data isolation", "customer retention", "churn rate"}, Action: "block", Category: "customer_data"},
 				{Name: "saas_tenant", Patterns: []string{"多租户配置", "部署架构", "multi-tenant config", "deployment architecture"}, Action: "warn", Category: "tenant_config"},
@@ -966,7 +983,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-search-engine", Name: "搜索引擎入站规则",
 			Description: "搜索引擎行业专属检测规则，覆盖排名算法、搜索日志和广告竞价保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "se_ranking_block", Patterns: []string{"搜索排名算法", "排名因子", "索引策略", "ranking algorithm", "ranking factor", "indexing strategy"}, Action: "block", Category: "ranking_algo"},
 				{Name: "se_log", Patterns: []string{"搜索日志", "用户搜索词", "搜索意图", "search log", "search query", "search intent"}, Action: "warn", Category: "search_log"},
@@ -977,7 +994,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-local-services", Name: "外卖/本地生活入站规则",
 			Description: "外卖/本地生活行业专属检测规则，覆盖骑手轨迹、商户评分和用户地址保护",
-			Category: "services", BuiltIn: true,
+			Category:    "services", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "ls_rider", Patterns: []string{"骑手轨迹", "配送路径", "运力调度", "rider trajectory", "delivery route", "capacity scheduling"}, Action: "warn", Category: "rider_data"},
 				{Name: "ls_merchant_block", Patterns: []string{"商户评分算法", "佣金比例", "抽成比例", "merchant scoring algorithm", "commission rate"}, Action: "block", Category: "merchant_algo"},
@@ -988,7 +1005,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-cybersecurity", Name: "网络安全入站规则",
 			Description: "网络安全行业专属检测规则，覆盖漏洞数据、攻击payload和0day信息保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "cyber_vuln_block", Patterns: []string{"0day漏洞", "未公开漏洞", "漏洞利用代码", "PoC代码", "zero-day", "undisclosed vulnerability", "exploit code", "PoC code"}, Action: "block", Category: "vulnerability"},
 				{Name: "cyber_payload_block", Patterns: []string{"攻击载荷", "攻击工具链", "attack payload", "attack toolchain"}, Action: "block", Category: "attack_payload"},
@@ -999,7 +1016,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-media-news", Name: "传媒/新闻入站规则",
 			Description: "传媒/新闻行业专属检测规则，覆盖未发布稿件、信息源和独家线索保护",
-			Category: "media", BuiltIn: true,
+			Category:    "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "news_unpub_block", Patterns: []string{"未发布稿件", "发稿计划", "新闻素材", "unpublished article", "publication schedule", "news material"}, Action: "block", Category: "unpublished"},
 				{Name: "news_source_block", Patterns: []string{"信息源", "匿名线人", "anonymous source", "confidential informant"}, Action: "block", Category: "news_source"},
@@ -1010,7 +1027,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-publishing", Name: "出版/版权入站规则",
 			Description: "出版/版权行业专属检测规则，覆盖未出版手稿、版税数据和DRM配置保护",
-			Category: "media", BuiltIn: true,
+			Category:    "media", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "pub_manuscript_block", Patterns: []string{"未出版手稿", "unpublished manuscript"}, Action: "block", Category: "manuscript"},
 				{Name: "pub_royalty", Patterns: []string{"版税数据", "稿费标准", "royalty data", "author fee", "印数", "首印量", "print run"}, Action: "warn", Category: "royalty_data"},
@@ -1021,7 +1038,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-telecom", Name: "电信/运营商入站规则",
 			Description: "电信/运营商行业专属检测规则，覆盖CDR通话记录、基站数据和用户号码保护",
-			Category: "technology", BuiltIn: true,
+			Category:    "technology", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "telecom_cdr_block", Patterns: []string{"通话记录", "CDR数据", "信令数据", "call detail record", "CDR data", "signaling data"}, Action: "block", Category: "cdr_data"},
 				{Name: "telecom_bs_block", Patterns: []string{"基站位置", "核心网配置", "监听接口", "DPI数据", "base station location", "core network config", "lawful interception", "DPI data"}, Action: "block", Category: "network_data"},
@@ -1032,7 +1049,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-logistics", Name: "物流/供应链入站规则",
 			Description: "物流/供应链行业专属检测规则，覆盖客户地址、仓储布局和供应商报价保护",
-			Category: "transport", BuiltIn: true,
+			Category:    "transport", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "logi_address", Patterns: []string{"客户收货地址", "customer shipping address"}, Action: "warn", Category: "address_data"},
 				{Name: "logi_warehouse", Patterns: []string{"仓储布局", "库位规划", "库存数据", "入库单", "出库单", "warehouse layout", "storage planning", "inventory data"}, Action: "warn", Category: "warehouse_data"},
@@ -1043,7 +1060,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-real-estate", Name: "房地产/物业入站规则",
 			Description: "房地产/物业行业专属检测规则，覆盖业主信息、房价数据和户型图纸保护",
-			Category: "services", BuiltIn: true,
+			Category:    "services", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "re_owner", Patterns: []string{"业主信息", "业主名单", "owner information", "owner list"}, Action: "warn", Category: "owner_data"},
 				{Name: "re_price", Patterns: []string{"房价数据", "成交底价", "楼盘均价", "物业费", "按揭数据", "property price", "transaction floor price", "average price", "property fee", "mortgage data"}, Action: "warn", Category: "price_data"},
@@ -1054,7 +1071,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-agriculture", Name: "农业/食品入站规则",
 			Description: "农业/食品行业专属检测规则，覆盖种子专利、农药配方和溯源数据保护",
-			Category: "industry", BuiltIn: true,
+			Category:    "industry", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "agri_seed_block", Patterns: []string{"种子专利", "转基因数据", "育种记录", "seed patent", "GMO data", "breeding record"}, Action: "block", Category: "seed_data"},
 				{Name: "agri_pesticide_block", Patterns: []string{"农药配方", "农药残留", "饲料配方", "pesticide formula", "pesticide residue", "feed formula"}, Action: "block", Category: "pesticide_data"},
@@ -1065,7 +1082,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-aerospace", Name: "航空航天入站规则",
 			Description: "航空航天行业专属检测规则，覆盖ITAR管制、卫星参数和飞控代码保护",
-			Category: "defense", BuiltIn: true,
+			Category:    "defense", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "aero_itar_block", Patterns: []string{"ITAR管制", "ITAR controlled"}, Action: "block", Category: "itar_control"},
 				{Name: "aero_satellite_block", Patterns: []string{"卫星参数", "轨道数据", "TLE", "遥测数据", "遥控指令", "satellite parameter", "orbital data", "TLE", "telemetry data", "telecommand"}, Action: "block", Category: "satellite_data"},
@@ -1076,7 +1093,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-mining", Name: "矿业/资源入站规则",
 			Description: "矿业/资源行业专属检测规则，覆盖勘探数据、矿藏储量和环评数据保护",
-			Category: "energy", BuiltIn: true,
+			Category:    "energy", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "mine_explore_block", Patterns: []string{"勘探数据", "矿藏储量", "品位数据", "exploration data", "mineral reserves", "ore grade"}, Action: "block", Category: "exploration_data"},
 				{Name: "mine_rights_block", Patterns: []string{"采矿权", "探矿权", "地质报告", "mining rights", "prospecting rights", "geological report"}, Action: "block", Category: "mining_rights"},
@@ -1087,7 +1104,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-construction", Name: "建筑/工程入站规则",
 			Description: "建筑/工程行业专属检测规则，覆盖设计图纸、结构计算和招标底价保护",
-			Category: "industry", BuiltIn: true,
+			Category:    "industry", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "const_drawing", Patterns: []string{"设计图纸", "结构计算书", "施工方案", "design drawing", "structural calculation", "construction plan"}, Action: "warn", Category: "design_data"},
 				{Name: "const_bid_block", Patterns: []string{"招标底价", "投标报价", "工程造价", "bid floor price", "tender price", "project cost"}, Action: "block", Category: "bid_data"},
@@ -1098,7 +1115,7 @@ func getDefaultInboundTemplates() []InboundRuleTemplate {
 		{
 			ID: "tpl-inbound-hospitality", Name: "酒店/旅游入站规则",
 			Description: "酒店/旅游行业专属检测规则，覆盖旅客信息、VIP客户和定价策略保护",
-			Category: "services", BuiltIn: true,
+			Category:    "services", BuiltIn: true,
 			Rules: []InboundRuleConfig{
 				{Name: "hotel_guest", Patterns: []string{"旅客信息", "PNR记录", "VIP客户", "客户偏好", "会员数据", "guest information", "PNR record", "VIP customer", "customer preference", "loyalty data"}, Action: "warn", Category: "guest_data"},
 				{Name: "hotel_pricing_block", Patterns: []string{"定价策略", "收益管理", "房价策略", "pricing strategy", "revenue management", "rate strategy"}, Action: "block", Category: "pricing_data"},
@@ -1120,7 +1137,9 @@ func validateConfig(cfg *Config) []string {
 		{cfg.ManagementListen, "management_listen"},
 	} {
 		addr, name := pair[0], pair[1]
-		if addr == "" { continue }
+		if addr == "" {
+			continue
+		}
 		if prev, ok := ports[addr]; ok {
 			errs = append(errs, fmt.Sprintf("端口冲突: %s 和 %s 使用了相同的地址 %s", prev, name, addr))
 		}
@@ -1129,7 +1148,9 @@ func validateConfig(cfg *Config) []string {
 
 	// channel 必须是已知值
 	ch := cfg.Channel
-	if ch == "" { ch = "lanxin" }
+	if ch == "" {
+		ch = "lanxin"
+	}
 	switch ch {
 	case "lanxin", "feishu", "dingtalk", "wecom", "generic":
 		// ok
@@ -1139,7 +1160,9 @@ func validateConfig(cfg *Config) []string {
 
 	// mode 必须是 webhook 或 bridge
 	mode := cfg.Mode
-	if mode == "" { mode = "webhook" }
+	if mode == "" {
+		mode = "webhook"
+	}
 	if mode != "webhook" && mode != "bridge" {
 		errs = append(errs, fmt.Sprintf("mode %q 无效，必须是 webhook 或 bridge", cfg.Mode))
 	}
@@ -1182,7 +1205,9 @@ func validateConfig(cfg *Config) []string {
 	if len(cfg.RuleBindings) > 0 {
 		ruleGroups := make(map[string]bool)
 		for _, r := range cfg.InboundRules {
-			if r.Group != "" { ruleGroups[r.Group] = true }
+			if r.Group != "" {
+				ruleGroups[r.Group] = true
+			}
 		}
 		for _, binding := range cfg.RuleBindings {
 			for _, g := range binding.Groups {

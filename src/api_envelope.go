@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // handleEnvelopeVerify GET /api/v1/envelopes/verify/:id — 验证单个信封
@@ -160,6 +161,87 @@ func (api *ManagementAPI) handleEnvelopeBatchDetail(w http.ResponseWriter, r *ht
 }
 
 // handleEnvelopeConfigUpdate PUT /api/v1/envelopes/config — 配置开关+密钥（热更新）
+
+// handleEnvelopeRangeVerify POST /api/v1/envelopes/verify — 按时间范围批量验证 Merkle 批次
+func (api *ManagementAPI) handleEnvelopeRangeVerify(w http.ResponseWriter, r *http.Request) {
+	if api.envelopeMgr == nil {
+		jsonResponse(w, 404, map[string]string{"error": "envelope not enabled"})
+		return
+	}
+	var req struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request: " + err.Error()})
+		return
+	}
+	var start, end time.Time
+	var err error
+	if strings.TrimSpace(req.Start) != "" {
+		start, err = time.Parse(time.RFC3339, req.Start)
+		if err != nil {
+			jsonResponse(w, 400, map[string]string{"error": "invalid start time"})
+			return
+		}
+	}
+	if strings.TrimSpace(req.End) != "" {
+		end, err = time.Parse(time.RFC3339, req.End)
+		if err != nil {
+			jsonResponse(w, 400, map[string]string{"error": "invalid end time"})
+			return
+		}
+	}
+	batches, err := api.envelopeMgr.ListBatches(500)
+	if err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	type item struct {
+		BatchID        string    `json:"batch_id"`
+		CreatedAt      time.Time `json:"created_at"`
+		Valid          bool      `json:"valid"`
+		LeafCount      int       `json:"leaf_count"`
+		FailureReasons []string  `json:"failure_reasons,omitempty"`
+	}
+	results := make([]item, 0)
+	passed := 0
+	failed := 0
+	for _, batch := range batches {
+		if !start.IsZero() && batch.CreatedAt.Before(start) {
+			continue
+		}
+		if !end.IsZero() && batch.CreatedAt.After(end) {
+			continue
+		}
+		v, err := api.envelopeMgr.VerifyBatch(batch.ID)
+		entry := item{BatchID: batch.ID, CreatedAt: batch.CreatedAt, LeafCount: batch.LeafCount}
+		if err != nil {
+			entry.Valid = false
+			entry.FailureReasons = []string{err.Error()}
+			failed++
+		} else {
+			entry.Valid = v.Valid
+			entry.LeafCount = v.LeafCount
+			entry.FailureReasons = v.FailureReasons
+			if v.Valid {
+				passed++
+			} else {
+				failed++
+			}
+		}
+		results = append(results, entry)
+	}
+	jsonResponse(w, 200, map[string]interface{}{
+		"start":         req.Start,
+		"end":           req.End,
+		"total_batches": len(results),
+		"passed":        passed,
+		"failed":        failed,
+		"results":       results,
+	})
+}
+
 func (api *ManagementAPI) handleEnvelopeConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enabled   *bool  `json:"enabled"`

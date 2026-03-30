@@ -59,7 +59,9 @@ func main() {
 		rules := getDefaultInboundRules()
 		rulesFile := InboundRulesFileConfig{Rules: rules}
 		data, err := yaml.Marshal(&rulesFile)
-		if err != nil { log.Fatalf("序列化规则失败: %v", err) }
+		if err != nil {
+			log.Fatalf("序列化规则失败: %v", err)
+		}
 		header := "# lobster-guard 默认入站规则文件\n# 由 lobster-guard -gen-rules 自动生成\n# 可自定义修改后通过 inbound_rules_file 配置项加载\n\n"
 		if err := os.WriteFile(*genRulesFile, []byte(header+string(data)), 0644); err != nil {
 			log.Fatalf("写入规则文件失败: %v", err)
@@ -72,32 +74,53 @@ func main() {
 	printBanner()
 
 	cfg, err := loadConfig(*cfgPath)
-	if err != nil { log.Fatalf("加载配置失败: %v", err) }
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
 
 	// v4.0 配置验证
 	if errs := validateConfig(cfg); len(errs) > 0 {
-		for _, e := range errs { log.Printf("[配置错误] ❌ %s", e) }
+		for _, e := range errs {
+			log.Printf("[配置错误] ❌ %s", e)
+		}
 		log.Fatalf("配置验证失败，共 %d 个错误", len(errs))
 	}
 
 	// -check-config: 验证配置文件并退出
 	if *checkConfig {
 		fmt.Println("✅ 配置文件验证通过")
-		fmt.Printf("  通道: %s\n", func() string { if cfg.Channel == "" { return "lanxin" }; return cfg.Channel }())
-		fmt.Printf("  模式: %s\n", func() string { if cfg.Mode == "" { return "webhook" }; return cfg.Mode }())
+		fmt.Printf("  通道: %s\n", func() string {
+			if cfg.Channel == "" {
+				return "lanxin"
+			}
+			return cfg.Channel
+		}())
+		fmt.Printf("  模式: %s\n", func() string {
+			if cfg.Mode == "" {
+				return "webhook"
+			}
+			return cfg.Mode
+		}())
 		fmt.Printf("  入站监听: %s\n", cfg.InboundListen)
 		fmt.Printf("  出站监听: %s\n", cfg.OutboundListen)
 		fmt.Printf("  管理监听: %s\n", cfg.ManagementListen)
 		fmt.Printf("  数据库: %s\n", cfg.DBPath)
 		fmt.Printf("  上游数: %d\n", len(cfg.StaticUpstreams))
-		fmt.Printf("  日志格式: %s\n", func() string { if cfg.LogFormat == "" { return "text" }; return cfg.LogFormat }())
+		fmt.Printf("  日志格式: %s\n", func() string {
+			if cfg.LogFormat == "" {
+				return "text"
+			}
+			return cfg.LogFormat
+		}())
 		return
 	}
 
 	// -dump-rules: 打印规则并退出
 	if *dumpRules {
 		rules, source, err := resolveInboundRules(cfg)
-		if err != nil { log.Fatalf("加载入站规则失败: %v", err) }
+		if err != nil {
+			log.Fatalf("加载入站规则失败: %v", err)
+		}
 		if rules == nil {
 			rules = getDefaultInboundRules()
 			source = "default"
@@ -105,14 +128,20 @@ func main() {
 		fmt.Printf("=== 入站规则 (来源: %s, %d 条) ===\n", source, len(rules))
 		for _, r := range rules {
 			typeStr := r.Type
-			if typeStr == "" { typeStr = "keyword" }
+			if typeStr == "" {
+				typeStr = "keyword"
+			}
 			fmt.Printf("  [%s] %s (%s) patterns=%d priority=%d group=%q\n", r.Action, r.Name, typeStr, len(r.Patterns), r.Priority, r.Group)
 		}
 		fmt.Printf("\n=== 出站规则 (%d 条) ===\n", len(cfg.OutboundRules))
 		for _, r := range cfg.OutboundRules {
 			pCount := 0
-			if r.Pattern != "" { pCount = 1 }
-			if len(r.Patterns) > 0 { pCount = len(r.Patterns) }
+			if r.Pattern != "" {
+				pCount = 1
+			}
+			if len(r.Patterns) > 0 {
+				pCount = len(r.Patterns)
+			}
 			fmt.Printf("  [%s] %s patterns=%d priority=%d\n", r.Action, r.Name, pCount, r.Priority)
 		}
 		return
@@ -121,7 +150,9 @@ func main() {
 	// -dump-routes: 需要数据库，打印路由表并退出
 	if *dumpRoutes {
 		db, err := initDB(cfg.DBPath)
-		if err != nil { log.Fatalf("初始化数据库失败: %v", err) }
+		if err != nil {
+			log.Fatalf("初始化数据库失败: %v", err)
+		}
 		defer db.Close()
 		routes := NewRouteTable(db, cfg.RoutePersist)
 		entries := routes.ListRoutes()
@@ -147,9 +178,13 @@ func main() {
 	}
 
 	channelName := cfg.Channel
-	if channelName == "" { channelName = "lanxin" }
+	if channelName == "" {
+		channelName = "lanxin"
+	}
 	modeName := cfg.Mode
-	if modeName == "" { modeName = "webhook" }
+	if modeName == "" {
+		modeName = "webhook"
+	}
 
 	// 初始化通道插件
 	var channel ChannelPlugin
@@ -164,7 +199,9 @@ func main() {
 		channel = NewGenericPlugin(cfg.GenericSenderHeader, cfg.GenericTextField)
 	default:
 		crypto, err := NewLanxinCrypto(cfg.CallbackKey, cfg.CallbackSignToken)
-		if err != nil { log.Fatalf("初始化蓝信加解密失败: %v", err) }
+		if err != nil {
+			log.Fatalf("初始化蓝信加解密失败: %v", err)
+		}
 		channel = NewLanxinPlugin(crypto)
 	}
 	fmt.Printf("[初始化] ✅ 通道插件: %s (%s 模式)\n", channelName, modeName)
@@ -172,7 +209,9 @@ func main() {
 	// 初始化入站规则引擎
 	var engine *RuleEngine
 	inboundRules, inboundSource, err := resolveInboundRules(cfg)
-	if err != nil { log.Fatalf("加载入站规则失败: %v", err) }
+	if err != nil {
+		log.Fatalf("加载入站规则失败: %v", err)
+	}
 
 	// v30.0: 行业模板不再通过 config.yaml rule_templates 加载
 	// 改为 DB 全局开关机制，通过 Dashboard 启用/禁用
@@ -192,7 +231,9 @@ func main() {
 
 	// 初始化数据库
 	db, err := initDB(cfg.DBPath)
-	if err != nil { log.Fatalf("初始化数据库失败: %v", err) }
+	if err != nil {
+		log.Fatalf("初始化数据库失败: %v", err)
+	}
 	defer db.Close()
 
 	// v4.2: 创建 Store 抽象层
@@ -221,7 +262,9 @@ func main() {
 	}
 
 	logger, err := NewAuditLogger(db)
-	if err != nil { log.Fatalf("初始化审计日志失败: %v", err) }
+	if err != nil {
+		log.Fatalf("初始化审计日志失败: %v", err)
+	}
 	defer logger.Close()
 	logger.SetTenantManager(tenantMgr) // v14.0: 审计日志自动解析租户
 
@@ -233,9 +276,9 @@ func main() {
 		// v10.0: 初始化 LLM 规则引擎（v18: 合并用户配置 + 默认规则）
 		llmRules := mergeLLMRuleDefaults(cfg.LLMProxy.Rules)
 		llmRuleEngine = NewLLMRuleEngine(llmRules)
-		llmRuleEngine.SetDB(logger.DB()) // Issue #7 fix: 命中计数持久化
+		llmRuleEngine.SetDB(logger.DB())         // Issue #7 fix: 命中计数持久化
 		llmRuleEngine.SetTenantDB(logger.DB())   // v28.0: LLM 规则租户绑定持久化
-		llmRuleEngine.SetTemplateDB(logger.DB())  // v28.0: LLM 规则模板持久化
+		llmRuleEngine.SetTemplateDB(logger.DB()) // v28.0: LLM 规则模板持久化
 		initIndustryTemplateSystem(logger.DB())
 		llmRuleEngine.InitGlobalLLMTemplateRules() // v30.0/v31.0: 初始化全局启用的 LLM 行业模板规则
 		log.Printf("[初始化] ✅ LLM 规则引擎: %d 条规则 (用户%d+默认补充)", len(llmRules), len(cfg.LLMProxy.Rules))
@@ -282,15 +325,21 @@ func main() {
 	pool.RestoreUserCounts(db)
 
 	var metrics *MetricsCollector
-	if cfg.IsMetricsEnabled() { metrics = NewMetricsCollector() }
+	if cfg.IsMetricsEnabled() {
+		metrics = NewMetricsCollector()
+	}
 
 	ruleHits := NewRuleHitStats()
 
 	var userCache *UserInfoCache
 	var policyEng *RoutePolicyEngine
 	provider := createUserInfoProvider(cfg)
-	if provider != nil { userCache = NewUserInfoCache(db, provider, 24*time.Hour) }
-	if len(cfg.RoutePolicies) > 0 { policyEng = NewRoutePolicyEngine(cfg.RoutePolicies) }
+	if provider != nil {
+		userCache = NewUserInfoCache(db, provider, 24*time.Hour)
+	}
+	if len(cfg.RoutePolicies) > 0 {
+		policyEng = NewRoutePolicyEngine(cfg.RoutePolicies)
+	}
 
 	// 限流
 	printRateLimitSummary(cfg)
@@ -298,14 +347,20 @@ func main() {
 	// 上游
 	upTotal, _ := pool.Count()
 	upIDs := make([]string, 0)
-	for _, u := range pool.ListUpstreams() { upIDs = append(upIDs, u.ID) }
+	for _, u := range pool.ListUpstreams() {
+		upIDs = append(upIDs, u.ID)
+	}
 	fmt.Printf("[初始化] ✅ 上游: %d 个静态 (%s)\n", upTotal, strings.Join(upIDs, ", "))
 
 	// 审计
 	retentionDays := cfg.AuditRetentionDays
-	if retentionDays <= 0 { retentionDays = 30 }
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
 	alertDesc := "未配置"
-	if cfg.AlertWebhook != "" { alertDesc = cfg.AlertWebhook }
+	if cfg.AlertWebhook != "" {
+		alertDesc = cfg.AlertWebhook
+	}
 	fmt.Printf("[初始化] ✅ 审计: 保留 %d 天, 告警 webhook: %s\n", retentionDays, alertDesc)
 
 	// Metrics
@@ -329,10 +384,25 @@ func main() {
 	var sessionDetector *SessionDetector
 	if cfg.SessionDetectEnabled {
 		sessionDetector = NewSessionDetector(SessionDetectorConfig{
-			Enabled:       true,
-			RiskThreshold: func() float64 { if cfg.SessionRiskThreshold > 0 { return cfg.SessionRiskThreshold }; return 10 }(),
-			Window:        func() int { if cfg.SessionWindow > 0 { return cfg.SessionWindow }; return 20 }(),
-			DecayRate:     func() float64 { if cfg.SessionDecayRate > 0 { return cfg.SessionDecayRate }; return 1 }(),
+			Enabled: true,
+			RiskThreshold: func() float64 {
+				if cfg.SessionRiskThreshold > 0 {
+					return cfg.SessionRiskThreshold
+				}
+				return 10
+			}(),
+			Window: func() int {
+				if cfg.SessionWindow > 0 {
+					return cfg.SessionWindow
+				}
+				return 20
+			}(),
+			DecayRate: func() float64 {
+				if cfg.SessionDecayRate > 0 {
+					return cfg.SessionDecayRate
+				}
+				return 1
+			}(),
 		})
 		fmt.Printf("[初始化] ✅ 会话检测: threshold=%.0f, window=%d, decay_rate=%.1f/h\n",
 			sessionDetector.cfg.RiskThreshold, sessionDetector.cfg.Window, sessionDetector.cfg.DecayRate)
@@ -357,9 +427,13 @@ func main() {
 	// v5.1: 检测缓存
 	var detectCache *DetectCache
 	cacheTTL := cfg.DetectCacheTTL
-	if cacheTTL <= 0 { cacheTTL = 300 }
+	if cacheTTL <= 0 {
+		cacheTTL = 300
+	}
 	cacheSize := cfg.DetectCacheSize
-	if cacheSize <= 0 { cacheSize = 1000 }
+	if cacheSize <= 0 {
+		cacheSize = 1000
+	}
 	detectCache = NewDetectCache(cacheSize, time.Duration(cacheTTL)*time.Second)
 	fmt.Printf("[初始化] ✅ 检测缓存: size=%d, ttl=%ds\n", cacheSize, cacheTTL)
 
@@ -412,7 +486,9 @@ func main() {
 		}
 	}
 	outbound, err := NewOutboundProxy(cfg, channel, engine, outboundEngine, logger, metrics, ruleHits, honeypotEngine)
-	if err != nil { log.Fatalf("初始化出站代理失败: %v", err) }
+	if err != nil {
+		log.Fatalf("初始化出站代理失败: %v", err)
+	}
 	outbound.realtime = realtime
 	outbound.traceCorrelator = traceCorrelator
 	outbound.routes = routes // D-005: 出站代理路由感知
@@ -422,12 +498,26 @@ func main() {
 	wsProxy := NewWSProxyManager(cfg, engine, outboundEngine, logger, metrics, pool, routes, ruleHits)
 	inbound.wsProxy = wsProxy
 	wsMode := cfg.WSMode
-	if wsMode == "" { wsMode = "inspect" }
+	if wsMode == "" {
+		wsMode = "inspect"
+	}
 	wsMaxConn := cfg.WSMaxConnections
-	if wsMaxConn <= 0 { wsMaxConn = 100 }
+	if wsMaxConn <= 0 {
+		wsMaxConn = 100
+	}
 	fmt.Printf("[初始化] ✅ WebSocket 代理: mode=%s, max_connections=%d, idle_timeout=%ds, max_duration=%ds\n",
-		wsMode, wsMaxConn, func() int { if cfg.WSIdleTimeout <= 0 { return 300 }; return cfg.WSIdleTimeout }(),
-		func() int { if cfg.WSMaxDuration <= 0 { return 3600 }; return cfg.WSMaxDuration }())
+		wsMode, wsMaxConn, func() int {
+			if cfg.WSIdleTimeout <= 0 {
+				return 300
+			}
+			return cfg.WSIdleTimeout
+		}(),
+		func() int {
+			if cfg.WSMaxDuration <= 0 {
+				return 3600
+			}
+			return cfg.WSMaxDuration
+		}())
 
 	var alertNotifier *AlertNotifier
 	if cfg.AlertWebhook != "" {
@@ -443,9 +533,9 @@ func main() {
 	mgmtAPI.sessionDetector = sessionDetector
 	mgmtAPI.llmDetector = llmDetector
 	mgmtAPI.detectCache = detectCache
-	mgmtAPI.llmAuditor = llmAuditor // v9.0
-	mgmtAPI.llmRuleEngine = llmRuleEngine // v10.0
-	mgmtAPI.llmProxy = llmProxy // v10.1
+	mgmtAPI.llmAuditor = llmAuditor                            // v9.0
+	mgmtAPI.llmRuleEngine = llmRuleEngine                      // v10.0
+	mgmtAPI.llmProxy = llmProxy                                // v10.1
 	mgmtAPI.userProfileEng = NewUserProfileEngine(logger.DB()) // v11.0
 	// v11.1: 驾驶舱模式
 	mgmtAPI.healthScoreEng = NewHealthScoreEngine(logger.DB())
@@ -472,9 +562,9 @@ func main() {
 
 	// v14.2: Red Team Autopilot
 	redTeamEngine := NewRedTeamEngine(logger.DB(), engine)
-	redTeamEngine.outboundEngine = outboundEngine   // v17.3: 出站规则红队
-	redTeamEngine.llmRuleEngine = llmRuleEngine      // v17.3: LLM 规则红队
-	redTeamEngine.honeypotEngine = honeypotEngine     // v17.3: 蜜罐红队
+	redTeamEngine.outboundEngine = outboundEngine // v17.3: 出站规则红队
+	redTeamEngine.llmRuleEngine = llmRuleEngine   // v17.3: LLM 规则红队
+	redTeamEngine.honeypotEngine = honeypotEngine // v17.3: 蜜罐红队
 	mgmtAPI.redTeamEngine = redTeamEngine
 	fmt.Println("[初始化] ✅ Red Team Autopilot 引擎已就绪 (35 攻击向量, OWASP LLM Top10)")
 
@@ -488,7 +578,7 @@ func main() {
 	reportEngine.SetEngines(mgmtAPI.healthScoreEng, mgmtAPI.owaspMatrixEng, llmAuditor, mgmtAPI.userProfileEng, anomalyDetector, logger)
 	mgmtAPI.reportEngine = reportEngine
 	mgmtAPI.sessionReplayEng = sessionReplayEng
-	mgmtAPI.honeypotEngine = honeypotEngine // v15.0
+	mgmtAPI.honeypotEngine = honeypotEngine   // v15.0
 	mgmtAPI.traceCorrelator = traceCorrelator // v18
 
 	// v15.1: A/B 测试引擎
@@ -579,6 +669,14 @@ func main() {
 		fmt.Println("[初始化] ⚠️ 对抗性自进化: 未启用")
 	}
 	mgmtAPI.evolutionEngine = evolutionEngine
+
+	// v32.11: 规则建议队列
+	suggestionQueue := NewSuggestionQueue(logger.DB(), engine)
+	mgmtAPI.suggestionQueue = suggestionQueue
+	if evolutionEngine != nil {
+		evolutionEngine.SetSuggestionQueue(suggestionQueue)
+	}
+	fmt.Println("[初始化] ✅ 规则建议队列已启用")
 
 	// v18.3: 自适应决策引擎
 	var adaptiveEngine *AdaptiveDecisionEngine
@@ -744,10 +842,10 @@ func main() {
 		taintTracker.SetIFCEngine(ifcEngine)
 	}
 	inbound.pathPolicyEngine = pathPolicyEngine // v23.0
-	inbound.planCompiler = planCompiler          // v25.0
-	inbound.capabilityEngine = capEngine         // v25.1
-	inbound.deviationDetector = devDetector      // v25.2
-	inbound.ifcEngine = ifcEngine                // v26.0
+	inbound.planCompiler = planCompiler         // v25.0
+	inbound.capabilityEngine = capEngine        // v25.1
+	inbound.deviationDetector = devDetector     // v25.2
+	inbound.ifcEngine = ifcEngine               // v26.0
 	// v27.0: 租户策略闭环 + API Key 身份管理
 	apiKeyMgr := NewAPIKeyManager(db)
 	inbound.SetTenantManager(tenantMgr)
@@ -818,7 +916,12 @@ func main() {
 		} else {
 			fmt.Printf("[初始化] ✅ K8s 服务发现: namespace=%s, service=%s, interval=%ds\n",
 				cfg.Discovery.Kubernetes.Namespace, cfg.Discovery.Kubernetes.Service,
-				func() int { if cfg.Discovery.Kubernetes.SyncInterval > 0 { return cfg.Discovery.Kubernetes.SyncInterval }; return 15 }())
+				func() int {
+					if cfg.Discovery.Kubernetes.SyncInterval > 0 {
+						return cfg.Discovery.Kubernetes.SyncInterval
+					}
+					return 15
+				}())
 		}
 	} else {
 		fmt.Println("[初始化] ⚠️ K8s 服务发现: 未启用")
@@ -826,7 +929,7 @@ func main() {
 
 	mgmtAPI.honeypotDeep = honeypotDeep
 	mgmtAPI.pathPolicyEngine = pathPolicyEngine // v23.0
-	mgmtAPI.k8sDiscovery = k8sDiscovery // v21.0
+	mgmtAPI.k8sDiscovery = k8sDiscovery         // v21.0
 	inbound.honeypotDeep = honeypotDeep
 	mgmtAPI.semanticDetector = semanticDetector
 	inbound.semanticDetector = semanticDetector
@@ -841,9 +944,13 @@ func main() {
 	// v18.0: 后台调度器（攻击链自动分析 + 行为画像自动扫描）
 	bgScheduler := NewBackgroundScheduler(cfg, attackChainEng, behaviorProfileEng)
 	chainMin := cfg.ChainAnalysisIntervalMin
-	if chainMin <= 0 { chainMin = 5 }
+	if chainMin <= 0 {
+		chainMin = 5
+	}
 	behaviorMin := cfg.BehaviorScanIntervalMin
-	if behaviorMin <= 0 { behaviorMin = 10 }
+	if behaviorMin <= 0 {
+		behaviorMin = 10
+	}
 	fmt.Printf("[初始化] ✅ 后台调度器已就绪 (攻击链分析: %d 分钟, 行为画像扫描: %d 分钟)\n", chainMin, behaviorMin)
 
 	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
@@ -855,7 +962,9 @@ func main() {
 	if k8sDiscovery != nil {
 		go k8sDiscovery.Run(ctx)
 	}
-	if inbound.limiter != nil { go inbound.limiter.startCleanup(ctx) }
+	if inbound.limiter != nil {
+		go inbound.limiter.startCleanup(ctx)
+	}
 
 	// v18.0: 启动后台调度器
 	bgScheduler.Start(ctx)
@@ -867,14 +976,24 @@ func main() {
 	// 日志轮转
 	go func() { defer func() { recover() }(); logger.CleanupOldLogs(retentionDays) }()
 	go func() {
-		ticker := time.NewTicker(24 * time.Hour); defer ticker.Stop()
-		for { select { case <-ctx.Done(): return; case <-ticker.C: logger.CleanupOldLogs(retentionDays) } }
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				logger.CleanupOldLogs(retentionDays)
+			}
+		}
 	}()
 
 	// v5.0: 审计日志归档
 	if cfg.AuditArchiveEnabled {
 		archiveDir := cfg.AuditArchiveDir
-		if archiveDir == "" { archiveDir = "/var/lib/lobster-guard/archives/" }
+		if archiveDir == "" {
+			archiveDir = "/var/lib/lobster-guard/archives/"
+		}
 		fmt.Printf("[初始化] ✅ 审计归档: 目录 %s, 保留 %d 天\n", archiveDir, retentionDays)
 		// 启动时立即归档一次
 		go func() {
@@ -888,10 +1007,12 @@ func main() {
 		}()
 		// 每天归档
 		go func() {
-			ticker := time.NewTicker(24 * time.Hour); defer ticker.Stop()
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-ctx.Done(): return
+				case <-ctx.Done():
+					return
 				case <-ticker.C:
 					path, deleted, err := logger.ArchiveLogs(retentionDays, archiveDir)
 					if err != nil {
@@ -906,9 +1027,13 @@ func main() {
 
 	// Bridge 模式
 	if cfg.Mode == "bridge" {
-		if !channel.SupportsBridge() { log.Fatalf("[错误] %s 通道不支持 bridge 模式", channel.Name()) }
+		if !channel.SupportsBridge() {
+			log.Fatalf("[错误] %s 通道不支持 bridge 模式", channel.Name())
+		}
 		go func() {
-			if err := inbound.startBridge(ctx); err != nil && err != context.Canceled { log.Fatalf("[错误] 启动桥接失败: %v", err) }
+			if err := inbound.startBridge(ctx); err != nil && err != context.Canceled {
+				log.Fatalf("[错误] 启动桥接失败: %v", err)
+			}
 		}()
 		shutdownMgr.SetBridge(inbound.bridge)
 	}
@@ -916,9 +1041,13 @@ func main() {
 	// v4.2: 自动备份
 	if cfg.BackupAutoInterval > 0 {
 		backupDir := cfg.BackupDir
-		if backupDir == "" { backupDir = "/var/lib/lobster-guard/backups/" }
+		if backupDir == "" {
+			backupDir = "/var/lib/lobster-guard/backups/"
+		}
 		maxCount := cfg.BackupMaxCount
-		if maxCount <= 0 { maxCount = 10 }
+		if maxCount <= 0 {
+			maxCount = 10
+		}
 		go func() {
 			ticker := time.NewTicker(time.Duration(cfg.BackupAutoInterval) * time.Hour)
 			defer ticker.Stop()
@@ -948,9 +1077,21 @@ func main() {
 	// v4.2: 注册服务器到关闭管理器
 	shutdownMgr.SetServers(inSrv, outSrv, mgmtSrv)
 
-	go func() { if err := inSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("入站代理启动失败: %v", err) } }()
-	go func() { if err := outSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("出站代理启动失败: %v", err) } }()
-	go func() { if err := mgmtSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatalf("管理API启动失败: %v", err) } }()
+	go func() {
+		if err := inSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("入站代理启动失败: %v", err)
+		}
+	}()
+	go func() {
+		if err := outSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("出站代理启动失败: %v", err)
+		}
+	}()
+	go func() {
+		if err := mgmtSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("管理API启动失败: %v", err)
+		}
+	}()
 
 	log.Printf("[启动完成] 龙虾卫士 v%s 已就绪 (入站=%s 出站=%s 管理=%s log_format=%s)", AppVersion, cfg.InboundListen, cfg.OutboundListen, cfg.ManagementListen, slog.Format())
 
@@ -995,8 +1136,16 @@ func printInboundRuleSummary(engine *RuleEngine) {
 	keywordCount := len(engine.rules)
 	regexCount := len(engine.regexRules)
 	groups := make(map[string]bool)
-	for _, r := range engine.rules { if r.Group != "" { groups[r.Group] = true } }
-	for _, r := range engine.regexRules { if r.Group != "" { groups[r.Group] = true } }
+	for _, r := range engine.rules {
+		if r.Group != "" {
+			groups[r.Group] = true
+		}
+	}
+	for _, r := range engine.regexRules {
+		if r.Group != "" {
+			groups[r.Group] = true
+		}
+	}
 	fmt.Printf("[初始化] ✅ 入站规则: %d 条 (keyword: %d, regex: %d, 分组: %d)\n",
 		keywordCount+regexCount, keywordCount, regexCount, len(groups))
 }
@@ -1006,9 +1155,12 @@ func printOutboundRuleSummary(rules []OutboundRuleConfig) {
 	block, warn, logCount := 0, 0, 0
 	for _, r := range rules {
 		switch r.Action {
-		case "block": block++
-		case "warn": warn++
-		case "log": logCount++
+		case "block":
+			block++
+		case "warn":
+			warn++
+		case "log":
+			logCount++
 		}
 	}
 	fmt.Printf("[初始化] ✅ 出站规则: block %d / warn %d / log %d\n", block, warn, logCount)

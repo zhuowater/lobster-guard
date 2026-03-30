@@ -84,6 +84,9 @@
       </div>
     </div>
 
+    <!-- v32.11 规则建议队列 -->
+    <RuleSuggestions />
+
     <!-- v32.0 全链路检测调试 -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
@@ -329,6 +332,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api, apiPost, apiPut, apiDelete, downloadFile } from '../api.js'
 import { showToast } from '../stores/app.js'
 import DataTable from '../components/DataTable.vue'
+import RuleSuggestions from '../components/RuleSuggestions.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import Icon from '../components/Icon.vue'
 import RuleEditor from '../components/RuleEditor.vue'

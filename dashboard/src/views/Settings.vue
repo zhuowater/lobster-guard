@@ -108,6 +108,21 @@
       </template>
     </div>
 
+    <div v-show="activeTab === 'security'" class="card canary-card" style="margin-top:16px; border-color: rgba(99,102,241,.22);">
+      <div class="card-header"><div class="card-title">🐤 金丝雀令牌管理</div></div>
+      <div class="config-desc">创建时间：{{ canaryStatus.token_created_at || '-' }} · 下次轮换：{{ canaryStatus.next_rotation_at || '-' }}</div>
+      <div style="margin-top:12px; display:flex; gap:12px; align-items:center;">
+        <button class="btn btn-primary" @click="openCanaryRotateConfirm">立即轮换</button>
+      </div>
+      <div style="margin-top:16px;">
+        <div class="config-desc" style="margin-bottom:8px;">轮换历史</div>
+        <div v-for="item in canaryHistory" :key="item.rotated_at" class="kv-row">
+          <span>{{ fmtTime(item.rotated_at) }}</span>
+          <span>{{ item.old_token_hash }} → {{ item.new_token_hash }}</span>
+        </div>
+      </div>
+    </div>
+
     <ConfigWizard :visible="wizardVisible" @close="wizardVisible = false" />
 
     <!-- Tab 2: 认证与安全 -->
@@ -312,7 +327,32 @@
             </div>
           </div>
         </div>
+        <div class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
+          <div class="card-header"><span class="card-icon">🧩</span><span class="card-title">CaMeL 三引擎独立开关</span></div>
+          <div class="engine-list">
+            <div v-for="item in camelEngines" :key="item.name" class="engine-row card">
+              <div class="engine-info">
+                <div class="engine-name-row"><span class="engine-status-dot" :class="{ on: item.enabled }"></span><span class="engine-name">{{ item.title }}</span></div>
+                <div class="engine-desc">{{ item.desc }}</div>
+                <div class="engine-path"><code>{{ item.name }}</code></div>
+                <div class="engine-desc" style="margin-top:8px">{{ item.stat1Label }}：{{ item.stat1 }} · {{ item.stat2Label }}：{{ item.stat2 }}</div>
+              </div>
+              <div class="engine-toggle">
+                <label class="toggle-switch toggle-switch-lg"><input type="checkbox" :checked="item.enabled" @change="toggleCamelEngine(item, $event)" /><span class="toggle-slider"></span></label>
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
+    </div>
+
+    <div v-show="activeTab === 'llm'" class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
+      <div class="card-header"><span class="card-icon">🐤</span><span class="card-title">金丝雀令牌管理</span></div>
+      <div class="config-desc">创建时间：{{ canaryRotationStatus.token_created_at || '--' }} · 下次自动轮换：{{ canaryRotationStatus.next_rotation_at || '--' }}</div>
+      <div style="margin-top:12px"><button class="btn btn-sm btn-primary" @click="confirmCanaryRotateNow">立即轮换</button></div>
+      <div style="margin-top:16px" v-if="canaryRotationHistory.length">
+        <div v-for="item in canaryRotationHistory" :key="item.rotated_at" class="status-row"><span class="status-key">{{ fmtTime(item.rotated_at) }}</span><span class="status-val">{{ item.old_token_hash }} → {{ item.new_token_hash }}</span></div>
+      </div>
     </div>
 
     <!-- Tab: AC 智能分级 -->
@@ -625,6 +665,16 @@ async function loadAlertHistory() { alertsLoading.value = true; try { const d = 
 const llmConfigLoading = ref(true); const llmConfig = ref(null); const llmSaving = ref(false); const showAdvanced = ref(false)
 const highRiskToolsStr = computed({ get: () => llmConfig.value?.security?.high_risk_tool_list?.join(', ') || '', set: (v) => { if (llmConfig.value?.security) llmConfig.value.security.high_risk_tool_list = v.split(',').map(s => s.trim()).filter(Boolean) } })
 const canaryStatus = ref({ token: '', leak_count: 0 })
+const canaryRotationStatus = ref({})
+const canaryRotationHistory = ref([])
+const planCompilerStats = ref({})
+const capabilityEngineStats = ref({})
+const deviationDetectorStats = ref({})
+const camelEngines = computed(() => [
+  { name: 'plan-compiler', title: 'PlanCompiler', desc: '执行计划编译器', enabled: !!engineSettings['plan_compiler.enabled'], stat1Label: '活跃计划数', stat1: planCompilerStats.value.active_plans || 0, stat2Label: '模板数', stat2: planCompilerStats.value.templates || 0 },
+  { name: 'capability-engine', title: 'CapabilityEngine', desc: '能力标签引擎', enabled: !!engineSettings['capability.enabled'], stat1Label: '工具映射数', stat1: capabilityEngineStats.value.tool_mappings || 0, stat2Label: '活跃上下文数', stat2: capabilityEngineStats.value.active_contexts || 0 },
+  { name: 'deviation-detector', title: 'DeviationDetector', desc: '偏差检测器', enabled: !!engineSettings['deviation.enabled'], stat1Label: '检测到的偏差数', stat1: deviationDetectorStats.value.detected_deviations || 0, stat2Label: '策略数', stat2: deviationDetectorStats.value.policies || 0 },
+])
 const canaryEnabled = computed({ get: () => llmConfig.value?.security?.canary_token?.enabled ?? true, set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.enabled = v } })
 const canaryAlertAction = computed({ get: () => llmConfig.value?.security?.canary_token?.alert_action || 'warn', set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.alert_action = v } })
 const canaryAutoRotate = computed({ get: () => llmConfig.value?.security?.canary_token?.auto_rotate ?? false, set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.auto_rotate = v } })
@@ -646,6 +696,29 @@ async function loadLLMConfig() {
 async function loadCanaryStatus() { try { canaryStatus.value = await api('/api/v1/llm/canary/status') } catch {} }
 async function loadBudgetStatus() { try { budgetStatus.value = await api('/api/v1/llm/budget/status') } catch {} }
 async function rotateCanary() { try { const d = await apiPost('/api/v1/llm/canary/rotate', {}); showToast('Canary Token 已轮换', 'success'); canaryStatus.value.token = d.token } catch (e) { showToast('轮换失败: ' + e.message, 'error') } }
+async function loadCanaryRotationData() {
+  try { canaryRotationStatus.value = await api('/api/v1/canary/status') } catch {}
+  try { const d = await api('/api/v1/canary/history'); canaryRotationHistory.value = d.history || [] } catch {}
+}
+async function loadCamelStats() {
+  try { planCompilerStats.value = await api('/api/v1/plan/stats') } catch {}
+  try { capabilityEngineStats.value = await api('/api/v1/capabilities/stats') } catch {}
+  try { deviationDetectorStats.value = await api('/api/v1/deviations/stats') } catch {}
+}
+function confirmCanaryRotateNow() { confirmTitle.value = '确认立即轮换金丝雀令牌？'; confirmMessage.value = '将生成新 token 并写回 config.yaml'; confirmType.value = 'danger'; confirmAction = async () => { try { await apiPost('/api/v1/canary/rotate', {}); showToast('金丝雀令牌已轮换', 'success'); await loadCanaryRotationData() } catch (e) { showToast('轮换失败: ' + e.message, 'error') } }; confirmVisible.value = true }
+async function toggleCamelEngine(item, event) {
+  const enabled = event.target.checked
+  try {
+    await apiPost(`/api/v1/engines/${item.name}/toggle`, { enabled })
+    if (item.name === 'plan-compiler') engineSettings['plan_compiler.enabled'] = enabled
+    if (item.name === 'capability-engine') engineSettings['capability.enabled'] = enabled
+    if (item.name === 'deviation-detector') engineSettings['deviation.enabled'] = enabled
+    showToast(`${item.title} 已${enabled ? '启用' : '关闭'}`, 'success')
+  } catch (e) {
+    event.target.checked = !enabled
+    showToast('切换失败: ' + e.message, 'error')
+  }
+}
 async function saveLLMConfig() { if (!llmConfig.value) return; llmSaving.value = true; try { const d = await apiPut('/api/v1/llm/config', llmConfig.value); showToast(d.need_restart ? '已保存（需重启）' : 'LLM 已保存', 'success') } catch (e) { showToast('失败: ' + e.message, 'error') }; llmSaving.value = false }
 
 // 通用
@@ -905,7 +978,7 @@ function scrollToSection(section) {
 }
 
 onMounted(() => {
-  loadConfig(); loadBackups(); loadLLMConfig(); loadAlertHistory(); loadSQLiteStats()
+  loadConfig(); loadBackups(); loadLLMConfig(); loadAlertHistory(); loadSQLiteStats(); loadCanaryRotationData(); loadCamelStats(); loadEngineSettings()
   const section = route.query.section
   if (section) { const poll = () => { if (!llmConfigLoading.value) scrollToSection(section); else setTimeout(poll, 100) }; poll() }
 })

@@ -24,16 +24,17 @@ import (
 
 // EvolutionEngine 对抗性自进化引擎
 type EvolutionEngine struct {
-	db          *sql.DB
-	redTeam     *RedTeamEngine
-	ruleEngine  *RuleEngine
-	outboundEng *OutboundRuleEngine
-	llmRuleEng  *LLMRuleEngine
-	eventBus    *EventBus
-	mu          sync.Mutex
-	generation  int
-	autoTicker  *time.Ticker
-	stopCh      chan struct{}
+	db              *sql.DB
+	redTeam         *RedTeamEngine
+	ruleEngine      *RuleEngine
+	outboundEng     *OutboundRuleEngine
+	llmRuleEng      *LLMRuleEngine
+	eventBus        *EventBus
+	suggestionQueue *SuggestionQueue // v32.11: 规则建议队列（不再直接应用，走审批）
+	mu              sync.Mutex
+	generation      int
+	autoTicker      *time.Ticker
+	stopCh          chan struct{}
 }
 
 // MutationStrategy 变异策略
@@ -190,6 +191,11 @@ func NewEvolutionEngine(db *sql.DB, redTeam *RedTeamEngine, ruleEngine *RuleEngi
 }
 
 // initSchema 初始化 SQLite 表
+// SetSuggestionQueue 设置规则建议队列（v32.11）
+func (ee *EvolutionEngine) SetSuggestionQueue(sq *SuggestionQueue) {
+	ee.suggestionQueue = sq
+}
+
 func (ee *EvolutionEngine) initSchema() {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS evolution_log (
@@ -670,55 +676,38 @@ func (ee *EvolutionEngine) generateAndApplyRules(gen int, bypasses []MutatedVect
 	for _, g := range groups {
 		ruleName := fmt.Sprintf("evo-gen-%d-%s-%s", gen, g.engine, g.strategy)
 
+		var ruleType string
+		var patterns []string
+		var reason string
+
 		switch g.strategy {
 		case "synonym_replace":
-			// 提取绕过载荷中的新同义词，作为 keyword 规则
-			keywords := extractSynonymKeywords(g.payloads)
-			if len(keywords) > 0 && g.engine == "inbound" {
-				ee.addInboundKeywordRule(ruleName, keywords)
-				generatedRuleNames = append(generatedRuleNames, ruleName)
-				ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("keywords: %v", keywords))
-			}
+			patterns = extractSynonymKeywords(g.payloads)
+			ruleType = "keyword"
+			reason = fmt.Sprintf("红队同义词替换绕过检测，发现 %d 个新关键词", len(patterns))
 
 		case "case_mixed":
-			// 大小写混淆 → 添加正则规则（case-insensitive 匹配）
-			patterns := extractCaseInsensitivePatterns(g.payloads)
-			if len(patterns) > 0 && g.engine == "inbound" {
-				ee.addInboundRegexRule(ruleName, patterns)
-				generatedRuleNames = append(generatedRuleNames, ruleName)
-				ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("regex patterns: %v", patterns))
-			}
+			patterns = extractCaseInsensitivePatterns(g.payloads)
+			ruleType = "regex"
+			reason = fmt.Sprintf("红队大小写混淆绕过检测，提取 %d 个正则模式", len(patterns))
 
 		case "unicode_homoglyph":
-			// Unicode 同形字 → 添加规范化后的 keyword 规则
-			normalized := extractNormalizedKeywords(g.payloads)
-			if len(normalized) > 0 && g.engine == "inbound" {
-				ee.addInboundKeywordRule(ruleName, normalized)
-				generatedRuleNames = append(generatedRuleNames, ruleName)
-				ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("normalized keywords: %v", normalized))
-			}
+			patterns = extractNormalizedKeywords(g.payloads)
+			ruleType = "keyword"
+			reason = fmt.Sprintf("红队 Unicode 同形字绕过检测，归一化 %d 个关键词", len(patterns))
 
 		case "whitespace_inject":
-			// 空白注入 → 添加正则规则
-			patterns := extractWhitespacePatterns(g.payloads)
-			if len(patterns) > 0 && g.engine == "inbound" {
-				ee.addInboundRegexRule(ruleName, patterns)
-				generatedRuleNames = append(generatedRuleNames, ruleName)
-				ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("whitespace patterns: %v", patterns))
-			}
+			patterns = extractWhitespacePatterns(g.payloads)
+			ruleType = "regex"
+			reason = fmt.Sprintf("红队空白注入绕过检测，提取 %d 个模式", len(patterns))
 
 		case "encoding_wrap":
-			// 编码包装 → 添加编码特征 keyword
-			keywords := []string{"decode base64", "Decode and follow"}
-			if g.engine == "inbound" {
-				ee.addInboundKeywordRule(ruleName, keywords)
-				generatedRuleNames = append(generatedRuleNames, ruleName)
-				ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("encoding keywords: %v", keywords))
-			}
+			patterns = []string{"decode base64", "Decode and follow"}
+			ruleType = "keyword"
+			reason = "红队编码包装绕过检测，添加编码特征关键词"
 
 		case "context_dilute":
-			// 上下文稀释通常不生成新规则（因为核心载荷应已被检测）
-			// 只记录日志
+			// 上下文稀释通常不生成新规则
 			ee.logRecord(EvolutionRecord{
 				ID:         uuid.New().String(),
 				Generation: gen,
@@ -727,6 +716,40 @@ func (ee *EvolutionEngine) generateAndApplyRules(gen int, bypasses []MutatedVect
 				Strategy:   g.strategy,
 				Details:    fmt.Sprintf("context_dilute bypasses: %d payloads, no rule generated (core payload should be caught)", len(g.payloads)),
 			})
+			continue
+		}
+
+		if len(patterns) == 0 || g.engine != "inbound" {
+			continue
+		}
+
+		// v32.11: 有建议队列时走审批流程，没有时保持旧行为（直接应用）
+		if ee.suggestionQueue != nil {
+			suggestion := RuleSuggestion{
+				Source:       "evolution",
+				SourceDetail: fmt.Sprintf("gen-%d-%s", gen, g.strategy),
+				RuleName:     ruleName,
+				RuleType:     ruleType,
+				Patterns:     patterns,
+				Action:       "block",
+				Category:     "prompt_injection",
+				Engine:       g.engine,
+				Reason:       reason,
+			}
+			if err := ee.suggestionQueue.Add(suggestion); err != nil {
+				log.Printf("[进化引擎] 添加建议失败: %v", err)
+			}
+			generatedRuleNames = append(generatedRuleNames, ruleName+" (pending)")
+			ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("[建议] %s: %v", ruleType, patterns))
+		} else {
+			// 兼容旧行为：直接应用
+			if ruleType == "keyword" {
+				ee.addInboundKeywordRule(ruleName, patterns)
+			} else {
+				ee.addInboundRegexRule(ruleName, patterns)
+			}
+			generatedRuleNames = append(generatedRuleNames, ruleName)
+			ee.logRuleGeneration(gen, ruleName, fmt.Sprintf("%s: %v", ruleType, patterns))
 		}
 	}
 

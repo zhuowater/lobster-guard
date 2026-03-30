@@ -159,7 +159,11 @@ type ManagementAPI struct {
 	// v27.0 API Key 管理
 	apiKeyMgr *APIKeyManager
 	// v31.0 AC 智能分级（自动模式）
-	autoReviewMgr *AutoReviewManager
+	autoReviewMgr   *AutoReviewManager
+	suggestionQueue *SuggestionQueue // v32.11: 规则建议队列
+	// v32.13-v32.14
+	canaryRotator   *CanaryRotator
+	reportScheduler *ReportScheduler
 }
 
 func NewManagementAPI(cfg *Config, cfgPath string, pool *UpstreamPool, routes *RouteTable, logger *AuditLogger, inboundEngine *RuleEngine, outboundEngine *OutboundRuleEngine, inbound *InboundProxy, channel ChannelPlugin, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, alertNotifier *AlertNotifier, wsProxy *WSProxyManager, store Store, shutdownMgr *ShutdownManager, realtime *RealtimeMetrics) *ManagementAPI {
@@ -1120,6 +1124,16 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleEvolutionConfigGet(w, r)
 	case path == "/api/v1/evolution/config" && method == "PUT":
 		api.handleEvolutionConfigPut(w, r)
+
+	// v32.11: 规则建议队列 API
+	case path == "/api/v1/suggestions" && method == "GET":
+		api.handleSuggestionList(w, r)
+	case path == "/api/v1/suggestions/stats" && method == "GET":
+		api.handleSuggestionStats(w, r)
+	case strings.HasSuffix(path, "/accept") && strings.HasPrefix(path, "/api/v1/suggestions/") && method == "POST":
+		api.handleSuggestionAccept(w, r)
+	case strings.HasSuffix(path, "/reject") && strings.HasPrefix(path, "/api/v1/suggestions/") && method == "POST":
+		api.handleSuggestionReject(w, r)
 
 	// v19.1: 语义检测引擎 API
 	case path == "/api/v1/semantic/stats" && method == "GET":
