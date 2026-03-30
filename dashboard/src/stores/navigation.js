@@ -4,13 +4,13 @@ const TABS = {
   overview: {
     label: '安全总览',
     icon: 'shield',
-    routes: ['overview', 'security-overview', 'custom-dashboard', 'anomaly', 'monitor']
+    routes: ['overview', 'custom-dashboard', 'anomaly', 'monitor']
   },
   threat: {
     label: '威胁中心',
     icon: 'search',
     groups: [
-      { label: 'IM 安全', routes: ['audit', 'sessions', 'session-detail', 'attack-chains', 'user-profiles', 'user-detail', 'behavior'] },
+      { label: 'IM 安全', routes: ['audit', 'sessions', 'session-detail', 'attack-chains', 'user-profiles', 'user-detail', 'behavior'] },  // behavior = 安全画像
       { label: 'LLM 安全', routes: ['semantic', 'prompts', 'taint'] },
       { label: '对抗测试', routes: ['honeypot', 'singularity', 'redteam'] }
     ]
