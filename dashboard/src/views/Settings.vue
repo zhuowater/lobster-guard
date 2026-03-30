@@ -500,7 +500,7 @@ const sqliteStats = ref(null)
 const configGroups = [
   { key: 'basic', label: '配置基础', icon: '🌐' },
   { key: 'security', label: '安全检测', icon: '🛡️' },
-  { key: 'engines', label: '引擎开关', icon: '🧠' },
+  // 引擎开关子 Tab 已移除，统一在 "检测引擎" 顶级 Tab
   { key: 'ratelimit', label: '限流配置', icon: '⚡' },
   { key: 'session', label: '会话关联', icon: '🔗' },
   { key: 'alerts', label: '告警配置', icon: '🔔' },
@@ -522,10 +522,7 @@ const form = reactive({
   alert_webhook: '', alert_format: 'generic', alert_min_interval: 60,
   db_path: '', heartbeat_interval_sec: 10, route_default_policy: 'least-users',
   audit_retention_days: 30, ws_idle_timeout: 300, backup_auto_interval: 0,
-  // v23-v26 引擎开关
-  engine_path_policy: true, engine_counterfactual: true,
-  engine_plan_compiler: true, engine_capability: true,
-  engine_deviation: true, engine_ifc: true,
+  // 引擎开关已统一到 "检测引擎" Tab
 })
 const errors = reactive({})
 
@@ -545,14 +542,7 @@ const visibleGroups = computed(() => [
     { key: 'outbound_audit_enabled', label: '出站审计', desc: '对出站流量执行 PII 扫描和内容审计', type: 'toggle' },
     { key: 'detect_timeout_ms', label: '检测超时', desc: '单次检测最大耗时，超时则放行', type: 'number', min: 1, max: 10000, step: 10, unit: 'ms' },
   ]},
-  { key: 'engines', icon: '🧠', title: '引擎开关', desc: 'v23-v26 安全引擎的启用/禁用控制，修改需重启', items: [
-    { key: 'engine_path_policy', label: '路径策略引擎 (v23)', desc: '基于路径和风险评分的运行时策略决策，含风险仪表和行业模板', type: 'toggle' },
-    { key: 'engine_counterfactual', label: '反事实验证 (v24)', desc: '通过假设替换和归因分析验证 AI 决策的因果逻辑', type: 'toggle' },
-    { key: 'engine_plan_compiler', label: '执行计划编译器 (v25)', desc: 'CaMeL 控制流/数据流分离，将自然语言计划编译为确定性步骤', type: 'toggle' },
-    { key: 'engine_capability', label: '能力权限系统 (v25)', desc: '工具映射、来源追踪（Sources 并集）和信任评分传播', type: 'toggle' },
-    { key: 'engine_deviation', label: '偏差检测器 (v25)', desc: '检测实际 tool_call 与计划的偏差，支持策略化自动修复', type: 'toggle' },
-    { key: 'engine_ifc', label: '信息流控制 (v26)', desc: 'Fides 双标签格积（机密性×完整性），选择性隐藏和隔离 LLM', type: 'toggle' },
-  ]},
+  // 引擎开关已统一到 "检测引擎" 顶级 Tab，此处不再重复
   { key: 'ratelimit', icon: '⚡', title: '限流配置', desc: '令牌桶限流参数，0 = 不限制', items: [
     { field: 'global_rps', label: '全局 RPS', desc: '每秒最大通过数', type: 'number', min: 0, max: 100000, step: 10, unit: 'req/s' },
     { field: 'global_burst', label: '全局 Burst', desc: '突发容量', type: 'number', min: 0, max: 10000, step: 1 },
@@ -584,7 +574,7 @@ function isChanged(key) { return String(form[key]) !== String(originalConfig.val
 function isRLChanged(field) { return String(form.rate_limit[field]) !== String((originalConfig.value.rate_limit || {})[field]) }
 const changedFields = computed(() => {
   const c = []
-  const flat = ['inbound_listen','outbound_listen','management_listen','openclaw_upstream','lanxin_upstream','default_gateway_origin','log_level','log_format','inbound_detect_enabled','outbound_audit_enabled','detect_timeout_ms','session_idle_timeout_min','session_fp_window_sec','alert_webhook','alert_format','alert_min_interval','db_path','heartbeat_interval_sec','route_default_policy','audit_retention_days','ws_idle_timeout','backup_auto_interval','engine_path_policy','engine_counterfactual','engine_plan_compiler','engine_capability','engine_deviation','engine_ifc']
+  const flat = ['inbound_listen','outbound_listen','management_listen','openclaw_upstream','lanxin_upstream','default_gateway_origin','log_level','log_format','inbound_detect_enabled','outbound_audit_enabled','detect_timeout_ms','session_idle_timeout_min','session_fp_window_sec','alert_webhook','alert_format','alert_min_interval','db_path','heartbeat_interval_sec','route_default_policy','audit_retention_days','ws_idle_timeout','backup_auto_interval']
   for (const k of flat) if (String(form[k]) !== String(originalConfig.value[k])) c.push({ key: k, label: fieldLabels.value[k]||k, oldVal: originalConfig.value[k], newVal: form[k], restart: restartFields.has(k) })
   const orl = originalConfig.value.rate_limit || {}
   for (const f of ['global_rps','global_burst','per_sender_rps','per_sender_burst']) if (String(form.rate_limit[f]) !== String(orl[f])) c.push({ key:'rate_limit.'+f, label: fieldLabels.value['rate_limit.'+f]||f, oldVal: orl[f], newVal: form.rate_limit[f] })
@@ -612,13 +602,7 @@ function fillForm(d) {
   form.db_path = d.db_path || ''; form.heartbeat_interval_sec = d.heartbeat_interval_sec || 10
   form.route_default_policy = d.route_default_policy || 'least-users'; form.audit_retention_days = d.audit_retention_days || 30
   form.ws_idle_timeout = d.ws_idle_timeout || 300; form.backup_auto_interval = d.backup_auto_interval || 0
-  // v23-v26 引擎开关
-  form.engine_path_policy = (d.path_policy || {}).enabled !== false
-  form.engine_counterfactual = (d.counterfactual || {}).enabled !== false
-  form.engine_plan_compiler = (d.plan_compiler || {}).enabled !== false
-  form.engine_capability = (d.capability || {}).enabled !== false
-  form.engine_deviation = (d.deviation || {}).enabled !== false
-  form.engine_ifc = (d.ifc || {}).enabled !== false
+  // 引擎开关已统一到 "检测引擎" Tab，不再在配置管理表单中管理
 }
 function extractForm() {
   return { inbound_listen: form.inbound_listen, outbound_listen: form.outbound_listen, management_listen: form.management_listen,
@@ -628,9 +612,7 @@ function extractForm() {
     alert_webhook: form.alert_webhook, alert_format: form.alert_format, alert_min_interval: form.alert_min_interval,
     db_path: form.db_path, heartbeat_interval_sec: form.heartbeat_interval_sec, route_default_policy: form.route_default_policy,
     audit_retention_days: form.audit_retention_days, ws_idle_timeout: form.ws_idle_timeout, backup_auto_interval: form.backup_auto_interval,
-    engine_path_policy: form.engine_path_policy, engine_counterfactual: form.engine_counterfactual,
-    engine_plan_compiler: form.engine_plan_compiler, engine_capability: form.engine_capability,
-    engine_deviation: form.engine_deviation, engine_ifc: form.engine_ifc }
+    }
 }
 function resetConfig() { fillForm(originalConfig.value); Object.keys(errors).forEach(k => delete errors[k]); showChangesPreview.value = false }
 function validateForm() {
@@ -670,9 +652,9 @@ const planCompilerStats = ref({})
 const capabilityEngineStats = ref({})
 const deviationDetectorStats = ref({})
 const camelEngines = computed(() => [
-  { name: 'plan-compiler', title: 'PlanCompiler', desc: '执行计划编译器', enabled: !!engineSettings['plan_compiler.enabled'], stat1Label: '活跃计划数', stat1: planCompilerStats.value.active_plans || 0, stat2Label: '模板数', stat2: planCompilerStats.value.templates || 0 },
-  { name: 'capability-engine', title: 'CapabilityEngine', desc: '能力标签引擎', enabled: !!engineSettings['capability.enabled'], stat1Label: '工具映射数', stat1: capabilityEngineStats.value.tool_mappings || 0, stat2Label: '活跃上下文数', stat2: capabilityEngineStats.value.active_contexts || 0 },
-  { name: 'deviation-detector', title: 'DeviationDetector', desc: '偏差检测器', enabled: !!engineSettings['deviation.enabled'], stat1Label: '检测到的偏差数', stat1: deviationDetectorStats.value.detected_deviations || 0, stat2Label: '策略数', stat2: deviationDetectorStats.value.policies || 0 },
+  { name: 'plan-compiler', title: 'PlanCompiler', desc: '执行计划编译器', enabled: !!engineSettings['engine_plan_compiler'], stat1Label: '活跃计划数', stat1: planCompilerStats.value.active_plans || 0, stat2Label: '模板数', stat2: planCompilerStats.value.templates || 0 },
+  { name: 'capability-engine', title: 'CapabilityEngine', desc: '能力标签引擎', enabled: !!engineSettings['engine_capability'], stat1Label: '工具映射数', stat1: capabilityEngineStats.value.tool_mappings || 0, stat2Label: '活跃上下文数', stat2: capabilityEngineStats.value.active_contexts || 0 },
+  { name: 'deviation-detector', title: 'DeviationDetector', desc: '偏差检测器', enabled: !!engineSettings['engine_deviation'], stat1Label: '检测到的偏差数', stat1: deviationDetectorStats.value.detected_deviations || 0, stat2Label: '策略数', stat2: deviationDetectorStats.value.policies || 0 },
 ])
 const canaryEnabled = computed({ get: () => llmConfig.value?.security?.canary_token?.enabled ?? true, set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.enabled = v } })
 const canaryAlertAction = computed({ get: () => llmConfig.value?.security?.canary_token?.alert_action || 'warn', set: (v) => { if (llmConfig.value?.security?.canary_token) llmConfig.value.security.canary_token.alert_action = v } })
@@ -709,9 +691,9 @@ async function toggleCamelEngine(item, event) {
   const enabled = event.target.checked
   try {
     await apiPost(`/api/v1/engines/${item.name}/toggle`, { enabled })
-    if (item.name === 'plan-compiler') engineSettings['plan_compiler.enabled'] = enabled
-    if (item.name === 'capability-engine') engineSettings['capability.enabled'] = enabled
-    if (item.name === 'deviation-detector') engineSettings['deviation.enabled'] = enabled
+    if (item.name === 'plan-compiler') engineSettings['engine_plan_compiler'] = enabled
+    if (item.name === 'capability-engine') engineSettings['engine_capability'] = enabled
+    if (item.name === 'deviation-detector') engineSettings['engine_deviation'] = enabled
     showToast(`${item.title} 已${enabled ? '启用' : '关闭'}`, 'success')
   } catch (e) {
     event.target.checked = !enabled
@@ -792,31 +774,56 @@ const enginesLoading = ref(false)
 const enginesLoaded = ref(false)
 const engineSettings = reactive({})
 const engineList = [
-  { name: '入站检测', configPath: 'inbound_detect_enabled', desc: 'AC自动机+正则+PII三阶段检测' },
-  { name: '会话检测', configPath: 'session_detect_enabled', desc: '多轮会话上下文关联+风险累积' },
-  { name: 'LLM检测', configPath: 'llm_detect_enabled', desc: 'Pipeline内LLM调用检测' },
-  { name: '语义检测', configPath: 'semantic_detector.enabled', desc: '基于embedding的语义匹配' },
+  { name: '入站检测', configPath: 'engine_inbound_detect', desc: 'AC自动机+正则+PII三阶段检测' },
+  { name: '会话检测', configPath: 'engine_session_detect', desc: '多轮会话上下文关联+风险累积' },
+  { name: 'LLM检测', configPath: 'engine_llm_detect', desc: 'Pipeline内LLM调用检测' },
+  { name: '语义检测', configPath: 'engine_semantic', desc: '基于embedding的语义匹配' },
   { name: '蜜罐引擎', configPath: 'honeypot', desc: '模式匹配→假响应+水印', alwaysOn: true },
-  { name: '深度蜜罐', configPath: 'honeypot_deep.enabled', desc: '多轮交互蜜罐+行为建模' },
-  { name: '奇点引擎', configPath: 'singularity.enabled', desc: '概率性诱饵投放+预算控制' },
-  { name: 'IFC引擎', configPath: 'ifc.enabled', desc: 'Bell-LaPadula双标签信息流控制' },
-  { name: 'IFC隔离', configPath: 'ifc.quarantine_enabled', desc: '违规隔离到安全上游' },
-  { name: 'IFC隐藏', configPath: 'ifc.hiding_enabled', desc: 'Selective Hide基于标签隐藏' },
-  { name: '路径策略', configPath: 'path_policy.enabled', desc: '条件匹配→allow/deny/audit' },
-  { name: '工具策略', configPath: 'tool_policy.enabled', desc: '工具级黑/白名单' },
-  { name: '计划编译器', configPath: 'plan_compiler.enabled', desc: '预编译合法tool_call序列' },
-  { name: '能力引擎', configPath: 'capability.enabled', desc: 'Sources并集+Labels交集+TrustScore' },
-  { name: '偏差检测', configPath: 'deviation.enabled', desc: '计划vs实际偏差+自动修复' },
-  { name: '反事实验证', configPath: 'counterfactual.enabled', desc: '置换输入验证因果关系' },
-  { name: '执行信封', configPath: 'envelope_enabled', desc: '密封决策证据链+Merkle树' },
-  { name: '演化引擎', configPath: 'evolution_enabled', desc: '红队结果→规则自动演化' },
-  { name: '自适应决策', configPath: 'adaptive_decision.enabled', desc: '多因素动态决策阈值' },
-  { name: '污点追踪', configPath: 'taint_tracker.enabled', desc: '全链路数据流标记' },
-  { name: '污点溯源', configPath: 'taint_reversal.enabled', desc: '反向追踪数据来源' },
-  { name: '事件总线', configPath: 'event_bus.enabled', desc: '引擎间事件发布/订阅' },
+  { name: '深度蜜罐', configPath: 'engine_honeypot_deep', desc: '多轮交互蜜罐+行为建模' },
+  { name: '奇点引擎', configPath: 'engine_singularity', desc: '概率性诱饵投放+预算控制' },
+  { name: 'IFC引擎', configPath: 'engine_ifc', desc: 'Bell-LaPadula双标签信息流控制' },
+  { name: 'IFC隔离', configPath: 'engine_ifc_quarantine', desc: '违规隔离到安全上游' },
+  { name: 'IFC隐藏', configPath: 'engine_ifc_hiding', desc: 'Selective Hide基于标签隐藏' },
+  { name: '路径策略', configPath: 'engine_path_policy', desc: '条件匹配→allow/deny/audit' },
+  { name: '工具策略', configPath: 'engine_tool_policy', desc: '工具级黑/白名单' },
+  { name: '计划编译器', configPath: 'engine_plan_compiler', desc: '预编译合法tool_call序列' },
+  { name: '能力引擎', configPath: 'engine_capability', desc: 'Sources并集+Labels交集+TrustScore' },
+  { name: '偏差检测', configPath: 'engine_deviation', desc: '计划vs实际偏差+自动修复' },
+  { name: '反事实验证', configPath: 'engine_counterfactual', desc: '置换输入验证因果关系' },
+  { name: '执行信封', configPath: 'engine_envelope', desc: '密封决策证据链+Merkle树' },
+  { name: '演化引擎', configPath: 'engine_evolution', desc: '红队结果→规则自动演化' },
+  { name: '自适应决策', configPath: 'engine_adaptive', desc: '多因素动态决策阈值' },
+  { name: '污点追踪', configPath: 'engine_taint_tracker', desc: '全链路数据流标记' },
+  { name: '污点溯源', configPath: 'engine_taint_reversal', desc: '反向追踪数据来源' },
+  { name: '事件总线', configPath: 'engine_event_bus', desc: '引擎间事件发布/订阅' },
 ]
 const engineOnCount = computed(() => engineList.filter(e => e.alwaysOn || engineSettings[e.configPath]).length)
 const engineOffCount = computed(() => engineList.length - engineOnCount.value)
+
+// configPath → Config JSON 的取值路径映射
+const engineConfigPaths = {
+  engine_inbound_detect: 'inbound_detect_enabled',
+  engine_session_detect: 'session_detect_enabled',
+  engine_llm_detect: 'llm_detect_enabled',
+  engine_semantic: 'semantic_detector.enabled',
+  engine_honeypot_deep: 'honeypot_deep.enabled',
+  engine_singularity: 'singularity.enabled',
+  engine_ifc: 'ifc.enabled',
+  engine_ifc_quarantine: 'ifc.quarantine_enabled',
+  engine_ifc_hiding: 'ifc.hiding_enabled',
+  engine_path_policy: 'path_policy.enabled',
+  engine_tool_policy: 'tool_policy.enabled',
+  engine_plan_compiler: 'plan_compiler.enabled',
+  engine_capability: 'capability.enabled',
+  engine_deviation: 'deviation.enabled',
+  engine_counterfactual: 'counterfactual.enabled',
+  engine_envelope: 'envelope_enabled',
+  engine_evolution: 'evolution_enabled',
+  engine_adaptive: 'adaptive_decision.enabled',
+  engine_taint_tracker: 'taint_tracker.enabled',
+  engine_taint_reversal: 'taint_reversal.enabled',
+  engine_event_bus: 'event_bus.enabled',
+}
 
 async function loadEngineSettings() {
   enginesLoading.value = true
@@ -824,7 +831,8 @@ async function loadEngineSettings() {
     const d = await api('/api/v1/config/settings')
     for (const eng of engineList) {
       if (eng.alwaysOn) continue
-      const parts = eng.configPath.split('.')
+      const jsonPath = engineConfigPaths[eng.configPath] || eng.configPath
+      const parts = jsonPath.split('.')
       let val = d
       for (const p of parts) { val = val?.[p] }
       engineSettings[eng.configPath] = val !== false && val !== undefined

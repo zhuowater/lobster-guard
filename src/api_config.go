@@ -1220,29 +1220,65 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		updated = append(updated, "backup_auto_interval")
 	}
 
-	// v23-v26 引擎开关
-	engineMap := map[string]struct {
+	// 统一引擎开关 — 所有引擎的 enabled 都通过此 map 管理
+	type engineDef struct {
 		cfgPtr  *bool
-		yamlKey string
-	}{
-		"engine_path_policy":    {&api.cfg.PathPolicy.Enabled, "path_policy"},
-		"engine_counterfactual": {&api.cfg.Counterfactual.Enabled, "counterfactual"},
-		"engine_plan_compiler":  {&api.cfg.PlanCompiler.Enabled, "plan_compiler"},
-		"engine_capability":     {&api.cfg.Capability.Enabled, "capability"},
-		"engine_deviation":      {&api.cfg.Deviation.Enabled, "deviation"},
-		"engine_ifc":            {&api.cfg.IFC.Enabled, "ifc"},
+		yamlKey string // "" = top-level bool field
+	}
+	engineMap := map[string]engineDef{
+		// 基础检测
+		"engine_inbound_detect":  {&api.cfg.InboundDetectEnabled, ""},
+		"engine_session_detect":  {&api.cfg.SessionDetectEnabled, ""},
+		"engine_llm_detect":      {&api.cfg.LLMDetectEnabled, ""},
+		"engine_semantic":        {&api.cfg.SemanticDetector.Enabled, "semantic_detector"},
+		// 蜜罐
+		"engine_honeypot_deep":   {&api.cfg.HoneypotDeep.Enabled, "honeypot_deep"},
+		"engine_singularity":     {&api.cfg.Singularity.Enabled, "singularity"},
+		// IFC
+		"engine_ifc":             {&api.cfg.IFC.Enabled, "ifc"},
+		"engine_ifc_quarantine":  {&api.cfg.IFC.QuarantineEnabled, "ifc"},
+		"engine_ifc_hiding":      {&api.cfg.IFC.HidingEnabled, "ifc"},
+		// 策略
+		"engine_path_policy":     {&api.cfg.PathPolicy.Enabled, "path_policy"},
+		"engine_tool_policy":     {&api.cfg.ToolPolicy.Enabled, "tool_policy"},
+		// CaMeL
+		"engine_plan_compiler":   {&api.cfg.PlanCompiler.Enabled, "plan_compiler"},
+		"engine_capability":      {&api.cfg.Capability.Enabled, "capability"},
+		"engine_deviation":       {&api.cfg.Deviation.Enabled, "deviation"},
+		"engine_counterfactual":  {&api.cfg.Counterfactual.Enabled, "counterfactual"},
+		// 辅助
+		"engine_envelope":        {&api.cfg.EnvelopeEnabled, ""},
+		"engine_evolution":       {&api.cfg.EvolutionEnabled, ""},
+		"engine_adaptive":        {&api.cfg.AdaptiveDecision.Enabled, "adaptive_decision"},
+		"engine_taint_tracker":   {&api.cfg.TaintTracker.Enabled, "taint_tracker"},
+		"engine_taint_reversal":  {&api.cfg.TaintReversal.Enabled, "taint_reversal"},
+		"engine_event_bus":       {&api.cfg.EventBus.Enabled, "event_bus"},
 	}
 	for reqKey, eng := range engineMap {
 		if v, ok := req[reqKey]; ok {
 			b, _ := v.(bool)
 			*eng.cfgPtr = b
-			// Ensure YAML sub-map exists
-			sub, _ := raw[eng.yamlKey].(map[string]interface{})
-			if sub == nil {
-				sub = map[string]interface{}{}
+			if eng.yamlKey == "" {
+				// top-level bool field: derive yaml key from reqKey (strip "engine_" prefix)
+				yamlField := strings.TrimPrefix(reqKey, "engine_")
+				raw[yamlField] = b
+			} else {
+				// nested struct .enabled field
+				sub, _ := raw[eng.yamlKey].(map[string]interface{})
+				if sub == nil {
+					sub = map[string]interface{}{}
+				}
+				// IFC has sub-fields: quarantine_enabled, hiding_enabled
+				switch reqKey {
+				case "engine_ifc_quarantine":
+					sub["quarantine_enabled"] = b
+				case "engine_ifc_hiding":
+					sub["hiding_enabled"] = b
+				default:
+					sub["enabled"] = b
+				}
+				raw[eng.yamlKey] = sub
 			}
-			sub["enabled"] = b
-			raw[eng.yamlKey] = sub
 			updated = append(updated, reqKey)
 			needRestart = true
 		}

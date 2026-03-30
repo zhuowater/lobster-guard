@@ -40,7 +40,7 @@
     </div>
     <div v-if="activeTab === 'config'" class="section">
       <div class="config-form"><h3 class="config-section-title">基础配置</h3>
-        <div class="config-row"><label class="config-label">启用</label><label class="toggle"><input type="checkbox" v-model="configForm.enabled" /><span class="toggle-slider"></span></label></div>
+        <div class="config-row"><label class="config-label">启用</label><span :style="{color: configForm.enabled ? 'var(--color-success)' : 'var(--color-danger)', fontWeight:600}">{{ configForm.enabled ? '✅ 已启用' : '❌ 已关闭' }}</span><span style="font-size:.75rem;color:var(--text-tertiary);margin-left:8px">在 设置→检测引擎 中管理</span></div>
         <div class="config-row"><label class="config-label">模式</label><select v-model="configForm.mode" class="field-select"><option value="sync">同步</option><option value="async">异步</option></select></div>
         <div class="config-row"><label class="config-label">每小时预算</label><input v-model.number="configForm.max_per_hour" type="number" class="field-input" min="1" max="10000" /></div>
         <div class="config-row"><label class="config-label">风险阈值</label><input v-model.number="configForm.risk_threshold" type="number" class="field-input" min="0" max="100" /></div>

@@ -27,7 +27,7 @@
 <div v-if="tab==='config'" class="section">
 <div class="config-form">
 <h3 class="config-section-title">基础配置</h3>
-<div class="config-row"><label>启用</label><label class="toggle"><input type="checkbox" v-model="configForm.enabled"/><span class="slider"></span></label></div>
+<div class="config-row"><label>启用</label><span :style="{color: configForm.enabled ? 'var(--color-success)' : 'var(--color-danger)', fontWeight:600}">{{ configForm.enabled ? '✅ 已启用' : '❌ 已关闭' }}</span><span style="font-size:.75rem;color:var(--text-tertiary);margin-left:8px">在 设置→检测引擎 中管理</span></div>
 <div class="config-row"><label>自动修复</label><label class="toggle"><input type="checkbox" v-model="configForm.auto_repair"/><span class="slider"></span></label></div>
 <div class="config-row"><label>每 Trace 最大修复数</label><input v-model.number="configForm.max_repairs" type="number" class="field-input" min="0"/></div>
 <button class="btn btn-primary" @click="saveConfig" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
