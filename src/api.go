@@ -1125,6 +1125,34 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/api/v1/evolution/config" && method == "PUT":
 		api.handleEvolutionConfigPut(w, r)
 
+	// v32.13: 金丝雀轮换 API
+	case path == "/api/v1/canary/status" && method == "GET":
+		api.handleCanaryRotationStatus(w, r)
+	case path == "/api/v1/canary/rotate" && method == "POST":
+		api.handleCanaryRotateNow(w, r)
+	case path == "/api/v1/canary/history" && method == "GET":
+		api.handleCanaryHistory(w, r)
+
+	// v32.14: 报告定时 API
+	case path == "/api/v1/reports/schedule" && method == "GET":
+		api.handleReportScheduleGet(w, r)
+	case path == "/api/v1/reports/schedule" && method == "PUT":
+		api.handleReportScheduleUpdate(w, r)
+	case path == "/api/v1/reports/generate-now" && method == "POST":
+		api.handleReportGenerateNow(w, r)
+	case path == "/api/v1/reports/runs" && method == "GET":
+		api.handleReportRuns(w, r)
+
+	// v32.15: 引擎开关 API
+	case strings.HasPrefix(path, "/api/v1/engines/") && strings.HasSuffix(path, "/toggle") && method == "POST":
+		api.handleEngineToggle(w, r)
+	case strings.HasPrefix(path, "/api/v1/engines/") && strings.HasSuffix(path, "/toggle") && method == "GET":
+		api.handleEngineToggle(w, r)
+
+	// v32.12: Merkle 批量验证 API
+	case path == "/api/v1/envelopes/verify" && method == "POST":
+		api.handleEnvelopeRangeVerify(w, r)
+
 	// v32.11: 规则建议队列 API
 	case path == "/api/v1/suggestions" && method == "GET":
 		api.handleSuggestionList(w, r)
