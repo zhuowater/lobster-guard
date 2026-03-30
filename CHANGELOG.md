@@ -1,5 +1,24 @@
 # Changelog
 
+## v33.0 — Upstream 安全画像 (2026-03-30)
+
+### 新功能
+- **Per-upstream 5 维安全评分**: 入站防护/LLM安全/数据防泄漏/行为合规/工具管控，各 20 分
+- **全引擎聚合**: 16 引擎 × 14 张 DB 表，比率评分(偏离率/拒绝率/失败率)
+- **正面信号加分**: 污染逆转 + IFC 隐藏 = 防御成功证据
+- **安全画像概览页**: Treemap(面积=用户数,颜色=评分) + 甜甜圈 + 5档分段统计
+- **Canvas 粒子系统**: 60fps 粒子场 + 网状连线 + 上游实例亮点
+- **三级穿透**: L0 概览 → L1 排名列表 → L2 实例详情(雷达图+引擎网格+趋势)
+- **联动过滤**: 统计卡片/分段/维度环点击过滤排名列表
+- **API**: `GET /api/v1/upstreams/{id}/security-profile` + `GET /api/v1/upstream-profiles`
+
+### 变更
+- 安全画像替换原"行为画像"位置(威胁中心 → 安全画像)
+- `/security-overview` redirect 到 `/behavior`
+- API 返回 segments/total_users/avg_score 全局统计
+
+---
+
 ## v26.0 — IFC 双标签系统 (2026-03-26)
 - Fides 信息流控制引擎: Confidentiality (PUBLIC→SECRET) + Integrity (TAINT→HIGH)
 - Bell-LaPadula 传播规则: conf=max(inputs), integ=min(inputs)
