@@ -780,25 +780,6 @@
 
 ### v31 原规划 → 并入 v32.10-v32.15
 
-### v33.0 — Upstream 安全画像 (2026-03-30)
-
-- [x] **Per-upstream 5 维安全评分引擎** `082bbcc`
-  - `upstream_profile.go`: 入站防护/LLM安全/数据防泄漏/行为合规/工具管控，各 20 分
-  - 16 引擎 × 14 张 DB 表聚合（audit_log/llm_rule_hits/ifc_violations/taint_entries/plan_deviations/cap_evaluations/singularity_history/execution_envelopes/cf_verifications/evolution_log/attack_chains/behavior_anomalies/ifc_hidden_content/taint_reversals）
-  - 比率评分：偏离率(deviations/executions)、拒绝率(denials/total)、信封失败率(failures/total)
-  - 正面信号加分：污染逆转 + IFC 隐藏（防御成功证据）
-  - API: `GET /api/v1/upstreams/{id}/security-profile` + `GET /api/v1/upstream-profiles`
-  - user_count 字段从 user_routes 按 upstream_id 聚合
-
-- [x] **安全画像概览页** `735b260` `499ba83`
-  - SecurityOverview.vue: 替换原 BehaviorProfile.vue，位置：威胁中心 → 安全画像
-  - L0 概览层：Canvas 粒子系统(60fps) + Treemap(面积=用户数,颜色=评分) + 甜甜圈(实例/用户总数) + 5档分段统计(>80/61-80/41-60/20-40/<20) + 维度环
-  - L1 排名列表：环形评分 + 5 维度进度条 + 等级标签 + 用户数列 + 联动过滤排序
-  - L2 详情穿透：评分环 + 雷达图 + 维度卡片 + 16 引擎告警网格(正/负面信号区分) + Top 风险事件(7表 UNION) + 7 天趋势
-  - 统计卡片/分段/维度环点击联动过滤下方列表
-
-- [x] **142 实测**: 76 分/良好，LLM 维度因红队测试告警降至 3.5/20
-
 ### v32.x — 架构优化 + Dashboard 演示级打磨 ✅ DONE
 > 双线并行：后端减复杂度 + 前端做到"功能完整、交互流畅、UI 美观、运行顺畅"
 > 交付标准：**用浏览器打开 Dashboard，每个页面都能用、好看、不报错、有数据**
@@ -885,6 +866,25 @@
   - v28 做了 6 引擎开关，计划编译器/能力引擎/偏差检测缺少独立 Dashboard 开关
   - 补齐到 Settings 引擎 Tab（v30.4 的自然延伸）
   - 每个引擎显示：启用/禁用 toggle + 当前统计（活跃计划数/映射数/偏差数）+ 配置链接
+
+### v33.0 — Upstream 安全画像 (2026-03-30)
+
+- [x] **Per-upstream 5 维安全评分引擎** `082bbcc`
+  - `upstream_profile.go`: 入站防护/LLM安全/数据防泄漏/行为合规/工具管控，各 20 分
+  - 16 引擎 × 14 张 DB 表聚合（audit_log/llm_rule_hits/ifc_violations/taint_entries/plan_deviations/cap_evaluations/singularity_history/execution_envelopes/cf_verifications/evolution_log/attack_chains/behavior_anomalies/ifc_hidden_content/taint_reversals）
+  - 比率评分：偏离率(deviations/executions)、拒绝率(denials/total)、信封失败率(failures/total)
+  - 正面信号加分：污染逆转 + IFC 隐藏（防御成功证据）
+  - API: `GET /api/v1/upstreams/{id}/security-profile` + `GET /api/v1/upstream-profiles`
+  - user_count 字段从 user_routes 按 upstream_id 聚合
+
+- [x] **安全画像概览页** `735b260` `499ba83`
+  - SecurityOverview.vue: 替换原 BehaviorProfile.vue，位置：威胁中心 → 安全画像
+  - L0 概览层：Canvas 粒子系统(60fps) + Treemap(面积=用户数,颜色=评分) + 甜甜圈(实例/用户总数) + 5档分段统计(>80/61-80/41-60/20-40/<20) + 维度环
+  - L1 排名列表：环形评分 + 5 维度进度条 + 等级标签 + 用户数列 + 联动过滤排序
+  - L2 详情穿透：评分环 + 雷达图 + 维度卡片 + 16 引擎告警网格(正/负面信号区分) + Top 风险事件(7表 UNION) + 7 天趋势
+  - 统计卡片/分段/维度环点击联动过滤下方列表
+
+- [x] **142 实测**: 76 分/良好，LLM 维度因红队测试告警降至 3.5/20
 
 ### 未来探索
 
