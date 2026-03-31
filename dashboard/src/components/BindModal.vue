@@ -54,6 +54,26 @@
                 :class="{ 'bm-error-border': fieldErrors[field.key] }"
               ></textarea>
             </div>
+            <!-- Checkbox / Toggle -->
+            <div v-else-if="field.type === 'checkbox'" class="bm-input-wrap bm-toggle-wrap">
+              <label class="bm-toggle" @click.prevent="updateField(field.key, !modelValue[field.key])">
+                <span class="bm-toggle-track" :class="{ active: !!modelValue[field.key] }">
+                  <span class="bm-toggle-thumb"></span>
+                </span>
+                <span class="bm-toggle-label">{{ modelValue[field.key] ? '已启用' : '未启用' }}</span>
+              </label>
+            </div>
+            <!-- Number -->
+            <div v-else-if="field.type === 'number'" class="bm-input-wrap">
+              <input
+                type="number"
+                :value="modelValue[field.key]"
+                @input="updateField(field.key, parseInt($event.target.value) || 0)"
+                :placeholder="field.placeholder"
+                class="bm-input"
+                :class="{ 'bm-error-border': fieldErrors[field.key] }"
+              />
+            </div>
             <!-- Slot for custom component (e.g. UpstreamSelect) -->
             <div v-else-if="field.type === 'component'" class="bm-input-wrap">
               <slot :name="'field-' + field.key" :value="modelValue[field.key]" :update="(v) => updateField(field.key, v)"></slot>
@@ -270,6 +290,33 @@ onUnmounted(() => {
   display: flex; justify-content: flex-end; gap: var(--space-2);
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Toggle switch */
+.bm-toggle-wrap { padding: var(--space-1) 0; }
+.bm-toggle {
+  display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer;
+  user-select: none;
+}
+.bm-toggle-track {
+  position: relative; width: 40px; height: 22px;
+  background: var(--border-default); border-radius: 11px;
+  transition: background var(--transition-fast);
+}
+.bm-toggle-track.active {
+  background: var(--color-primary, #6366f1);
+}
+.bm-toggle-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; background: #fff;
+  border-radius: 50%; transition: transform var(--transition-fast);
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.bm-toggle-track.active .bm-toggle-thumb {
+  transform: translateX(18px);
+}
+.bm-toggle-label {
+  font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500;
 }
 
 .bm-spinner {
