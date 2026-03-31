@@ -1,10 +1,10 @@
 # lobster-guard Dockerfile — 多阶段构建
-# v33.0 AI Agent 安全网关
+# v34.0 AI Agent 安全网关
 #
-# 构建: docker build -t lobster-guard:v33.0 .
+# 构建: docker build -t lobster-guard:v34.0 .
 # 运行: docker run -d -p 18443:18443 -p 18444:18444 -p 8445:8445 -p 9090:9090 \
 #          -v ./config.yaml:/etc/lobster-guard/config.yaml:ro \
-#          lobster-guard:v33.0
+#          lobster-guard:v34.0
 
 # ── Stage 1: Build Vue Dashboard ──
 FROM node:22-alpine AS frontend
@@ -12,6 +12,7 @@ WORKDIR /app/dashboard
 COPY dashboard/package*.json ./
 RUN npm ci --ignore-scripts
 COPY dashboard/ .
+# Vite outDir = '../src/dashboard/dist'，输出到 /app/src/dashboard/dist
 RUN npm run build
 
 # ── Stage 2: Build Go binary ──
@@ -21,9 +22,8 @@ WORKDIR /app/src
 COPY src/go.mod src/go.sum ./
 RUN go mod download
 COPY src/ ./
-COPY rules/ ./rules/
-# Embed built dashboard
-COPY --from=frontend /app/dashboard/dist ./dashboard/dist/
+# go:embed dashboard/dist/* — 从 frontend 阶段拿构建产物
+COPY --from=frontend /app/src/dashboard/dist ./dashboard/dist/
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /lobster-guard .
 
 # ── Stage 3: Runtime ──
