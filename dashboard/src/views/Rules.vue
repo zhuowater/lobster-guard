@@ -776,7 +776,7 @@ function closeEditor() { editorVisible.value = false; editorErrors.value = {} }
 
 function validatePatterns(patterns, type) {
   if (type !== 'regex') return null
-  for (const p of patterns) { try { new RegExp(p) } catch (e) { return 'Invalid regex "' + p + '": ' + e.message } }
+  for (const p of patterns) { try { new RegExp(p.replace(/^\(\?[imdsUu]+\)/, '')) } catch (e) { return 'Invalid regex "' + p + '": ' + e.message } }
   return null
 }
 

@@ -388,7 +388,9 @@ const regexValidation = computed(() => {
   patternsText.value.split('\n').forEach((line, i) => {
     const t = line.trim()
     if (!t) return
-    try { new RegExp(t) }
+    // Go regexp 支持 (?i) 等 inline flags，JS 不支持 — 剥离后校验
+    const jsPattern = t.replace(/^\(\?[imdsUu]+\)/, '')
+    try { new RegExp(jsPattern) }
     catch (e) { errors.push({ line: i + 1, pattern: t, error: e.message }) }
   })
   return errors
@@ -550,7 +552,7 @@ function runTest() {
     for (const pattern of (rule.patterns || [])) {
       let matched = false, matchedText = ''
       if (rule.type === 'regex') {
-        try { const re = new RegExp(pattern, 'gi'); const m = re.exec(text); if (m) { matched = true; matchedText = m[0] } } catch(e){}
+        try { const jsP = pattern.replace(/^\(\?[imdsUu]+\)/, ''); const re = new RegExp(jsP, 'gi'); const m = re.exec(text); if (m) { matched = true; matchedText = m[0] } } catch(e){}
       } else {
         const idx = text.toLowerCase().indexOf(pattern.toLowerCase())
         if (idx !== -1) { matched = true; matchedText = text.substring(idx, idx + pattern.length) }
