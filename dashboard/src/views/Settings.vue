@@ -682,7 +682,7 @@ async function loadCanaryRotationData() {
   try { const d = await api('/api/v1/canary/history'); canaryRotationHistory.value = d.history || [] } catch {}
 }
 async function loadCamelStats() {
-  try { planCompilerStats.value = await api('/api/v1/plan/stats') } catch {}
+  try { planCompilerStats.value = await api('/api/v1/plans/stats') } catch {}
   try { capabilityEngineStats.value = await api('/api/v1/capabilities/stats') } catch {}
   try { deviationDetectorStats.value = await api('/api/v1/deviations/stats') } catch {}
 }

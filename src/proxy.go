@@ -917,6 +917,10 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ip.metrics.RecordRequest("inbound", "fixed_response", ip.channel.Name(), latMs)
 			}
 			log.Printf("[路由] 🎯 固定返回 sender=%s app=%s status=%d", senderID, appID, sc)
+			// v34.0: IM 主动回复 — 蓝信场景下将 body 作为消息推送给发送者
+			if fr.Body != "" && senderID != "" && ip.cfg != nil && ip.cfg.LanxinAppID != "" {
+				go ip.sendLanxinFixedReply(senderID, fr.Body)
+			}
 			return
 		}
 	}
@@ -1620,4 +1624,59 @@ func taintActionForLabel(label string) string {
 	default:
 		return "pii_detected"
 	}
+}
+
+// sendLanxinFixedReply v34.0: 蓝信固定返回 IM 主动回复
+// 通过蓝信 API 将固定返回内容作为消息发送给 IM 发送者
+func (ip *InboundProxy) sendLanxinFixedReply(senderID, text string) {
+	cfg := ip.cfg
+	upstream := cfg.LanxinUpstream
+	if upstream == "" {
+		upstream = "https://apigw.lx.qianxin.com"
+	}
+
+	// 1. 获取 app_token
+	tokenURL := upstream + "/v1/apptoken/create?grant_type=client_credential&appid=" +
+		url.QueryEscape(cfg.LanxinAppID) + "&secret=" + url.QueryEscape(cfg.LanxinAppSecret)
+	resp, err := http.Get(tokenURL)
+	if err != nil {
+		log.Printf("[固定返回] 获取蓝信 token 失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var tokenResp struct {
+		ErrCode  int    `json:"errCode"`
+		ErrMsg   string `json:"errMsg"`
+		AppToken string `json:"appToken"`
+	}
+	if json.Unmarshal(body, &tokenResp) != nil || tokenResp.AppToken == "" {
+		log.Printf("[固定返回] 蓝信 token 响应异常: %s", string(body))
+		return
+	}
+
+	// 2. 发送消息
+	msgPayload := map[string]interface{}{
+		"userIdList": []string{senderID},
+		"msgData": map[string]interface{}{
+			"msgType": "text",
+			"text": map[string]string{
+				"content": text,
+			},
+		},
+	}
+	msgBody, _ := json.Marshal(msgPayload)
+	msgURL := upstream + "/v1/bot/messages/create"
+	req, _ := http.NewRequest("POST", msgURL, bytes.NewReader(msgBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tokenResp.AppToken)
+	client := &http.Client{Timeout: 10 * time.Second}
+	msgResp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[固定返回] 发送蓝信消息失败: %v", err)
+		return
+	}
+	defer msgResp.Body.Close()
+	msgRespBody, _ := io.ReadAll(msgResp.Body)
+	log.Printf("[固定返回] 蓝信回复完成 sender=%s status=%d resp=%s", senderID, msgResp.StatusCode, truncate(string(msgRespBody), 200))
 }
