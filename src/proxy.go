@@ -917,9 +917,9 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ip.metrics.RecordRequest("inbound", "fixed_response", ip.channel.Name(), latMs)
 			}
 			log.Printf("[路由] 🎯 固定返回 sender=%s app=%s status=%d", senderID, appID, sc)
-			// v34.0: IM 主动回复 — 蓝信场景下将 body 作为消息推送给发送者
-			if fr.Body != "" && senderID != "" && ip.cfg != nil && ip.cfg.LanxinAppID != "" {
-				go ip.sendLanxinFixedReply(senderID, fr.Body)
+			// v34.0: IM 主动回复 — 通过出站代理发送消息给发送者（复用已有链路）
+			if fr.Body != "" && senderID != "" && ip.cfg != nil {
+				go ip.sendFixedReplyViaOutbound(senderID, fr.Body)
 			}
 			return
 		}
@@ -1626,57 +1626,76 @@ func taintActionForLabel(label string) string {
 	}
 }
 
-// sendLanxinFixedReply v34.0: 蓝信固定返回 IM 主动回复
-// 通过蓝信 API 将固定返回内容作为消息发送给 IM 发送者
-func (ip *InboundProxy) sendLanxinFixedReply(senderID, text string) {
-	cfg := ip.cfg
-	upstream := cfg.LanxinUpstream
-	if upstream == "" {
-		upstream = "https://apigw.lx.qianxin.com"
+// sendFixedReplyViaOutbound v34.0: 通过出站代理发送固定返回消息
+// 构造蓝信消息格式，POST 到 localhost 出站端口，复用已有的出站链路（含审计、检测）
+func (ip *InboundProxy) sendFixedReplyViaOutbound(senderID, text string) {
+	outboundAddr := ip.cfg.OutboundListen
+	if outboundAddr == "" {
+		outboundAddr = ":18444"
 	}
-
-	// 1. 获取 app_token
-	tokenURL := upstream + "/v1/apptoken/create?grant_type=client_credential&appid=" +
-		url.QueryEscape(cfg.LanxinAppID) + "&secret=" + url.QueryEscape(cfg.LanxinAppSecret)
-	resp, err := http.Get(tokenURL)
-	if err != nil {
-		log.Printf("[固定返回] 获取蓝信 token 失败: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	var tokenResp struct {
-		ErrCode  int    `json:"errCode"`
-		ErrMsg   string `json:"errMsg"`
-		AppToken string `json:"appToken"`
-	}
-	if json.Unmarshal(body, &tokenResp) != nil || tokenResp.AppToken == "" {
-		log.Printf("[固定返回] 蓝信 token 响应异常: %s", string(body))
-		return
-	}
-
-	// 2. 发送消息
+	// 蓝信消息格式：msgType 在外层，msgData.text.content 放内容
 	msgPayload := map[string]interface{}{
 		"userIdList": []string{senderID},
+		"msgType":    "text",
 		"msgData": map[string]interface{}{
-			"msgType": "text",
 			"text": map[string]string{
 				"content": text,
 			},
 		},
 	}
-	msgBody, _ := json.Marshal(msgPayload)
-	msgURL := upstream + "/v1/bot/messages/create"
-	req, _ := http.NewRequest("POST", msgURL, bytes.NewReader(msgBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+tokenResp.AppToken)
-	client := &http.Client{Timeout: 10 * time.Second}
-	msgResp, err := client.Do(req)
+	body, _ := json.Marshal(msgPayload)
+	// 蓝信 API 用 URL 参数传 app_token（不是 Authorization header）
+	token, err := ip.getLanxinAppToken()
 	if err != nil {
-		log.Printf("[固定返回] 发送蓝信消息失败: %v", err)
+		log.Printf("[固定返回] 获取蓝信 token 失败: %v", err)
 		return
 	}
-	defer msgResp.Body.Close()
-	msgRespBody, _ := io.ReadAll(msgResp.Body)
-	log.Printf("[固定返回] 蓝信回复完成 sender=%s status=%d resp=%s", senderID, msgResp.StatusCode, truncate(string(msgRespBody), 200))
+	targetURL := "http://127.0.0.1" + outboundAddr + "/v1/bot/messages/create?app_token=" + url.QueryEscape(token)
+	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[固定返回] 构造出站请求失败: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[固定返回] 出站请求失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	log.Printf("[固定返回] 出站回复完成 sender=%s status=%d resp=%s", senderID, resp.StatusCode, truncate(string(respBody), 200))
+}
+
+// getLanxinAppToken 获取蓝信 app_token
+func (ip *InboundProxy) getLanxinAppToken() (string, error) {
+	cfg := ip.cfg
+	upstream := cfg.LanxinUpstream
+	if upstream == "" {
+		upstream = "https://apigw.lx.qianxin.com"
+	}
+	tokenURL := upstream + "/v1/apptoken/create?grant_type=client_credential&appid=" +
+		url.QueryEscape(cfg.LanxinAppID) + "&secret=" + url.QueryEscape(cfg.LanxinAppSecret)
+	resp, err := http.Get(tokenURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// 蓝信返回格式: {"errCode":0,"data":{"appToken":"xxx"}}
+	var tokenResp struct {
+		ErrCode int `json:"errCode"`
+		Data    struct {
+			AppToken string `json:"appToken"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return "", fmt.Errorf("解析token响应失败: %s", string(body))
+	}
+	if tokenResp.Data.AppToken == "" {
+		return "", fmt.Errorf("token为空: %s", string(body))
+	}
+	return tokenResp.Data.AppToken, nil
 }
