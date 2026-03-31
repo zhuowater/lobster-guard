@@ -594,7 +594,6 @@ func (ip *InboundProxy) handleWecomVerify(w http.ResponseWriter, r *http.Request
 }
 
 func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// panic recovery
 	defer func() {
 		if rv := recover(); rv != nil {
 			log.Printf("[PANIC] InboundProxy: %v\n%s", rv, debug.Stack())
@@ -603,51 +602,30 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	start := time.Now()
-
-	// v5.0: 生成 trace_id
 	traceID := GenerateTraceID()
-	// v4.1: WebSocket Upgrade 检测
+
+	// --- 1. 协议前置处理（WebSocket / GET 验证 / 非 POST）---
 	if IsWebSocketUpgrade(r) && ip.wsProxy != nil {
-		// 从 query 或 header 提取 sender_id / app_id
 		senderID := r.URL.Query().Get("sender_id")
-		if senderID == "" {
-			senderID = r.Header.Get("X-Sender-Id")
-		}
+		if senderID == "" { senderID = r.Header.Get("X-Sender-Id") }
 		appID := r.URL.Query().Get("app_id")
-		if appID == "" {
-			appID = r.Header.Get("X-App-Id")
-		}
+		if appID == "" { appID = r.Header.Get("X-App-Id") }
 		ip.wsProxy.HandleWebSocket(w, r, senderID, appID)
 		return
 	}
-
-	// 企微 GET 验证回调
 	if r.Method == "GET" {
-		if wp, ok := ip.channel.(*WecomPlugin); ok {
-			ip.handleWecomVerify(w, r, wp)
-			return
-		}
-		// 非企微通道的 GET 请求，转发到上游
+		if wp, ok := ip.channel.(*WecomPlugin); ok { ip.handleWecomVerify(w, r, wp); return }
 		proxy, _ := ip.pool.GetAnyHealthyProxy()
-		if proxy != nil {
-			proxy.ServeHTTP(w, r)
-		} else {
-			w.WriteHeader(502)
-			w.Write([]byte(`{"errcode":502,"errmsg":"no upstream"}`))
-		}
+		if proxy != nil { proxy.ServeHTTP(w, r) } else { w.WriteHeader(502); w.Write([]byte(`{"errcode":502,"errmsg":"no upstream"}`)) }
 		return
 	}
-
 	if r.Method != http.MethodPost {
-		// 非POST直接转发到任意健康上游
 		proxy, _ := ip.pool.GetAnyHealthyProxy()
-		if proxy != nil { proxy.ServeHTTP(w, r) } else {
-			w.WriteHeader(502); w.Write([]byte(`{"errcode":502,"errmsg":"no upstream"}`))
-		}
+		if proxy != nil { proxy.ServeHTTP(w, r) } else { w.WriteHeader(502); w.Write([]byte(`{"errcode":502,"errmsg":"no upstream"}`)) }
 		return
 	}
 
-	// 入站超时保护：整个入站处理不超过 30 秒
+	// --- 2. 读取 body + 解析消息 ---
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
@@ -655,179 +633,55 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body); r.Body.Close()
 	if err != nil {
 		proxy, _ := ip.pool.GetAnyHealthyProxy()
-		if proxy != nil {
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			proxy.ServeHTTP(w, r)
-		}
+		if proxy != nil { r.Body = io.NopCloser(bytes.NewReader(body)); proxy.ServeHTTP(w, r) }
 		return
 	}
 	rh := fmt.Sprintf("%x", sha256.Sum256(body))
 
-	// 使用通道插件解析入站消息
-	var msgText, senderID, eventType, appID string
-	var decryptOK bool
-	var isVerify bool
-	func() {
-		defer func() {
-			if rv := recover(); rv != nil {
-				log.Printf("[入站] ParseInbound panic: %v", rv)
-			}
-		}()
-		// 优先使用 RequestAwareParser（支持从 URL query 提取参数）
-		var msg InboundMessage
-		var err error
-		if rap, ok := ip.channel.(RequestAwareParser); ok {
-			msg, err = rap.ParseInboundRequest(body, r)
-		} else {
-			msg, err = ip.channel.ParseInbound(body)
-		}
-		if err != nil {
-			log.Printf("[入站] 解析失败: %v，fail-open", err)
-			return
-		}
-		// URL Verification / echostr 验证特殊处理（飞书等）
-		if msg.IsVerify && msg.VerifyReply != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(200)
-			w.Write(msg.VerifyReply)
-			isVerify = true
-			log.Printf("[入站] URL Verification 处理完成")
-			return
-		}
-		// 兼容旧逻辑：飞书 URL Verification
-		if msg.EventType == "url_verification" && msg.Raw != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(200)
-			w.Write(msg.Raw)
-			isVerify = true
-			return
-		}
-		msgText = msg.Text
-		senderID = msg.SenderID
-		eventType = msg.EventType
-		appID = msg.AppID
-		decryptOK = true
-	}()
+	parsed, isVerify := ip.parseInboundMessage(w, body, r)
+	if isVerify { return }
+	msgText, senderID, appID, decryptOK := parsed.Text, parsed.SenderID, parsed.AppID, parsed.DecryptOK
 
-	// 如果是验证请求，已在闭包中直接响应，不再继续
-	if isVerify {
-		return
-	}
+	// --- 3. Trace/Session 关联 ---
+	if ip.traceCorrelator != nil && senderID != "" { ip.traceCorrelator.Set(senderID, traceID) }
+	if ip.sessionCorrelator != nil && msgText != "" { ip.sessionCorrelator.RegisterIMSession(msgText, traceID, senderID, appID) }
 
-	// v18: 记录 sender→trace 映射，供出站关联
-	if ip.traceCorrelator != nil && senderID != "" {
-		ip.traceCorrelator.Set(senderID, traceID)
-	}
-
-	// v17.3: 注册 IM→LLM 会话关联（内容指纹 → IM trace_id）
-	if ip.sessionCorrelator != nil && msgText != "" {
-		ip.sessionCorrelator.RegisterIMSession(msgText, traceID, senderID, appID)
-	}
-
-	// 限流检查（安检之前）
+	// --- 4. 限流 ---
 	if ip.limiter != nil {
 		allowed, reason := ip.limiter.Allow(senderID)
 		if !allowed {
-			if ip.metrics != nil {
-				ip.metrics.RecordRateLimit(false)
-				ip.metrics.RecordRequest("inbound", "rate_limited", ip.channel.Name(), 0)
-			}
-			w.Header().Set("Retry-After", "1")
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("X-Trace-ID", traceID)
+			if ip.metrics != nil { ip.metrics.RecordRateLimit(false); ip.metrics.RecordRequest("inbound", "rate_limited", ip.channel.Name(), 0) }
+			w.Header().Set("Retry-After", "1"); w.Header().Set("Content-Type", "application/json"); w.Header().Set("X-Trace-ID", traceID)
 			w.WriteHeader(429)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"errcode": 429,
-				"errmsg":  "rate limited",
-				"detail":  reason,
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{"errcode": 429, "errmsg": "rate limited", "detail": reason})
 			ip.logger.Log("inbound", senderID, "rate_limited", reason, truncate(msgText, 200), rh, 0, "", appID)
 			return
 		}
-		if ip.metrics != nil {
-			ip.metrics.RecordRateLimit(true)
-		}
+		if ip.metrics != nil { ip.metrics.RecordRateLimit(true) }
 	}
 
-	// 路由决策（统一方法，修复 Race #1/#2/#3/#5）
+	// --- 5. 路由解析 ---
 	var upstreamID string
-	if senderID != "" {
-		upstreamID = ip.resolveUpstream(senderID, appID, "[路由]")
-	}
+	if senderID != "" { upstreamID = ip.resolveUpstream(senderID, appID, "[路由]") }
 
-	// v34.0: 固定返回内容 — 命中策略且配置了 fixed_response 时直接短路
-	if ip.policyEng != nil {
-		var matchedPolicy *RoutePolicyConfig
-		if ip.userCache != nil {
-			info, _ := ip.userCache.GetOrFetchWithTimeout(senderID, 500*time.Millisecond)
-			matchedPolicy, _ = ip.policyEng.MatchFull(info, appID)
-		} else {
-			matchedPolicy, _ = ip.policyEng.MatchFull(nil, appID)
-		}
-		if matchedPolicy != nil && matchedPolicy.FixedResponse != nil && matchedPolicy.FixedResponse.Enabled {
-			fr := matchedPolicy.FixedResponse
-			for k, v := range fr.Headers {
-				w.Header().Set(k, v)
-			}
-			ct := fr.ContentType
-			if ct == "" {
-				ct = "application/json"
-			}
-			w.Header().Set("Content-Type", ct)
-			if traceID != "" {
-				w.Header().Set("X-Trace-ID", traceID)
-			}
-			w.Header().Set("X-Lobster-Guard", "fixed-response")
-			sc := fr.StatusCode
-			if sc == 0 {
-				sc = 200
-			}
-			w.WriteHeader(sc)
-			w.Write([]byte(fr.Body))
-			// 审计日志
-			if ip.logger != nil {
-				ip.logger.Log("inbound", senderID, "fixed_response",
-					fmt.Sprintf("status=%d content_type=%s", sc, ct),
-					truncate(msgText, 200), "", 0, "fixed_response", appID)
-			}
-			if ip.metrics != nil {
-				latMs := float64(time.Since(start).Microseconds()) / 1000.0
-				ip.metrics.RecordRequest("inbound", "fixed_response", ip.channel.Name(), latMs)
-			}
-			log.Printf("[路由] 🎯 固定返回 sender=%s app=%s status=%d", senderID, appID, sc)
-			// v34.0: IM 主动回复 — 通过出站代理发送消息给发送者（复用已有链路）
-			if fr.Body != "" && senderID != "" && ip.cfg != nil {
-				go ip.sendFixedReplyViaOutbound(senderID, fr.Body)
-			}
-			return
-		}
-	}
+	// --- 6. 固定返回短路 ---
+	if ip.handleFixedResponse(w, senderID, appID, msgText, traceID, start) { return }
 
-	// 获取代理
+	// --- 7. 获取上游代理 ---
 	var proxy *httputil.ReverseProxy
-	if upstreamID != "" {
-		proxy = ip.pool.GetProxy(upstreamID)
-	}
-	// D-002: 当 GetProxy 返回 nil 需要降级时，更新路由表和计数
+	if upstreamID != "" { proxy = ip.pool.GetProxy(upstreamID) }
 	if proxy == nil {
 		var fallbackUID string
 		proxy, fallbackUID = ip.pool.GetAnyHealthyProxy()
 		if fallbackUID != "" && fallbackUID != upstreamID && senderID != "" {
 			log.Printf("[路由] ⚠️ 上游 %s proxy不可用，降级到 %s sender=%s", upstreamID, fallbackUID, senderID)
-			if upstreamID != "" {
-				ip.routes.Bind(senderID, appID, fallbackUID)
-				ip.pool.TransferUserCount(upstreamID, fallbackUID)
-			}
-			upstreamID = fallbackUID // 确保审计日志记录实际上游
+			if upstreamID != "" { ip.routes.Bind(senderID, appID, fallbackUID); ip.pool.TransferUserCount(upstreamID, fallbackUID) }
+			upstreamID = fallbackUID
 		}
 	}
-	if proxy == nil {
-		w.WriteHeader(502)
-		w.Write([]byte(`{"errcode":502,"errmsg":"no upstream available"}`))
-		return
-	}
+	if proxy == nil { w.WriteHeader(502); w.Write([]byte(`{"errcode":502,"errmsg":"no upstream available"}`)); return }
 
-	// 检测（白名单跳过）（v5.1: 使用 Pipeline 统一编排 keyword→regex→pii→session→llm）
+	// --- 8. 安全检测 ---
 	skipDetect := !ip.enabled || ip.whitelist[senderID] || !decryptOK || msgText == ""
 	var detectResult DetectResult
 	if !skipDetect {
@@ -843,17 +697,15 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 构建审计信息
-	latMs := float64(time.Since(start).Microseconds()) / 1000.0
+	// --- 9. 构建审计信息 ---
 	reason := strings.Join(detectResult.Reasons, ",")
 	if len(detectResult.PIIs) > 0 {
 		if reason != "" { reason += "," }
 		reason += "pii:" + strings.Join(detectResult.PIIs, "+")
 	}
 	act := detectResult.Action; if act == "" { act = "pass" }
-	_ = eventType
 
-	// v18.3: 自适应决策 — 基于贝叶斯误伤率分析可能降级 block→warn
+	// v18.3: 自适应决策
 	if ip.adaptiveEngine != nil && act == "block" {
 		newAction, proof := ip.adaptiveEngine.ShouldDowngrade(senderID, act)
 		if newAction != act {
@@ -862,201 +714,28 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// v20.1: 入站污染标记
-	if ip.taintTracker != nil {
-		taintEntry := ip.taintTracker.MarkTainted(traceID, msgText, "inbound")
-		if taintEntry != nil {
-			log.Printf("[入站] 🏷️ 污染标记 sender=%s trace=%s labels=%v", senderID, traceID, taintEntry.Labels)
-			// v23.0: 同步污染标签到路径上下文（驱动 cumulative 规则）
-			if ip.pathPolicyEngine != nil {
-				for _, label := range taintEntry.Labels {
-					ip.pathPolicyEngine.AddTaintLabel(traceID, label)
-					ip.pathPolicyEngine.RegisterStep(traceID, PathStep{
-						Stage: "taint", Action: taintActionForLabel(label), Details: label,
-					})
-				}
-			}
-		}
-	}
+	// --- 10. 安全上下文增强 ---
+	ip.applyInboundEnrichment(traceID, senderID, appID, msgText)
 
-	// v25.0: 编译执行计划 — 从用户 query 提取意图并生成允许的执行模板
-	if ip.planCompiler != nil && msgText != "" {
-		plan := ip.planCompiler.CompileIntent(traceID, msgText)
-		if plan != nil {
-			log.Printf("[入站] 📋 执行计划已编译 trace=%s plan=%s steps=%d", traceID, plan.ID, plan.TotalSteps)
-		}
-	}
+	// --- 11. 统一记录审计/指标/信封 ---
+	ip.recordInboundObservability(senderID, appID, traceID, msgText, rh, upstreamID, act, reason, detectResult, start)
 
-	// v25.1: 初始化 Capability 上下文 — 用户输入拥有完整权限
-	if ip.capabilityEngine != nil && senderID != "" {
-		userCaps := []CapLabel{
-			{Name: "read", Source: "user_input", Level: "read", Granted: true},
-			{Name: "write", Source: "user_input", Level: "write", Granted: true},
-			{Name: "execute", Source: "user_input", Level: "execute", Granted: true},
-		}
-		ctx := ip.capabilityEngine.InitContext(traceID, senderID, userCaps)
-		if ctx != nil {
-			log.Printf("[入站] 🔑 Capability 上下文已初始化 trace=%s user=%s caps=%d", traceID, senderID, len(userCaps))
-		}
-	}
-
-	// v26.0: IFC 入站标签 — 注册用户输入变量
-	if ip.ifcEngine != nil && ip.ifcEngine.config.Enabled {
-		v := ip.ifcEngine.RegisterVariable(traceID, "user_input", "user_input", msgText)
-		if v != nil {
-			log.Printf("[入站] 🏷️ IFC 变量已注册 trace=%s name=user_input conf=%s integ=%s", traceID, v.Label.Confidentiality, v.Label.Integrity)
-		}
-	}
-
-	ip.logger.LogWithTrace("inbound", senderID, act, reason, msgText, rh, latMs, upstreamID, appID, traceID)
-
-	// v18.0: 执行信封
-	if ip.envelopeMgr != nil {
-		ip.envelopeMgr.Seal(traceID, "inbound", msgText, act, detectResult.MatchedRules, senderID)
-	}
-
-	// 指标采集
-	if ip.metrics != nil {
-		ip.metrics.RecordRequest("inbound", act, ip.channel.Name(), latMs)
-	}
-
-	// v5.0 实时监控
-	if ip.realtime != nil {
-		ip.realtime.RecordInbound(act, time.Since(start).Microseconds())
-		if act == "block" || act == "warn" {
-			ip.realtime.RecordEvent("inbound", senderID, act, reason, traceID)
-		}
-	}
-
-	// v3.6 规则命中统计
-	if ip.ruleHits != nil && len(detectResult.MatchedRules) > 0 {
-		for _, ruleName := range detectResult.MatchedRules {
-			ip.ruleHits.Record(ruleName)
-		}
-	}
-
-	// 执行决策
-	if detectResult.Action == "block" {
-		if ip.slog != nil {
-			ip.slog.Warn("inbound", "请求拦截", "sender_id", senderID, "action", "block", "reason", reason, "trace_id", traceID)
-		} else {
-			log.Printf("[入站] 拦截 sender=%s reasons=%v trace_id=%s", senderID, detectResult.Reasons, traceID)
-		}
-		// v3.10 告警通知
-		if ip.alertNotifier != nil {
-			rule := strings.Join(detectResult.MatchedRules, ",")
-			ip.alertNotifier.Notify("inbound", senderID, rule, msgText, appID)
-		}
-		// v18.1: 事件总线
-		if ip.eventBus != nil {
-			ip.eventBus.Emit(&SecurityEvent{
-				Type: "inbound_block", Severity: "high", Domain: "inbound",
-				TraceID: traceID, SenderID: senderID,
-				Summary: fmt.Sprintf("入站拦截: %s", strings.Join(detectResult.Reasons, "; ")),
-				Details: map[string]interface{}{"rules": detectResult.MatchedRules, "app_id": appID},
-			})
-		}
-		// v18.3: 奇点蜜罐暴露 — block 时注入蜜罐内容
-		if ip.singularityEngine != nil {
-			if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", traceID); shouldExpose && tpl != nil {
-				ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, traceID)
-				if ip.envelopeMgr != nil {
-					ip.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
-				}
-				log.Printf("[入站] 🔮 奇点暴露 sender=%s template=%s level=%d trace_id=%s", senderID, tpl.Name, tpl.Level, traceID)
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Trace-ID", traceID)
-				w.WriteHeader(200)
-				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","singularity_response":%q}`, tpl.Content)))
-				return
-			}
-		}
-		code, respBody := ip.channel.BlockResponseWithMessage(detectResult.Message)
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Trace-ID", traceID)
-		w.WriteHeader(code)
-		w.Write(respBody)
+	// --- 12. 执行决策 ---
+	latMs := float64(time.Since(start).Microseconds()) / 1000.0
+	if act == "block" {
+		ip.handleBlockAction(w, senderID, appID, msgText, traceID, rh, upstreamID, detectResult, reason, latMs)
 		return
 	}
-	if detectResult.Action == "warn" {
-		if ip.slog != nil {
-			ip.slog.Warn("inbound", "告警放行", "sender_id", senderID, "action", "warn", "reason", reason, "trace_id", traceID)
-		} else {
-			log.Printf("[入站] 告警放行 sender=%s reasons=%v trace_id=%s", senderID, detectResult.Reasons, traceID)
-		}
-		// v18.1: 事件总线
-		if ip.eventBus != nil {
-			ip.eventBus.Emit(&SecurityEvent{
-				Type: "inbound_block", Severity: "medium", Domain: "inbound",
-				TraceID: traceID, SenderID: senderID,
-				Summary: fmt.Sprintf("入站告警: %s", strings.Join(detectResult.Reasons, "; ")),
-				Details: map[string]interface{}{"rules": detectResult.MatchedRules, "action": "warn", "app_id": appID},
-			})
-		}
-		// v15.0: 蜜罐触发检查
-		if ip.honeypot != nil {
-			tpl, watermark := ip.honeypot.ShouldTrigger(msgText, senderID, "")
-			if tpl != nil {
-				fakeResp := ip.honeypot.GenerateFakeResponse(tpl, watermark)
-				ip.honeypot.RecordTrigger(&HoneypotTrigger{
-					TenantID:      ip.resolveTenantID(senderID, appID),
-					SenderID:      senderID,
-					TemplateID:    tpl.ID,
-					TemplateName:  tpl.Name,
-					TriggerType:   tpl.TriggerType,
-					OriginalInput: msgText,
-					FakeResponse:  fakeResp,
-					Watermark:     watermark,
-					TraceID:       traceID,
-				})
-				ip.logger.LogWithTrace("inbound", senderID, "honeypot", "honeypot_triggered:"+tpl.Name, msgText, rh, latMs, upstreamID, appID, traceID)
-				// v19.2: 蜜罐深度交互记录
-				if ip.honeypotDeep != nil {
-					ip.honeypotDeep.RecordInteraction(senderID, tpl.TriggerType, "im", msgText)
-				}
-				// v31.0: 蜜罐→攻击链事件发布
-				if ip.eventBus != nil {
-					ip.eventBus.Emit(&SecurityEvent{
-						Type:     "honeypot_trigger",
-						Severity: "high",
-						SenderID: senderID,
-						Summary:  fmt.Sprintf("蜜罐触发: template=%s watermark=%s trigger_type=%s", tpl.Name, watermark, tpl.TriggerType),
-						Details:  map[string]interface{}{"template": tpl.Name, "watermark": watermark, "trigger_type": tpl.TriggerType},
-						Domain:   "inbound",
-					})
-				}
-				log.Printf("[入站] 🍯 蜜罐触发 sender=%s template=%s watermark=%s trace_id=%s", senderID, tpl.Name, watermark, traceID)
-				// 返回蜜罐假响应而不是转发给上游
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Trace-ID", traceID)
-				w.WriteHeader(200)
-				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","honeypot_response":%q}`, fakeResp)))
-				return
-			}
-		}
-		// v18.3: 奇点蜜罐暴露 — warn 时也可注入蜜罐内容（蜜罐未触发时）
-		if ip.singularityEngine != nil {
-			if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", traceID); shouldExpose && tpl != nil {
-				ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, traceID)
-				if ip.envelopeMgr != nil {
-					ip.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
-				}
-				log.Printf("[入站] 🔮 奇点暴露(warn) sender=%s template=%s level=%d trace_id=%s", senderID, tpl.Name, tpl.Level, traceID)
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Trace-ID", traceID)
-				w.WriteHeader(200)
-				w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","singularity_response":%q}`, tpl.Content)))
-				return
-			}
+	if act == "warn" {
+		if ip.handleWarnAction(w, senderID, appID, msgText, traceID, rh, upstreamID, detectResult, reason, latMs) {
+			return // 蜜罐/奇点短路
 		}
 	}
 
-	// v5.0: 设置 X-Trace-ID header 传递给上游
+	// --- 13. 转发上游 ---
 	r.Header.Set("X-Trace-ID", traceID)
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
-
-	// v5.0: 包装 ResponseWriter 以在响应中添加 X-Trace-ID
 	tw := &traceResponseWriter{ResponseWriter: w, traceID: traceID, headerWritten: false}
 	proxy.ServeHTTP(tw, r)
 }
