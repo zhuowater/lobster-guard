@@ -20,11 +20,15 @@ func (api *ManagementAPI) handleCFAdaptiveCost(w http.ResponseWriter, r *http.Re
 // handleCFAdaptiveEffectiveness GET /api/v1/counterfactual/effectiveness — 效果指标
 func (api *ManagementAPI) handleCFAdaptiveEffectiveness(w http.ResponseWriter, r *http.Request) {
 	if api.adaptiveStrategy == nil {
-		jsonResponse(w, 200, EffectTracker{})
+		jsonResponse(w, 200, map[string]interface{}{"total_decisions": 0, "true_positives": 0, "false_positives": 0, "precision": 0, "recall": 0})
 		return
 	}
-	metrics := api.adaptiveStrategy.GetEffectMetrics()
-	jsonResponse(w, 200, metrics)
+	m := api.adaptiveStrategy.GetEffectMetrics()
+	jsonResponse(w, 200, map[string]interface{}{
+		"total_decisions": m.TotalChecked, "true_positives": m.TruePositive,
+		"false_positives": m.FalsePositive, "precision": m.Precision,
+		"recall": m.Recall, "f1_score": m.F1Score,
+	})
 }
 
 // handleCFAdaptiveFeedback POST /api/v1/counterfactual/feedback — 提交人类反馈
