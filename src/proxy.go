@@ -877,6 +877,50 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		upstreamID = ip.resolveUpstream(senderID, appID, "[路由]")
 	}
 
+	// v34.0: 固定返回内容 — 命中策略且配置了 fixed_response 时直接短路
+	if ip.policyEng != nil {
+		var matchedPolicy *RoutePolicyConfig
+		if ip.userCache != nil {
+			info, _ := ip.userCache.GetOrFetchWithTimeout(senderID, 500*time.Millisecond)
+			matchedPolicy, _ = ip.policyEng.MatchFull(info, appID)
+		} else {
+			matchedPolicy, _ = ip.policyEng.MatchFull(nil, appID)
+		}
+		if matchedPolicy != nil && matchedPolicy.FixedResponse != nil && matchedPolicy.FixedResponse.Enabled {
+			fr := matchedPolicy.FixedResponse
+			for k, v := range fr.Headers {
+				w.Header().Set(k, v)
+			}
+			ct := fr.ContentType
+			if ct == "" {
+				ct = "application/json"
+			}
+			w.Header().Set("Content-Type", ct)
+			if traceID != "" {
+				w.Header().Set("X-Trace-ID", traceID)
+			}
+			w.Header().Set("X-Lobster-Guard", "fixed-response")
+			sc := fr.StatusCode
+			if sc == 0 {
+				sc = 200
+			}
+			w.WriteHeader(sc)
+			w.Write([]byte(fr.Body))
+			// 审计日志
+			if ip.logger != nil {
+				ip.logger.Log("inbound", senderID, "fixed_response",
+					fmt.Sprintf("status=%d content_type=%s", sc, ct),
+					truncate(msgText, 200), "", 0, "fixed_response", appID)
+			}
+			if ip.metrics != nil {
+				latMs := float64(time.Since(start).Microseconds()) / 1000.0
+				ip.metrics.RecordRequest("inbound", "fixed_response", ip.channel.Name(), latMs)
+			}
+			log.Printf("[路由] 🎯 固定返回 sender=%s app=%s status=%d", senderID, appID, sc)
+			return
+		}
+	}
+
 	// 获取代理
 	var proxy *httputil.ReverseProxy
 	if upstreamID != "" {

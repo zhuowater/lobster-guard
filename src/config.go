@@ -342,10 +342,20 @@ type StaticUpstreamConfig struct {
 	OpenClawConfigPath string `yaml:"openclaw_config_path"` // 上游 OpenClaw 的 openclaw.json 路径（同机部署时可直接读取，获取完整 agents/sessions 列表）
 }
 
+// FixedResponseConfig 固定返回内容配置（v34.0）
+type FixedResponseConfig struct {
+	Enabled     bool              `yaml:"enabled" json:"enabled"`
+	StatusCode  int               `yaml:"status_code" json:"status_code"`
+	ContentType string            `yaml:"content_type" json:"content_type"`
+	Body        string            `yaml:"body" json:"body"`
+	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+}
+
 // RoutePolicyConfig 路由策略配置（v3.9）
 type RoutePolicyConfig struct {
-	Match      RoutePolicyMatch `yaml:"match" json:"match"`
-	UpstreamID string           `yaml:"upstream_id" json:"upstream_id"`
+	Match         RoutePolicyMatch  `yaml:"match" json:"match"`
+	UpstreamID    string            `yaml:"upstream_id" json:"upstream_id"`
+	FixedResponse *FixedResponseConfig `yaml:"fixed_response,omitempty" json:"fixed_response,omitempty"` // v34.0 固定返回
 }
 
 // RoutePolicyMatch 策略匹配条件

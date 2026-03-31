@@ -1301,6 +1301,68 @@ func (rpe *RoutePolicyEngine) Match(info *UserInfo, appID string) (string, bool)
 	return "", false
 }
 
+// MatchFull 匹配策略，返回完整的 RoutePolicyConfig（含 fixed_response）
+func (rpe *RoutePolicyEngine) MatchFull(info *UserInfo, appID string) (*RoutePolicyConfig, bool) {
+	rpe.mu.RLock()
+	defer rpe.mu.RUnlock()
+
+	var defaultPolicy *RoutePolicyConfig
+
+	if info == nil {
+		for i := range rpe.policies {
+			if rpe.policies[i].Match.Default {
+				p := rpe.policies[i]
+				return &p, true
+			}
+		}
+		return nil, false
+	}
+
+	for i := range rpe.policies {
+		p := &rpe.policies[i]
+		if p.Match.Default {
+			cp := rpe.policies[i]
+			defaultPolicy = &cp
+			continue
+		}
+		matched := true
+		hasCondition := false
+
+		if p.Match.Email != "" {
+			hasCondition = true
+			if !strings.EqualFold(info.Email, p.Match.Email) {
+				matched = false
+			}
+		}
+		if matched && p.Match.EmailSuffix != "" {
+			hasCondition = true
+			if !strings.HasSuffix(strings.ToLower(info.Email), strings.ToLower(p.Match.EmailSuffix)) {
+				matched = false
+			}
+		}
+		if matched && p.Match.Department != "" {
+			hasCondition = true
+			if !containsDepartment(info.Department, p.Match.Department) {
+				matched = false
+			}
+		}
+		if matched && p.Match.AppID != "" {
+			hasCondition = true
+			if appID != p.Match.AppID {
+				matched = false
+			}
+		}
+		if hasCondition && matched {
+			cp := rpe.policies[i]
+			return &cp, true
+		}
+	}
+	if defaultPolicy != nil {
+		return defaultPolicy, true
+	}
+	return nil, false
+}
+
 // ListPolicies 返回策略列表
 func (rpe *RoutePolicyEngine) ListPolicies() []RoutePolicyConfig {
 	rpe.mu.RLock()

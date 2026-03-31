@@ -143,7 +143,10 @@
                   <span v-if="gmf(p,'app_id')" class="tag tag-info">App: {{ gmf(p,'app_id') }}</span>
                   <span v-if="gmf(p,'default')" class="tag tag-pass">默认策略</span>
                 </div></td>
-                <td><span class="tag" style="background:var(--color-primary-dim);color:var(--color-primary);font-weight:600">{{ p.upstream_id || '(默认分配)' }}</span></td>
+                <td>
+                  <span v-if="p.fixed_response && p.fixed_response.enabled" class="tag" style="background:var(--color-success-dim,#dcfce7);color:var(--color-success,#16a34a);font-weight:600">🎯 固定返回 ({{ p.fixed_response.status_code || 200 }})</span>
+                  <span v-else class="tag" style="background:var(--color-primary-dim);color:var(--color-primary);font-weight:600">{{ p.upstream_id || '(默认分配)' }}</span>
+                </td>
                 <td><span v-if="gmf(p,'default')" class="tag" style="background:var(--color-warning-dim);color:var(--color-warning)">默认</span><span v-else class="tag tag-info">条件</span></td>
                 <td style="text-align:right">
                   <button class="btn btn-ghost btn-sm" @click="openPolicyEdit(idx, p)" title="编辑"><Icon name="edit" :size="14" /></button>
@@ -282,11 +285,19 @@ const policyFields = computed(() => {
     const ph = { department: '输入部门名称', email: '输入完整邮箱', email_suffix: '输入邮箱后缀，如 @qianxin.com', app_id: '输入 App ID' }
     fields.push({ key: 'matchValue', label: '匹配值', type: 'text', required: true, placeholder: ph[policyForm.value.matchType] || '' })
   }
-  fields.push({ key: 'upstream', label: '目标上游', type: 'component', required: false, hint: '留空表示使用默认上游分配' })
+  fields.push({ key: 'upstream', label: '目标上游', type: 'component', required: false, hint: '留空表示使用默认上游分配（启用固定返回时可为空）' })
+  // v34.0: 固定返回内容配置
+  fields.push({ key: 'fixedEnabled', label: '启用固定返回', type: 'checkbox', hint: '启用后直接返回固定内容，不转发上游' })
+  if (policyForm.value.fixedEnabled) {
+    fields.push({ key: 'fixedStatusCode', label: '状态码', type: 'number', placeholder: '200', hint: '默认 200' })
+    fields.push({ key: 'fixedContentType', label: 'Content-Type', type: 'text', placeholder: 'application/json', hint: '默认 application/json' })
+    fields.push({ key: 'fixedBody', label: '返回内容', type: 'textarea', placeholder: '{"code":0,"message":"ok"}', rows: 4 })
+    fields.push({ key: 'fixedHeaders', label: '自定义响应头', type: 'textarea', placeholder: 'X-Custom: value\nX-Another: value2', rows: 2, hint: '每行一个，格式: Key: Value' })
+  }
   return fields
 })
 
-function openPolicyCreate() { policyEditIdx.value = -1; policyForm.value = { matchType: 'department', matchValue: '', upstream: '' }; showPolicyModal.value = true }
+function openPolicyCreate() { policyEditIdx.value = -1; policyForm.value = { matchType: 'department', matchValue: '', upstream: '', fixedEnabled: false, fixedStatusCode: 200, fixedContentType: 'application/json', fixedBody: '', fixedHeaders: '' }; showPolicyModal.value = true }
 function openPolicyEdit(idx, p) {
   policyEditIdx.value = idx
   const match = p.match || p.Match || {}
@@ -295,7 +306,16 @@ function openPolicyEdit(idx, p) {
   else if (match.email) { mt = 'email'; mv = match.email }
   else if (match.email_suffix) { mt = 'email_suffix'; mv = match.email_suffix }
   else if (match.app_id) { mt = 'app_id'; mv = match.app_id }
-  policyForm.value = { matchType: mt, matchValue: mv, upstream: p.upstream_id || '' }
+  const fr = p.fixed_response || {}
+  const hdrs = fr.headers ? Object.entries(fr.headers).map(([k,v]) => `${k}: ${v}`).join('\n') : ''
+  policyForm.value = {
+    matchType: mt, matchValue: mv, upstream: p.upstream_id || '',
+    fixedEnabled: !!fr.enabled,
+    fixedStatusCode: fr.status_code || 200,
+    fixedContentType: fr.content_type || 'application/json',
+    fixedBody: fr.body || '',
+    fixedHeaders: hdrs,
+  }
   showPolicyModal.value = true
 }
 
@@ -308,6 +328,23 @@ async function doPolicySave() {
     match[matchType] = matchValue.trim()
   }
   const body = { match, upstream_id: upstream || '' }
+  // v34.0: 固定返回内容
+  if (policyForm.value.fixedEnabled) {
+    const headers = {}
+    if (policyForm.value.fixedHeaders) {
+      policyForm.value.fixedHeaders.split('\n').forEach(line => {
+        const idx = line.indexOf(':')
+        if (idx > 0) headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim()
+      })
+    }
+    body.fixed_response = {
+      enabled: true,
+      status_code: parseInt(policyForm.value.fixedStatusCode) || 200,
+      content_type: policyForm.value.fixedContentType || 'application/json',
+      body: policyForm.value.fixedBody || '',
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+    }
+  }
   try {
     let result
     if (policyEditIdx.value >= 0) result = await apiPut('/api/v1/route-policies/' + policyEditIdx.value, body)

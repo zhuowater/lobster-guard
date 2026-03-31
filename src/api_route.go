@@ -463,6 +463,18 @@ func (api *ManagementAPI) saveRoutePolicies(policies []RoutePolicyConfig) error 
 		}
 		m["match"] = match
 		m["upstream_id"] = p.UpstreamID
+		if p.FixedResponse != nil {
+			fr := map[string]interface{}{
+				"enabled":      p.FixedResponse.Enabled,
+				"status_code":  p.FixedResponse.StatusCode,
+				"content_type": p.FixedResponse.ContentType,
+				"body":         p.FixedResponse.Body,
+			}
+			if len(p.FixedResponse.Headers) > 0 {
+				fr["headers"] = p.FixedResponse.Headers
+			}
+			m["fixed_response"] = fr
+		}
 		policyList[i] = m
 	}
 	raw["route_policies"] = policyList
@@ -515,9 +527,10 @@ func (api *ManagementAPI) handleCreateRoutePolicy(w http.ResponseWriter, r *http
 		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
 		return
 	}
-	// D-007 fix: upstream_id 不能为空
-	if req.UpstreamID == "" {
-		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (including default policy)"})
+	// D-007 fix: upstream_id 不能为空（除非配置了 fixed_response）
+	hasFixedResponse := req.FixedResponse != nil && req.FixedResponse.Enabled
+	if req.UpstreamID == "" && !hasFixedResponse {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (unless fixed_response is enabled)"})
 		return
 	}
 	// R2-004: 长度限制
@@ -589,9 +602,10 @@ func (api *ManagementAPI) handleUpdateRoutePolicy(w http.ResponseWriter, r *http
 		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
 		return
 	}
-	// D-007 fix: upstream_id 不能为空
-	if req.UpstreamID == "" {
-		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (including default policy)"})
+	// D-007 fix: upstream_id 不能为空（除非配置了 fixed_response）
+	hasFixedResponse := req.FixedResponse != nil && req.FixedResponse.Enabled
+	if req.UpstreamID == "" && !hasFixedResponse {
+		jsonResponse(w, 400, map[string]string{"error": "upstream_id is required (unless fixed_response is enabled)"})
 		return
 	}
 	if api.policyEng == nil {
