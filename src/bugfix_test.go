@@ -231,6 +231,91 @@ func TestBug001_DuplicatePolicyReturns409(t *testing.T) {
 }
 
 // ============================================================
+// BUG-013: policy reorder should be atomic and preserve fields
+// ============================================================
+
+func TestBug013_ReorderPoliciesAtomicallyPreservesFixedResponse(t *testing.T) {
+	api, cleanup := setupBugfixAPI(t)
+	defer cleanup()
+
+	createCases := []string{
+		`{"match":{"department":"engineering"},"upstream_id":"up-1"}`,
+		`{"match":{"default":true},"upstream_id":"","fixed_response":{"enabled":true,"status_code":200,"content_type":"application/json","body":"{\"code\":0}","headers":{"X-Test":"ok"}}}`,
+	}
+	for _, reqBody := range createCases {
+		req := httptest.NewRequest("POST", "/api/v1/route-policies", strings.NewReader(reqBody))
+		req.Header.Set("Authorization", "Bearer mgmt-token-for-testing")
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("create policy failed: %d %s", w.Code, w.Body.String())
+		}
+	}
+
+	reorderBody := `{
+		"policies":[
+			{
+				"match":{"default":true},
+				"upstream_id":"",
+				"fixed_response":{"enabled":true,"status_code":200,"content_type":"application/json","body":"{\"code\":0}","headers":{"X-Test":"ok"}}
+			},
+			{
+				"match":{"department":"engineering"},
+				"upstream_id":"up-1"
+			}
+		]
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/route-policies/reorder", strings.NewReader(reorderBody))
+	req.Header.Set("Authorization", "Bearer mgmt-token-for-testing")
+	w := httptest.NewRecorder()
+	api.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("reorder should succeed, got %d %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/v1/route-policies", nil)
+	req.Header.Set("Authorization", "Bearer mgmt-token-for-testing")
+	w = httptest.NewRecorder()
+	api.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("list policies failed: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Policies []RoutePolicyConfig `json:"policies"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal policies failed: %v", err)
+	}
+	if len(resp.Policies) != 2 {
+		t.Fatalf("expected 2 policies after reorder, got %d", len(resp.Policies))
+	}
+	if !resp.Policies[0].Match.Default {
+		t.Fatalf("expected default policy to move to first position, got %+v", resp.Policies[0].Match)
+	}
+	if resp.Policies[0].FixedResponse == nil || !resp.Policies[0].FixedResponse.Enabled {
+		t.Fatal("expected reordered default policy to preserve fixed_response")
+	}
+	if resp.Policies[0].FixedResponse.Headers["X-Test"] != "ok" {
+		t.Fatalf("expected reordered fixed_response header preserved, got %+v", resp.Policies[0].FixedResponse.Headers)
+	}
+
+	cfg, err := loadConfig(api.cfgPath)
+	if err != nil {
+		t.Fatalf("load config failed: %v", err)
+	}
+	if len(cfg.RoutePolicies) != 2 {
+		t.Fatalf("expected 2 persisted policies, got %d", len(cfg.RoutePolicies))
+	}
+	if !cfg.RoutePolicies[0].Match.Default {
+		t.Fatalf("expected persisted default policy at index 0, got %+v", cfg.RoutePolicies[0].Match)
+	}
+	if cfg.RoutePolicies[0].FixedResponse == nil || cfg.RoutePolicies[0].FixedResponse.Body != `{"code":0}` {
+		t.Fatalf("expected persisted fixed_response body preserved, got %+v", cfg.RoutePolicies[0].FixedResponse)
+	}
+}
+
+// ============================================================
 // BUG-002: bind to non-existent upstream should return 400
 // ============================================================
 

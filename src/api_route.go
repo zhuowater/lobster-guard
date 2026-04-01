@@ -494,6 +494,48 @@ func (api *ManagementAPI) respondPolicies(w http.ResponseWriter, policies []Rout
 	jsonResponse(w, 200, map[string]interface{}{"policies": policies, "total": len(policies)})
 }
 
+// handleReorderRoutePolicies POST /api/v1/route-policies/reorder — 原子重排策略顺序
+func (api *ManagementAPI) handleReorderRoutePolicies(w http.ResponseWriter, r *http.Request) {
+	if api.policyEng == nil {
+		jsonResponse(w, 500, map[string]string{"error": "route policy engine not initialized"})
+		return
+	}
+
+	var req struct {
+		Policies []RoutePolicyConfig `json:"policies"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	for i, p := range req.Policies {
+		hasFixedResponse := p.FixedResponse != nil && p.FixedResponse.Enabled
+		if p.UpstreamID == "" && !hasFixedResponse {
+			jsonResponse(w, 400, map[string]string{"error": fmt.Sprintf("policy #%d upstream_id is required (unless fixed_response is enabled)", i)})
+			return
+		}
+		if !p.Match.Default && p.Match.Department == "" && p.Match.EmailSuffix == "" && p.Match.Email == "" && p.Match.AppID == "" {
+			jsonResponse(w, 400, map[string]string{"error": fmt.Sprintf("policy #%d match conditions cannot be empty", i)})
+			return
+		}
+	}
+
+	api.policyEng.SetPolicies(req.Policies)
+	if err := api.saveRoutePolicies(req.Policies); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	log.Printf("[策略路由] 已原子重排 %d 条策略", len(req.Policies))
+	migrated := api.reevaluateAllRoutes()
+	resp := map[string]interface{}{"policies": req.Policies, "total": len(req.Policies)}
+	if migrated > 0 {
+		resp["routes_migrated"] = migrated
+	}
+	jsonResponse(w, 200, resp)
+}
+
 // D-004: reevaluateAllRoutes 策略变更后重评估所有路由绑定
 func (api *ManagementAPI) reevaluateAllRoutes() int {
 	if api.policyEng == nil || api.userCache == nil {
