@@ -210,6 +210,8 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 
 // persistOutboundRules 将出站规则写回 config.yaml 的 outbound_rules 字段
 func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) error {
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		return fmt.Errorf("读取配置文件失败: %w", err)

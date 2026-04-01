@@ -84,6 +84,8 @@ func genToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 func (api *ManagementAPI) persistRawSection(section string, value map[string]interface{}) error {
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		return err

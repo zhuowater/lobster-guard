@@ -279,6 +279,8 @@ func (api *ManagementAPI) handleLLMConfigPut(w http.ResponseWriter, r *http.Requ
 
 // saveLLMConfig 将 LLM 代理配置写回 config.yaml
 func (api *ManagementAPI) saveLLMConfig() error {
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		return fmt.Errorf("读取配置文件失败: %w", err)

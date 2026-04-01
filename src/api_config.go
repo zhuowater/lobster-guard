@@ -1017,7 +1017,9 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 	needRestart := false
 	updated := []string{}
 
-	// 读取配置文件用于持久化
+	// 读取配置文件用于持久化（P1: 全局锁防止并发写覆盖）
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": "read config failed: " + err.Error()})
@@ -1361,6 +1363,8 @@ func (api *ManagementAPI) handleAlertsConfigUpdate(w http.ResponseWriter, r *htt
 		return
 	}
 
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": "read config failed"})

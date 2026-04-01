@@ -433,6 +433,8 @@ func (api *ManagementAPI) handleTestRoutePolicy(w http.ResponseWriter, r *http.R
 
 // saveRoutePolicies 将策略列表写回 config.yaml（读取→修改 route_policies 字段→写回）
 func (api *ManagementAPI) saveRoutePolicies(policies []RoutePolicyConfig) error {
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		return fmt.Errorf("读取配置文件失败: %w", err)

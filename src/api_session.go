@@ -270,6 +270,8 @@ func (api *ManagementAPI) handleSessionCorrelatorConfigUpdate(w http.ResponseWri
 
 // saveSessionCorrelatorConfig 将 session correlator 配置写回 config.yaml
 func (api *ManagementAPI) saveSessionCorrelatorConfig() error {
+	api.cfgMu.Lock()
+	defer api.cfgMu.Unlock()
 	data, err := os.ReadFile(api.cfgPath)
 	if err != nil {
 		return fmt.Errorf("读取配置文件失败: %w", err)
