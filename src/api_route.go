@@ -513,8 +513,9 @@ func (api *ManagementAPI) handleReorderRoutePolicies(w http.ResponseWriter, r *h
 
 	for i, p := range req.Policies {
 		hasFixedResponse := p.FixedResponse != nil && p.FixedResponse.Enabled
-		if p.UpstreamID == "" && !hasFixedResponse {
-			jsonResponse(w, 400, map[string]string{"error": fmt.Sprintf("policy #%d upstream_id is required (unless fixed_response is enabled)", i)})
+		// default 策略允许 upstream_id 为空（走全局默认上游）
+		if p.UpstreamID == "" && !hasFixedResponse && !p.Match.Default {
+			jsonResponse(w, 400, map[string]string{"error": fmt.Sprintf("policy #%d upstream_id is required (unless fixed_response is enabled or match is default)", i)})
 			return
 		}
 		if !p.Match.Default && p.Match.Department == "" && p.Match.EmailSuffix == "" && p.Match.Email == "" && p.Match.AppID == "" {
