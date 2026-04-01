@@ -1247,7 +1247,7 @@ func extractMessagesFromResponse(resp *toolsInvokeResponse) []map[string]interfa
 // ============================================================
 
 // handleGatewaySkills GET /api/v1/upstreams/{id}/gateway/skills
-// 扫描上游 OpenClaw 实例的 skill 目录
+// 通过 WSS RPC 获取上游 OpenClaw 实例的 skill 列表，聚合所有 agent
 func (api *ManagementAPI) handleGatewaySkills(w http.ResponseWriter, r *http.Request) {
 	id := extractUpstreamIDFromGatewayPath(r.URL.Path, "/gateway/skills")
 	if id == "" {
@@ -1255,112 +1255,147 @@ func (api *ManagementAPI) handleGatewaySkills(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_, ok := api.pool.GetUpstream(id)
+	up, ok := api.pool.GetUpstream(id)
 	if !ok {
 		jsonResponse(w, 404, map[string]string{"error": "upstream not found"})
 		return
 	}
 
-	// OpenClaw skill 目录约定
-	scanDirs := []struct {
-		Path     string
-		Category string
-	}{
-		{"/root/openclaw/skills", "global"},
-		{"/root/.openclaw/skills", "user"},
+	// 优先通过 WSS RPC 获取
+	if result, err := api.fetchSkillsViaRPC(up); err == nil {
+		jsonResponse(w, 200, result)
+		return
 	}
 
-	// 扫描 workspace skills
-	workspaceDirs, _ := filepath.Glob("/root/.openclaw/workspace-*/skills/*")
-	for _, wd := range workspaceDirs {
-		if info, err := os.Stat(wd); err == nil && info.IsDir() {
-			// 检查是否有 SKILL.md
-			if _, err := os.Stat(filepath.Join(wd, "SKILL.md")); err == nil {
-				// 提取 workspace ID
-				parts := strings.Split(wd, "/")
-				wsName := ""
-				for _, p := range parts {
-					if strings.HasPrefix(p, "workspace-") {
-						wsName = strings.TrimPrefix(p, "workspace-")
-						break
+	// WSS 不可用时返回空（不再扫描本地文件系统，因为生产环境龙虾卫士和 OpenClaw 不在同一台机器）
+	jsonResponse(w, 200, map[string]interface{}{
+		"skills":  nil,
+		"count":   0,
+		"summary": map[string]int{"global": 0, "user": 0, "workspace": 0},
+		"source":  "unavailable",
+		"warning": "WSS RPC 不可用，无法获取 skills",
+	})
+}
+
+// fetchSkillsViaRPC 通过 WSS RPC 聚合所有 agent 的 skills
+func (api *ManagementAPI) fetchSkillsViaRPC(up *Upstream) (map[string]interface{}, error) {
+	// 1. 获取所有 agent
+	agentsResult, err := api.rpcCall(up, "agents.list", map[string]interface{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	// 提取 agent ID 列表
+	var agentIDs []string
+	if agents, ok := agentsResult["agents"]; ok {
+		if agentList, ok := agents.([]interface{}); ok {
+			for _, a := range agentList {
+				if agentMap, ok := a.(map[string]interface{}); ok {
+					if aid, ok := agentMap["id"].(string); ok && aid != "" {
+						agentIDs = append(agentIDs, aid)
 					}
 				}
-				scanDirs = append(scanDirs, struct {
-					Path     string
-					Category string
-				}{filepath.Dir(wd), "workspace:" + wsName})
 			}
 		}
 	}
 
-	seen := make(map[string]bool)
-	var skills []skillInfo
-
-	for _, sd := range scanDirs {
-		entries, err := os.ReadDir(sd.Path)
+	// 如果拿不到 agent 列表，尝试不传 agentId（使用默认 agent）
+	if len(agentIDs) == 0 {
+		result, err := api.rpcCall(up, "skills.status", map[string]interface{}{})
 		if err != nil {
+			return nil, err
+		}
+		result["source"] = "wss_rpc"
+		return result, nil
+	}
+
+	// 2. 聚合每个 agent 的 skills
+	seen := make(map[string]bool) // 按 category+name 去重
+	var allSkills []interface{}
+	globalCount, userCount, workspaceCount := 0, 0, 0
+
+	for _, agentID := range agentIDs {
+		result, err := api.rpcCall(up, "skills.status", map[string]interface{}{
+			"agentId": agentID,
+		})
+		if err != nil {
+			continue // 跳过失败的 agent
+		}
+
+		skills, ok := result["skills"]
+		if !ok || skills == nil {
 			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
+		skillList, ok := skills.([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, s := range skillList {
+			sm, ok := s.(map[string]interface{})
+			if !ok {
 				continue
 			}
-			name := entry.Name()
-			if name == "." || name == ".." || name == "node_modules" {
-				continue
+			name, _ := sm["name"].(string)
+
+			// RPC 返回 "source" 字段，前端需要 "category"
+			// 映射: openclaw-core/openclaw-extra → global, user → user, workspace → workspace
+			source, _ := sm["source"].(string)
+			category, _ := sm["category"].(string)
+			if category == "" {
+				switch {
+				case source == "openclaw-core" || source == "openclaw-extra":
+					category = "global"
+				case source == "user":
+					category = "user"
+				case strings.HasPrefix(source, "workspace"):
+					category = "workspace:" + agentID
+				default:
+					category = "workspace:" + agentID
+				}
+				sm["category"] = category
 			}
 
-			// 去重 key
-			dedup := sd.Category + ":" + name
+			// has_skill_md: RPC 返回 filePath，有值就说明有 SKILL.md
+			if _, exists := sm["has_skill_md"]; !exists {
+				if fp, _ := sm["filePath"].(string); fp != "" {
+					sm["has_skill_md"] = true
+				}
+			}
+
+			dedup := category + ":" + name
 			if seen[dedup] {
 				continue
 			}
 			seen[dedup] = true
 
-			skillDir := filepath.Join(sd.Path, name)
-			skillMDPath := filepath.Join(skillDir, "SKILL.md")
-			hasSkillMD := false
-			desc := ""
+			// 标记来源 agent
+			sm["agentId"] = agentID
+			allSkills = append(allSkills, sm)
 
-			if data, err := os.ReadFile(skillMDPath); err == nil {
-				hasSkillMD = true
-				desc = extractSkillDescription(string(data))
+			// 统计
+			switch {
+			case category == "global":
+				globalCount++
+			case category == "user":
+				userCount++
+			default:
+				workspaceCount++
 			}
-
-			ws := ""
-			if strings.HasPrefix(sd.Category, "workspace:") {
-				ws = strings.TrimPrefix(sd.Category, "workspace:")
-			}
-
-			skills = append(skills, skillInfo{
-				Name:        name,
-				Description: desc,
-				Category:    sd.Category,
-				Workspace:   ws,
-				HasSkillMD:  hasSkillMD,
-			})
 		}
 	}
 
-	// 按类别排序：global → user → workspace
-	sort.Slice(skills, func(i, j int) bool {
-		ci := categoryOrder(skills[i].Category)
-		cj := categoryOrder(skills[j].Category)
-		if ci != cj {
-			return ci < cj
-		}
-		return skills[i].Name < skills[j].Name
-	})
-
-	jsonResponse(w, 200, map[string]interface{}{
-		"skills": skills,
-		"count":  len(skills),
+	return map[string]interface{}{
+		"skills": allSkills,
+		"count":  len(allSkills),
 		"summary": map[string]int{
-			"global":    countByCategory(skills, "global"),
-			"user":      countByCategory(skills, "user"),
-			"workspace": countByCategoryPrefix(skills, "workspace:"),
+			"global":    globalCount,
+			"user":      userCount,
+			"workspace": workspaceCount,
 		},
-	})
+		"source":   "wss_rpc",
+		"agentIds": agentIDs,
+	}, nil
 }
 
 // extractSkillDescription 从 SKILL.md 提取 description 字段
