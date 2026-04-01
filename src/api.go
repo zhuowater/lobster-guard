@@ -603,6 +603,8 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleListRoutePolicies(w, r)
 	case path == "/api/v1/route-policies" && method == "POST":
 		api.handleCreateRoutePolicy(w, r)
+	case path == "/api/v1/route-policies/reorder" && method == "POST":
+		api.handleReorderRoutePolicies(w, r)
 	case path == "/api/v1/route-policies/test" && method == "POST":
 		api.handleTestRoutePolicy(w, r)
 	case strings.HasPrefix(path, "/api/v1/route-policies/") && method == "PUT":

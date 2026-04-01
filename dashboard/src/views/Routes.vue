@@ -357,20 +357,13 @@ async function doPolicySave() {
 
 // ==================== Policy Priority (Up/Down) ====================
 async function swapPolicies(idxA, idxB) {
-  // Delete idxA, re-insert at idxB position by re-saving the whole list
   const list = [...policies.value]
   const temp = list[idxA]
   list[idxA] = list[idxB]
   list[idxB] = temp
   try {
-    // Delete all policies then recreate in order
-    for (let i = policies.value.length - 1; i >= 0; i--) {
-      await apiDelete('/api/v1/route-policies/' + i)
-    }
-    for (const p of list) {
-      await apiPost('/api/v1/route-policies', { match: p.match || p.Match, upstream_id: p.upstream_id || '' })
-    }
-    await loadPolicies()
+    const result = await apiPost('/api/v1/route-policies/reorder', { policies: list })
+    policies.value = result.policies || []
     showToast('策略顺序已更新', 'success')
   } catch (e) { showToast('调整优先级失败: ' + e.message, 'error'); await loadPolicies() }
 }
