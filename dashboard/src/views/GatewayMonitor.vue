@@ -682,7 +682,7 @@
                           <div class="skills-search">
                             <input v-model="skillSearch" placeholder="搜索 skill 名称或描述..." class="skills-search-input" />
                             <span class="skills-search-count" v-if="skillSearch">{{ filteredSkills.length }} / {{ skillData.skills.length }}</span>
-                            <button class="btn btn-xs btn-primary" style="margin-left:8px" @click="openSkillInstall">+ 安装</button>
+                            <button class="btn btn-xs btn-primary" style="white-space:nowrap;flex-shrink:0" @click="openSkillInstall">+ 安装</button>
                           </div>
                           <div v-if="skillsLoading" class="skel-lines"><div class="skel-line" v-for="i in 6" :key="i"></div></div>
                           <template v-else>
@@ -2472,10 +2472,10 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 /* Skills View */
 .aoc-skills-view { animation:fadeIn .3s; }
 .skills-stat-strip { display:flex; gap:8px; margin-bottom:16px; }
-.skills-search { margin-bottom:16px; position:relative; }
-.skills-search-input { width:100%; padding:8px 12px; background:var(--bg-base,#0f172a); border:1px solid var(--border-subtle,#334155); border-radius:8px; color:var(--text-primary,#e2e8f0); font-size:13px; outline:none; box-sizing:border-box; transition:border-color .15s; }
+.skills-search { margin-bottom:16px; position:relative; display:flex; align-items:center; gap:8px; }
+.skills-search-input { flex:1; min-width:0; padding:8px 12px; background:var(--bg-base,#0f172a); border:1px solid var(--border-subtle,#334155); border-radius:8px; color:var(--text-primary,#e2e8f0); font-size:13px; outline:none; box-sizing:border-box; transition:border-color .15s; }
 .skills-search-input:focus { border-color:#6366f1; }
-.skills-search-count { position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:11px; color:var(--text-tertiary,#64748b); }
+.skills-search-count { position:absolute; right:70px; top:50%; transform:translateY(-50%); font-size:11px; color:var(--text-tertiary,#64748b); pointer-events:none; }
 .skill-group { background:var(--bg-base,#0f172a); border:1px solid var(--border-subtle,#334155); border-radius:10px; overflow:hidden; margin-bottom:10px; }
 .skill-group-header { display:flex; align-items:center; gap:8px; padding:10px 14px; cursor:pointer; user-select:none; transition:background .15s; }
 .skill-group-header:hover { background:rgba(99,102,241,.04); }
