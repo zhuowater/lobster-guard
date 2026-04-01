@@ -485,10 +485,10 @@ func (c *GatewayWSClient) sendConnectAsync(conn *websocket.Conn, token, nonce st
 		MinProtocol: 3,
 		MaxProtocol: 3,
 		Client: gwClientInfo{
-			ID:         "gateway-client",      // 不用 control-ui，避免触发 HTTPS/device 安全检查
+			ID:         "openclaw-control-ui", // 必须用 control-ui 才能保留 operator.admin scopes
 			Version:    "v34.0-lobster-guard",
 			Platform:   "linux",
-			Mode:       "backend",             // backend 模式，非浏览器
+			Mode:       "webchat",             // control-ui 要求的 mode
 			InstanceID: c.instanceID,
 		},
 		Role:   "operator",
