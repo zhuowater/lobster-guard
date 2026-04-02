@@ -405,6 +405,16 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestPath = stripped
 	}
 
+	// v20.2+: 污染逆转 — 请求侧 pre-inject（在 LLM 看到数据之前注入"数据不可信"提示）
+	if lp.reversalEngine != nil {
+		injected, record := lp.reversalEngine.PreInject(taintTraceID, bodyBytes)
+		if record != nil {
+			bodyBytes = injected
+			log.Printf("[LLM代理] 🛡️ 污染逆转 pre-inject: trace=%s taint_trace=%s template=%s",
+				traceID, taintTraceID, record.TemplateID)
+		}
+	}
+
 	// v26.2: PII 隐藏 — 向上游发送前替换高机密字段
 	if lp.ifcEngine != nil && lp.ifcEngine.config.HidingEnabled {
 		hideResult := lp.ifcEngine.HideContent(traceID, string(bodyBytes), lp.ifcEngine.config.HidingThreshold)
