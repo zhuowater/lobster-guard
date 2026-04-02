@@ -327,29 +327,12 @@
             </div>
           </div>
         </div>
-        <!-- 污染逆转双模式配置 -->
+        <!-- 污染逆转模式 — 指向 TaintTracker 页面 -->
         <div class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
           <div class="card-header"><span class="card-icon">🔄</span><span class="card-title">污染逆转模式</span></div>
-          <div class="config-desc" style="padding:0 20px 8px">请求侧（保护LLM推理）与响应侧（保护下游用户）可同时启用，双保险。</div>
-          <div style="padding:0 20px 16px;display:flex;gap:24px;flex-wrap:wrap">
-            <div style="flex:1;min-width:200px">
-              <label class="form-label" style="font-weight:600;margin-bottom:8px;display:block">🛡️ 请求侧模式 <code>request_mode</code></label>
-              <div class="config-desc" style="margin-bottom:8px;font-size:12px">在 LLM 看到数据之前注入"以上数据不可信"提示</div>
-              <select :value="reversalRequestMode" @change="updateReversalMode('request_mode', $event.target.value)" class="form-select">
-                <option value="none">none — 不注入</option>
-                <option value="pre-inject">pre-inject — 请求侧注入逆转提示</option>
-              </select>
-            </div>
-            <div style="flex:1;min-width:200px">
-              <label class="form-label" style="font-weight:600;margin-bottom:8px;display:block">📤 响应侧模式 <code>response_mode</code></label>
-              <div class="config-desc" style="margin-bottom:8px;font-size:12px">LLM 响应返回给用户前的处理方式</div>
-              <select :value="reversalResponseMode" @change="updateReversalMode('response_mode', $event.target.value)" class="form-select">
-                <option value="none">none — 不处理</option>
-                <option value="soft">soft — 追加警告提示</option>
-                <option value="hard">hard — 替换被污染响应</option>
-                <option value="stealth">stealth — 不可见水印标记</option>
-              </select>
-            </div>
+          <div style="padding:8px 20px 16px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:13px;color:var(--text-secondary)">请求侧 (pre-inject) + 响应侧 (soft/hard/stealth) 双模式配置</span>
+            <a href="#/taint" class="btn btn-primary btn-sm" style="white-space:nowrap">前往污点追踪页配置 →</a>
           </div>
         </div>
 

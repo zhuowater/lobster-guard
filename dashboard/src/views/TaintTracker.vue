@@ -292,13 +292,22 @@
         <div class="config-panel">
           <h3 class="section-title"><Icon name="refresh" :size="16" /> 逆转引擎配置</h3>
           <div class="config-field">
-            <label class="field-label">逆转模式</label>
-            <select v-model="reversalConfig.mode" class="field-select">
-              <option value="soft">soft — 标记脱敏（保留结构，替换敏感值）</option>
-              <option value="hard">hard — 完全移除（彻底删除污染内容）</option>
-              <option value="stealth">stealth — 静默替换（无感知替换）</option>
+            <label class="field-label">🛡️ 请求侧模式 <code>request_mode</code></label>
+            <select v-model="reversalConfig.request_mode" class="field-select">
+              <option value="none">none — 不注入</option>
+              <option value="pre-inject">pre-inject — LLM请求前注入"数据不可信"提示</option>
             </select>
-            <span class="field-hint">检测到泄露时对数据的处理方式</span>
+            <span class="field-hint">在 LLM 看到数据之前注入逆转提示，防止 LLM 被污染数据驱动执行危险操作</span>
+          </div>
+          <div class="config-field">
+            <label class="field-label">📤 响应侧模式 <code>response_mode</code></label>
+            <select v-model="reversalConfig.response_mode" class="field-select">
+              <option value="none">none — 不处理</option>
+              <option value="soft">soft — 追加警告提示</option>
+              <option value="hard">hard — 替换被污染响应</option>
+              <option value="stealth">stealth — 不可见水印标记</option>
+            </select>
+            <span class="field-hint">LLM 响应返回给用户前的处理方式。两个模式可同时启用（双保险）</span>
           </div>
           <div class="config-field" v-if="reversalConfig.templates && reversalConfig.templates.length">
             <label class="field-label">逆转模板</label>
@@ -420,7 +429,7 @@ const scanning = ref(false)
 const scanResult = ref(null)
 
 const taintConfig = reactive({ action: 'warn', ttl_minutes: 60 })
-const reversalConfig = reactive({ mode: 'soft', templates: [] })
+const reversalConfig = reactive({ mode: 'soft', request_mode: 'none', response_mode: 'soft', templates: [] })
 const autoCleanStrategy = ref('auto')
 const savingTaint = ref(false)
 const savingReversal = ref(false)
@@ -553,6 +562,8 @@ async function loadReversalConfig() {
   try {
     const d = await api('/api/v1/reversal/config')
     if (d.mode) reversalConfig.mode = d.mode
+    reversalConfig.request_mode = d.request_mode || 'none'
+    reversalConfig.response_mode = d.response_mode || d.mode || 'soft'
     if (d.templates) reversalConfig.templates = d.templates
   } catch (_) {}
 }
@@ -584,7 +595,7 @@ async function saveTaintConfig() {
 async function saveReversalConfig() {
   savingReversal.value = true
   try {
-    await apiPut('/api/v1/reversal/config', { mode: reversalConfig.mode })
+    await apiPut('/api/v1/reversal/config', { mode: reversalConfig.response_mode, request_mode: reversalConfig.request_mode, response_mode: reversalConfig.response_mode })
     showToast('✅ 逆转引擎配置已保存', 'success')
   } catch (e) {
     showToast('❌ 保存失败: ' + e.message, 'error')
