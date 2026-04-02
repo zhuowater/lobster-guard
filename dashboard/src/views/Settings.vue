@@ -802,10 +802,14 @@ const engineOffCount = computed(() => engineList.length - engineOnCount.value)
 
 // configPath → Config JSON 的取值路径映射
 const engineConfigPaths = {
-  engine_inbound_detect: 'inbound_detect_enabled',
-  engine_session_detect: 'session_detect_enabled',
-  engine_llm_detect: 'llm_detect_enabled',
-  engine_semantic: 'semantic_detector.enabled',
+  // top-level bool 字段：Go JSON 序列化为 PascalCase
+  engine_inbound_detect: 'InboundDetectEnabled',
+  engine_session_detect: 'SessionDetectEnabled',
+  engine_llm_detect: 'LLMDetectEnabled',
+  engine_envelope: 'EnvelopeEnabled',
+  engine_evolution: 'EvolutionEnabled',
+  // 嵌套结构体字段：Go JSON 保持小写 key
+  engine_semantic: 'SemanticDetector.enabled',
   engine_honeypot_deep: 'honeypot_deep.enabled',
   engine_singularity: 'singularity.enabled',
   engine_ifc: 'ifc.enabled',
@@ -817,11 +821,9 @@ const engineConfigPaths = {
   engine_capability: 'capability.enabled',
   engine_deviation: 'deviation.enabled',
   engine_counterfactual: 'counterfactual.enabled',
-  engine_envelope: 'envelope_enabled',
-  engine_evolution: 'evolution_enabled',
   engine_adaptive: 'adaptive_decision.enabled',
-  engine_taint_tracker: 'taint_tracker.enabled',
-  engine_taint_reversal: 'taint_reversal.enabled',
+  engine_taint_tracker: 'TaintTracker.enabled',
+  engine_taint_reversal: 'TaintReversal.enabled',
   engine_event_bus: 'event_bus.enabled',
 }
 
