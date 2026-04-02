@@ -327,6 +327,32 @@
             </div>
           </div>
         </div>
+        <!-- 污染逆转双模式配置 -->
+        <div class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
+          <div class="card-header"><span class="card-icon">🔄</span><span class="card-title">污染逆转模式</span></div>
+          <div class="config-desc" style="padding:0 20px 8px">请求侧（保护LLM推理）与响应侧（保护下游用户）可同时启用，双保险。</div>
+          <div style="padding:0 20px 16px;display:flex;gap:24px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+              <label class="form-label" style="font-weight:600;margin-bottom:8px;display:block">🛡️ 请求侧模式 <code>request_mode</code></label>
+              <div class="config-desc" style="margin-bottom:8px;font-size:12px">在 LLM 看到数据之前注入"以上数据不可信"提示</div>
+              <select :value="reversalRequestMode" @change="updateReversalMode('request_mode', $event.target.value)" class="form-select">
+                <option value="none">none — 不注入</option>
+                <option value="pre-inject">pre-inject — 请求侧注入逆转提示</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:200px">
+              <label class="form-label" style="font-weight:600;margin-bottom:8px;display:block">📤 响应侧模式 <code>response_mode</code></label>
+              <div class="config-desc" style="margin-bottom:8px;font-size:12px">LLM 响应返回给用户前的处理方式</div>
+              <select :value="reversalResponseMode" @change="updateReversalMode('response_mode', $event.target.value)" class="form-select">
+                <option value="none">none — 不处理</option>
+                <option value="soft">soft — 追加警告提示</option>
+                <option value="hard">hard — 替换被污染响应</option>
+                <option value="stealth">stealth — 不可见水印标记</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
           <div class="card-header"><span class="card-icon">🧩</span><span class="card-title">CaMeL 三引擎独立开关</span></div>
           <div class="engine-list">
@@ -773,6 +799,8 @@ function formatQPS(v) {
 const enginesLoading = ref(false)
 const enginesLoaded = ref(false)
 const engineSettings = reactive({})
+const reversalRequestMode = ref('none')
+const reversalResponseMode = ref('soft')
 const engineList = [
   { name: '入站检测', configPath: 'engine_inbound_detect', desc: 'AC自动机+正则+PII三阶段检测' },
   { name: '会话检测', configPath: 'engine_session_detect', desc: '多轮会话上下文关联+风险累积' },
@@ -839,6 +867,11 @@ async function loadEngineSettings() {
       for (const p of parts) { val = val?.[p] }
       engineSettings[eng.configPath] = val !== false && val !== undefined
     }
+    // 污染逆转双模式
+    const tr = d?.TaintReversal || d?.taint_reversal || {}
+    reversalRequestMode.value = tr.request_mode || tr.RequestMode || 'none'
+    reversalResponseMode.value = tr.response_mode || tr.ResponseMode || tr.mode || tr.Mode || 'soft'
+
     enginesLoaded.value = true
   } catch (e) { showToast('加载引擎配置失败: ' + e.message, 'error') }
   enginesLoading.value = false
@@ -856,6 +889,17 @@ async function toggleEngine(eng, event) {
     showToast('切换失败: ' + e.message, 'error')
   }
   eng.saving = false
+}
+
+async function updateReversalMode(field, value) {
+  try {
+    await apiPut('/api/v1/config/settings', { [`taint_reversal_${field}`]: value })
+    if (field === 'request_mode') reversalRequestMode.value = value
+    else reversalResponseMode.value = value
+    showToast(`污染逆转 ${field} 已设为 ${value}`, 'success')
+  } catch (e) {
+    showToast('更新失败: ' + e.message, 'error')
+  }
 }
 
 // === Tab 3: AC 智能分级 ===

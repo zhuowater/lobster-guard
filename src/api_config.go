@@ -1286,6 +1286,26 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		}
 	}
 
+	// 污染逆转双模式字段
+	if v, ok := req["taint_reversal_request_mode"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.TaintReversal.RequestMode = s
+		sub, _ := raw["taint_reversal"].(map[string]interface{})
+		if sub == nil { sub = map[string]interface{}{} }
+		sub["request_mode"] = s
+		raw["taint_reversal"] = sub
+		updated = append(updated, "taint_reversal_request_mode")
+	}
+	if v, ok := req["taint_reversal_response_mode"]; ok {
+		s := fmt.Sprintf("%v", v)
+		api.cfg.TaintReversal.ResponseMode = s
+		sub, _ := raw["taint_reversal"].(map[string]interface{})
+		if sub == nil { sub = map[string]interface{}{} }
+		sub["response_mode"] = s
+		raw["taint_reversal"] = sub
+		updated = append(updated, "taint_reversal_response_mode")
+	}
+
 	if len(updated) == 0 {
 		jsonResponse(w, 400, map[string]string{"error": "no fields to update"})
 		return
