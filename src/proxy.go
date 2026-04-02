@@ -157,7 +157,7 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 		}
 
 		// 白名单检查
-		skipDetect := !ip.enabled || ip.whitelist[senderID] || msgText == ""
+		skipDetect := !ip.cfg.InboundDetectEnabled || ip.whitelist[senderID] || msgText == ""
 
 		// 安检（v5.1: 使用 Pipeline 统一编排 keyword→regex→pii→session→llm）
 		var detectResult DetectResult
@@ -682,7 +682,7 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if proxy == nil { w.WriteHeader(502); w.Write([]byte(`{"errcode":502,"errmsg":"no upstream available"}`)); return }
 
 	// --- 8. 安全检测 ---
-	skipDetect := !ip.enabled || ip.whitelist[senderID] || !decryptOK || msgText == ""
+	skipDetect := !ip.cfg.InboundDetectEnabled || ip.whitelist[senderID] || !decryptOK || msgText == ""
 	var detectResult DetectResult
 	if !skipDetect {
 		ch := make(chan DetectResult, 1)
@@ -879,7 +879,8 @@ type OutboundProxy struct {
 	outboundEngine *OutboundRuleEngine
 	logger         *AuditLogger
 	proxy          *httputil.ReverseProxy
-	enabled        bool
+	enabled        bool // deprecated: 用 cfg.OutboundAuditEnabled 代替
+	cfg            *Config
 	metrics        *MetricsCollector // v3.4 指标采集器
 	ruleHits       *RuleHitStats     // v3.6 规则命中统计
 	alertNotifier  *AlertNotifier    // v3.10 告警通知器
@@ -918,7 +919,7 @@ func NewOutboundProxy(cfg *Config, channel ChannelPlugin, inboundEngine *RuleEng
 	}
 	return &OutboundProxy{
 		channel: channel, inboundEngine: inboundEngine, outboundEngine: outboundEngine,
-		logger: logger, proxy: p, enabled: cfg.OutboundAuditEnabled,
+		logger: logger, proxy: p, enabled: cfg.OutboundAuditEnabled, cfg: cfg,
 		metrics: metrics, ruleHits: ruleHits, honeypot: honeypot,
 	}, nil
 }
@@ -933,7 +934,7 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	start := time.Now()
-	if !op.enabled || !op.channel.ShouldAuditOutbound(r.URL.Path) {
+	if !op.cfg.OutboundAuditEnabled || !op.channel.ShouldAuditOutbound(r.URL.Path) {
 		op.proxy.ServeHTTP(w, r)
 		return
 	}
