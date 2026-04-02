@@ -149,9 +149,10 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	}
 
 	// --- 会话检测器 ---
-	if cfg.SessionDetectEnabled {
+	// 总是初始化，运行时靠 cfg.SessionDetectEnabled 控制
+	{
 		e.SessionDetector = NewSessionDetector(SessionDetectorConfig{
-			Enabled: true,
+			Enabled: cfg.SessionDetectEnabled,
 			RiskThreshold: func() float64 { if cfg.SessionRiskThreshold > 0 { return cfg.SessionRiskThreshold }; return 10 }(),
 			Window:    func() int { if cfg.SessionWindow > 0 { return cfg.SessionWindow }; return 20 }(),
 			DecayRate: func() float64 { if cfg.SessionDecayRate > 0 { return cfg.SessionDecayRate }; return 1 }(),
@@ -161,9 +162,10 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	}
 
 	// --- LLM 检测器 ---
-	if cfg.LLMDetectEnabled {
+	// 总是初始化，运行时靠 cfg.LLMDetectEnabled 控制
+	{
 		e.LLMDetector = NewLLMDetector(LLMDetectorConfig{
-			Enabled: true, Endpoint: cfg.LLMDetectEndpoint, APIKey: cfg.LLMDetectAPIKey,
+			Enabled: cfg.LLMDetectEnabled, Endpoint: cfg.LLMDetectEndpoint, APIKey: cfg.LLMDetectAPIKey,
 			Model: cfg.LLMDetectModel, Timeout: cfg.LLMDetectTimeout, Mode: cfg.LLMDetectMode, Prompt: cfg.LLMDetectPrompt,
 		})
 		fmt.Printf("[初始化] ✅ LLM 检测: endpoint=%s, model=%s, mode=%s\n",
@@ -226,22 +228,20 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	fmt.Println("[初始化] ✅ 布局引擎已就绪 (面板拖拽 + 折叠 + 预设模板)")
 
 	// --- 事件总线 ---
-	if cfg.EventBus.Enabled {
-		e.EventBus = NewEventBus(db, cfg)
-		fmt.Println("[初始化] ✅ 事件总线已启用")
-	} else {
-		fmt.Println("[初始化] ⚠️ 事件总线: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.EventBus.Enabled 控制
+	e.EventBus = NewEventBus(db, cfg)
+	fmt.Printf("[初始化] ✅ 事件总线已就绪 (enabled=%v)\n", cfg.EventBus.Enabled)
 
 	// --- 执行信封 ---
-	if cfg.EnvelopeEnabled && cfg.EnvelopeSecretKey != "" {
+	// 总是初始化（需要 SecretKey），运行时靠 cfg.EnvelopeEnabled 控制
+	{
 		batchSize := cfg.EnvelopeBatchSize
 		if batchSize <= 0 { batchSize = 64 }
-		e.EnvelopeMgr = NewEnvelopeManagerWithBatchSize(db, cfg.EnvelopeSecretKey, batchSize)
+		secretKey := cfg.EnvelopeSecretKey
+		if secretKey == "" { secretKey = "lobster-guard-default-key" }
+		e.EnvelopeMgr = NewEnvelopeManagerWithBatchSize(db, secretKey, batchSize)
 		e.EnvelopeMgr.startAutoFlush()
-		fmt.Println("[初始化] ✅ 执行信封已启用（密码学审计链）")
-	} else {
-		fmt.Println("[初始化] ⚠️ 执行信封: 未启用")
+		fmt.Printf("[初始化] ✅ 执行信封已就绪 (enabled=%v)\n", cfg.EnvelopeEnabled)
 	}
 
 	// --- 事件总线回调 ---
@@ -257,14 +257,15 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	}
 
 	// --- 对抗性自进化 ---
+	// 总是初始化，运行时靠 cfg.EvolutionEnabled 控制
+	e.EvolutionEngine = NewEvolutionEngine(db, e.RedTeamEngine, engine, outboundEngine, llmRuleEngine, e.EventBus)
 	if cfg.EvolutionEnabled {
-		e.EvolutionEngine = NewEvolutionEngine(db, e.RedTeamEngine, engine, outboundEngine, llmRuleEngine, e.EventBus)
 		intervalMin := cfg.EvolutionIntervalMin
 		if intervalMin <= 0 { intervalMin = 360 }
 		e.EvolutionEngine.StartAutoEvolution(intervalMin)
 		fmt.Printf("[初始化] ✅ 对抗性自进化已启用 (每 %d 分钟)\n", intervalMin)
 	} else {
-		fmt.Println("[初始化] ⚠️ 对抗性自进化: 未启用")
+		fmt.Printf("[初始化] ✅ 对抗性自进化已就绪 (enabled=%v)\n", cfg.EvolutionEnabled)
 	}
 
 	// --- 规则建议队列 ---
@@ -275,36 +276,24 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	fmt.Println("[初始化] ✅ 规则建议队列已启用")
 
 	// --- 自适应决策 ---
-	if cfg.AdaptiveDecision.Enabled {
-		e.AdaptiveEngine = NewAdaptiveDecisionEngine(db, e.EnvelopeMgr, cfg.AdaptiveDecision)
-		fmt.Println("[初始化] ✅ 自适应决策引擎已启用（贝叶斯误伤率优化）")
-	} else {
-		fmt.Println("[初始化] ⚠️ 自适应决策引擎: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.AdaptiveDecision.Enabled 控制
+	e.AdaptiveEngine = NewAdaptiveDecisionEngine(db, e.EnvelopeMgr, cfg.AdaptiveDecision)
+	fmt.Printf("[初始化] ✅ 自适应决策引擎已就绪 (enabled=%v)\n", cfg.AdaptiveDecision.Enabled)
 
 	// --- 奇点蜜罐 ---
-	if cfg.Singularity.Enabled {
-		e.SingularityEngine = NewSingularityEngine(db, honeypotEngine, e.EnvelopeMgr, cfg.Singularity)
-		fmt.Println("[初始化] ✅ 奇点蜜罐已启用")
-	} else {
-		fmt.Println("[初始化] ⚠️ 奇点蜜罐: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.Singularity.Enabled 控制
+	e.SingularityEngine = NewSingularityEngine(db, honeypotEngine, e.EnvelopeMgr, cfg.Singularity)
+	fmt.Printf("[初始化] ✅ 奇点蜜罐已就绪 (enabled=%v)\n", cfg.Singularity.Enabled)
 
 	// --- 蜜罐深度交互 ---
-	if cfg.HoneypotDeep.Enabled {
-		e.HoneypotDeep = NewHoneypotDeepEngine(db, honeypotEngine, e.EvolutionEngine, e.EventBus, cfg.HoneypotDeep)
-		fmt.Println("[初始化] ✅ 蜜罐深度交互引擎已启用（忠诚度曲线 + 自进化回馈）")
-	} else {
-		fmt.Println("[初始化] ⚠️ 蜜罐深度交互引擎: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.HoneypotDeep.Enabled 控制
+	e.HoneypotDeep = NewHoneypotDeepEngine(db, honeypotEngine, e.EvolutionEngine, e.EventBus, cfg.HoneypotDeep)
+	fmt.Printf("[初始化] ✅ 蜜罐深度交互引擎已就绪 (enabled=%v)\n", cfg.HoneypotDeep.Enabled)
 
 	// --- 语义检测 ---
-	if cfg.SemanticDetector.Enabled {
-		e.SemanticDetect = NewSemanticDetector(db, cfg.SemanticDetector)
-		fmt.Printf("[初始化] ✅ 语义检测引擎已启用 (阈值=%.1f, 模式库=%d)\n", cfg.SemanticDetector.Threshold, len(e.SemanticDetect.attackVectors))
-	} else {
-		fmt.Println("[初始化] ⚠️ 语义检测引擎: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.SemanticDetector.Enabled 控制
+	e.SemanticDetect = NewSemanticDetector(db, cfg.SemanticDetector)
+	fmt.Printf("[初始化] ✅ 语义检测引擎已就绪 (enabled=%v, 模式库=%d)\n", cfg.SemanticDetector.Enabled, len(e.SemanticDetect.attackVectors))
 
 	// --- 路径级策略 ---
 	e.PathPolicyEngine = NewPathPolicyEngine(db)
@@ -353,67 +342,45 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 		len(e.IFCEngine.ListSourceRules()), len(e.IFCEngine.ListToolRequirements()),
 		cfg.IFC.QuarantineEnabled, cfg.IFC.HidingEnabled)
 
-	if cfg.IFC.QuarantineEnabled {
-		e.IFCQuarantine = NewIFCQuarantine(e.IFCEngine, pool)
-		if llmProxy != nil { llmProxy.ifcQuarantine = e.IFCQuarantine }
-		fmt.Printf("[初始化] ✅ IFC 隔离LLM已启用 (上游=%s)\n", cfg.IFC.QuarantineUpstream)
-	} else {
-		fmt.Printf("[初始化] ℹ️  IFC 隔离LLM未启用\n")
-	}
+	// 总是初始化，运行时靠 cfg.IFC.QuarantineEnabled 控制
+	e.IFCQuarantine = NewIFCQuarantine(e.IFCEngine, pool)
+	if llmProxy != nil { llmProxy.ifcQuarantine = e.IFCQuarantine }
+	fmt.Printf("[初始化] ✅ IFC 隔离LLM已就绪 (enabled=%v)\n", cfg.IFC.QuarantineEnabled)
 
 	if llmProxy != nil { llmProxy.auditLogger = logger }
 
 	// --- 工具策略 ---
-	if cfg.ToolPolicy.Enabled {
-		e.ToolPolicy = NewToolPolicyEngine(db, cfg.ToolPolicy)
-		fmt.Printf("[初始化] ✅ 工具策略引擎已启用 (规则=%d, 默认=%s)\n", len(e.ToolPolicy.ListRules()), cfg.ToolPolicy.DefaultAction)
-	} else {
-		fmt.Println("[初始化] ⚠️ 工具策略引擎: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.ToolPolicy.Enabled 控制
+	e.ToolPolicy = NewToolPolicyEngine(db, cfg.ToolPolicy)
+	fmt.Printf("[初始化] ✅ 工具策略引擎已就绪 (enabled=%v, 规则=%d)\n", cfg.ToolPolicy.Enabled, len(e.ToolPolicy.ListRules()))
 	if llmProxy != nil {
 		llmProxy.toolPolicy = e.ToolPolicy
 		llmProxy.pathPolicyEngine = e.PathPolicyEngine
 	}
 
 	// --- 污染追踪 ---
-	if cfg.TaintTracker.Enabled {
-		e.TaintTracker = NewTaintTracker(db, cfg.TaintTracker)
-		e.TaintTracker.SetIFCEngine(e.IFCEngine)
-		fmt.Printf("[初始化] ✅ 信息流污染追踪已启用 (action=%s, ttl=%d分钟, PII模式=%d)\n",
-			e.TaintTracker.config.Action, e.TaintTracker.config.TTLMinutes, len(piiPatterns))
-	} else {
-		fmt.Println("[初始化] ⚠️ 信息流污染追踪: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.TaintTracker.Enabled 控制
+	e.TaintTracker = NewTaintTracker(db, cfg.TaintTracker)
+	e.TaintTracker.SetIFCEngine(e.IFCEngine)
+	fmt.Printf("[初始化] ✅ 信息流污染追踪已就绪 (enabled=%v)\n", cfg.TaintTracker.Enabled)
 	if llmProxy != nil { llmProxy.taintTracker = e.TaintTracker }
 
 	// --- 污染链逆转 ---
-	if cfg.TaintReversal.Enabled {
-		e.ReversalEngine = NewTaintReversalEngine(db, e.TaintTracker, e.EnvelopeMgr, cfg.TaintReversal)
-		fmt.Printf("[初始化] ✅ 污染链逆转已启用 (mode=%s, 模板=%d)\n",
-			e.ReversalEngine.GetConfig().Mode, len(e.ReversalEngine.GetTemplates()))
-	} else {
-		fmt.Println("[初始化] ⚠️ 污染链逆转: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.TaintReversal.Enabled 控制
+	e.ReversalEngine = NewTaintReversalEngine(db, e.TaintTracker, e.EnvelopeMgr, cfg.TaintReversal)
+	fmt.Printf("[初始化] ✅ 污染链逆转已就绪 (enabled=%v)\n", cfg.TaintReversal.Enabled)
 	if llmProxy != nil { llmProxy.reversalEngine = e.ReversalEngine }
 
 	// --- LLM 缓存 ---
-	if cfg.LLMCache.Enabled {
-		e.LLMCache = NewLLMCache(db, cfg.LLMCache)
-		fmt.Printf("[初始化] ✅ LLM 响应缓存已启用 (max=%d, ttl=%d分钟, similarity=%.2f, 租户隔离=%v)\n",
-			e.LLMCache.config.MaxEntries, e.LLMCache.config.TTLMinutes, e.LLMCache.config.SimilarityMin, e.LLMCache.config.TenantIsolation)
-	} else {
-		fmt.Println("[初始化] ⚠️ LLM 响应缓存: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.LLMCache.Enabled 控制
+	e.LLMCache = NewLLMCache(db, cfg.LLMCache)
+	fmt.Printf("[初始化] ✅ LLM 响应缓存已就绪 (enabled=%v)\n", cfg.LLMCache.Enabled)
 	if llmProxy != nil { llmProxy.llmCache = e.LLMCache }
 
 	// --- API Gateway ---
-	if cfg.APIGateway.Enabled {
-		e.APIGateway = NewAPIGateway(db, cfg.APIGateway)
-		fmt.Printf("[初始化] ✅ API Gateway 已启用 (JWT=%v, APIKey=%v, 路由=%d)\n",
-			cfg.APIGateway.JWTEnabled, cfg.APIGateway.APIKeyEnabled, len(e.APIGateway.ListRoutes()))
-	} else {
-		fmt.Println("[初始化] ⚠️ API Gateway: 未启用")
-	}
+	// 总是初始化，运行时靠 cfg.APIGateway.Enabled 控制
+	e.APIGateway = NewAPIGateway(db, cfg.APIGateway)
+	fmt.Printf("[初始化] ✅ API Gateway 已就绪 (enabled=%v)\n", cfg.APIGateway.Enabled)
 	if llmProxy != nil { llmProxy.apiGateway = e.APIGateway }
 
 	// --- K8s ---
