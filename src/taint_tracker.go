@@ -110,6 +110,8 @@ type TaintTracker struct {
 	config TaintConfig
 	// 内存中活跃污染标签缓存：trace_id → TaintEntry
 	active map[string]*TaintEntry
+	// 自定义污点规则（运行时热更新）
+	customRules []piiPatternEntry
 	// 统计
 	totalMarked  int64
 	totalBlocked int64
@@ -118,6 +120,16 @@ type TaintTracker struct {
 	stopCh chan struct{}
 	// v31.0: IFC 引擎联动
 	ifcEngine *IFCEngine
+}
+
+// CustomTaintRule 自定义污点规则（持久化到DB）
+type CustomTaintRule struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Pattern string `json:"pattern"` // 正则表达式
+	Label   string `json:"label"`   // 污点标签：PII-TAINTED / CREDENTIAL-TAINTED / CONFIDENTIAL / INTERNAL-ONLY / 自定义
+	Enabled bool   `json:"enabled"`
+	Desc    string `json:"desc"`
 }
 
 // SetIFCEngine 设置 IFC 引擎引用（v31.0 污点→IFC 统一）
@@ -172,6 +184,15 @@ func (tt *TaintTracker) initDB() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_taint_ts ON taint_entries(timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_taint_expired ON taint_entries(expired)`,
+		// 自定义污点规则表
+		`CREATE TABLE IF NOT EXISTS taint_custom_rules (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			pattern TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT 'PII-TAINTED',
+			enabled INTEGER DEFAULT 1,
+			desc_text TEXT DEFAULT ''
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := tt.db.Exec(s); err != nil {
@@ -247,6 +268,30 @@ func ScanPII(text string) (matchedNames []string, labels []string) {
 	return
 }
 
+// ScanAll 扫描文本，同时检查内置规则 + 自定义规则（去重标签）
+func (tt *TaintTracker) ScanAll(text string) (matchedNames []string, labels []string) {
+	matchedNames, labels = ScanPII(text)
+
+	tt.mu.RLock()
+	customs := tt.customRules
+	tt.mu.RUnlock()
+
+	labelSet := make(map[string]bool)
+	for _, l := range labels {
+		labelSet[l] = true
+	}
+	for _, cr := range customs {
+		if cr.Pattern != nil && cr.Pattern.MatchString(text) {
+			matchedNames = append(matchedNames, cr.Name)
+			if !labelSet[cr.Label] {
+				labelSet[cr.Label] = true
+				labels = append(labels, cr.Label)
+			}
+		}
+	}
+	return
+}
+
 // MarkTainted 扫描 text 匹配 PII 模式，标记污染
 // 返回 TaintEntry（没有匹配到任何 PII 则返回 nil）
 func (tt *TaintTracker) MarkTainted(traceID string, text string, source string) *TaintEntry {
@@ -254,7 +299,19 @@ func (tt *TaintTracker) MarkTainted(traceID string, text string, source string) 
 		return nil
 	}
 
+	// 扫描内置规则
 	matchedNames, labels := ScanPII(text)
+
+	// 扫描自定义规则
+	tt.mu.RLock()
+	customs := tt.customRules
+	tt.mu.RUnlock()
+	for _, cr := range customs {
+		if cr.Pattern != nil && cr.Pattern.MatchString(text) {
+			matchedNames = append(matchedNames, cr.Name)
+			labels = append(labels, cr.Label)
+		}
+	}
 	if len(labels) == 0 {
 		return nil
 	}
@@ -608,4 +665,127 @@ func (tt *TaintTracker) InjectManual(traceID string, labels []string, source, de
 	tt.totalMarked++
 	tt.mu.Unlock()
 	tt.persistEntry(entry)
+}
+
+// ============================================================
+// 自定义污点规则 CRUD
+// ============================================================
+
+// LoadCustomRules 从 DB 加载自定义规则到内存
+func (tt *TaintTracker) LoadCustomRules() {
+	if tt.db == nil {
+		return
+	}
+	rows, err := tt.db.Query("SELECT id, name, pattern, label, enabled, desc_text FROM taint_custom_rules WHERE enabled=1")
+	if err != nil {
+		log.Printf("[TaintTracker] 加载自定义规则失败: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var rules []piiPatternEntry
+	for rows.Next() {
+		var r CustomTaintRule
+		if err := rows.Scan(&r.ID, &r.Name, &r.Pattern, &r.Label, &r.Enabled, &r.Desc); err != nil {
+			continue
+		}
+		compiled, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			log.Printf("[TaintTracker] 自定义规则正则编译失败: name=%s pattern=%s err=%v", r.Name, r.Pattern, err)
+			continue
+		}
+		rules = append(rules, piiPatternEntry{Name: r.Name, Pattern: compiled, Label: r.Label})
+	}
+
+	tt.mu.Lock()
+	tt.customRules = rules
+	tt.mu.Unlock()
+	log.Printf("[TaintTracker] 已加载 %d 条自定义污点规则", len(rules))
+}
+
+// ListCustomRules 列出所有自定义规则（含禁用的）
+func (tt *TaintTracker) ListCustomRules() []CustomTaintRule {
+	if tt.db == nil {
+		return nil
+	}
+	rows, err := tt.db.Query("SELECT id, name, pattern, label, enabled, desc_text FROM taint_custom_rules ORDER BY name")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var rules []CustomTaintRule
+	for rows.Next() {
+		var r CustomTaintRule
+		if err := rows.Scan(&r.ID, &r.Name, &r.Pattern, &r.Label, &r.Enabled, &r.Desc); err != nil {
+			continue
+		}
+		rules = append(rules, r)
+	}
+	return rules
+}
+
+// AddCustomRule 添加自定义规则
+func (tt *TaintTracker) AddCustomRule(r CustomTaintRule) error {
+	// 验证正则
+	if _, err := regexp.Compile(r.Pattern); err != nil {
+		return fmt.Errorf("正则表达式无效: %v", err)
+	}
+	if r.ID == "" {
+		r.ID = generateEnvelopeID()
+	}
+	if r.Label == "" {
+		r.Label = TaintPII
+	}
+	_, err := tt.db.Exec(
+		"INSERT OR REPLACE INTO taint_custom_rules (id, name, pattern, label, enabled, desc_text) VALUES (?,?,?,?,?,?)",
+		r.ID, r.Name, r.Pattern, r.Label, r.Enabled, r.Desc,
+	)
+	if err != nil {
+		return err
+	}
+	tt.LoadCustomRules() // 热更新内存
+	return nil
+}
+
+// UpdateCustomRule 更新自定义规则
+func (tt *TaintTracker) UpdateCustomRule(id string, r CustomTaintRule) error {
+	if r.Pattern != "" {
+		if _, err := regexp.Compile(r.Pattern); err != nil {
+			return fmt.Errorf("正则表达式无效: %v", err)
+		}
+	}
+	_, err := tt.db.Exec(
+		"UPDATE taint_custom_rules SET name=?, pattern=?, label=?, enabled=?, desc_text=? WHERE id=?",
+		r.Name, r.Pattern, r.Label, r.Enabled, r.Desc, id,
+	)
+	if err != nil {
+		return err
+	}
+	tt.LoadCustomRules()
+	return nil
+}
+
+// DeleteCustomRule 删除自定义规则
+func (tt *TaintTracker) DeleteCustomRule(id string) error {
+	_, err := tt.db.Exec("DELETE FROM taint_custom_rules WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	tt.LoadCustomRules()
+	return nil
+}
+
+// ListBuiltinRules 列出内置规则（只读）
+func (tt *TaintTracker) ListBuiltinRules() []map[string]string {
+	var rules []map[string]string
+	for _, p := range piiPatterns {
+		rules = append(rules, map[string]string{
+			"name":    p.Name,
+			"pattern": p.Pattern.String(),
+			"label":   p.Label,
+			"type":    "builtin",
+		})
+	}
+	return rules
 }

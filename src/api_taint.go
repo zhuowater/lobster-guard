@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -112,7 +113,13 @@ func (api *ManagementAPI) handleTaintScan(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	matchedNames, labels := ScanPII(req.Text)
+	var matchedNames, labels []string
+	if api.taintTracker != nil {
+		matchedNames, labels = api.taintTracker.ScanAll(req.Text)
+	} else {
+		matchedNames, labels = ScanPII(req.Text)
+	}
+
 	jsonResponse(w, 200, map[string]interface{}{
 		"text":     req.Text,
 		"tainted":  len(labels) > 0,
@@ -181,4 +188,75 @@ func (api *ManagementAPI) handleTaintInject(w http.ResponseWriter, r *http.Reque
 		"status":   "injected",
 		"trace_id": traceID,
 	})
+}
+
+// ============================================================
+// 自定义污点规则 CRUD API
+// ============================================================
+
+// handleTaintRulesList GET /api/v1/taint/rules — 列出内置 + 自定义规则
+func (api *ManagementAPI) handleTaintRulesList(w http.ResponseWriter, r *http.Request) {
+	builtin := api.taintTracker.ListBuiltinRules()
+	custom := api.taintTracker.ListCustomRules()
+	jsonResponse(w, 200, map[string]interface{}{
+		"builtin":      builtin,
+		"custom":       custom,
+		"builtin_count": len(builtin),
+		"custom_count":  len(custom),
+	})
+}
+
+// handleTaintRulesCreate POST /api/v1/taint/rules — 添加自定义规则
+func (api *ManagementAPI) handleTaintRulesCreate(w http.ResponseWriter, r *http.Request) {
+	var rule CustomTaintRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if rule.Name == "" || rule.Pattern == "" {
+		jsonResponse(w, 400, map[string]string{"error": "name and pattern required"})
+		return
+	}
+	rule.Enabled = true
+	if err := api.taintTracker.AddCustomRule(rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[TaintRule] 添加自定义规则: name=%s label=%s pattern=%s", rule.Name, rule.Label, rule.Pattern)
+	jsonResponse(w, 201, map[string]interface{}{"ok": true, "rule": rule})
+}
+
+// handleTaintRulesUpdate PUT /api/v1/taint/rules/:id — 更新自定义规则
+func (api *ManagementAPI) handleTaintRulesUpdate(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/taint/rules/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	var rule CustomTaintRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := api.taintTracker.UpdateCustomRule(id, rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[TaintRule] 更新自定义规则: id=%s name=%s", id, rule.Name)
+	jsonResponse(w, 200, map[string]interface{}{"ok": true})
+}
+
+// handleTaintRulesDelete DELETE /api/v1/taint/rules/:id — 删除自定义规则
+func (api *ManagementAPI) handleTaintRulesDelete(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/taint/rules/")
+	if id == "" {
+		jsonResponse(w, 400, map[string]string{"error": "id required"})
+		return
+	}
+	if err := api.taintTracker.DeleteCustomRule(id); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[TaintRule] 删除自定义规则: id=%s", id)
+	jsonResponse(w, 200, map[string]interface{}{"ok": true})
 }
