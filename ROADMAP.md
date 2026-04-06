@@ -1,8 +1,8 @@
 # lobster-guard Roadmap
 
-> **当前版本：v33.0** · 360+ commits · Go ~67,500 行 + 测试 ~37,500 行 · Vue ~32,200 行 · 1252 测试 · 487 API · 50 页面 · 75 Vue 组件 · 5 依赖
+> **当前版本：v35.0** · 363+ commits · Go ~68,000 行 + 测试 ~37,500 行 · Vue ~32,700 行 · 1252 测试 · 491 API · 50 页面 · 75 Vue 组件 · 5 依赖
 >
-> 更新时间：2026-03-30
+> 更新时间：2026-04-06
 
 ---
 
@@ -886,6 +886,27 @@
 
 - [x] **142 实测**: 76 分/良好，LLM 维度因红队测试告警降至 3.5/20
 
+### v34.0 — 路由策略固定返回 + P0-P2 重构 (2026-03-30)
+
+- [x] 路由策略固定返回（固定内容直接回复，不转发上游）
+- [x] proxy.go 瘦身 -31.7%，main.go 瘦身 -58.7%
+- [x] 五层质量保障体系（L0 编译→L1 API黑盒→L2 数据流白盒→L3 设计矛盾→L4 E2E）
+
+### v35.0 — 出站 Redact 脱敏 + TaintTracker 自定义规则 (2026-04-06)
+
+- [x] **出站规则 `redact` 动作** — 正则替换敏感内容后放行，不拦截
+  - `actionWeight` = 4（block=5 > redact=4 > review=3 > warn=2 > log=1）
+  - 规则编辑器新增 replacement 字段；出站审计展示 `ReplacedText`
+  - Dashboard: 规则类型紫色 `tag-redact`
+
+- [x] **TaintTracker 自定义污点规则 CRUD**
+  - 新增 `自定义规则` Tab：自定义规则列表（编辑/删除）+ 内置规则只读展示
+  - 新增/编辑 Modal：名称、正则（RE2）、标签、描述、启用开关
+  - API: `GET/POST /api/v1/taint/rules`，`PUT/DELETE /api/v1/taint/rules/:id`
+  - Tab 计数实时同步（`customRules.length`）
+
+- [x] **威胁中心 Tab 导航修复** — groups 结构 Tab 点击不再崩溃
+
 ### 未来探索
 
 > 以下是尚未排期但值得关注的方向
@@ -1174,9 +1195,10 @@ Phase 1 — 纯流量（不改上下游，只靠已有三条数据通道）:
   v32.10-15: 功能补全（红队建议 + Merkle审计 + 金丝雀轮换 + 报告定时 + 引擎开关统一） ✅
   v33:     Upstream 安全画像（5维评分×16引擎 + Treemap + 三级穿透）              ✅
   v34:     路由策略固定返回 + proxy.go/main.go P0-P2 重构                        ✅
-------- v34.0 当前版本 -------
+  v35:     出站 redact 脱敏动作 + TaintTracker 自定义污点规则 CRUD              ✅
+------- v35.0 当前版本 -------
 Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
-  v34:     IM 安全前端模式 + MCP 安全网关（从透明代理升级为安全入口）
+  v35:     IM 安全前端模式 + MCP 安全网关（从透明代理升级为安全入口）
   v34+:    AI 安全副驾驶 + Benchmark 自动化 + Guardrail 市场（原 v28 规划）
 
   --- v33 IM 安全前端模式详细规划 ---
@@ -1209,7 +1231,8 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
   v32.10-15: ✅ 功能补全（红队建议 + Merkle审计 + 金丝雀轮换 + 报告定时 + 引擎开关统一）
   v33.0:   ✅ Upstream 安全画像（5维评分×16引擎 + Treemap + 三级穿透 + 比率评分）
   v34.0:   ✅ 路由策略固定返回 + P0-P2 重构（proxy.go -31.7%/main.go -58.7%，五层质量体系）
-  v34+:    IM 安全前端模式 + MCP 安全网关 + AI 安全副驾驶（Phase 3 生态扩展 → 商业化）
+  v35.0:   ✅ 出站 redact 脱敏动作 + TaintTracker 自定义污点规则 CRUD UI（API+前端）
+  v35+:    IM 安全前端模式 + MCP 安全网关 + AI 安全副驾驶（Phase 3 生态扩展 → 商业化）
 
 产品灵魂：**龙虾卫士 — 让 AI Agent 不泄密、不越权、不失控**
   不泄密 → IFC(v26) + 污点追踪(v20) + Selective Hide(v28) + 出站规则
@@ -1222,7 +1245,7 @@ Phase 3 — 生态扩展（MCP 安全网关 + 跨 Agent + 企业级）:
   行业模板（v31）✅ → 40行业×三维度 + F1=1.0 benchmark
   产品化（v32）✅ → 配置向导 + SQLite优化 + Dashboard演示级打磨 + 功能补全
   安全可视化（v33）✅ → Per-upstream 安全画像 + 16引擎聚合 + Treemap + 三级穿透
-  → 商业化（v34+）→ IM前端模式 + MCP安全网关 + 私有化部署、数据不出域
+  → 商业化（v35+）→ IM前端模式 + MCP安全网关 + 私有化部署、数据不出域
 
 三个产品线:
   A — Agent 防注入引擎（核心壁垒）  : v25 CaMeL + v24 AttriGuard + v19 语义检测 + v30 AC 智能分级

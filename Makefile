@@ -6,7 +6,7 @@
 # 外部依赖: sqlite3 + yaml.v3 + gorilla/websocket + x/crypto
 
 APP_NAME := lobster-guard
-VERSION := 33.0.0
+VERSION := 35.0.0
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_FLAGS := -ldflags="-s -w"
 

@@ -1,4 +1,4 @@
-# 🦞 Lobster Guard — 龙虾卫士 v33.0 智能管控
+# 🦞 Lobster Guard — 龙虾卫士 v35.0 智能管控
 
 
 ## 连接配置
@@ -36,7 +36,7 @@ LOBSTER_GUARD_TOKEN="test-token-2026!"          # Bearer Token 或 JWT
 | 语义检测、语义分析、模式库、ONNX | **语义检测** | `semantic/SKILL.md` |
 | 奇点、暴露预算、欧拉、忠诚度 | **奇点蜜罐** | `singularity/SKILL.md` |
 | tool_calls、工具策略、工具白名单 | **工具策略** | `tool-policy/SKILL.md` |
-| 污染、taint、PII追踪、逆转 | **污染追踪** | `taint/SKILL.md` |
+| 污染、taint、PII追踪、逆转、自定义污点规则、污点规则 CRUD | **污染追踪** | `taint/SKILL.md` |
 | 缓存、响应缓存、命中率 | **响应缓存** | `cache/SKILL.md` |
 | 网关、JWT、灰度、路由转换 | **API网关** | `gateway/SKILL.md` |
 | Gateway Monitor、上游网关、AOC、Agent操作中心、技能目录 | **API网关** | `gateway/SKILL.md` |
@@ -195,6 +195,8 @@ LOBSTER_GUARD_TOKEN="test-token-2026!"          # Bearer Token 或 JWT
 
 ## 版本历史
 
+- **v35.0** — 出站 redact 脱敏动作（正则替换后放行，actionWeight=4）；TaintTracker 自定义污点规则 CRUD（GET/POST/PUT/DELETE /api/v1/taint/rules）；威胁中心 Tab 导航修复
+- **v34.0** — 路由策略固定返回 + proxy.go/main.go P0-P2 重构（-31.7%/-58.7%），五层质量体系
 - **v33.0** — Upstream 安全画像：per-upstream 5 维安全评分（入站/LLM/数据/行为/工具，各 20 分）；16 引擎 × 14 表聚合；比率评分（偏离率/拒绝率/失败率）+ 正面信号加分；Treemap（面积=用户数，颜色=评分）+ 甜甜圈 + 5 档分段 + Canvas 粒子系统；三级穿透（概览→排名→详情）
 - **v32.0** — 架构优化 + Dashboard 演示级打磨：全链路检测调试 API；SQLite 批量写入 + 监控；三级配置简化 + 向导；43 页面全量巡检；骨架屏/Toast/fade 过渡；红队规则建议 + Merkle 批量验证 + 金丝雀轮换 + 报告定时 + 引擎开关
 - **v31.0** — 统一行业模板：40 模板 × 12 分类；入站 + LLM + 出站三维度一键启用；Benchmark F1=1.0（500 样本）；auto-review LLM 二审

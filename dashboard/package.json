@@ -1,6 +1,6 @@
 {
   "name": "lobster-guard-dashboard",
-  "version": "22.4.0",
+  "version": "22.5.0",
   "private": true,
   "type": "module",
   "scripts": {
