@@ -29,12 +29,10 @@ outbound_rules:
       - '-----BEGIN .* PRIVATE KEY-----'
     action: "block"
 
-  # 系统提示词泄露
+  # 系统提示词泄露（精确匹配：仅在内容被实际输出时触发，避免文件名操作描述产生误报）
   - name: "system_prompt_leak"
     patterns:
-      - 'SOUL\.md'
-      - 'AGENTS\.md'
-      - 'MEMORY\.md'
+      - '(?i)(my\s+system\s+prompt|以下是.{0,20}(SOUL|AGENTS|MEMORY)\.md|(SOUL|AGENTS|MEMORY)\.md.{0,10}内容如下|我的系统提示词.{0,20}(SOUL|AGENTS|MEMORY)\.md)'
     action: "warn"
 
   # 恶意命令
