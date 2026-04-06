@@ -568,6 +568,19 @@ func (e *LLMRuleEngine) CheckResponse(content string) []LLMRuleMatch {
 	return matches
 }
 
+// HasRewriteRuleForResponse 检查是否存在针对响应侧的 rewrite 规则（用于决定 SSE 是否走缓冲模式）
+func (e *LLMRuleEngine) HasRewriteRuleForResponse() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, r := range e.rules {
+		if r.Enabled && !r.ShadowMode && r.Action == "rewrite" &&
+			(r.Direction == "response" || r.Direction == "both" || r.Direction == "") {
+			return true
+		}
+	}
+	return false
+}
+
 // ApplyRewrite 对内容应用 rewrite 规则，返回修改后的内容
 func (e *LLMRuleEngine) ApplyRewrite(content string, matches []LLMRuleMatch) string {
 	e.mu.RLock()

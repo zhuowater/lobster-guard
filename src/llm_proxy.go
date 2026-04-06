@@ -484,7 +484,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isSSE := strings.Contains(contentType, "text/event-stream")
 
 	if isSSE {
-		// SSE 流式处理
+		// SSE 流式处理（v35.1: handleSSEResponse 内置 rewrite 尾部持留）
 		w.WriteHeader(resp.StatusCode)
 		lp.handleSSEResponse(w, resp, auditCtx, taintTraceID)
 	} else {
@@ -842,6 +842,116 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleSSEBufferedRewrite 当存在响应侧 rewrite 规则时，以缓冲模式处理 SSE：
+// 先积累所有 delta.content，流结束后统一改写，最终以 JSON 格式返回给客户端。
+func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.Response, auditCtx *LLMAuditContext, taintTraceID string) {
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var contentAccum strings.Builder
+	var firstFrame map[string]interface{} // 保存第一帧元信息（id/model/created）
+	var finishReason string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := line[6:]
+		if payload == "[DONE]" {
+			break
+		}
+		var frame map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
+			continue
+		}
+		if firstFrame == nil {
+			firstFrame = frame
+		}
+		// 提取 choices[0].delta.content
+		if choices, ok := frame["choices"].([]interface{}); ok && len(choices) > 0 {
+			if choice, ok := choices[0].(map[string]interface{}); ok {
+				if delta, ok := choice["delta"].(map[string]interface{}); ok {
+					if c, ok := delta["content"].(string); ok {
+						contentAccum.WriteString(c)
+					}
+				}
+				if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
+					finishReason = fr
+				}
+			}
+		}
+	}
+
+	fullContent := contentAccum.String()
+
+	// 应用 rewrite 规则
+	var rewritten bool
+	if lp.ruleEngine != nil {
+		respMatches := lp.ruleEngine.CheckResponseWithTenant(fullContent, auditCtx.TenantID)
+		if len(respMatches) > 0 {
+			action, topMatch := HighestPriorityAction(respMatches)
+			if action == "rewrite" {
+				newContent := lp.ruleEngine.ApplyRewrite(fullContent, respMatches)
+				log.Printf("[LLM规则] SSE 缓冲改写: rule=%s category=%s len=%d→%d",
+					topMatch.RuleID, topMatch.Category, len(fullContent), len(newContent))
+				fullContent = newContent
+				rewritten = true
+			} else if action == "block" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(200)
+				fmt.Fprintf(w, `{"error":"Response blocked by security rule: %s"}`, topMatch.RuleName)
+				log.Printf("[LLM规则] SSE 缓冲拦截: rule=%s category=%s", topMatch.RuleID, topMatch.Category)
+				go lp.auditor.ProcessResponse(auditCtx, 200, []byte(fullContent))
+				return
+			}
+		}
+	}
+	_ = rewritten
+
+	// 构造非流式 JSON 响应
+	id := ""
+	model := ""
+	var created interface{}
+	if firstFrame != nil {
+		if v, ok := firstFrame["id"].(string); ok {
+			id = v
+		}
+		if v, ok := firstFrame["model"].(string); ok {
+			model = v
+		}
+		created = firstFrame["created"]
+	}
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
+	result := map[string]interface{}{
+		"id":      id,
+		"object":  "chat.completion",
+		"model":   model,
+		"created": created,
+		"choices": []interface{}{
+			map[string]interface{}{
+				"index": 0,
+				"message": map[string]interface{}{
+					"role":    "assistant",
+					"content": fullContent,
+				},
+				"finish_reason": finishReason,
+			},
+		},
+	}
+	respBody, _ := json.Marshal(result)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Del("Content-Length")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
+
+	go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+}
+
 // handleSSEResponse 处理 SSE 流式响应
 func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response, auditCtx *LLMAuditContext, taintTraceID string) {
 	flusher, hasFlusher := w.(http.Flusher)
@@ -853,6 +963,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 	// v31.1: SSE 实时检测 — 累积 content delta, 每 512 字节过一次 AC 检测
 	var contentAccum strings.Builder // 累积所有 content delta
 	var sseBlocked bool
+	var doneIntercepted bool // v35.1: 拦截 [DONE]，在尾部 rewrite 后再发出
 	sseTenantIDEarly := auditCtx.TenantID
 	const sseCheckInterval = 512 // 字节阈值
 	lastCheckLen := 0
@@ -863,18 +974,22 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		// 提取 SSE data 中的 content delta
 		if strings.HasPrefix(line, "data: ") && !sseBlocked {
 			dataPayload := line[6:]
-			if dataPayload != "[DONE]" {
-				// 尝试提取 choices[0].delta.content
-				var sseObj struct {
-					Choices []struct {
-						Delta struct {
-							Content string `json:"content"`
-						} `json:"delta"`
-					} `json:"choices"`
-				}
-				if json.Unmarshal([]byte(dataPayload), &sseObj) == nil && len(sseObj.Choices) > 0 {
-					contentAccum.WriteString(sseObj.Choices[0].Delta.Content)
-				}
+			if dataPayload == "[DONE]" {
+				// v35.1: 拦截 [DONE]，暂不转发，留到流结束后统一处理 rewrite
+				doneIntercepted = true
+				eventBuf.WriteString(line + "\n")
+				continue
+			}
+			// 尝试提取 choices[0].delta.content
+			var sseObj struct {
+				Choices []struct {
+					Delta struct {
+						Content string `json:"content"`
+					} `json:"delta"`
+				} `json:"choices"`
+			}
+			if json.Unmarshal([]byte(dataPayload), &sseObj) == nil && len(sseObj.Choices) > 0 {
+				contentAccum.WriteString(sseObj.Choices[0].Delta.Content)
 			}
 		}
 
@@ -899,8 +1014,8 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 					}
 				}
 				if action == "rewrite" {
-					// SSE 帧已实时推送，无法回收改写；降级为 warn 并记录
-					log.Printf("[LLM规则] SSE 不支持 rewrite（帧已发出），降级为 warn: rule=%s category=%s 已累积 %d 字节",
+					// v35.1: 中途检测到 rewrite — 记录，尾部处理
+					log.Printf("[LLM规则] SSE 检测到 rewrite 规则（尾部处理）: rule=%s category=%s 已累积 %d 字节",
 						topMatch.RuleID, topMatch.Category, contentAccum.Len())
 				} else if action == "block" {
 					sseBlocked = true
@@ -942,15 +1057,40 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		eventBuf.WriteString(line + "\n")
 	}
 
-	// 流结束: 最后一批未检测的内容也要检查
-	if !sseBlocked && lp.ruleEngine != nil && contentAccum.Len() > lastCheckLen {
-		respMatches := lp.ruleEngine.CheckResponseWithTenant(contentAccum.String(), sseTenantIDEarly)
+	// v35.1: 流结束 — 对全量累积内容执行 rewrite，并在 [DONE] 前追加修正事件
+	if !sseBlocked && lp.ruleEngine != nil {
+		fullContent := contentAccum.String()
+		respMatches := lp.ruleEngine.CheckResponseWithTenant(fullContent, sseTenantIDEarly)
 		if len(respMatches) > 0 {
 			action, topMatch := HighestPriorityAction(respMatches)
-			if action == "block" || action == "warn" || action == "rewrite" {
-				log.Printf("[LLM规则] SSE 流结束检测: rule=%s action=%s 累积 %d 字节（rewrite 在 SSE 模式下仅记录）",
-					topMatch.RuleID, action, contentAccum.Len())
+			if action == "rewrite" {
+				newContent := lp.ruleEngine.ApplyRewrite(fullContent, respMatches)
+				if newContent != fullContent {
+					log.Printf("[LLM规则] SSE 尾部改写: rule=%s category=%s len=%d→%d",
+						topMatch.RuleID, topMatch.Category, len(fullContent), len(newContent))
+					// 追加 security_rewrite 事件：客户端可据此覆盖已显示的内容
+					corrObj := map[string]interface{}{
+						"content":      newContent,
+						"rewritten_by": topMatch.RuleName,
+					}
+					corrJSON, _ := json.Marshal(corrObj)
+					fmt.Fprintf(w, "event: security_rewrite\ndata: %s\n\n", corrJSON)
+					if hasFlusher {
+						flusher.Flush()
+					}
+				}
+			} else if action == "block" || action == "warn" {
+				log.Printf("[LLM规则] SSE 流结束检测: rule=%s action=%s 累积 %d 字节",
+					topMatch.RuleID, action, len(fullContent))
 			}
+		}
+	}
+
+	// 发出之前拦截的 [DONE]
+	if doneIntercepted {
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		if hasFlusher {
+			flusher.Flush()
 		}
 	}
 

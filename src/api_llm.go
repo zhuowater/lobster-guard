@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -389,6 +390,41 @@ func (api *ManagementAPI) saveLLMConfig() error {
 	}
 	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
 		return fmt.Errorf("写入配置文件失败: %w", err)
+	}
+
+	// v35.1: 同步 conf.d/ 中含 llm_proxy 的文件，防止重启后 conf.d 覆盖
+	// 找到所有可能含 llm_proxy 的 conf.d 文件并更新其中的 llm_proxy 节
+	confDir := filepath.Join(filepath.Dir(api.cfgPath), "conf.d")
+	if entries, err := os.ReadDir(confDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+				continue
+			}
+			confPath := filepath.Join(confDir, entry.Name())
+			confData, err := os.ReadFile(confPath)
+			if err != nil {
+				continue
+			}
+			var confRaw map[string]interface{}
+			if err := yaml.Unmarshal(confData, &confRaw); err != nil {
+				continue
+			}
+			if _, hasLLM := confRaw["llm_proxy"]; !hasLLM {
+				continue
+			}
+			// 该 conf.d 文件含 llm_proxy，覆盖其 llm_proxy 节
+			confRaw["llm_proxy"] = llmProxy
+			confOut, err := yaml.Marshal(confRaw)
+			if err != nil {
+				log.Printf("[LLM配置] 序列化 conf.d/%s 失败: %v", entry.Name(), err)
+				continue
+			}
+			if err := os.WriteFile(confPath, confOut, 0644); err != nil {
+				log.Printf("[LLM配置] 写入 conf.d/%s 失败: %v", entry.Name(), err)
+			} else {
+				log.Printf("[LLM配置] 同步 conf.d/%s", entry.Name())
+			}
+		}
 	}
 	return nil
 }
