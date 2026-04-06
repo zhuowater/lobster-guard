@@ -539,10 +539,10 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				case "rewrite":
 					newBody := lp.ruleEngine.ApplyRewrite(string(respBody), respMatches)
 					respBody = []byte(newBody)
-					// 更新 Content-Length
-					w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
-					log.Printf("[LLM规则] 响应已改写: rule=%s category=%s",
-						topMatch.RuleID, topMatch.Category)
+					// 删除上游的 Content-Length，让 Go HTTP 根据实际 body 长度重新计算
+					w.Header().Del("Content-Length")
+					log.Printf("[LLM规则] 响应已改写: rule=%s category=%s len=%d",
+						topMatch.RuleID, topMatch.Category, len(respBody))
 				case "warn":
 					log.Printf("[LLM规则] 响应告警: rule=%s category=%s",
 						topMatch.RuleID, topMatch.Category)
@@ -898,7 +898,11 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 						action = lp.ruleEngine.autoReviewMgr.ReviewWithLLM(rules[0], contentAccum.String())
 					}
 				}
-				if action == "block" {
+				if action == "rewrite" {
+					// SSE 帧已实时推送，无法回收改写；降级为 warn 并记录
+					log.Printf("[LLM规则] SSE 不支持 rewrite（帧已发出），降级为 warn: rule=%s category=%s 已累积 %d 字节",
+						topMatch.RuleID, topMatch.Category, contentAccum.Len())
+				} else if action == "block" {
 					sseBlocked = true
 					log.Printf("[LLM规则] SSE 实时拦截: rule=%s category=%s 已累积 %d 字节",
 						topMatch.RuleID, topMatch.Category, contentAccum.Len())
@@ -943,8 +947,8 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		respMatches := lp.ruleEngine.CheckResponseWithTenant(contentAccum.String(), sseTenantIDEarly)
 		if len(respMatches) > 0 {
 			action, topMatch := HighestPriorityAction(respMatches)
-			if action == "block" || action == "warn" {
-				log.Printf("[LLM规则] SSE 流结束检测: rule=%s action=%s 累积 %d 字节",
+			if action == "block" || action == "warn" || action == "rewrite" {
+				log.Printf("[LLM规则] SSE 流结束检测: rule=%s action=%s 累积 %d 字节（rewrite 在 SSE 模式下仅记录）",
 					topMatch.RuleID, action, contentAccum.Len())
 			}
 		}
