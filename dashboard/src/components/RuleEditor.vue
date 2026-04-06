@@ -40,8 +40,13 @@
                 <option value="review">review (LLM复核)</option>
                 <option value="warn">warn (警告)</option>
                 <option value="log">log (记录)</option>
+                <option value="redact" v-if="!isInbound">redact (脱敏替换)</option>
               </select>
             </div>
+          </div>
+          <div class="form-group" v-if="form.action === 'redact'">
+            <label>替换文本 <span class="hint">(为空则默认 [REDACTED])</span></label>
+            <input type="text" v-model="form.replacement" placeholder="如 [已脱敏]、***、[手机号已隐藏]" />
           </div>
           <div class="form-row">
             <div class="form-group" style="flex:1">
@@ -105,6 +110,7 @@ const form = ref({
   group: '',
   patternsText: '',
   message: '',
+  replacement: '',
   direction: 'inbound',
 })
 
@@ -118,12 +124,13 @@ watch(() => props.visible, (v) => {
       group: props.rule.group || '',
       patternsText: (props.rule.patterns || []).join('\n'),
       message: props.rule.message || '',
+      replacement: props.rule.replacement || '',
       direction: props.direction || 'inbound',
     }
   } else if (v) {
     form.value = {
       name: '', type: 'keyword', action: 'block', priority: 0,
-      group: '', patternsText: '', message: '',
+      group: '', patternsText: '', message: '', replacement: '',
       direction: props.direction || 'inbound',
     }
   }
@@ -164,6 +171,10 @@ function submit() {
   // Include group only for inbound
   if (isInbound.value) {
     data.group = form.value.group.trim()
+  }
+  // Include replacement only for redact action
+  if (form.value.action === 'redact') {
+    data.replacement = form.value.replacement.trim()
   }
   emit('save', data)
 }

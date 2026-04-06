@@ -170,6 +170,9 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 			if c.DisplayName != "" {
 				m["display_name"] = c.DisplayName
 			}
+			if c.Replacement != "" {
+				m["replacement"] = c.Replacement
+			}
 			detailRules[i] = m
 		}
 		piiPatterns := api.inboundEngine.ListPIIPatterns()
@@ -238,6 +241,9 @@ func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) err
 		if c.Message != "" {
 			m["message"] = c.Message
 		}
+		if c.Replacement != "" {
+			m["replacement"] = c.Replacement
+		}
 		ruleList[i] = m
 	}
 	raw["outbound_rules"] = ruleList
@@ -268,8 +274,8 @@ func (api *ManagementAPI) handleAddOutboundRule(w http.ResponseWriter, r *http.R
 	if req.Action == "" {
 		req.Action = "log"
 	}
-	if !validateInboundAction(req.Action) {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
+	if !validateOutboundAction(req.Action) {
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log/redact"})
 		return
 	}
 
@@ -303,8 +309,8 @@ func (api *ManagementAPI) handleUpdateOutboundRule(w http.ResponseWriter, r *htt
 		jsonResponse(w, 400, map[string]string{"error": "pattern or patterns required"})
 		return
 	}
-	if req.Action != "" && !validateInboundAction(req.Action) {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
+	if req.Action != "" && !validateOutboundAction(req.Action) {
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log/redact"})
 		return
 	}
 

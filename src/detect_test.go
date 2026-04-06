@@ -1903,3 +1903,113 @@ func TestDetectWithAppIDBackwardCompatible(t *testing.T) {
 		t.Errorf("Detect and DetectWithAppID should return same result: %s vs %s", r1.Action, r2.Action)
 	}
 }
+
+// ============================================================
+// redact 动作测试
+// ============================================================
+
+func TestOutboundRuleEngineRedact(t *testing.T) {
+	t.Run("手机号被替换", func(t *testing.T) {
+		// 单独使用手机号规则，避免默认规则干扰
+		configs := []OutboundRuleConfig{
+			{Name: "pii_phone", Patterns: []string{`1[3-9]\d{9}`}, Action: "redact", Replacement: "***"},
+		}
+		engine := NewOutboundRuleEngine(configs)
+		r := engine.Detect("联系我：13812345678")
+		if r.Action != "redact" {
+			t.Fatalf("期望 redact，实际 %s", r.Action)
+		}
+		if r.ReplacedText == "" {
+			t.Fatal("ReplacedText 不应为空")
+		}
+		if r.ReplacedText == "联系我：13812345678" {
+			t.Fatal("ReplacedText 未被替换")
+		}
+		if r.ReplacedText != "联系我：***" {
+			t.Errorf("期望 '联系我：***'，实际 %q", r.ReplacedText)
+		}
+	})
+
+	t.Run("身份证被替换", func(t *testing.T) {
+		// 单独使用身份证规则，避免默认手机规则在 ID 号中误匹配
+		configs := []OutboundRuleConfig{
+			{Name: "pii_id_card", Patterns: []string{`\d{17}[\dXx]`}, Action: "redact", Replacement: "[ID_REMOVED]"},
+		}
+		engine := NewOutboundRuleEngine(configs)
+		// 用默认 pii_id_card 规则名覆盖内置 warn 规则
+		r := engine.Detect("身份证：110101199001011234")
+		if r.Action != "redact" {
+			t.Fatalf("期望 redact，实际 %s (rule=%s)", r.Action, r.RuleName)
+		}
+		if r.ReplacedText != "身份证：[ID_REMOVED]" {
+			t.Errorf("期望 '身份证：[ID_REMOVED]'，实际 %q", r.ReplacedText)
+		}
+	})
+
+	t.Run("无匹配时 ReplacedText 为空", func(t *testing.T) {
+		configs := []OutboundRuleConfig{
+			{Name: "pii_phone", Patterns: []string{`1[3-9]\d{9}`}, Action: "redact", Replacement: "***"},
+		}
+		engine := NewOutboundRuleEngine(configs)
+		r := engine.Detect("今天天气真好")
+		if r.Action != "pass" {
+			t.Fatalf("期望 pass，实际 %s", r.Action)
+		}
+		if r.ReplacedText != "" {
+			t.Errorf("无匹配时 ReplacedText 应为空，实际 %q", r.ReplacedText)
+		}
+	})
+}
+
+func TestOutboundRuleEngineRedactDefaultReplacement(t *testing.T) {
+	// Replacement 为空时默认用 [REDACTED]；用不与内置规则冲突的模式
+	configs := []OutboundRuleConfig{
+		{Name: "redact_secret", Patterns: []string{`MYSECRET-[A-Z0-9]{8}`}, Action: "redact"},
+	}
+	engine := NewOutboundRuleEngine(configs)
+	r := engine.Detect("token=MYSECRET-ABCD1234")
+	if r.Action != "redact" {
+		t.Fatalf("期望 redact，实际 %s", r.Action)
+	}
+	if r.ReplacedText != "token=[REDACTED]" {
+		t.Errorf("期望默认替换为 [REDACTED]，实际 %q", r.ReplacedText)
+	}
+}
+
+func TestOutboundRuleEngineRedactVsBlock(t *testing.T) {
+	// block 优先级高于 redact
+	configs := []OutboundRuleConfig{
+		{Name: "redact_phone", Patterns: []string{`1[3-9]\d{9}`}, Action: "redact", Replacement: "***"},
+		{Name: "block_key",    Patterns: []string{`sk-[a-zA-Z0-9]{20,}`}, Action: "block"},
+	}
+	engine := NewOutboundRuleEngine(configs)
+
+	t.Run("仅 redact 匹配", func(t *testing.T) {
+		r := engine.Detect("电话13812345678")
+		if r.Action != "redact" {
+			t.Errorf("期望 redact，实际 %s", r.Action)
+		}
+	})
+
+	t.Run("block 优先于 redact", func(t *testing.T) {
+		r := engine.Detect("key=sk-abcdefghijklmnopqrstuvwxyz 电话13812345678")
+		if r.Action != "block" {
+			t.Errorf("期望 block 优先，实际 %s", r.Action)
+		}
+	})
+}
+
+func TestValidateOutboundAction(t *testing.T) {
+	valid := []string{"block", "review", "warn", "log", "redact"}
+	for _, a := range valid {
+		if !validateOutboundAction(a) {
+			t.Errorf("%q 应为有效出站 action", a)
+		}
+	}
+	invalid := []string{"", "pass", "drop", "allow"}
+	for _, a := range invalid {
+		if validateOutboundAction(a) {
+			t.Errorf("%q 不应为有效出站 action", a)
+		}
+	}
+}

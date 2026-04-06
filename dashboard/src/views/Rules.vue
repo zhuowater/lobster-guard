@@ -381,7 +381,12 @@
                 <option value="block">block</option>
                 <option value="warn">warn</option>
                 <option value="log">log</option>
+                <option value="redact" v-if="editingTplRuleLayer === 'outbound'">redact (脱敏替换)</option>
               </select>
+            </div>
+            <div class="tpl-form-row" v-if="tplRuleForm.action === 'redact' && editingTplRuleLayer === 'outbound'">
+              <label>替换文本</label>
+              <input v-model="tplRuleForm.replacement" class="tpl-form-input" placeholder="如 [已脱敏]、***（空则默认 [REDACTED]）" />
             </div>
             <div class="tpl-form-row" v-if="editingTplRuleLayer !== 'outbound'">
               <label>类型</label>
@@ -562,7 +567,7 @@ function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : s }
 
 const groupColors = { jailbreak: '#ff6b6b', injection: '#ffa94d', social_engineering: '#69db7c', pii: '#74c0fc', sensitive: '#b197fc', roleplay: '#e599f7', command_injection: '#ff8787', evasion: '#845ef7', data_exfil: '#f06595' }
 function groupColor(g) { return groupColors[g] || '#868e96' }
-function actTag(a) { a = (a || '').toLowerCase(); return a === 'block' ? 'tag-block' : a === 'review' ? 'tag-review' : a === 'warn' ? 'tag-warn' : a === 'log' ? 'tag-log' : 'tag-pass' }
+function actTag(a) { a = (a || '').toLowerCase(); return a === 'block' ? 'tag-block' : a === 'review' ? 'tag-review' : a === 'warn' ? 'tag-warn' : a === 'log' ? 'tag-log' : a === 'redact' ? 'tag-redact' : 'tag-pass' }
 function fmtTime(ts) { if (!ts) return '--'; const d = new Date(ts); return isNaN(d.getTime()) ? String(ts) : d.toLocaleString('zh-CN', { hour12: false }) }
 function priorityClass(p) { if (p == null) return ''; if (p >= 80) return 'priority-high'; if (p >= 40) return 'priority-med'; return 'priority-low' }
 
@@ -682,7 +687,7 @@ function confirmDeleteIndustryTemplate(tpl) {
 const showTplRuleEditor = ref(false)
 const editingTplRuleLayer = ref('inbound')
 const editingTplRuleIdx = ref(-1)
-const tplRuleForm = ref({ name: '', display_name: '', action: 'block', type: 'keyword', direction: 'both', patterns: [] })
+const tplRuleForm = ref({ name: '', display_name: '', action: 'block', type: 'keyword', direction: 'both', patterns: [], replacement: '' })
 const tplRulePatternsText = ref('')
 const tplRuleLayerLabel = computed(() => {
   const m = { inbound: '🛡️ 入站', llm: '🤖 LLM', outbound: '📤 出站' }
@@ -692,7 +697,7 @@ const tplRuleLayerLabel = computed(() => {
 function openAddTplRule(layer) {
   editingTplRuleLayer.value = layer
   editingTplRuleIdx.value = -1
-  tplRuleForm.value = { name: '', display_name: '', action: 'block', type: layer === 'outbound' ? 'regex' : 'keyword', direction: 'both', patterns: [] }
+  tplRuleForm.value = { name: '', display_name: '', action: 'block', type: layer === 'outbound' ? 'regex' : 'keyword', direction: 'both', patterns: [], replacement: '' }
   tplRulePatternsText.value = ''
   showTplRuleEditor.value = true
 }
@@ -702,7 +707,7 @@ function openEditTplRule(layer, idx) {
   const ruleKey = layer === 'llm' ? 'llm_rules' : layer === 'outbound' ? 'outbound_rules' : 'inbound_rules'
   const rule = detailData.value[ruleKey]?.[idx]
   if (!rule) return
-  tplRuleForm.value = { name: rule.name || '', display_name: rule.display_name || '', action: rule.action || 'block', type: rule.type || 'keyword', direction: rule.direction || 'both', patterns: [...(rule.patterns || [])] }
+  tplRuleForm.value = { name: rule.name || '', display_name: rule.display_name || '', action: rule.action || 'block', type: rule.type || 'keyword', direction: rule.direction || 'both', patterns: [...(rule.patterns || [])], replacement: rule.replacement || '' }
   tplRulePatternsText.value = (rule.patterns || []).join('\n')
   showTplRuleEditor.value = true
 }
@@ -935,6 +940,7 @@ onMounted(() => { loadRuleHits(); loadInbound(); loadOutbound(); loadIndustryTem
 
 .tag-block { background: rgba(255, 68, 102, 0.15); color: #ff4466; border: 1px solid rgba(255, 68, 102, 0.3); }
 .tag-warn { background: rgba(255, 169, 77, 0.15); color: #ffa94d; border: 1px solid rgba(255, 169, 77, 0.3); }
+.tag-redact { background: rgba(168, 85, 247, 0.15); color: #a855f7; border: 1px solid rgba(168, 85, 247, 0.3); }
 .tag-log { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
 .tag-pass { background: rgba(148, 163, 184, 0.1); color: #64748b; }
 .tag-success { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }

@@ -326,6 +326,7 @@ type OutboundRuleConfig struct {
 	Pattern     string   `yaml:"pattern"`
 	Patterns    []string `yaml:"patterns"`
 	Action      string   `yaml:"action"`
+	Replacement string   `yaml:"replacement,omitempty" json:"replacement,omitempty"` // redact 动作时的替换文本，为空则用 [REDACTED]
 	Priority    int      `yaml:"priority"`                       // v3.6 优先级权重，数字越大越高，默认 0
 	Message     string   `yaml:"message"`                        // v3.6 自定义拦截提示，为空则用默认
 	ShadowMode  bool     `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
@@ -457,6 +458,16 @@ func (cfg *Config) IsMetricsEnabled() bool {
 func validateInboundAction(action string) bool {
 	switch action {
 	case "block", "review", "warn", "log":
+		return true
+	default:
+		return false
+	}
+}
+
+// validateOutboundAction 验证出站规则的 action 字段（比入站多 redact）
+func validateOutboundAction(action string) bool {
+	switch action {
+	case "block", "review", "warn", "log", "redact":
 		return true
 	default:
 		return false

@@ -422,10 +422,12 @@ func (re *RuleEngine) ListRules() []InboundRuleSummary {
 type DetectResult struct { Action string; Reasons []string; PIIs []string; Message string; MatchedRules []string; ShadowReasons []string }
 
 // actionWeight returns a numeric weight for action precedence (higher = more severe)
-// Used when multiple rules have the same priority: block > warn > log
+// Used when multiple rules have the same priority: block > redact > review > warn > log
 func actionWeight(action string) int {
 	switch action {
 	case "block":
+		return 5
+	case "redact":
 		return 4
 	case "review":
 		return 3
@@ -1429,6 +1431,7 @@ type OutboundRule struct {
 	DisplayName string
 	Regexps     []*regexp.Regexp
 	Action      string
+	Replacement string // redact 动作时的替换文本，为空则用 [REDACTED]
 	Priority    int
 	Message     string
 	ShadowMode  bool
@@ -1482,7 +1485,7 @@ func mergeOutboundDefaults(userConfigs []OutboundRuleConfig) []OutboundRuleConfi
 func compileOutboundRules(configs []OutboundRuleConfig) []OutboundRule {
 	var rules []OutboundRule
 	for _, c := range configs {
-		rule := OutboundRule{Name: c.Name, DisplayName: c.DisplayName, Action: c.Action, Priority: c.Priority, Message: c.Message, ShadowMode: c.ShadowMode, Enabled: isEnabled(c.Enabled)}
+		rule := OutboundRule{Name: c.Name, DisplayName: c.DisplayName, Action: c.Action, Replacement: c.Replacement, Priority: c.Priority, Message: c.Message, ShadowMode: c.ShadowMode, Enabled: isEnabled(c.Enabled)}
 		if rule.Action == "" { rule.Action = "log" }
 		var patterns []string
 		if c.Pattern != "" { patterns = append(patterns, c.Pattern) }
@@ -1556,6 +1559,7 @@ func (ore *OutboundRuleEngine) GetRuleConfigs() []OutboundRuleConfig {
 			DisplayName: rule.DisplayName,
 			Patterns:    patterns,
 			Action:      rule.Action,
+			Replacement: rule.Replacement,
 			Priority:    rule.Priority,
 			Message:     rule.Message,
 			ShadowMode:  rule.ShadowMode,
@@ -1620,6 +1624,7 @@ type OutboundDetectResult struct {
 	RuleName      string
 	Reason        string
 	Message       string   // v3.6 自定义拦截提示
+	ReplacedText  string   // redact 动作时替换后的完整文本
 	ShadowReasons []string // 影子模式命中的规则名
 }
 
@@ -1630,12 +1635,14 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 
 	// v3.6: collect all matching rules and pick the one with highest priority
 	type matchedOutbound struct {
-		Action     string
-		RuleName   string
-		Reason     string
-		Message    string
-		Priority   int
-		ShadowMode bool
+		Action      string
+		RuleName    string
+		Reason      string
+		Message     string
+		Replacement string
+		Regexps     []*regexp.Regexp
+		Priority    int
+		ShadowMode  bool
 	}
 	var matches []matchedOutbound
 	allRules := make([]OutboundRule, 0, len(ore.rules)+len(ore.globalTemplateRules))
@@ -1648,12 +1655,14 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 		for _, compiled := range rule.Regexps {
 			if compiled.MatchString(text) {
 				matches = append(matches, matchedOutbound{
-					Action:     rule.Action,
-					RuleName:   rule.Name,
-					Reason:     "outbound_" + rule.Action + ":" + rule.Name,
-					Message:    rule.Message,
-					Priority:   rule.Priority,
-					ShadowMode: rule.ShadowMode,
+					Action:      rule.Action,
+					RuleName:    rule.Name,
+					Reason:      "outbound_" + rule.Action + ":" + rule.Name,
+					Message:     rule.Message,
+					Replacement: rule.Replacement,
+					Regexps:     rule.Regexps,
+					Priority:    rule.Priority,
+					ShadowMode:  rule.ShadowMode,
 				})
 				break // one match per rule is enough
 			}
@@ -1695,6 +1704,18 @@ func (ore *OutboundRuleEngine) Detect(text string) OutboundDetectResult {
 		result.RuleName = winner.RuleName
 		result.Reason = winner.Reason
 		result.Message = winner.Message
+		// redact: 对命中文本做正则替换，生成脱敏后的完整文本
+		if winner.Action == "redact" {
+			replacement := winner.Replacement
+			if replacement == "" {
+				replacement = "[REDACTED]"
+			}
+			replaced := text
+			for _, re := range winner.Regexps {
+				replaced = re.ReplaceAllString(replaced, replacement)
+			}
+			result.ReplacedText = replaced
+		}
 	}
 
 	return result

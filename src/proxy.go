@@ -1071,6 +1071,30 @@ func (op *OutboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch result.Action {
+	case "redact":
+		log.Printf("[出站] 脱敏透传 path=%s rule=%s", r.URL.Path, result.RuleName)
+		op.logger.LogWithTrace("outbound", recipient, "redact", result.Reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
+		if op.metrics != nil {
+			op.metrics.RecordRequest("outbound", "redact", op.channel.Name(), latMs)
+		}
+		if op.realtime != nil {
+			op.realtime.RecordOutbound("redact", time.Since(start).Microseconds())
+			op.realtime.RecordEvent("outbound", recipient, "redact", result.Reason, outTraceID)
+		}
+		if op.eventBus != nil {
+			op.eventBus.Emit(&SecurityEvent{
+				Type: "outbound_redact", Severity: "medium", Domain: "outbound",
+				TraceID: outTraceID, SenderID: recipient,
+				Summary: fmt.Sprintf("出站脱敏: %s", result.Reason),
+				Details: map[string]interface{}{"rule": result.RuleName, "app_id": outAppID},
+			})
+		}
+		// 用脱敏后的文本替换 body 中的原始文本，再透传
+		newBody := []byte(strings.Replace(string(body), text, result.ReplacedText, 1))
+		r.Body = io.NopCloser(bytes.NewReader(newBody))
+		r.ContentLength = int64(len(newBody))
+		op.proxy.ServeHTTP(w, r)
+		return
 	case "block":
 		log.Printf("[出站] 拦截 path=%s rule=%s", r.URL.Path, result.RuleName)
 		op.logger.LogWithTrace("outbound", recipient, "block", result.Reason, pv, rh, latMs, upstreamID, outAppID, outTraceID)
