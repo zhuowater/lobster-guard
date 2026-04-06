@@ -244,6 +244,13 @@ func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) err
 		if c.Replacement != "" {
 			m["replacement"] = c.Replacement
 		}
+		// 显式序列化 enabled 字段，避免重启后因 nil 指针丢失启用状态
+		if c.Enabled != nil {
+			m["enabled"] = *c.Enabled
+		}
+		if c.ShadowMode {
+			m["shadow_mode"] = c.ShadowMode
+		}
 		ruleList[i] = m
 	}
 	raw["outbound_rules"] = ruleList
