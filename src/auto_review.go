@@ -342,7 +342,7 @@ BENIGN indicators (ALL must be true → benign):
 ## Flagged Text
 %s
 
-Respond with exactly one word: "malicious" or "benign".`, ruleName, text)
+Think through your reasoning, then end your response with exactly one word on the last line: malicious or benign.`, ruleName, text)
 
 	// 构造 OpenAI-compatible request
 	reqBody := map[string]interface{}{
@@ -351,7 +351,7 @@ Respond with exactly one word: "malicious" or "benign".`, ruleName, text)
 			{"role": "system", "content": "You are an AI security gateway analyst. Classify flagged messages precisely. Respond with exactly one word."},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":  10,
+		"max_tokens":  1024, // thinking 模型需要足够 token 完成推理和给出结论
 		"temperature": 0.0,
 	}
 
@@ -414,9 +414,16 @@ Respond with exactly one word: "malicious" or "benign".`, ruleName, text)
 	if msg.Content != nil && *msg.Content != "" {
 		rawAnswer = *msg.Content
 	} else if msg.ReasoningContent != "" {
-		// thinking 模型（如 GLM-4.7）内容在 reasoning_content
-		rawAnswer = msg.ReasoningContent
-		log.Printf("[AutoReview] thinking 模型，从 reasoning_content 取答案 rule=%s", ruleName)
+		// content 为空时（极少数情况）fallback 到 reasoning_content 关键词搜索
+		rc := strings.ToLower(msg.ReasoningContent)
+		hasMalicious := strings.Contains(rc, "malicious")
+		hasBenign := strings.Contains(rc, "benign") && !hasMalicious
+		if hasBenign {
+			rawAnswer = "benign"
+		} else {
+			rawAnswer = "malicious" // 保守处理
+		}
+		log.Printf("[AutoReview] content 为空，从 reasoning_content 推断 rule=%s → %q", ruleName, rawAnswer)
 	}
 	answer := strings.ToLower(strings.TrimSpace(rawAnswer))
 	log.Printf("[AutoReview] LLM 判断 rule=%s answer=%q", ruleName, answer)
