@@ -297,7 +297,11 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			if ip.singularityEngine != nil {
 				if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", bridgeTraceID); shouldExpose && tpl != nil {
 					ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+					if ip.envelopeMgr != nil {
+						ip.envelopeMgr.Seal(bridgeTraceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
+					}
 					log.Printf("[桥接入站] 🔮 奇点暴露 sender=%s template=%s level=%d", senderID, tpl.Name, tpl.Level)
+					go ip.sendFixedReplyViaOutbound(senderID, tpl.Content)
 				}
 			}
 			return
@@ -353,7 +357,11 @@ func (ip *InboundProxy) startBridge(ctx context.Context) error {
 			if ip.singularityEngine != nil {
 				if shouldExpose, tpl := ip.singularityEngine.ShouldExpose("im", bridgeTraceID); shouldExpose && tpl != nil {
 					ip.logger.LogWithTrace("inbound", senderID, "singularity_expose", fmt.Sprintf("channel=im,level=%d,template=%s", tpl.Level, tpl.Name), msgText, rh, latMs, upstreamID, appID, bridgeTraceID)
+					if ip.envelopeMgr != nil {
+						ip.envelopeMgr.Seal(bridgeTraceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
+					}
 					log.Printf("[桥接入站] 🔮 奇点暴露(warn) sender=%s template=%s level=%d", senderID, tpl.Name, tpl.Level)
+					go ip.sendFixedReplyViaOutbound(senderID, tpl.Content)
 					return // 蜜罐已介入，不转发
 				}
 			}

@@ -197,10 +197,12 @@ func (ip *InboundProxy) handleBlockAction(w http.ResponseWriter, senderID, appID
 				ip.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
 			}
 			log.Printf("[入站] 🔮 奇点暴露 sender=%s template=%s level=%d trace_id=%s", senderID, tpl.Name, tpl.Level, traceID)
+			// 蜜罐内容通过出站 IM 通道推送给用户，ACK 正常返回
+			go ip.sendFixedReplyViaOutbound(senderID, tpl.Content)
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Trace-ID", traceID)
 			w.WriteHeader(200)
-			w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","singularity_response":%q}`, tpl.Content)))
+			w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
 			return true
 		}
 	}
@@ -267,10 +269,12 @@ func (ip *InboundProxy) handleWarnAction(w http.ResponseWriter, senderID, appID,
 				ip.envelopeMgr.Seal(traceID, "singularity_expose", tpl.Content, "expose", []string{"singularity_im_" + tpl.Name}, senderID)
 			}
 			log.Printf("[入站] 🔮 奇点暴露(warn) sender=%s template=%s level=%d trace_id=%s", senderID, tpl.Name, tpl.Level, traceID)
+			// 蜜罐内容通过出站 IM 通道推送给用户，ACK 正常返回
+			go ip.sendFixedReplyViaOutbound(senderID, tpl.Content)
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Trace-ID", traceID)
 			w.WriteHeader(200)
-			w.Write([]byte(fmt.Sprintf(`{"errcode":0,"errmsg":"ok","singularity_response":%q}`, tpl.Content)))
+			w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
 			return true
 		}
 	}
