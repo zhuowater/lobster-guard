@@ -1227,6 +1227,14 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleTaintEntryDelete(w, r)
 	case path == "/api/v1/taint/inject" && method == "POST":
 		api.handleTaintInject(w, r)
+	case path == "/api/v1/taint/rules" && method == "GET":
+		api.handleTaintRulesList(w, r)
+	case path == "/api/v1/taint/rules" && method == "POST":
+		api.handleTaintRulesCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/taint/rules/") && method == "PUT":
+		api.handleTaintRulesUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/taint/rules/") && method == "DELETE":
+		api.handleTaintRulesDelete(w, r)
 
 	// v20.2: 污染链逆转 API
 	case path == "/api/v1/reversal/stats" && method == "GET":

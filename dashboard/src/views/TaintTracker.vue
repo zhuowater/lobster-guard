@@ -47,6 +47,9 @@
       <button class="tab-btn" :class="{ active: activeTab === 'reversal' }" @click="activeTab = 'reversal'">
         <Icon name="refresh" :size="14" /> 逆转记录 <span class="tab-count">{{ reversals.length }}</span>
       </button>
+      <button class="tab-btn" :class="{ active: activeTab === 'rules' }" @click="activeTab = 'rules'; loadRules()">
+        <Icon name="list" :size="14" /> 自定义规则 <span class="tab-count">{{ customRules.length }}</span>
+      </button>
       <button class="tab-btn" :class="{ active: activeTab === 'config' }" @click="activeTab = 'config'">
         <Icon name="settings" :size="14" /> 配置
       </button>
@@ -254,6 +257,79 @@
       </div>
     </div>
 
+    <!-- Tab: 自定义规则 -->
+    <div v-if="activeTab === 'rules'" class="section">
+      <!-- 自定义规则 -->
+      <div class="rules-header">
+        <div>
+          <h3 class="section-title"><Icon name="plus" :size="16" /> 自定义污点规则</h3>
+          <p class="section-desc">自定义正则检测规则，用于识别特定格式的敏感数据并打污染标签</p>
+        </div>
+        <button class="btn btn-sm btn-primary" @click="openRuleEditor(null)">
+          <Icon name="plus" :size="14" /> 新增规则
+        </button>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom: var(--space-4)">
+        <table class="data-table" v-if="customRules.length">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>正则模式</th>
+              <th>标签</th>
+              <th>描述</th>
+              <th>状态</th>
+              <th style="width:80px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="rule in customRules" :key="rule.id">
+              <td class="td-bold">{{ rule.name }}</td>
+              <td class="td-mono">{{ truncate(rule.pattern, 40) }}</td>
+              <td><span class="taint-badge" :class="'taint-' + normLabel(rule.label)">{{ rule.label }}</span></td>
+              <td>{{ truncate(rule.desc_text, 40) }}</td>
+              <td>
+                <span class="status-badge" :class="rule.enabled ? 'status-active' : 'status-expired'">
+                  {{ rule.enabled ? '启用' : '停用' }}
+                </span>
+              </td>
+              <td>
+                <div class="td-actions">
+                  <button class="btn-icon" @click="openRuleEditor(rule)" title="编辑"><Icon name="edit" :size="14" /></button>
+                  <button class="btn-icon btn-icon-danger" @click="confirmDeleteRule(rule)" title="删除"><Icon name="trash" :size="14" /></button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <EmptyState v-else :iconSvg="svgShield" title="暂无自定义规则" description="点击「新增规则」添加自定义污点检测模式" />
+      </div>
+
+      <!-- 内置规则 (只读) -->
+      <div>
+        <h3 class="section-title" style="color: var(--text-tertiary)"><Icon name="shield" :size="16" /> 内置规则（只读）</h3>
+        <div class="table-wrap">
+          <table class="data-table" v-if="builtinRules.length">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>正则模式</th>
+                <th>标签</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="rule in builtinRules" :key="rule.name">
+                <td class="td-bold">{{ rule.name }}</td>
+                <td class="td-mono">{{ truncate(rule.pattern, 50) }}</td>
+                <td><span class="taint-badge" :class="'taint-' + normLabel(rule.label)">{{ rule.label }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <EmptyState v-else :iconSvg="svgShield" title="加载中..." description="" />
+        </div>
+      </div>
+    </div>
+
     <!-- Tab: 配置 -->
     <div v-if="activeTab === 'config'" class="section">
       <div class="config-columns">
@@ -322,6 +398,65 @@
         </div>
       </div>
     </div>
+
+    <!-- 规则编辑 Modal -->
+    <Teleport to="body">
+      <div v-if="showRuleEditor" class="modal-overlay" @click.self="showRuleEditor = false">
+        <div class="modal-box" style="min-width: 500px">
+          <div class="modal-header">
+            <span class="modal-icon">📐</span>
+            <span class="modal-title">{{ ruleForm.id ? '编辑规则' : '新增自定义规则' }}</span>
+          </div>
+          <div class="modal-body-form">
+            <div class="config-field">
+              <label class="field-label">规则名称 <span style="color:#EF4444">*</span></label>
+              <input v-model="ruleForm.name" class="field-input" placeholder="如: api-key-detector" />
+            </div>
+            <div class="config-field">
+              <label class="field-label">正则模式 <span style="color:#EF4444">*</span></label>
+              <input v-model="ruleForm.pattern" class="field-input td-mono" placeholder="如: (?i)(sk-[a-z0-9]{32,})" />
+              <span class="field-hint">Go 正则语法（RE2），匹配即触发污染标记</span>
+            </div>
+            <div class="config-field">
+              <label class="field-label">标签</label>
+              <select v-model="ruleForm.label" class="field-select">
+                <option value="CREDENTIAL-TAINTED">CREDENTIAL-TAINTED</option>
+                <option value="PII-TAINTED">PII-TAINTED</option>
+                <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+                <option value="INTERNAL-ONLY">INTERNAL-ONLY</option>
+              </select>
+              <span class="field-hint">匹配后打到数据流上的污染标签</span>
+            </div>
+            <div class="config-field">
+              <label class="field-label">描述</label>
+              <input v-model="ruleForm.desc_text" class="field-input" placeholder="规则说明（可选）" />
+            </div>
+            <div class="config-field" style="flex-direction: row; align-items: center; gap: var(--space-3)">
+              <label class="field-label" style="margin:0">启用</label>
+              <input type="checkbox" v-model="ruleForm.enabled" style="accent-color: var(--color-primary); width:16px; height:16px" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-sm" @click="showRuleEditor = false">取消</button>
+            <button class="btn btn-sm btn-primary" @click="saveRule" :disabled="!ruleForm.name.trim() || !ruleForm.pattern.trim() || savingRule">
+              <span v-if="savingRule" class="spinner"></span>
+              {{ savingRule ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 删除规则确认 -->
+    <ConfirmModal
+      :visible="showDeleteRuleConfirm"
+      title="删除自定义规则"
+      :message="deleteRuleConfirmMsg"
+      type="danger"
+      confirmText="确认删除"
+      @confirm="doDeleteRule"
+      @cancel="showDeleteRuleConfirm = false"
+    />
 
     <!-- 错误 Banner -->
     <div v-if="error" class="error-banner">
@@ -441,6 +576,16 @@ const showInjectModal = ref(false)
 const injecting = ref(false)
 const injectForm = reactive({ labels: [], source: 'manual', detail: '' })
 const injectLabelOptions = ['PII-TAINTED', 'CREDENTIAL-TAINTED', 'CONFIDENTIAL', 'INTERNAL-ONLY']
+
+// Custom rules state
+const customRules = ref([])
+const builtinRules = ref([])
+const showRuleEditor = ref(false)
+const savingRule = ref(false)
+const ruleForm = reactive({ id: '', name: '', pattern: '', label: 'CREDENTIAL-TAINTED', enabled: true, desc_text: '' })
+const showDeleteRuleConfirm = ref(false)
+const deleteRuleTarget = ref(null)
+const deleteRuleConfirmMsg = computed(() => '确认删除规则「' + (deleteRuleTarget.value?.name || '') + '」？')
 
 const activeFilter = reactive({ keyword: '', label: '', source: '' })
 const leakFilter = reactive({ keyword: '', label: '', action: '' })
@@ -648,6 +793,59 @@ async function doInject() {
   } catch (e) {
     showToast('❌ 注入失败: ' + e.message, 'error')
   } finally { injecting.value = false }
+}
+
+// Custom rules CRUD
+async function loadRules() {
+  try {
+    const d = await api('/api/v1/taint/rules')
+    builtinRules.value = d.builtin || []
+    customRules.value = d.custom || []
+  } catch (e) { error.value = '加载规则失败: ' + e.message }
+}
+
+function openRuleEditor(rule) {
+  if (rule) {
+    Object.assign(ruleForm, { id: rule.id, name: rule.name, pattern: rule.pattern, label: rule.label, enabled: rule.enabled, desc_text: rule.desc_text || '' })
+  } else {
+    Object.assign(ruleForm, { id: '', name: '', pattern: '', label: 'CREDENTIAL-TAINTED', enabled: true, desc_text: '' })
+  }
+  showRuleEditor.value = true
+}
+
+async function saveRule() {
+  savingRule.value = true
+  try {
+    const payload = { name: ruleForm.name, pattern: ruleForm.pattern, label: ruleForm.label, enabled: ruleForm.enabled, desc_text: ruleForm.desc_text }
+    if (ruleForm.id) {
+      await apiPut('/api/v1/taint/rules/' + ruleForm.id, payload)
+      showToast('✅ 规则已更新', 'success')
+    } else {
+      await apiPost('/api/v1/taint/rules', payload)
+      showToast('✅ 规则已添加', 'success')
+    }
+    showRuleEditor.value = false
+    loadRules()
+  } catch (e) {
+    showToast('❌ 保存失败: ' + e.message, 'error')
+  } finally { savingRule.value = false }
+}
+
+function confirmDeleteRule(rule) {
+  deleteRuleTarget.value = rule
+  showDeleteRuleConfirm.value = true
+}
+
+async function doDeleteRule() {
+  showDeleteRuleConfirm.value = false
+  if (!deleteRuleTarget.value) return
+  try {
+    await apiDelete('/api/v1/taint/rules/' + deleteRuleTarget.value.id)
+    showToast('✅ 规则已删除', 'success')
+    loadRules()
+  } catch (e) {
+    showToast('❌ 删除失败: ' + e.message, 'error')
+  }
 }
 
 // Helpers
@@ -875,6 +1073,11 @@ onMounted(loadAll)
 .inject-labels { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .checkbox-label input[type="checkbox"] { accent-color: var(--color-primary); }
+
+/* Custom rules */
+.rules-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: var(--space-3); gap: var(--space-3); flex-wrap: wrap; }
+.td-bold { font-weight: 600; color: var(--text-primary); }
+.td-actions { display: flex; gap: 4px; }
 
 /* Responsive */
 @media (max-width: 768px) {
