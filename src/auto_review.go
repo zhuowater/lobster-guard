@@ -394,11 +394,12 @@ Respond with exactly one word: "malicious" or "benign".`, ruleName, text)
 		return "warn"
 	}
 
-	// 解析 LLM 响应
+	// 解析 LLM 响应（兼容 thinking 模型：content=null 时读 reasoning_content）
 	var llmResp struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          *string `json:"content"`
+				ReasoningContent string  `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -408,7 +409,16 @@ Respond with exactly one word: "malicious" or "benign".`, ruleName, text)
 		return "warn"
 	}
 
-	answer := strings.ToLower(strings.TrimSpace(llmResp.Choices[0].Message.Content))
+	msg := llmResp.Choices[0].Message
+	rawAnswer := ""
+	if msg.Content != nil && *msg.Content != "" {
+		rawAnswer = *msg.Content
+	} else if msg.ReasoningContent != "" {
+		// thinking 模型（如 GLM-4.7）内容在 reasoning_content
+		rawAnswer = msg.ReasoningContent
+		log.Printf("[AutoReview] thinking 模型，从 reasoning_content 取答案 rule=%s", ruleName)
+	}
+	answer := strings.ToLower(strings.TrimSpace(rawAnswer))
 	log.Printf("[AutoReview] LLM 判断 rule=%s answer=%q", ruleName, answer)
 	if strings.Contains(answer, "benign") || strings.Contains(answer, "safe") || strings.Contains(answer, "false positive") {
 		atomic.AddInt64(&m.allowedCount, 1)
