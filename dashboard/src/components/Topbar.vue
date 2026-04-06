@@ -115,7 +115,8 @@ const searchInput = ref(null)
 function onTabClick(tab) {
   navStore.setTab(tab)
   // 导航到该 Tab 的第一个路由
-  const firstRoute = navStore.tabs[tab]?.routes[0]
+  const tabConfig = navStore.tabs[tab]
+  const firstRoute = tabConfig?.routes?.[0] ?? tabConfig?.groups?.[0]?.routes?.[0]
   if (firstRoute) {
     router.push({ name: firstRoute })
   }
