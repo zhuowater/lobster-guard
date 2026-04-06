@@ -14,6 +14,10 @@
         <span class="card-title">审计日志</span>
         <div class="card-actions">
           <button class="btn btn-ghost btn-sm" @click="refreshAll" :disabled="loading"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> 刷新</button>
+          <button class="btn btn-sm" :class="autoRefresh ? 'btn-active' : 'btn-ghost'" @click="toggleAutoRefresh" :title="autoRefresh ? '关闭自动刷新（30s）' : '开启自动刷新（30s）'">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {{ autoRefresh ? '自动刷新中' : '自动刷新' }}
+          </button>
         </div>
       </div>
 
@@ -334,8 +338,17 @@ function doConfirm() { confirmVisible.value=false; if (confirmAction) confirmAct
 
 function refreshAll() { loadLogs(); loadTimeline(); loadAuditStats() }
 
+const autoRefresh = ref(false)
 let refreshTimer=null
-onMounted(() => { loadFiltersFromURL(); loadLogs(); loadTimeline(); loadAuditStats(); refreshTimer=setInterval(()=>{loadLogs();loadTimeline()},30000) })
+function toggleAutoRefresh() {
+  autoRefresh.value = !autoRefresh.value
+  if (autoRefresh.value) {
+    refreshTimer = setInterval(() => { loadLogs(); loadTimeline() }, 30000)
+  } else {
+    clearInterval(refreshTimer); refreshTimer = null
+  }
+}
+onMounted(() => { loadFiltersFromURL(); loadLogs(); loadTimeline(); loadAuditStats() })
 onUnmounted(() => clearInterval(refreshTimer))
 </script>
 <style scoped>

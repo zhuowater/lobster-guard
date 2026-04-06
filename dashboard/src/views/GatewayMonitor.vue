@@ -14,11 +14,10 @@
         <button class="toolbar-btn refresh-btn" @click="refresh" :class="{ spinning: loading }" title="刷新">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         </button>
-        <div class="refresh-interval-wrap">
-          <select v-model="refreshInterval" @change="onRefreshChange" class="refresh-select" title="自动刷新间隔">
-            <option value="15000">15s</option><option value="30000">30s</option><option value="60000">1m</option><option value="0">手动</option>
-          </select>
-        </div>
+        <button class="toolbar-btn auto-refresh-btn" :class="{ active: autoRefreshOn }" @click="toggleAutoRefresh" :title="autoRefreshOn ? '关闭自动刷新' : '开启自动刷新（30s）'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          {{ autoRefreshOn ? '自动刷新中' : '自动刷新' }}
+        </button>
       </div>
     </div>
 
@@ -982,7 +981,7 @@ const sessionHistoryLoading = ref(false)
 const msgExpanded = reactive({})
 const lastRefreshTime = ref('')
 const lastRefreshDisplay = ref('')
-const refreshInterval = ref(localStorage.getItem('gm_refresh') || '30000')
+const autoRefreshOn = ref(false)
 let refreshTimer = null
 let displayTimer = null
 
@@ -2079,10 +2078,16 @@ function agentColor(id) { let h=0; for(let i=0;i<(id||'').length;i++) h=(id||'')
 function agentInitial(id) { return (id||'?').charAt(0).toUpperCase() }
 function showToast(m,t='info') { toast.msg=m; toast.type=t; toast.show=true; if(toastTimer)clearTimeout(toastTimer); toastTimer=setTimeout(()=>{toast.show=false},3500) }
 function updateRefreshDisplay() { lastRefreshDisplay.value = lastRefreshTime.value || '—' }
-function onRefreshChange() { localStorage.setItem('gm_refresh',refreshInterval.value); setupTimer() }
-function setupTimer() { if(refreshTimer)clearInterval(refreshTimer); const ms=parseInt(refreshInterval.value); if(ms>0) refreshTimer=setInterval(refresh,ms) }
+function toggleAutoRefresh() {
+  autoRefreshOn.value = !autoRefreshOn.value
+  if (autoRefreshOn.value) {
+    refreshTimer = setInterval(refresh, 30000)
+  } else {
+    clearInterval(refreshTimer); refreshTimer = null
+  }
+}
 
-onMounted(()=>{ refresh(); setupTimer(); displayTimer=setInterval(updateRefreshDisplay,5000) })
+onMounted(()=>{ refresh(); displayTimer=setInterval(updateRefreshDisplay,5000) })
 onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)clearInterval(displayTimer) })
 </script>
 
@@ -2098,7 +2103,9 @@ onUnmounted(()=>{ if(refreshTimer)clearInterval(refreshTimer); if(displayTimer)c
 .refresh-btn.spinning svg { animation:spin .8s linear infinite; }
 @keyframes spin { to{transform:rotate(360deg)} }
 .refresh-select { background:var(--bg-surface,#1e293b); border:1px solid var(--border-subtle,#334155); border-radius:6px; color:var(--text-secondary,#94a3b8); font-size:12px; padding:4px 8px; cursor:pointer; }
-.refresh-interval-wrap { display:flex; }
+.auto-refresh-btn { padding:5px 10px; border-radius:6px; background:transparent; border:1px solid var(--border-subtle,#1e293b); color:var(--text-secondary,#94a3b8); cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:5px; font-size:12px; }
+.auto-refresh-btn:hover { background:rgba(99,102,241,.1); border-color:#6366f1; color:#a5b4fc; }
+.auto-refresh-btn.active { background:rgba(99,102,241,.15); border-color:#6366f1; color:#a5b4fc; }
 .toolbar-btn { display:flex; align-items:center; }
 .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:80px 20px; text-align:center; }
 .empty-visual { margin-bottom:24px; }
