@@ -547,7 +547,7 @@ func (al *AuditLogger) StatsWithFilterTenant(sinceRFC3339, tenantID string) map[
 
 // QueryLogsExTenant 租户感知的审计日志查询
 func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID string, limit int) ([]map[string]interface{}, error) {
-	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
+	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,'') FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id WHERE 1=1`
 	var args []interface{}
 
 	tClause, tArgs := TenantFilter(tenantID)
@@ -555,30 +555,30 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 	args = append(args, tArgs...)
 
 	if direction != "" {
-		query += ` AND direction=?`
+		query += ` AND a.direction=?`
 		args = append(args, direction)
 	}
 	if action != "" {
-		query += ` AND action=?`
+		query += ` AND a.action=?`
 		args = append(args, action)
 	}
 	if senderID != "" {
-		query += ` AND sender_id=?`
+		query += ` AND a.sender_id=?`
 		args = append(args, senderID)
 	}
 	if appID != "" {
-		query += ` AND app_id=?`
+		query += ` AND a.app_id=?`
 		args = append(args, appID)
 	}
 	if q != "" {
-		query += ` AND content_preview LIKE ?`
+		query += ` AND a.content_preview LIKE ?`
 		args = append(args, "%"+q+"%")
 	}
 	if traceID != "" {
-		query += ` AND trace_id=?`
+		query += ` AND a.trace_id=?`
 		args = append(args, traceID)
 	}
-	query += ` ORDER BY id DESC`
+	query += ` ORDER BY a.id DESC`
 	if limit <= 0 {
 		limit = 50
 	}
@@ -596,23 +596,30 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id int
-		var ts, dir, sid, act, reason, preview, uid, aid, tid string
+		var ts, dir, sid, act, reason, preview, uid, aid, tid, displayName, department string
 		var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil {
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid, &displayName, &department) != nil {
 			continue
 		}
-		results = append(results, map[string]interface{}{
+		r := map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
 			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
-		})
+		}
+		if displayName != "" {
+			r["display_name"] = displayName
+		}
+		if department != "" {
+			r["department"] = department
+		}
+		results = append(results, r)
 	}
 	return results, nil
 }
 
 // QueryLogsExFullTenant 完整查询（含时间范围+租户）
 func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID string, limit int) ([]map[string]interface{}, error) {
-	query := `SELECT id, timestamp, direction, sender_id, action, reason, content_preview, latency_ms, upstream_id, app_id, COALESCE(trace_id,'') FROM audit_log WHERE 1=1`
+	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,'') FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id WHERE 1=1`
 	var args []interface{}
 
 	tClause, tArgs := TenantFilter(tenantID)
@@ -620,38 +627,38 @@ func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID,
 	args = append(args, tArgs...)
 
 	if direction != "" {
-		query += ` AND direction=?`
+		query += ` AND a.direction=?`
 		args = append(args, direction)
 	}
 	if action != "" {
-		query += ` AND action=?`
+		query += ` AND a.action=?`
 		args = append(args, action)
 	}
 	if senderID != "" {
-		query += ` AND sender_id=?`
+		query += ` AND a.sender_id=?`
 		args = append(args, senderID)
 	}
 	if appID != "" {
-		query += ` AND app_id=?`
+		query += ` AND a.app_id=?`
 		args = append(args, appID)
 	}
 	if q != "" {
-		query += ` AND content_preview LIKE ?`
+		query += ` AND a.content_preview LIKE ?`
 		args = append(args, "%"+q+"%")
 	}
 	if traceID != "" {
-		query += ` AND trace_id=?`
+		query += ` AND a.trace_id=?`
 		args = append(args, traceID)
 	}
 	if from != "" {
-		query += ` AND timestamp >= ?`
+		query += ` AND a.timestamp >= ?`
 		args = append(args, from)
 	}
 	if to != "" {
-		query += ` AND timestamp <= ?`
+		query += ` AND a.timestamp <= ?`
 		args = append(args, to)
 	}
-	query += ` ORDER BY id DESC`
+	query += ` ORDER BY a.id DESC`
 	if limit <= 0 {
 		limit = 50
 	}
@@ -669,16 +676,23 @@ func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID,
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id int
-		var ts, dir, sid, act, reason, preview, uid, aid, tid string
+		var ts, dir, sid, act, reason, preview, uid, aid, tid, displayName, department string
 		var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid) != nil {
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid, &displayName, &department) != nil {
 			continue
 		}
-		results = append(results, map[string]interface{}{
+		r := map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
 			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
-		})
+		}
+		if displayName != "" {
+			r["display_name"] = displayName
+		}
+		if department != "" {
+			r["department"] = department
+		}
+		results = append(results, r)
 	}
 	return results, nil
 }

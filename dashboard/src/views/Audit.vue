@@ -67,6 +67,8 @@
         <template #cell-direction="{value}"><span class="tag" :class="value==='inbound'?'tag-inbound':'tag-outbound'">{{ value==='inbound'?'入站':value==='outbound'?'出站':(value||'--') }}</span></template>
         <template #cell-action="{value}"><span class="tag" :class="actionTagClass(value)">{{ ({block:'阻断',warn:'告警',pass:'放行',allow:'允许',log:'记录'})[value]||value||'--' }}</span></template>
         <template #cell-sender_id="{row}"><a v-if="row.sender_id" class="link-primary" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(row.sender_id))">{{ row.sender_id }}</a><span v-else class="text-muted">--</span></template>
+        <template #cell-display_name="{row}"><span v-if="row.display_name">{{ row.display_name }}</span><span v-else class="text-muted">--</span></template>
+        <template #cell-department="{row}"><span v-if="row.department" class="tag tag-dept">{{ row.department }}</span><span v-else class="text-muted">--</span></template>
         <template #cell-trace_id="{row}">
           <span v-if="row.trace_id" class="trace-cell"><a class="trace-link" @click.stop="$router.push('/sessions/'+encodeURIComponent(row.trace_id))" :title="row.trace_id">{{ row.trace_id.substring(0,8) }}…</a><span class="trace-filter" @click.stop="filters.trace_id=row.trace_id;applyFilters()" title="筛选">🔍</span></span>
           <span v-else class="text-muted">--</span>
@@ -86,6 +88,7 @@
               <div class="detail-section">
                 <h4 class="detail-title">关联信息</h4>
                 <div class="detail-row"><span class="detail-label">发送者</span><a v-if="row.sender_id" class="link-primary" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(row.sender_id))">{{ row.sender_id }} ↗</a><span v-else class="text-muted">--</span></div>
+                <div class="detail-row" v-if="row.display_name||row.department"><span class="detail-label">姓名/部门</span><span>{{ row.display_name||'--' }} / {{ row.department||'--' }}</span></div>
                 <div class="detail-row"><span class="detail-label">App ID</span><span class="mono">{{ row.app_id||'--' }}</span></div>
                 <div class="detail-row"><span class="detail-label">Trace ID</span><a v-if="row.trace_id" class="link-primary mono" @click.stop="$router.push('/sessions/'+encodeURIComponent(row.trace_id))">{{ row.trace_id }} ▶</a><span v-else class="text-muted">--</span></div>
                 <div class="detail-row"><span class="detail-label">上游</span><span class="mono">{{ row.upstream_id||'--' }}</span></div>
@@ -179,6 +182,8 @@ const columns = [
   { key:'timestamp', label:'时间', sortable:true, width:'150px' },
   { key:'direction', label:'方向', sortable:true, width:'70px' },
   { key:'sender_id', label:'发送者', sortable:true },
+  { key:'display_name', label:'姓名', sortable:true, width:'90px' },
+  { key:'department', label:'部门', sortable:true, width:'100px' },
   { key:'action', label:'动作', sortable:true, width:'80px' },
   { key:'trace_id', label:'Trace ID', sortable:false, width:'120px' },
   { key:'content_preview', label:'内容', sortable:false },
@@ -393,6 +398,7 @@ onUnmounted(() => clearInterval(refreshTimer))
 .tag-pass { background:rgba(16,185,129,0.15); color:#10B981; }
 .tag-inbound { background:rgba(59,130,246,0.15); color:#3B82F6; }
 .tag-outbound { background:rgba(139,92,246,0.15); color:#8B5CF6; }
+.tag-dept { background:rgba(20,184,166,0.12); color:#0d9488; }
 
 /* Row highlights */
 :deep(.row-block) { background:rgba(239,68,68,0.04) !important; }

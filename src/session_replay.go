@@ -45,6 +45,8 @@ type SessionSummary struct {
 	EndTime        string   `json:"end_time"`
 	DurationMs     float64  `json:"duration_ms"`
 	SenderID       string   `json:"sender_id"`
+	DisplayName    string   `json:"display_name,omitempty"`
+	Department     string   `json:"department,omitempty"`
 	Model          string   `json:"model"`
 	IMEvents       int      `json:"im_events"`
 	LLMCalls       int      `json:"llm_calls"`
@@ -512,6 +514,8 @@ func (e *SessionReplayEngine) ListSessions(from, to, senderID, riskLevel, q stri
 			ql := strings.ToLower(q)
 			if !strings.Contains(strings.ToLower(sum.TraceID), ql) &&
 				!strings.Contains(strings.ToLower(sum.SenderID), ql) &&
+				!strings.Contains(strings.ToLower(sum.DisplayName), ql) &&
+				!strings.Contains(strings.ToLower(sum.Department), ql) &&
 				!strings.Contains(strings.ToLower(sum.Model), ql) {
 				continue
 			}
@@ -673,6 +677,7 @@ func (e *SessionReplayEngine) sessionSummary(sessionID string) *SessionSummary {
 		s.RiskLevel = "medium"
 	}
 
+	e.enrichUserInfo(s)
 	return s
 }
 
@@ -783,7 +788,23 @@ func (e *SessionReplayEngine) quickSummary(traceID string) *SessionSummary {
 	// 风险等级
 	s.RiskLevel = calcRiskLevel(*s)
 
+	e.enrichUserInfo(s)
 	return s
+}
+
+// enrichUserInfo 从 user_routes 查询 display_name 和 department
+func (e *SessionReplayEngine) enrichUserInfo(s *SessionSummary) {
+	if s.SenderID == "" {
+		return
+	}
+	var displayName, department sql.NullString
+	e.db.QueryRow(`SELECT MAX(display_name), MAX(department) FROM user_routes WHERE sender_id=?`, s.SenderID).Scan(&displayName, &department)
+	if displayName.Valid && displayName.String != "" {
+		s.DisplayName = displayName.String
+	}
+	if department.Valid && department.String != "" {
+		s.Department = department.String
+	}
 }
 
 // AddTag 添加标签

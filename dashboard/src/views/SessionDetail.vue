@@ -27,7 +27,8 @@
           <div class="sds-left">
             <div class="sds-trace mono">{{ sm.trace_id }}</div>
             <div class="sds-meta">
-              <span v-if="sm.sender_id"><Icon name="users" :size="12" /> {{ sm.sender_id }}</span>
+              <span v-if="sm.sender_id"><Icon name="users" :size="12" /> {{ sm.display_name || sm.sender_id }}<span v-if="sm.display_name" class="sds-sub"> ({{ sm.sender_id }})</span></span>
+              <span v-if="sm.department" class="sds-dept">{{ sm.department }}</span>
               <span v-if="sm.model"><Icon name="brain" :size="12" /> {{ sm.model }}</span>
               <span><Icon name="clock" :size="12" /> {{ fmtD(sm.duration_ms) }}</span>
             </div>
@@ -325,6 +326,8 @@ onMounted(() => { loadTimeline(); loadSessionTags(); loadNotes() })
 .sds-trace{font-size:16px;font-weight:700;color:var(--color-primary)}
 .sds-meta{display:flex;gap:12px;font-size:12px;color:var(--text-secondary);margin-top:4px;flex-wrap:wrap}
 .sds-meta span{display:flex;align-items:center;gap:4px}
+.sds-sub{color:var(--text-tertiary);font-size:10px}
+.sds-dept{color:#0d9488!important;background:rgba(20,184,166,0.1);border-radius:4px;padding:1px 6px}
 .sds-right{display:flex;align-items:center;gap:12px}
 .risk-score{font-size:12px;color:var(--text-secondary)}
 .risk-score strong{color:var(--text-primary);font-size:16px;font-family:var(--font-mono)}

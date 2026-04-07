@@ -59,7 +59,7 @@
               <div class="sc-top-l"><span class="sc-trace mono" v-html="hl(s.trace_id)"></span><span class="risk-badge" :class="'badge-'+s.risk_level">{{ rlabel(s.risk_level) }}</span></div>
               <div class="sc-top-r"><span class="sc-dur"><Icon name="clock" :size="12" /> {{ fmtDur(s.duration_ms) }}</span><span class="sc-time">{{ fmtTime(s.start_time) }}</span></div>
             </div>
-            <div class="sc-meta"><span v-if="s.sender_id" class="meta-item"><Icon name="users" :size="12" /> <span v-html="hl(s.sender_id)"></span></span><span v-if="s.model" class="meta-item"><Icon name="brain" :size="12" /> {{ s.model }}</span></div>
+            <div class="sc-meta"><span v-if="s.sender_id" class="meta-item"><Icon name="users" :size="12" /> <span v-html="hl(s.display_name || s.sender_id)"></span><span v-if="s.display_name" class="meta-sub" :title="s.sender_id"> ({{ s.sender_id }})</span></span><span v-if="s.department" class="meta-item meta-dept">{{ s.department }}</span><span v-if="s.model" class="meta-item"><Icon name="brain" :size="12" /> {{ s.model }}</span></div>
             <div class="sc-stats"><span class="chip"><span class="chip-l">IM</span><span class="chip-v">{{ s.im_events }}</span></span><span class="chip"><span class="chip-l">LLM</span><span class="chip-v">{{ s.llm_calls }}</span></span><span class="chip"><span class="chip-l">Tools</span><span class="chip-v">{{ s.tool_calls }}</span></span><span class="chip"><span class="chip-l">Tokens</span><span class="chip-v">{{ fmtNum(s.total_tokens) }}</span></span></div>
             <div class="sc-flags" v-if="hasSec(s)"><span class="flag-danger" v-if="s.canary_leaked"><Icon name="alert-triangle" :size="12" /> Canary泄露</span><span class="flag-danger" v-if="s.blocked"><Icon name="shield" :size="12" /> 已拦截</span><span class="flag-warn" v-if="s.budget_exceeded"><Icon name="zap" :size="12" /> 预算超限</span><span class="flag-warn" v-if="s.flagged_tools>0"><Icon name="alert-triangle" :size="12" /> {{ s.flagged_tools }}可疑工具</span></div>
             <div class="sc-tags" v-if="(s.tags||[]).length"><span class="tag-pill" v-for="t in (s.tags||[]).slice(0,5)" :key="t">{{ t }}</span></div>
@@ -254,6 +254,8 @@ onUnmounted(()=>clearInterval(timer))
 .mono{font-family:var(--font-mono)}
 .sc-meta{display:flex;gap:12px;font-size:11px;color:var(--text-secondary);margin-bottom:12px;flex-wrap:wrap}
 .meta-item{display:flex;align-items:center;gap:4px}
+.meta-sub{color:var(--text-tertiary);font-size:10px}
+.meta-dept{color:#0d9488;background:rgba(20,184,166,0.1);border-radius:4px;padding:1px 6px}
 .sc-stats{display:flex;gap:12px;margin-bottom:8px}
 .chip{display:flex;align-items:center;gap:2px;font-size:13px}
 .chip-l{font-size:10px;font-weight:500;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
