@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -79,9 +80,9 @@ func (e *HealthScoreEngine) Calculate() (*HealthScoreResult, error) {
 		})
 	}
 
-	// 2. LLM 异常率扣20分
+	// 2. LLM 异常率扣20分（v35.1: 含 302 重定向，显示分类明细）
 	var llmTotal, llmErrors int64
-	row = e.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END),0) FROM llm_calls WHERE timestamp >= ?`, since7d)
+	row = e.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN status_code >= 400 OR status_code IN (301,302,307,308) THEN 1 ELSE 0 END),0) FROM llm_calls WHERE timestamp >= ?`, since7d)
 	row.Scan(&llmTotal, &llmErrors)
 	llmErrorRate := float64(0)
 	if llmTotal > 0 {
@@ -97,9 +98,25 @@ func (e *HealthScoreEngine) Calculate() (*HealthScoreResult, error) {
 	}
 	if llmDeduct > 0 {
 		score -= llmDeduct
+		// 获取分类明细
+		llmDetail := fmt.Sprintf("异常率 %.1f%% (%d/%d)", llmErrorRate, llmErrors, llmTotal)
+		breakRows, berr := e.db.Query(`SELECT error_type, COUNT(*) FROM llm_calls WHERE timestamp >= ? AND error_type != '' GROUP BY error_type ORDER BY COUNT(*) DESC`, since7d)
+		if berr == nil {
+			var parts []string
+			for breakRows.Next() {
+				var et string; var cnt int64
+				if breakRows.Scan(&et, &cnt) == nil {
+					parts = append(parts, fmt.Sprintf("%s×%d", et, cnt))
+				}
+			}
+			breakRows.Close()
+			if len(parts) > 0 {
+				llmDetail += " [" + strings.Join(parts, ", ") + "]"
+			}
+		}
 		deductions = append(deductions, HealthDeduction{
 			Name: "LLM 异常率", Points: llmDeduct, MaxPoints: 20,
-			Detail: fmt.Sprintf("异常率 %.1f%% (%d/%d)", llmErrorRate, llmErrors, llmTotal),
+			Detail: llmDetail,
 		})
 	}
 
@@ -267,9 +284,9 @@ func (e *HealthScoreEngine) CalculateForTenant(tenantID string) (*HealthScoreRes
 		})
 	}
 
-	// 2. LLM 异常率
+	// 2. LLM 异常率（v35.1: 含 302 重定向，显示分类明细）
 	var llmTotal, llmErrors int64
-	q2 := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END),0) FROM llm_calls WHERE timestamp >= ?` + tClause
+	q2 := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status_code >= 400 OR status_code IN (301,302,307,308) THEN 1 ELSE 0 END),0) FROM llm_calls WHERE timestamp >= ?` + tClause
 	args2 := append([]interface{}{since7d}, tArgs...)
 	e.db.QueryRow(q2, args2...).Scan(&llmTotal, &llmErrors)
 	llmErrorRate := float64(0)
@@ -286,9 +303,25 @@ func (e *HealthScoreEngine) CalculateForTenant(tenantID string) (*HealthScoreRes
 	}
 	if llmDeduct > 0 {
 		score -= llmDeduct
+		llmDetail := fmt.Sprintf("异常率 %.1f%% (%d/%d)", llmErrorRate, llmErrors, llmTotal)
+		q2b := `SELECT error_type, COUNT(*) FROM llm_calls WHERE timestamp >= ? AND error_type != ''` + tClause + ` GROUP BY error_type ORDER BY COUNT(*) DESC`
+		breakRows, berr := e.db.Query(q2b, args2...)
+		if berr == nil {
+			var parts []string
+			for breakRows.Next() {
+				var et string; var cnt int64
+				if breakRows.Scan(&et, &cnt) == nil {
+					parts = append(parts, fmt.Sprintf("%s×%d", et, cnt))
+				}
+			}
+			breakRows.Close()
+			if len(parts) > 0 {
+				llmDetail += " [" + strings.Join(parts, ", ") + "]"
+			}
+		}
 		deductions = append(deductions, HealthDeduction{
 			Name: "LLM 异常率", Points: llmDeduct, MaxPoints: 20,
-			Detail: fmt.Sprintf("异常率 %.1f%% (%d/%d)", llmErrorRate, llmErrors, llmTotal),
+			Detail: llmDetail,
 		})
 	}
 

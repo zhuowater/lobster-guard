@@ -112,6 +112,8 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	// v18.0: 请求/响应预览列
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN request_preview TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN response_preview TEXT DEFAULT ''`)
+	// v35.1: 错误类型分类列（upstream_redirect/upstream_auth/upstream_not_found/upstream_rate_limited/upstream_error）
+	db.Exec(`ALTER TABLE llm_calls ADD COLUMN error_type TEXT DEFAULT ''`)
 
 	return &LLMAuditor{
 		db:       db,
@@ -568,12 +570,37 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 		model = info.Model
 	}
 
+	// v35.1: 错误类型分类
 	errMsg := ""
-	if statusCode >= 400 {
+	errType := ""
+	switch {
+	case statusCode == 301 || statusCode == 302 || statusCode == 307 || statusCode == 308:
+		errMsg = fmt.Sprintf("UPSTREAM_REDIRECT(%d)", statusCode)
+		errType = "upstream_redirect"
+	case statusCode == 401 || statusCode == 403:
 		errMsg = info.ErrorMessage
 		if errMsg == "" {
 			errMsg = fmt.Sprintf("HTTP %d", statusCode)
 		}
+		errType = "upstream_auth"
+	case statusCode == 404:
+		errMsg = "UPSTREAM_NOT_FOUND"
+		errType = "upstream_not_found"
+	case statusCode == 429:
+		errMsg = "UPSTREAM_RATE_LIMITED"
+		errType = "upstream_rate_limited"
+	case statusCode >= 500:
+		errMsg = info.ErrorMessage
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", statusCode)
+		}
+		errType = "upstream_error"
+	case statusCode >= 400:
+		errMsg = info.ErrorMessage
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", statusCode)
+		}
+		errType = "upstream_error"
 	}
 
 	// v10.1: Canary Token 泄露检测
@@ -610,6 +637,10 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 	if err != nil {
 		log.Printf("[LLMAudit] 写入 llm_call 失败: %v", err)
 		return
+	}
+	// v35.1: 回填 error_type
+	if errType != "" {
+		la.db.Exec(`UPDATE llm_calls SET error_type=? WHERE id=?`, errType, callID)
 	}
 
 	// v17.3: 写入 IM↔LLM 会话关联
@@ -829,18 +860,41 @@ func (la *LLMAuditor) OverviewWithFilter(sinceRFC3339 string) (map[string]interf
 		result["avg_latency_ms"] = float64(int(avgLatency.Float64*10)) / 10
 	}
 
+	// v35.1: error_rate 纳入 302 重定向，并返回分类明细
 	var errorCount int
-	errWhere := callsWhere
 	errArgs := make([]interface{}, len(callsArgs))
 	copy(errArgs, callsArgs)
+	var errWhere string
 	if sinceRFC3339 != "" {
-		errWhere = " WHERE timestamp >= ? AND (status_code >= 400 OR error_message != '')"
+		errWhere = " WHERE timestamp >= ? AND (status_code >= 400 OR status_code IN (301,302,307,308))"
 	} else {
-		errWhere = " WHERE status_code >= 400 OR error_message != ''"
+		errWhere = " WHERE status_code >= 400 OR status_code IN (301,302,307,308)"
 	}
 	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls"+errWhere, errArgs...).Scan(&errorCount)
 	if totalCalls > 0 {
 		result["error_rate"] = float64(int(float64(errorCount)/float64(totalCalls)*10000)) / 10000
+	}
+	// 错误类型分布
+	breakArgs := make([]interface{}, len(callsArgs))
+	copy(breakArgs, callsArgs)
+	var breakWhere string
+	if sinceRFC3339 != "" {
+		breakWhere = " WHERE timestamp >= ? AND error_type != ''"
+	} else {
+		breakWhere = " WHERE error_type != ''"
+	}
+	breakRows, berr := la.db.Query("SELECT error_type, COUNT(*) FROM llm_calls"+breakWhere+" GROUP BY error_type", breakArgs...)
+	if berr == nil {
+		defer breakRows.Close()
+		breakdown := map[string]int{}
+		for breakRows.Next() {
+			var et string
+			var cnt int
+			if breakRows.Scan(&et, &cnt) == nil {
+				breakdown[et] = cnt
+			}
+		}
+		result["error_breakdown"] = breakdown
 	}
 
 	var toolCallsTotal int
@@ -952,8 +1006,9 @@ func (la *LLMAuditor) OverviewWithFilterTenant(sinceRFC3339, tenantID string) (m
 		result["avg_latency_ms"] = float64(int(avgLatency.Float64*10)) / 10
 	}
 
+	// v35.1: error_rate 纳入 302 重定向
 	var errorCount int
-	errWhere := " WHERE (status_code >= 400 OR error_message != '')" + tClause
+	errWhere := " WHERE (status_code >= 400 OR status_code IN (301,302,307,308))" + tClause
 	errArgs := append([]interface{}{}, tArgs...)
 	if sinceRFC3339 != "" {
 		errWhere += " AND timestamp >= ?"
