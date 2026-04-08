@@ -123,7 +123,10 @@ watch(() => props.value, (newVal) => {
 }
 .stat-card-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px;
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+  flex-shrink: 0;
 }
 .stat-card--blue .stat-card-icon { color: var(--color-primary); }
 .stat-card--red .stat-card-icon { color: var(--color-danger); }
@@ -139,11 +142,12 @@ watch(() => props.value, (newVal) => {
   background: rgba(107,114,128,0.15); margin-left: auto; line-height: 1.4;
 }
 .stat-card-value {
-  font-size: var(--text-2xl); font-weight: 700;
+  font-size: var(--text-2xl); font-weight: 800;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
 }
 .stat-card-change {
   display: flex; align-items: center; gap: 2px;

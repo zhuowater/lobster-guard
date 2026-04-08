@@ -10,10 +10,10 @@
       <text v-for="g in gridLines" :key="'yl'+g.y" :x="padL - 6" :y="g.y + 3" fill="#64748B" font-size="9" text-anchor="end" font-family="var(--font-mono, monospace)">{{ g.label }}</text>
       <!-- X labels -->
       <text v-for="xl in xTickLabels" :key="'xl'+xl.x" :x="xl.x" :y="svgH - 2" fill="#64748B" font-size="9" text-anchor="middle" font-family="var(--font-mono, monospace)">{{ xl.text }}</text>
-      <!-- Area fills (very subtle) -->
-      <polygon v-for="line in polylines" :key="'a'+line.key" :points="line.areaPoints" :fill="line.color" opacity="0.06" />
+      <!-- Area fills -->
+      <polygon v-for="line in polylines" :key="'a'+line.key" :points="line.areaPoints" :fill="line.color" opacity="0.09" />
       <!-- Polylines -->
-      <polyline v-for="line in polylines" :key="line.key" :points="line.points" fill="none" :stroke="line.color" :stroke-width="line.width || 1.5" stroke-linejoin="round" :opacity="line.opacity || 0.9" />
+      <polyline v-for="line in polylines" :key="line.key" :points="line.points" fill="none" :stroke="line.color" :stroke-width="line.width || 2" stroke-linejoin="round" :opacity="line.opacity || 1" />
       <!-- Hover vertical line -->
       <line v-if="hoverIdx >= 0" :x1="hoverX" :y1="padT" :x2="hoverX" :y2="svgH - padB" stroke="rgba(148,163,184,0.2)" stroke-width="1" stroke-dasharray="3,3" />
       <!-- Hover dots -->

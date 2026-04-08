@@ -58,26 +58,15 @@
           <div class="notif-empty" v-else>✅ 暂无通知</div>
         </div>
       </div>
-      <!-- v15.0: 模式切换开关 -->
-      <div class="mode-toggle" @click="toggleMode" :title="navStore.mode === 'classic' ? '切换到叙事模式' : '切换到经典模式'">
-        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'narrative' }"><Icon name="eye" :size="12" /></span>
-        <div class="mode-toggle-track" :class="{ 'mode-track-classic': navStore.mode === 'classic' }">
-          <div class="mode-toggle-thumb" :class="{ 'mode-thumb-right': navStore.mode === 'classic' }"></div>
-        </div>
-        <span class="mode-toggle-label" :class="{ 'mode-active': navStore.mode === 'classic' }"><Icon name="grid" :size="12" /></span>
-      </div>
-      <div class="topbar-status">
-        <span class="dot dot-sm" :class="dotClass"></span>
-        <span class="topbar-status-label">{{ statusLabel }}</span>
-      </div>
-      <div class="topbar-uptime" v-if="formattedUptime">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        {{ formattedUptime }}
-      </div>
+      <!-- v15.0: 模式切换按钮 -->
+      <button class="mode-toggle-btn" @click="toggleMode" :title="navStore.mode === 'classic' ? '切换到叙事模式' : '切换到经典模式'" :class="{ 'mode-narrative': navStore.mode === 'narrative' }">
+        <Icon :name="navStore.mode === 'classic' ? 'eye' : 'grid'" :size="14" />
+      </button>
       <!-- v14.1: 用户信息 + 登出 -->
       <div class="user-menu" v-if="authUser" ref="userMenuWrap">
-        <button class="user-btn" @click="userMenuOpen = !userMenuOpen">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <button class="user-btn" @click="userMenuOpen = !userMenuOpen" :title="formattedUptime ? '运行时长 ' + formattedUptime : ''">
+          <span class="dot dot-sm" :class="dotClass"></span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span class="user-name">{{ authUser.display_name || authUser.username }}</span>
           <span class="user-role-badge" :class="'role-' + authUser.role">{{ authUser.role }}</span>
         </button>
@@ -364,13 +353,7 @@ onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document
   padding: 1px 6px; border-radius: var(--radius-sm); pointer-events: none;
   border: 1px solid var(--border-subtle);
 }
-.topbar-right { display: flex; align-items: center; gap: var(--space-4); white-space: nowrap; }
-.topbar-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
-.topbar-uptime {
-  display: flex; align-items: center; gap: var(--space-1);
-  font-family: var(--font-mono); color: var(--text-tertiary); font-size: var(--text-xs);
-}
-.topbar-uptime svg { color: var(--text-disabled); }
+.topbar-right { display: flex; align-items: center; gap: var(--space-3); white-space: nowrap; }
 .hamburger {
   display: none; background: none; border: none; color: var(--text-primary);
   cursor: pointer; padding: var(--space-1) var(--space-2);
@@ -527,61 +510,16 @@ onUnmounted(() => { document.removeEventListener('keydown', onKeydown); document
   font-weight: 500;
 }
 
-/* v15.0: 模式切换开关 */
-.mode-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 12px;
-  transition: all 0.2s ease;
-  user-select: none;
+/* v15.0: 模式切换按钮 */
+.mode-toggle-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  background: none; border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm); color: var(--text-tertiary);
+  cursor: pointer; transition: all var(--transition-fast);
 }
-
-.mode-toggle:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.mode-toggle-label {
-  font-size: 12px;
-  line-height: 1;
-  opacity: 0.4;
-  transition: opacity 0.2s ease;
-}
-
-.mode-toggle-label.mode-active {
-  opacity: 1;
-}
-
-.mode-toggle-track {
-  width: 24px;
-  height: 14px;
-  border-radius: 7px;
-  background: rgba(139, 92, 246, 0.3);
-  position: relative;
-  transition: background 0.2s ease;
-}
-
-.mode-track-classic {
-  background: rgba(99, 102, 241, 0.3);
-}
-
-.mode-toggle-thumb {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #a78bfa;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: all 0.2s ease;
-}
-
-.mode-thumb-right {
-  left: 12px;
-  background: #818cf8;
-}
+.mode-toggle-btn:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-strong); }
+.mode-toggle-btn.mode-narrative { color: #a78bfa; border-color: rgba(167,139,250,0.3); background: rgba(139,92,246,0.08); }
 
 @media(max-width:768px) {
   .topnav-tabs { display: none; }

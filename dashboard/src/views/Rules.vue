@@ -6,7 +6,7 @@
         <span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span class="card-title">规则命中率</span>
         <div class="card-actions">
           <button class="btn btn-ghost btn-sm" @click="loadRuleHits">刷新</button>
-          <button class="btn btn-danger btn-sm" @click="confirmResetHits">重置</button>
+          <button class="btn btn-ghost-danger btn-sm" @click="confirmResetHits">重置</button>
         </div>
       </div>
       <DataTable :columns="hitsColumns" :data="ruleHits" :loading="hitsLoading" empty-text="规则正在保护中" empty-desc="命中数据将在检测到威胁后显示" :expandable="false">

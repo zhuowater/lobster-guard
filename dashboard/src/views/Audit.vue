@@ -205,7 +205,7 @@ const activeFilterTags = computed(() => {
 })
 
 const timelineChartData = computed(() => timelineData.value.map(t => ({ pass:t.pass||0, block:t.block||0, warn:t.warn||0 })))
-const timelineLines = [{ key:'pass', color:'#10B981', label:'放行' },{ key:'block', color:'#EF4444', label:'阻断' },{ key:'warn', color:'#F59E0B', label:'告警' }]
+const timelineLines = [{ key:'pass', color:'#34D399', label:'放行', width:2.5 },{ key:'block', color:'#F87171', label:'阻断', width:2 },{ key:'warn', color:'#FBBF24', label:'告警', width:2 }]
 const timelineXLabels = computed(() => timelineData.value.map(t => { const h=t.hour||''; if (timelineRange.value==='7d') return h.substring(5,10); const hp=h.substring(11,13); return hp?hp+':00':'' }))
 
 function fullTime(ts) { if (!ts) return '--'; const d=new Date(ts); return isNaN(d.getTime())?String(ts):d.toLocaleString('zh-CN',{hour12:false}) }

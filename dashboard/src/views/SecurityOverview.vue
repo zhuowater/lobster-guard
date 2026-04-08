@@ -516,8 +516,8 @@ onUnmounted(() => {
 .so-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 /* Overlay: treemap left, stats right */
 .so-overlay { position: relative; z-index: 2; display: flex; gap: 16px; padding: 16px; min-height: 310px; }
-.so-treemap-wrap { flex: 1; min-width: 0; }
-.so-treemap { position: relative; width: 100%; height: 100%; min-height: 280px; border-radius: 8px; overflow: hidden; }
+.so-treemap-wrap { flex: 1; min-width: 0; align-self: stretch; display: flex; flex-direction: column; }
+.so-treemap { flex: 1; position: relative; width: 100%; min-height: 280px; border-radius: 8px; overflow: hidden; }
 .so-tm-cell { position: absolute; border: 1px solid; border-radius: 6px; padding: 6px 8px; cursor: pointer; transition: all .2s; display: flex; flex-direction: column; justify-content: center; overflow: hidden; backdrop-filter: blur(6px); }
 .so-tm-cell:hover { transform: scale(1.02); z-index: 3; box-shadow: 0 0 20px rgba(99,102,241,0.3); }
 .so-tm-active { box-shadow: 0 0 15px rgba(99,102,241,0.4); }

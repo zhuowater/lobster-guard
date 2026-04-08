@@ -1224,53 +1224,63 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 
 	// 统一引擎开关 — 所有引擎的 enabled 都通过此 map 管理
 	type engineDef struct {
-		cfgPtr  *bool
-		yamlKey string // "" = top-level bool field
+		cfgPtr   *bool
+		yamlKey  string // "" = top-level bool field
+		topYaml  string // explicit yaml key for top-level bool fields
 	}
 	engineMap := map[string]engineDef{
-		// 基础检测
-		"engine_inbound_detect":  {&api.cfg.InboundDetectEnabled, ""},
-		"engine_session_detect":  {&api.cfg.SessionDetectEnabled, ""},
-		"engine_llm_detect":      {&api.cfg.LLMDetectEnabled, ""},
-		"engine_semantic":        {&api.cfg.SemanticDetector.Enabled, "semantic_detector"},
+		// 基础检测（top-level bool，需要显式指定 yaml tag 名）
+		"engine_inbound_detect":  {&api.cfg.InboundDetectEnabled, "", "inbound_detect_enabled"},
+		"engine_session_detect":  {&api.cfg.SessionDetectEnabled, "", "session_detect_enabled"},
+		"engine_llm_detect":      {&api.cfg.LLMDetectEnabled, "", "llm_detect_enabled"},
+		"engine_semantic":        {&api.cfg.SemanticDetector.Enabled, "semantic_detector", ""},
 		// 蜜罐
-		"engine_honeypot_deep":   {&api.cfg.HoneypotDeep.Enabled, "honeypot_deep"},
-		"engine_singularity":     {&api.cfg.Singularity.Enabled, "singularity"},
+		"engine_honeypot_deep":   {&api.cfg.HoneypotDeep.Enabled, "honeypot_deep", ""},
+		"engine_singularity":     {&api.cfg.Singularity.Enabled, "singularity", ""},
 		// IFC
-		"engine_ifc":             {&api.cfg.IFC.Enabled, "ifc"},
-		"engine_ifc_quarantine":  {&api.cfg.IFC.QuarantineEnabled, "ifc"},
-		"engine_ifc_hiding":      {&api.cfg.IFC.HidingEnabled, "ifc"},
+		"engine_ifc":             {&api.cfg.IFC.Enabled, "ifc", ""},
+		"engine_ifc_quarantine":  {&api.cfg.IFC.QuarantineEnabled, "ifc", ""},
+		"engine_ifc_hiding":      {&api.cfg.IFC.HidingEnabled, "ifc", ""},
 		// 策略
-		"engine_path_policy":     {&api.cfg.PathPolicy.Enabled, "path_policy"},
-		"engine_tool_policy":     {&api.cfg.ToolPolicy.Enabled, "tool_policy"},
+		"engine_path_policy":     {&api.cfg.PathPolicy.Enabled, "path_policy", ""},
+		"engine_tool_policy":     {&api.cfg.ToolPolicy.Enabled, "tool_policy", ""},
 		// CaMeL
-		"engine_plan_compiler":   {&api.cfg.PlanCompiler.Enabled, "plan_compiler"},
-		"engine_capability":      {&api.cfg.Capability.Enabled, "capability"},
-		"engine_deviation":       {&api.cfg.Deviation.Enabled, "deviation"},
-		"engine_counterfactual":  {&api.cfg.Counterfactual.Enabled, "counterfactual"},
-		// 辅助
-		"engine_envelope":        {&api.cfg.EnvelopeEnabled, ""},
-		"engine_evolution":       {&api.cfg.EvolutionEnabled, ""},
-		"engine_adaptive":        {&api.cfg.AdaptiveDecision.Enabled, "adaptive_decision"},
-		"engine_taint_tracker":   {&api.cfg.TaintTracker.Enabled, "taint_tracker"},
-		"engine_taint_reversal":  {&api.cfg.TaintReversal.Enabled, "taint_reversal"},
-		"engine_event_bus":       {&api.cfg.EventBus.Enabled, "event_bus"},
+		"engine_plan_compiler":   {&api.cfg.PlanCompiler.Enabled, "plan_compiler", ""},
+		"engine_capability":      {&api.cfg.Capability.Enabled, "capability", ""},
+		"engine_deviation":       {&api.cfg.Deviation.Enabled, "deviation", ""},
+		"engine_counterfactual":  {&api.cfg.Counterfactual.Enabled, "counterfactual", ""},
+		// 辅助（top-level bool）
+		"engine_envelope":        {&api.cfg.EnvelopeEnabled, "", "envelope_enabled"},
+		"engine_evolution":       {&api.cfg.EvolutionEnabled, "", "evolution_enabled"},
+		"engine_adaptive":        {&api.cfg.AdaptiveDecision.Enabled, "adaptive_decision", ""},
+		"engine_taint_tracker":   {&api.cfg.TaintTracker.Enabled, "taint_tracker", ""},
+		"engine_taint_reversal":  {&api.cfg.TaintReversal.Enabled, "taint_reversal", ""},
+		"engine_event_bus":       {&api.cfg.EventBus.Enabled, "event_bus", ""},
+	}
+	// toStringMap 将 yaml.v2 解析出的 map[interface{}]interface{} 安全转为 map[string]interface{}
+	toStringMap := func(v interface{}) map[string]interface{} {
+		switch m := v.(type) {
+		case map[string]interface{}:
+			return m
+		case map[interface{}]interface{}:
+			out := make(map[string]interface{}, len(m))
+			for k, val := range m {
+				out[fmt.Sprintf("%v", k)] = val
+			}
+			return out
+		}
+		return map[string]interface{}{}
 	}
 	for reqKey, eng := range engineMap {
 		if v, ok := req[reqKey]; ok {
 			b, _ := v.(bool)
 			*eng.cfgPtr = b
 			if eng.yamlKey == "" {
-				// top-level bool field: derive yaml key from reqKey (strip "engine_" prefix)
-				yamlField := strings.TrimPrefix(reqKey, "engine_")
-				raw[yamlField] = b
+				// top-level bool: 用显式指定的 yaml tag 写入
+				raw[eng.topYaml] = b
 			} else {
-				// nested struct .enabled field
-				sub, _ := raw[eng.yamlKey].(map[string]interface{})
-				if sub == nil {
-					sub = map[string]interface{}{}
-				}
-				// IFC has sub-fields: quarantine_enabled, hiding_enabled
+				// nested struct: 用 toStringMap 兼容 yaml.v2/v3，保留已有字段
+				sub := toStringMap(raw[eng.yamlKey])
 				switch reqKey {
 				case "engine_ifc_quarantine":
 					sub["quarantine_enabled"] = b
@@ -1290,8 +1300,7 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 	if v, ok := req["taint_reversal_request_mode"]; ok {
 		s := fmt.Sprintf("%v", v)
 		api.cfg.TaintReversal.RequestMode = s
-		sub, _ := raw["taint_reversal"].(map[string]interface{})
-		if sub == nil { sub = map[string]interface{}{} }
+		sub := toStringMap(raw["taint_reversal"])
 		sub["request_mode"] = s
 		raw["taint_reversal"] = sub
 		updated = append(updated, "taint_reversal_request_mode")
@@ -1299,8 +1308,7 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 	if v, ok := req["taint_reversal_response_mode"]; ok {
 		s := fmt.Sprintf("%v", v)
 		api.cfg.TaintReversal.ResponseMode = s
-		sub, _ := raw["taint_reversal"].(map[string]interface{})
-		if sub == nil { sub = map[string]interface{}{} }
+		sub := toStringMap(raw["taint_reversal"])
 		sub["response_mode"] = s
 		raw["taint_reversal"] = sub
 		updated = append(updated, "taint_reversal_response_mode")
