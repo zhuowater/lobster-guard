@@ -323,54 +323,23 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upstreamURL := strings.TrimRight(target.Upstream, "/") + requestPath
-	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		log.Printf("[LLM代理] 创建上游请求失败: %v", err)
-		http.Error(w, `{"error":"failed to create upstream request"}`, 500)
-		return
-	}
-
-	// 复制 headers
-	for key, values := range r.Header {
-		for _, v := range values {
-			upReq.Header.Add(key, v)
-		}
-	}
-	upReq.Header.Set("X-Trace-ID", traceID)
-	upReq.ContentLength = int64(len(bodyBytes))
-
-	// 发送上游请求
-	resp, err := lp.client.Do(upReq)
+	resp, err := lp.forwardLLMUpstream(r, upstreamURL, bodyBytes, traceID)
 	if err != nil {
 		log.Printf("[LLM代理] 上游请求失败: %v", err)
-		http.Error(w, fmt.Sprintf(`{"error":"upstream request failed: %v"}`, err), 502)
+		if strings.Contains(err.Error(), "failed to create upstream request") {
+			http.Error(w, `{"error":"failed to create upstream request"}`, 500)
+		} else {
+			http.Error(w, fmt.Sprintf(`{"error":"upstream request failed: %v"}`, err), 502)
+		}
 		return
 	}
 	defer resp.Body.Close()
 
 	// 审计上下文
-	auditCtx := &LLMAuditContext{
-		TraceID:      traceID,
-		StartTime:    start,
-		Model:        model,
-		ReqBody:      bodyBytes,
-		CanaryToken:  activeCanaryToken,
-		TenantID:     tenantID,
-	}
-
-	// v17.3: 填充 IM 会话关联信息
-	if sessionLink != nil {
-		auditCtx.IMTraceID = sessionLink.IMTraceID
-		auditCtx.SenderID = sessionLink.SenderID
-		auditCtx.SessionID = sessionLink.SessionID
-	}
+	auditCtx := buildLLMAuditContext(start, traceID, model, bodyBytes, activeCanaryToken, tenantID, sessionLink)
 
 	// 复制响应 headers
-	for key, values := range resp.Header {
-		for _, v := range values {
-			w.Header().Add(key, v)
-		}
-	}
+	copyHeaders(w.Header(), resp.Header)
 
 	// 检测是否是 SSE 流式响应
 	contentType := resp.Header.Get("Content-Type")
