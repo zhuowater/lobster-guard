@@ -175,13 +175,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	// Prefer trace ID from upstream (InboundProxy sets X-Trace-Id),
 	// fallback to generating a new one for direct LLM calls
-	traceID := r.Header.Get("X-Trace-Id")
-	if traceID == "" {
-		traceID = r.Header.Get("X-Trace-ID")
-	}
-	if traceID == "" {
-		traceID = GenerateTraceID()
-	}
+	traceID := resolveLLMTraceID(r)
 
 	// 匹配上游
 	target := lp.matchTarget(r)
@@ -327,10 +321,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// v20.1: LLM 请求侧污染传播（使用关联的 IM trace_id 以匹配入站标记）
-	taintTraceID := traceID
-	if sessionLink != nil && sessionLink.IMTraceID != "" {
-		taintTraceID = sessionLink.IMTraceID
-	}
+	taintTraceID := resolveTaintTraceID(traceID, sessionLink)
 	if lp.taintTracker != nil {
 		lp.taintTracker.Propagate(taintTraceID, "llm_request",
 			fmt.Sprintf("user message forwarded to LLM (llm_trace=%s)", traceID))
@@ -396,14 +387,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 构建上游请求（strip_prefix 模式下去掉 path_prefix 再转发）
-	requestPath := r.URL.RequestURI()
-	if target.StripPrefix && target.PathPrefix != "" && strings.HasPrefix(requestPath, target.PathPrefix) {
-		stripped := strings.TrimPrefix(requestPath, target.PathPrefix)
-		if !strings.HasPrefix(stripped, "/") {
-			stripped = "/" + stripped
-		}
-		requestPath = stripped
-	}
+	requestPath := buildLLMUpstreamRequestPath(r.URL.RequestURI(), target)
 
 	// v20.2+: 污染逆转 — 请求侧 pre-inject（在 LLM 看到数据之前注入"数据不可信"提示）
 	if lp.reversalEngine != nil {

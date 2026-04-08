@@ -947,6 +947,7 @@
     4. response policy
     5. SSE / stream finalize
     6. observability hooks
+  - 当前进展：已抽出 `src/llm_request_preprocess.go`，先收拢 trace/taint/request-path 三个 request preprocess helper；新增 `src/llm_proxy_pipeline_test.go` 覆盖这些阶段基础行为
   - 重点保障：rewrite、taint reversal、reasoning_content fallback、tool policy、counterfactual、SSE 尾包行为完全可回归测试
   - 测试：`src/llm_proxy_pipeline_test.go`
 
