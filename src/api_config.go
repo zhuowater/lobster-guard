@@ -992,81 +992,12 @@ func (api *ManagementAPI) handleConfigValidate(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// handleConfigSettingsGet GET /api/v1/config/settings — 返回当前运行配置（引擎开关等）
+// handleConfigSettingsGet GET /api/v1/config/settings — 返回当前运行配置（显式 DTO + 兼容旧字段）
 func (api *ManagementAPI) handleConfigSettingsGet(w http.ResponseWriter, r *http.Request) {
-	// 将 Config 结构体序列化为 map 以支持前端嵌套路径取值
-	data, err := json.Marshal(api.cfg)
+	result, err := buildConfigSettingsResponse(api.cfg)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": "serialize config failed"})
 		return
-	}
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-
-	// v35.2: 提供扁平化 engine_toggles，避免前端猜测 Go JSON 字段路径
-	engineToggles := map[string]bool{
-		"engine_inbound_detect": api.cfg.InboundDetectEnabled,
-		"engine_session_detect": api.cfg.SessionDetectEnabled,
-		"engine_llm_detect": api.cfg.LLMDetectEnabled,
-		"engine_semantic": api.cfg.SemanticDetector.Enabled,
-		"engine_honeypot_deep": api.cfg.HoneypotDeep.Enabled,
-		"engine_singularity": api.cfg.Singularity.Enabled,
-		"engine_ifc": api.cfg.IFC.Enabled,
-		"engine_ifc_quarantine": api.cfg.IFC.QuarantineEnabled,
-		"engine_ifc_hiding": api.cfg.IFC.HidingEnabled,
-		"engine_path_policy": api.cfg.PathPolicy.Enabled,
-		"engine_tool_policy": api.cfg.ToolPolicy.Enabled,
-		"engine_plan_compiler": api.cfg.PlanCompiler.Enabled,
-		"engine_capability": api.cfg.Capability.Enabled,
-		"engine_deviation": api.cfg.Deviation.Enabled,
-		"engine_counterfactual": api.cfg.Counterfactual.Enabled,
-		"engine_envelope": api.cfg.EnvelopeEnabled,
-		"engine_evolution": api.cfg.EvolutionEnabled,
-		"engine_adaptive": api.cfg.AdaptiveDecision.Enabled,
-		"engine_taint_tracker": api.cfg.TaintTracker.Enabled,
-		"engine_taint_reversal": api.cfg.TaintReversal.Enabled,
-		"engine_event_bus": api.cfg.EventBus.Enabled,
-	}
-	result["engine_toggles"] = engineToggles
-
-	// v36.2: 提供显式 DTO 分组，逐步替代前端对原始 Go JSON 结构的依赖
-	result["basic"] = map[string]interface{}{
-		"inbound_listen":         api.cfg.InboundListen,
-		"outbound_listen":        api.cfg.OutboundListen,
-		"management_listen":      api.cfg.ManagementListen,
-		"openclaw_upstream":      api.cfg.OpenClawUpstream,
-		"lanxin_upstream":        api.cfg.LanxinUpstream,
-		"default_gateway_origin": api.cfg.DefaultGatewayOrigin,
-		"log_level":              api.cfg.LogLevel,
-		"log_format":             api.cfg.LogFormat,
-	}
-	result["security"] = map[string]interface{}{
-		"inbound_detect_enabled": api.cfg.InboundDetectEnabled,
-		"outbound_audit_enabled": api.cfg.OutboundAuditEnabled,
-		"detect_timeout_ms":      api.cfg.DetectTimeoutMs,
-	}
-	result["rate_limit"] = map[string]interface{}{
-		"global_rps":       api.cfg.RateLimit.GlobalRPS,
-		"global_burst":     api.cfg.RateLimit.GlobalBurst,
-		"per_sender_rps":   api.cfg.RateLimit.PerSenderRPS,
-		"per_sender_burst": api.cfg.RateLimit.PerSenderBurst,
-	}
-	result["session"] = map[string]interface{}{
-		"session_idle_timeout_min": api.cfg.SessionIdleTimeoutMin,
-		"session_fp_window_sec":    api.cfg.SessionFPWindowSec,
-	}
-	result["alerts"] = map[string]interface{}{
-		"alert_webhook":      api.cfg.AlertWebhook,
-		"alert_format":       api.cfg.AlertFormat,
-		"alert_min_interval": api.cfg.AlertMinInterval,
-	}
-	result["advanced"] = map[string]interface{}{
-		"db_path":               api.cfg.DBPath,
-		"heartbeat_interval_sec": api.cfg.HeartbeatIntervalSec,
-		"route_default_policy":  api.cfg.RouteDefaultPolicy,
-		"audit_retention_days":  api.cfg.AuditRetentionDays,
-		"ws_idle_timeout":       api.cfg.WSIdleTimeout,
-		"backup_auto_interval":  api.cfg.BackupAutoInterval,
 	}
 	jsonResponse(w, 200, result)
 }

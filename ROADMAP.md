@@ -927,11 +927,12 @@
   - 测试：`src/config_persistence_test.go` + `TestSaveLLMConfig_SyncsConfD`
   - 全量验证：`go test ./...` + `go build ./...` + `vite build` 全绿
 
-- [ ] **v36.2 Config DTO / Contract 稳定化**
-  - `GET /api/v1/config/settings` 从“裸露 Go struct”演进到显式 DTO
-  - 分组稳定输出：`basic` / `security` / `rate_limit` / `session` / `alerts` / `advanced` / `engine_toggles`
-  - 已完成后端 DTO 基础与契约测试：`src/config_dto_test.go`
-  - 待完成：前端逐步改成 DTO-first，旧字段短期兼容，防止二次漂移
+- [x] **v36.2 Config DTO / Contract 稳定化** ✅ (2026-04-08)
+  - 新建 `src/config_dto.go`，集中构建 `GET /api/v1/config/settings` 的显式 DTO 契约
+  - 稳定分组输出：`basic` / `security` / `rate_limit` / `session` / `alerts` / `advanced` / `engine_toggles`
+  - 保留旧响应字段兼容：继续暴露原始 Go JSON 结构，避免已有控制面/脚本回归
+  - 新增 `src/config_dto_test.go` 契约测试；`dashboard/src/views/Settings.vue` 改为 DTO-first，并兼容 PascalCase 旧字段回退
+  - 全量验证：`go test ./...` + `go build ./...` + `vite build` 全绿
 
 - [ ] **v36.3 Settings 控制面拆分**
   - 将 `dashboard/src/views/Settings.vue` 拆为独立 tab 组件：Config / Engines / LLM / System / Database

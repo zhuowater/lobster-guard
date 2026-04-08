@@ -598,19 +598,57 @@ async function loadConfig() {
   catch (e) { showToast('加载配置失败: ' + e.message, 'error') }
   configLoading.value = false
 }
+function settingsSection(d, key) {
+  return d?.[key] && typeof d[key] === 'object' ? d[key] : {}
+}
+function legacySetting(d, snakeKey, pascalKey) {
+  if (d?.[snakeKey] !== undefined) return d[snakeKey]
+  if (d?.[pascalKey] !== undefined) return d[pascalKey]
+  return undefined
+}
+function settingValue(section, legacy, fallback) {
+  return section !== undefined ? section : (legacy !== undefined ? legacy : fallback)
+}
 function fillForm(d) {
-  form.inbound_listen = d.inbound_listen || ':8443'; form.outbound_listen = d.outbound_listen || ':8444'
-  form.management_listen = d.management_listen || ':9090'; form.openclaw_upstream = d.openclaw_upstream || ''
-  form.lanxin_upstream = d.lanxin_upstream || ''; form.default_gateway_origin = d.default_gateway_origin || 'http://localhost'; form.log_level = d.log_level || 'info'; form.log_format = d.log_format || 'text'
-  form.inbound_detect_enabled = d.inbound_detect_enabled !== false; form.outbound_audit_enabled = d.outbound_audit_enabled !== false
-  form.detect_timeout_ms = d.detect_timeout_ms || 50
-  const rl = d.rate_limit || {}; form.rate_limit.global_rps = rl.global_rps || 0; form.rate_limit.global_burst = rl.global_burst || 0
-  form.rate_limit.per_sender_rps = rl.per_sender_rps || 0; form.rate_limit.per_sender_burst = rl.per_sender_burst || 0
-  form.session_idle_timeout_min = d.session_idle_timeout_min || 60; form.session_fp_window_sec = d.session_fp_window_sec || 300
-  form.alert_webhook = d.alert_webhook || ''; form.alert_format = d.alert_format || 'generic'; form.alert_min_interval = d.alert_min_interval || 60
-  form.db_path = d.db_path || ''; form.heartbeat_interval_sec = d.heartbeat_interval_sec || 10
-  form.route_default_policy = d.route_default_policy || 'least-users'; form.audit_retention_days = d.audit_retention_days || 30
-  form.ws_idle_timeout = d.ws_idle_timeout || 300; form.backup_auto_interval = d.backup_auto_interval || 0
+  const basic = settingsSection(d, 'basic')
+  const security = settingsSection(d, 'security')
+  const rl = settingsSection(d, 'rate_limit')
+  const legacyRL = d?.rate_limit || d?.RateLimit || {}
+  const session = settingsSection(d, 'session')
+  const alerts = settingsSection(d, 'alerts')
+  const advanced = settingsSection(d, 'advanced')
+
+  form.inbound_listen = settingValue(basic.inbound_listen, legacySetting(d, 'inbound_listen', 'InboundListen'), ':8443')
+  form.outbound_listen = settingValue(basic.outbound_listen, legacySetting(d, 'outbound_listen', 'OutboundListen'), ':8444')
+  form.management_listen = settingValue(basic.management_listen, legacySetting(d, 'management_listen', 'ManagementListen'), ':9090')
+  form.openclaw_upstream = settingValue(basic.openclaw_upstream, legacySetting(d, 'openclaw_upstream', 'OpenClawUpstream'), '')
+  form.lanxin_upstream = settingValue(basic.lanxin_upstream, legacySetting(d, 'lanxin_upstream', 'LanxinUpstream'), '')
+  form.default_gateway_origin = settingValue(basic.default_gateway_origin, legacySetting(d, 'default_gateway_origin', 'DefaultGatewayOrigin'), 'http://localhost')
+  form.log_level = settingValue(basic.log_level, legacySetting(d, 'log_level', 'LogLevel'), 'info')
+  form.log_format = settingValue(basic.log_format, legacySetting(d, 'log_format', 'LogFormat'), 'text')
+
+  form.inbound_detect_enabled = settingValue(security.inbound_detect_enabled, legacySetting(d, 'inbound_detect_enabled', 'InboundDetectEnabled'), true) !== false
+  form.outbound_audit_enabled = settingValue(security.outbound_audit_enabled, legacySetting(d, 'outbound_audit_enabled', 'OutboundAuditEnabled'), true) !== false
+  form.detect_timeout_ms = settingValue(security.detect_timeout_ms, legacySetting(d, 'detect_timeout_ms', 'DetectTimeoutMs'), 50)
+
+  form.rate_limit.global_rps = settingValue(rl.global_rps, legacyRL.global_rps ?? legacyRL.GlobalRPS, 0)
+  form.rate_limit.global_burst = settingValue(rl.global_burst, legacyRL.global_burst ?? legacyRL.GlobalBurst, 0)
+  form.rate_limit.per_sender_rps = settingValue(rl.per_sender_rps, legacyRL.per_sender_rps ?? legacyRL.PerSenderRPS, 0)
+  form.rate_limit.per_sender_burst = settingValue(rl.per_sender_burst, legacyRL.per_sender_burst ?? legacyRL.PerSenderBurst, 0)
+
+  form.session_idle_timeout_min = settingValue(session.session_idle_timeout_min, legacySetting(d, 'session_idle_timeout_min', 'SessionIdleTimeoutMin'), 60)
+  form.session_fp_window_sec = settingValue(session.session_fp_window_sec, legacySetting(d, 'session_fp_window_sec', 'SessionFPWindowSec'), 300)
+
+  form.alert_webhook = settingValue(alerts.alert_webhook, legacySetting(d, 'alert_webhook', 'AlertWebhook'), '')
+  form.alert_format = settingValue(alerts.alert_format, legacySetting(d, 'alert_format', 'AlertFormat'), 'generic')
+  form.alert_min_interval = settingValue(alerts.alert_min_interval, legacySetting(d, 'alert_min_interval', 'AlertMinInterval'), 60)
+
+  form.db_path = settingValue(advanced.db_path, legacySetting(d, 'db_path', 'DBPath'), '')
+  form.heartbeat_interval_sec = settingValue(advanced.heartbeat_interval_sec, legacySetting(d, 'heartbeat_interval_sec', 'HeartbeatIntervalSec'), 10)
+  form.route_default_policy = settingValue(advanced.route_default_policy, legacySetting(d, 'route_default_policy', 'RouteDefaultPolicy'), 'least-users')
+  form.audit_retention_days = settingValue(advanced.audit_retention_days, legacySetting(d, 'audit_retention_days', 'AuditRetentionDays'), 30)
+  form.ws_idle_timeout = settingValue(advanced.ws_idle_timeout, legacySetting(d, 'ws_idle_timeout', 'WSIdleTimeout'), 300)
+  form.backup_auto_interval = settingValue(advanced.backup_auto_interval, legacySetting(d, 'backup_auto_interval', 'BackupAutoInterval'), 0)
   // 引擎开关已统一到 "检测引擎" Tab，不再在配置管理表单中管理
 }
 function extractForm() {

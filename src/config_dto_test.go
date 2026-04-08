@@ -1,150 +1,157 @@
 package main
 
-import (
-	"encoding/json"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
-func TestConfigSettingsGet_DTOSections(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-	initial := `inbound_listen: ":18443"
-outbound_listen: ":18444"
-management_listen: ":9090"
-openclaw_upstream: "http://127.0.0.1:18790"
-lanxin_upstream: "https://example.com"
-default_gateway_origin: "http://localhost"
-log_level: "debug"
-log_format: "json"
-inbound_detect_enabled: true
-outbound_audit_enabled: false
-detect_timeout_ms: 321
-rate_limit:
-  global_rps: 123
-  global_burst: 456
-  per_sender_rps: 7
-  per_sender_burst: 8
-session_idle_timeout_min: 66
-session_fp_window_sec: 777
-alert_webhook: "https://webhook"
-alert_format: "generic"
-alert_min_interval: 99
-db_path: "/tmp/audit.db"
-heartbeat_interval_sec: 12
-route_default_policy: "round-robin"
-audit_retention_days: 45
-ws_idle_timeout: 901
-backup_auto_interval: 6
-`
-	if err := os.WriteFile(cfgPath, []byte(initial), 0644); err != nil {
-		t.Fatal(err)
+func TestBuildConfigSettingsResponse_ProvidesStableDTOSections(t *testing.T) {
+	cfg := &Config{
+		InboundListen:        ":8443",
+		OutboundListen:       ":8444",
+		ManagementListen:     ":9090",
+		OpenClawUpstream:     "http://openclaw:8080",
+		LanxinUpstream:       "http://lanxin:19090",
+		DefaultGatewayOrigin: "http://localhost",
+		LogLevel:             "debug",
+		LogFormat:            "json",
+		InboundDetectEnabled: true,
+		OutboundAuditEnabled: false,
+		DetectTimeoutMs:      250,
+		RateLimit: RateLimiterConfig{
+			GlobalRPS:      12,
+			GlobalBurst:    24,
+			PerSenderRPS:   3,
+			PerSenderBurst: 6,
+		},
+		SessionIdleTimeoutMin: 45,
+		SessionFPWindowSec:    180,
+		AlertWebhook:          "https://alerts.example.com/hook",
+		AlertFormat:           "generic",
+		AlertMinInterval:      120,
+		DBPath:                "/tmp/lobster.db",
+		HeartbeatIntervalSec:  9,
+		RouteDefaultPolicy:    "round-robin",
+		AuditRetentionDays:    14,
+		WSIdleTimeout:         90,
+		BackupAutoInterval:    6,
+		SessionDetectEnabled:  true,
+		LLMDetectEnabled:      true,
+		EnvelopeEnabled:       true,
+		EvolutionEnabled:      false,
+		SemanticDetector:      SemanticConfig{Enabled: true},
+		HoneypotDeep:          HoneypotDeepConfig{Enabled: false},
+		Singularity:           SingularityConfig{Enabled: true},
+		IFC:                   IFCConfig{Enabled: true, QuarantineEnabled: true, HidingEnabled: false},
+		PathPolicy:            PathPolicyConfig{Enabled: true},
+		ToolPolicy:            ToolPolicyConfig{Enabled: false},
+		PlanCompiler:          PlanConfig{Enabled: true},
+		Capability:            CapConfig{Enabled: false},
+		Deviation:             DeviationConfig{Enabled: true},
+		Counterfactual:        CFConfig{Enabled: true},
+		AdaptiveDecision:      AdaptiveDecisionConfig{Enabled: true},
+		TaintTracker:          TaintConfig{Enabled: true},
+		TaintReversal:         TaintReversalConfig{Enabled: false},
+		EventBus:              EventBusConfig{Enabled: true},
 	}
-	cfg, err := loadConfig(cfgPath)
+
+	got, err := buildConfigSettingsResponse(cfg)
 	if err != nil {
-		t.Fatal(err)
-	}
-	api := &ManagementAPI{cfg: cfg, cfgPath: cfgPath}
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/config/settings", nil)
-	api.handleConfigSettingsGet(rr, req)
-	if rr.Code != 200 {
-		t.Fatalf("GET code=%d body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("buildConfigSettingsResponse error: %v", err)
 	}
 
-	var got map[string]interface{}
-	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
+	for _, key := range []string{"basic", "security", "rate_limit", "session", "alerts", "advanced", "engine_toggles"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("expected top-level key %q in response", key)
+		}
 	}
 
-	assertJSONPathString(t, got, "basic.inbound_listen", ":18443")
-	assertJSONPathString(t, got, "basic.outbound_listen", ":18444")
-	assertJSONPathString(t, got, "basic.management_listen", ":9090")
-	assertJSONPathString(t, got, "basic.log_level", "debug")
-	assertJSONPathString(t, got, "basic.log_format", "json")
-	assertJSONPathBool(t, got, "security.inbound_detect_enabled", true)
-	assertJSONPathBool(t, got, "security.outbound_audit_enabled", false)
-	assertJSONPathInt(t, got, "security.detect_timeout_ms", 321)
-	assertJSONPathInt(t, got, "rate_limit.global_burst", 456)
-	assertJSONPathInt(t, got, "rate_limit.per_sender_burst", 8)
-	assertJSONPathInt(t, got, "session.session_idle_timeout_min", 66)
-	assertJSONPathInt(t, got, "session.session_fp_window_sec", 777)
-	assertJSONPathString(t, got, "alerts.alert_webhook", "https://webhook")
-	assertJSONPathString(t, got, "alerts.alert_format", "generic")
-	assertJSONPathInt(t, got, "alerts.alert_min_interval", 99)
-	assertJSONPathString(t, got, "advanced.db_path", "/tmp/audit.db")
-	assertJSONPathInt(t, got, "advanced.heartbeat_interval_sec", 12)
-	assertJSONPathString(t, got, "advanced.route_default_policy", "round-robin")
-	assertJSONPathInt(t, got, "advanced.audit_retention_days", 45)
-	assertJSONPathInt(t, got, "advanced.ws_idle_timeout", 901)
-	assertJSONPathInt(t, got, "advanced.backup_auto_interval", 6)
+	basic := requireObject(t, got, "basic")
+	assertEqual(t, basic["inbound_listen"], ":8443", "basic.inbound_listen")
+	assertEqual(t, basic["outbound_listen"], ":8444", "basic.outbound_listen")
+	assertEqual(t, basic["management_listen"], ":9090", "basic.management_listen")
+	assertEqual(t, basic["log_level"], "debug", "basic.log_level")
+	assertEqual(t, basic["log_format"], "json", "basic.log_format")
+
+	security := requireObject(t, got, "security")
+	assertEqual(t, security["inbound_detect_enabled"], true, "security.inbound_detect_enabled")
+	assertEqual(t, security["outbound_audit_enabled"], false, "security.outbound_audit_enabled")
+	assertEqual(t, security["detect_timeout_ms"], float64(250), "security.detect_timeout_ms")
+
+	rateLimit := requireObject(t, got, "rate_limit")
+	assertEqual(t, rateLimit["global_rps"], float64(12), "rate_limit.global_rps")
+	assertEqual(t, rateLimit["global_burst"], float64(24), "rate_limit.global_burst")
+	assertEqual(t, rateLimit["per_sender_rps"], float64(3), "rate_limit.per_sender_rps")
+	assertEqual(t, rateLimit["per_sender_burst"], float64(6), "rate_limit.per_sender_burst")
+
+	session := requireObject(t, got, "session")
+	assertEqual(t, session["session_idle_timeout_min"], float64(45), "session.session_idle_timeout_min")
+	assertEqual(t, session["session_fp_window_sec"], float64(180), "session.session_fp_window_sec")
+
+	alerts := requireObject(t, got, "alerts")
+	assertEqual(t, alerts["alert_webhook"], "https://alerts.example.com/hook", "alerts.alert_webhook")
+	assertEqual(t, alerts["alert_format"], "generic", "alerts.alert_format")
+	assertEqual(t, alerts["alert_min_interval"], float64(120), "alerts.alert_min_interval")
+
+	advanced := requireObject(t, got, "advanced")
+	assertEqual(t, advanced["db_path"], "/tmp/lobster.db", "advanced.db_path")
+	assertEqual(t, advanced["heartbeat_interval_sec"], float64(9), "advanced.heartbeat_interval_sec")
+	assertEqual(t, advanced["route_default_policy"], "round-robin", "advanced.route_default_policy")
+	assertEqual(t, advanced["audit_retention_days"], float64(14), "advanced.audit_retention_days")
+	assertEqual(t, advanced["ws_idle_timeout"], float64(90), "advanced.ws_idle_timeout")
+	assertEqual(t, advanced["backup_auto_interval"], float64(6), "advanced.backup_auto_interval")
+
+	engines := requireObject(t, got, "engine_toggles")
+	assertEqual(t, engines["engine_inbound_detect"], true, "engine_toggles.engine_inbound_detect")
+	assertEqual(t, engines["engine_tool_policy"], false, "engine_toggles.engine_tool_policy")
+	assertEqual(t, engines["engine_event_bus"], true, "engine_toggles.engine_event_bus")
 }
 
-func digJSONPath(raw map[string]interface{}, path string) (interface{}, bool) {
-	cur := interface{}(raw)
-	start := 0
-	for i := 0; i <= len(path); i++ {
-		if i != len(path) && path[i] != '.' {
-			continue
-		}
-		part := path[start:i]
-		m, ok := cur.(map[string]interface{})
-		if !ok {
-			return nil, false
-		}
-		cur, ok = m[part]
-		if !ok {
-			return nil, false
-		}
-		start = i + 1
+func TestBuildConfigSettingsResponse_PreservesLegacyFieldsForCompatibility(t *testing.T) {
+	cfg := &Config{
+		InboundListen:        ":7001",
+		ManagementListen:     ":9091",
+		InboundDetectEnabled: false,
+		RateLimit:            RateLimiterConfig{GlobalRPS: 99},
+		TaintReversal:        TaintReversalConfig{Enabled: true, RequestMode: "hard", ResponseMode: "soft"},
 	}
-	return cur, true
+
+	got, err := buildConfigSettingsResponse(cfg)
+	if err != nil {
+		t.Fatalf("buildConfigSettingsResponse error: %v", err)
+	}
+
+	assertEqual(t, got["InboundListen"], ":7001", "legacy InboundListen")
+	assertEqual(t, got["ManagementListen"], ":9091", "legacy ManagementListen")
+	assertEqual(t, got["InboundDetectEnabled"], false, "legacy InboundDetectEnabled")
+
+	rl, ok := got["RateLimit"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("legacy RateLimit should remain object, got %#v", got["RateLimit"])
+	}
+	assertEqual(t, rl["GlobalRPS"], float64(99), "legacy RateLimit.GlobalRPS")
+
+	tr, ok := got["TaintReversal"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("legacy TaintReversal should remain object, got %#v", got["TaintReversal"])
+	}
+	assertEqual(t, tr["request_mode"], "hard", "legacy TaintReversal.request_mode")
+	assertEqual(t, tr["response_mode"], "soft", "legacy TaintReversal.response_mode")
 }
 
-func assertJSONPathString(t *testing.T, raw map[string]interface{}, path, want string) {
+func requireObject(t *testing.T, root map[string]interface{}, key string) map[string]interface{} {
 	t.Helper()
-	v, ok := digJSONPath(raw, path)
+	v, ok := root[key]
 	if !ok {
-		t.Fatalf("missing path %s", path)
+		t.Fatalf("missing key %q", key)
 	}
-	got, ok := v.(string)
+	obj, ok := v.(map[string]interface{})
 	if !ok {
-		t.Fatalf("path %s should be string, got %#v", path, v)
+		t.Fatalf("key %q should be object, got %#v", key, v)
 	}
+	return obj
+}
+
+func assertEqual(t *testing.T, got, want interface{}, label string) {
+	t.Helper()
 	if got != want {
-		t.Fatalf("path %s=%q want %q", path, got, want)
-	}
-}
-
-func assertJSONPathBool(t *testing.T, raw map[string]interface{}, path string, want bool) {
-	t.Helper()
-	v, ok := digJSONPath(raw, path)
-	if !ok {
-		t.Fatalf("missing path %s", path)
-	}
-	got, ok := v.(bool)
-	if !ok {
-		t.Fatalf("path %s should be bool, got %#v", path, v)
-	}
-	if got != want {
-		t.Fatalf("path %s=%v want %v", path, got, want)
-	}
-}
-
-func assertJSONPathInt(t *testing.T, raw map[string]interface{}, path string, want int) {
-	t.Helper()
-	v, ok := digJSONPath(raw, path)
-	if !ok {
-		t.Fatalf("missing path %s", path)
-	}
-	got, ok := v.(float64)
-	if !ok {
-		t.Fatalf("path %s should be numeric, got %#v", path, v)
-	}
-	if int(got) != want {
-		t.Fatalf("path %s=%v want %d", path, got, want)
+		t.Fatalf("%s = %#v, want %#v", label, got, want)
 	}
 }
