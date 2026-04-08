@@ -1,8 +1,8 @@
 # lobster-guard Roadmap
 
-> **当前版本：v35.0** · 363+ commits · Go ~68,000 行 + 测试 ~37,500 行 · Vue ~32,700 行 · 1252 测试 · 491 API · 50 页面 · 75 Vue 组件 · 5 依赖
+> **当前版本：v35.0** · 364+ commits · Go ~68,000 行 + 测试 ~37,500 行 · Vue ~32,700 行 · 1252+ 测试 · 491 API · 50 页面 · 75 Vue 组件 · 5 依赖
 >
-> 更新时间：2026-04-06
+> 更新时间：2026-04-08
 
 ---
 
@@ -906,6 +906,59 @@
   - Tab 计数实时同步（`customRules.length`）
 
 - [x] **威胁中心 Tab 导航修复** — groups 结构 Tab 点击不再崩溃
+
+### v36.x — 配置持久化统一 · LLM 管线重构 · Settings 控制面拆分 🚧
+> **P1 架构版本**：不是加新功能，而是把 v29-v35 快速迭代引入的配置/控制面/LLM 执行链复杂度收束为可维护结构。
+> 核心主题：**配置不漂移、前后端契约稳定、LLM 安全链路可解释、Streaming 行为可测试**。
+> 设计原则：**先统一 persistence，再稳定 DTO/contract，再拆 Settings，再拆 `llm_proxy.go`**。
+
+- [x] **v36.0 P0 预修复完成**（2026-04-08）
+  - 修复 Settings 引擎开关剩余 5 个路径漂移问题（HoneypotDeep / Singularity / ToolPolicy / AdaptiveDecision / EventBus）
+  - `GET /api/v1/config/settings` 新增扁平 `engine_toggles` 契约，前端不再猜 Go JSON 结构
+  - 回归测试：`src/config_settings_test.go`
+    - `TestConfigSettingsGet_EngineTogglesContract`
+    - `TestConfigSettingsUpdate_PersistsEngineTogglesToYAML`
+  - 全量验证：`go test ./...` + `go build ./...` + `vite build` 全绿
+
+- [ ] **v36.1 Config Persistence Service**
+  - 新建 `src/config_persistence.go`，统一所有 config 读-改-写路径
+  - 迁移：`handleConfigSettingsUpdate` / `handleAlertsConfigUpdate` / `saveLLMConfig` / `saveRoutePolicies` / `persistOutboundRules` / `persistRawSection`
+  - 统一 `cfgMu` 加锁、YAML map 兼容、错误上下文、`conf.d` section 同步
+  - 测试：`src/config_persistence_test.go`
+
+- [ ] **v36.2 Config DTO / Contract 稳定化**
+  - `GET /api/v1/config/settings` 从“裸露 Go struct”演进到显式 DTO
+  - 分组稳定输出：`basic` / `security` / `rate_limit` / `session` / `alerts` / `advanced` / `engine_toggles`
+  - 前端逐步改成 DTO-first，旧字段短期兼容，防止二次漂移
+  - 测试：`src/config_dto_test.go`
+
+- [ ] **v36.3 Settings 控制面拆分**
+  - 将 `dashboard/src/views/Settings.vue` 拆为独立 tab 组件：Config / Engines / LLM / System / Database
+  - 保持 UI 行为不变，先拆职责，后考虑 composable 抽取
+  - 目标：降低前后端契约耦合、减少超大前端文件维护风险
+
+- [ ] **v36.4 LLM Proxy 管线化重构**
+  - 将 `src/llm_proxy.go` 拆成显式阶段：
+    1. request preprocess
+    2. request policy
+    3. upstream forward
+    4. response policy
+    5. SSE / stream finalize
+    6. observability hooks
+  - 重点保障：rewrite、taint reversal、reasoning_content fallback、tool policy、counterfactual、SSE 尾包行为完全可回归测试
+  - 测试：`src/llm_proxy_pipeline_test.go`
+
+- [ ] **v36.5 config.yaml / conf.d 优先级规则固化**
+  - 文档：`docs/config-precedence.md`
+  - 明确：哪些 section 只写主配置、哪些 section 必须同步 `conf.d`、重启时冲突优先级如何判定
+  - 消灭“API 看起来保存了，重启后又被 conf.d 覆盖”的模糊地带
+
+- [ ] **v36 成功标准**
+  - Config 写回不再散落在多个 API handler
+  - Settings 不再依赖 Go struct 序列化偶然形状
+  - `llm_proxy.go` 从巨石文件降级为 orchestration + stage files
+  - Streaming / rewrite / taint / counterfactual 顺序拥有回归测试保护
+  - 重构后不新增功能债，而是为 v37+ 功能演进提供稳定底座
 
 ### 未来探索
 
