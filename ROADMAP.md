@@ -920,17 +920,18 @@
     - `TestConfigSettingsUpdate_PersistsEngineTogglesToYAML`
   - 全量验证：`go test ./...` + `go build ./...` + `vite build` 全绿
 
-- [ ] **v36.1 Config Persistence Service**
+- [x] **v36.1 Config Persistence Service** ✅ (2026-04-08)
   - 新建 `src/config_persistence.go`，统一所有 config 读-改-写路径
-  - 迁移：`handleConfigSettingsUpdate` / `handleAlertsConfigUpdate` / `saveLLMConfig` / `saveRoutePolicies` / `persistOutboundRules` / `persistRawSection`
+  - 已迁移：`handleConfigSettingsUpdate` / `handleAlertsConfigUpdate` / `saveLLMConfig` / `saveRoutePolicies` / `persistOutboundRules` / `persistRawSection`
   - 统一 `cfgMu` 加锁、YAML map 兼容、错误上下文、`conf.d` section 同步
-  - 测试：`src/config_persistence_test.go`
+  - 测试：`src/config_persistence_test.go` + `TestSaveLLMConfig_SyncsConfD`
+  - 全量验证：`go test ./...` + `go build ./...` + `vite build` 全绿
 
 - [ ] **v36.2 Config DTO / Contract 稳定化**
   - `GET /api/v1/config/settings` 从“裸露 Go struct”演进到显式 DTO
   - 分组稳定输出：`basic` / `security` / `rate_limit` / `session` / `alerts` / `advanced` / `engine_toggles`
-  - 前端逐步改成 DTO-first，旧字段短期兼容，防止二次漂移
-  - 测试：`src/config_dto_test.go`
+  - 已完成后端 DTO 基础与契约测试：`src/config_dto_test.go`
+  - 待完成：前端逐步改成 DTO-first，旧字段短期兼容，防止二次漂移
 
 - [ ] **v36.3 Settings 控制面拆分**
   - 将 `dashboard/src/views/Settings.vue` 拆为独立 tab 组件：Config / Engines / LLM / System / Database

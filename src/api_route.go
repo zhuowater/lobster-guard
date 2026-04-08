@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 func (api *ManagementAPI) handleListRoutes(w http.ResponseWriter, r *http.Request) {
@@ -433,16 +430,6 @@ func (api *ManagementAPI) handleTestRoutePolicy(w http.ResponseWriter, r *http.R
 
 // saveRoutePolicies 将策略列表写回 config.yaml（读取→修改 route_policies 字段→写回）
 func (api *ManagementAPI) saveRoutePolicies(policies []RoutePolicyConfig) error {
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		return fmt.Errorf("读取配置文件失败: %w", err)
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("解析配置文件失败: %w", err)
-	}
 	// 转换为 []interface{} 以保证 yaml marshal 正确
 	policyList := make([]interface{}, len(policies))
 	for i, p := range policies {
@@ -479,13 +466,8 @@ func (api *ManagementAPI) saveRoutePolicies(policies []RoutePolicyConfig) error 
 		}
 		policyList[i] = m
 	}
-	raw["route_policies"] = policyList
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
-		return fmt.Errorf("写入配置文件失败: %w", err)
+	if err := api.configPersistence().ReplaceSection("route_policies", policyList); err != nil {
+		return fmt.Errorf("写入 route_policies 失败: %w", err)
 	}
 	log.Printf("[策略路由] 已保存 %d 条策略到 %s", len(policies), api.cfgPath)
 	return nil

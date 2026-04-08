@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 func (api *ManagementAPI) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -1005,7 +1004,7 @@ func (api *ManagementAPI) handleConfigSettingsGet(w http.ResponseWriter, r *http
 	json.Unmarshal(data, &result)
 
 	// v35.2: 提供扁平化 engine_toggles，避免前端猜测 Go JSON 字段路径
-	result["engine_toggles"] = map[string]bool{
+	engineToggles := map[string]bool{
 		"engine_inbound_detect": api.cfg.InboundDetectEnabled,
 		"engine_session_detect": api.cfg.SessionDetectEnabled,
 		"engine_llm_detect": api.cfg.LLMDetectEnabled,
@@ -1028,6 +1027,47 @@ func (api *ManagementAPI) handleConfigSettingsGet(w http.ResponseWriter, r *http
 		"engine_taint_reversal": api.cfg.TaintReversal.Enabled,
 		"engine_event_bus": api.cfg.EventBus.Enabled,
 	}
+	result["engine_toggles"] = engineToggles
+
+	// v36.2: 提供显式 DTO 分组，逐步替代前端对原始 Go JSON 结构的依赖
+	result["basic"] = map[string]interface{}{
+		"inbound_listen":         api.cfg.InboundListen,
+		"outbound_listen":        api.cfg.OutboundListen,
+		"management_listen":      api.cfg.ManagementListen,
+		"openclaw_upstream":      api.cfg.OpenClawUpstream,
+		"lanxin_upstream":        api.cfg.LanxinUpstream,
+		"default_gateway_origin": api.cfg.DefaultGatewayOrigin,
+		"log_level":              api.cfg.LogLevel,
+		"log_format":             api.cfg.LogFormat,
+	}
+	result["security"] = map[string]interface{}{
+		"inbound_detect_enabled": api.cfg.InboundDetectEnabled,
+		"outbound_audit_enabled": api.cfg.OutboundAuditEnabled,
+		"detect_timeout_ms":      api.cfg.DetectTimeoutMs,
+	}
+	result["rate_limit"] = map[string]interface{}{
+		"global_rps":       api.cfg.RateLimit.GlobalRPS,
+		"global_burst":     api.cfg.RateLimit.GlobalBurst,
+		"per_sender_rps":   api.cfg.RateLimit.PerSenderRPS,
+		"per_sender_burst": api.cfg.RateLimit.PerSenderBurst,
+	}
+	result["session"] = map[string]interface{}{
+		"session_idle_timeout_min": api.cfg.SessionIdleTimeoutMin,
+		"session_fp_window_sec":    api.cfg.SessionFPWindowSec,
+	}
+	result["alerts"] = map[string]interface{}{
+		"alert_webhook":      api.cfg.AlertWebhook,
+		"alert_format":       api.cfg.AlertFormat,
+		"alert_min_interval": api.cfg.AlertMinInterval,
+	}
+	result["advanced"] = map[string]interface{}{
+		"db_path":               api.cfg.DBPath,
+		"heartbeat_interval_sec": api.cfg.HeartbeatIntervalSec,
+		"route_default_policy":  api.cfg.RouteDefaultPolicy,
+		"audit_retention_days":  api.cfg.AuditRetentionDays,
+		"ws_idle_timeout":       api.cfg.WSIdleTimeout,
+		"backup_auto_interval":  api.cfg.BackupAutoInterval,
+	}
 	jsonResponse(w, 200, result)
 }
 
@@ -1042,19 +1082,9 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 	needRestart := false
 	updated := []string{}
 
-	// 读取配置文件用于持久化（P1: 全局锁防止并发写覆盖）
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "read config failed: " + err.Error()})
-		return
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "parse config failed: " + err.Error()})
-		return
-	}
+	persistence := api.configPersistence()
+	errNoFieldsToUpdate := errors.New("no fields to update")
+	if err := persistence.PatchWith(func(raw map[string]interface{}) error {
 
 	// 基础配置
 	if v, ok := req["inbound_listen"]; ok {
@@ -1339,19 +1369,16 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		updated = append(updated, "taint_reversal_response_mode")
 	}
 
-	if len(updated) == 0 {
-		jsonResponse(w, 400, map[string]string{"error": "no fields to update"})
-		return
-	}
-
-	// 写回 config.yaml
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "marshal config failed: " + err.Error()})
-		return
-	}
-	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "write config failed: " + err.Error()})
+		if len(updated) == 0 {
+			return errNoFieldsToUpdate
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errNoFieldsToUpdate) {
+			jsonResponse(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -1416,39 +1443,22 @@ func (api *ManagementAPI) handleAlertsConfigUpdate(w http.ResponseWriter, r *htt
 		return
 	}
 
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "read config failed"})
-		return
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "parse config failed"})
-		return
-	}
-
-	if req.Webhook != nil {
-		api.cfg.AlertWebhook = *req.Webhook
-		raw["alert_webhook"] = *req.Webhook
-	}
-	if req.MinInterval != nil {
-		api.cfg.AlertMinInterval = *req.MinInterval
-		raw["alert_min_interval"] = *req.MinInterval
-	}
-	if req.Format != nil {
-		api.cfg.AlertFormat = *req.Format
-		raw["alert_format"] = *req.Format
-	}
-
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "marshal failed"})
-		return
-	}
-	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "write failed"})
+	if err := api.configPersistence().PatchWith(func(raw map[string]interface{}) error {
+		if req.Webhook != nil {
+			api.cfg.AlertWebhook = *req.Webhook
+			raw["alert_webhook"] = *req.Webhook
+		}
+		if req.MinInterval != nil {
+			api.cfg.AlertMinInterval = *req.MinInterval
+			raw["alert_min_interval"] = *req.MinInterval
+		}
+		if req.Format != nil {
+			api.cfg.AlertFormat = *req.Format
+			raw["alert_format"] = *req.Format
+		}
+		return nil
+	}); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 

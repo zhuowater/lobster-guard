@@ -7,13 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 func (api *ManagementAPI) handleLLMStatus(w http.ResponseWriter, r *http.Request) {
@@ -280,21 +276,10 @@ func (api *ManagementAPI) handleLLMConfigPut(w http.ResponseWriter, r *http.Requ
 
 // saveLLMConfig 将 LLM 代理配置写回 config.yaml
 func (api *ManagementAPI) saveLLMConfig() error {
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		return fmt.Errorf("读取配置文件失败: %w", err)
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("解析配置文件失败: %w", err)
-	}
-
 	cfg := api.cfg.LLMProxy
 	llmProxy := map[string]interface{}{
-		"enabled":    cfg.Enabled,
-		"listen":     cfg.Listen,
+		"enabled":     cfg.Enabled,
+		"listen":      cfg.Listen,
 		"timeout_sec": cfg.TimeoutSec,
 	}
 
@@ -332,7 +317,6 @@ func (api *ManagementAPI) saveLLMConfig() error {
 		"high_risk_tool_list":   cfg.Security.HighRiskToolList,
 		"prompt_injection_scan": cfg.Security.PromptInjectionScan,
 	}
-	// v10.1: canary_token
 	canaryMap := map[string]interface{}{
 		"enabled":      cfg.Security.CanaryToken.Enabled,
 		"token":        cfg.Security.CanaryToken.Token,
@@ -340,13 +324,12 @@ func (api *ManagementAPI) saveLLMConfig() error {
 		"alert_action": cfg.Security.CanaryToken.AlertAction,
 	}
 	securityMap["canary_token"] = canaryMap
-	// v10.1: response_budget
 	budgetMap := map[string]interface{}{
-		"enabled":               cfg.Security.ResponseBudget.Enabled,
-		"max_tool_calls_per_req":  cfg.Security.ResponseBudget.MaxToolCallsPerReq,
-		"max_single_tool_per_req": cfg.Security.ResponseBudget.MaxSingleToolPerReq,
-		"max_tokens_per_req":      cfg.Security.ResponseBudget.MaxTokensPerReq,
-		"over_budget_action":      cfg.Security.ResponseBudget.OverBudgetAction,
+		"enabled":                  cfg.Security.ResponseBudget.Enabled,
+		"max_tool_calls_per_req":   cfg.Security.ResponseBudget.MaxToolCallsPerReq,
+		"max_single_tool_per_req":  cfg.Security.ResponseBudget.MaxSingleToolPerReq,
+		"max_tokens_per_req":       cfg.Security.ResponseBudget.MaxTokensPerReq,
+		"over_budget_action":       cfg.Security.ResponseBudget.OverBudgetAction,
 	}
 	if cfg.Security.ResponseBudget.ToolLimits != nil {
 		budgetMap["tool_limits"] = cfg.Security.ResponseBudget.ToolLimits
@@ -354,7 +337,6 @@ func (api *ManagementAPI) saveLLMConfig() error {
 	securityMap["response_budget"] = budgetMap
 	llmProxy["security"] = securityMap
 
-	// v10.0: 规则
 	if len(cfg.Rules) > 0 {
 		var rulesList []interface{}
 		for _, rule := range cfg.Rules {
@@ -383,48 +365,8 @@ func (api *ManagementAPI) saveLLMConfig() error {
 		llmProxy["rules"] = rulesList
 	}
 
-	raw["llm_proxy"] = llmProxy
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
-		return fmt.Errorf("写入配置文件失败: %w", err)
-	}
-
-	// v35.1: 同步 conf.d/ 中含 llm_proxy 的文件，防止重启后 conf.d 覆盖
-	// 找到所有可能含 llm_proxy 的 conf.d 文件并更新其中的 llm_proxy 节
-	confDir := filepath.Join(filepath.Dir(api.cfgPath), "conf.d")
-	if entries, err := os.ReadDir(confDir); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-				continue
-			}
-			confPath := filepath.Join(confDir, entry.Name())
-			confData, err := os.ReadFile(confPath)
-			if err != nil {
-				continue
-			}
-			var confRaw map[string]interface{}
-			if err := yaml.Unmarshal(confData, &confRaw); err != nil {
-				continue
-			}
-			if _, hasLLM := confRaw["llm_proxy"]; !hasLLM {
-				continue
-			}
-			// 该 conf.d 文件含 llm_proxy，覆盖其 llm_proxy 节
-			confRaw["llm_proxy"] = llmProxy
-			confOut, err := yaml.Marshal(confRaw)
-			if err != nil {
-				log.Printf("[LLM配置] 序列化 conf.d/%s 失败: %v", entry.Name(), err)
-				continue
-			}
-			if err := os.WriteFile(confPath, confOut, 0644); err != nil {
-				log.Printf("[LLM配置] 写入 conf.d/%s 失败: %v", entry.Name(), err)
-			} else {
-				log.Printf("[LLM配置] 同步 conf.d/%s", entry.Name())
-			}
-		}
+	if err := api.configPersistence().ReplaceSectionAndSyncConfD("llm_proxy", llmProxy); err != nil {
+		return fmt.Errorf("写入 llm_proxy 配置失败: %w", err)
 	}
 	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -213,16 +212,6 @@ func (api *ManagementAPI) handleListOutboundRules(w http.ResponseWriter, r *http
 
 // persistOutboundRules 将出站规则写回 config.yaml 的 outbound_rules 字段
 func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) error {
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		return fmt.Errorf("读取配置文件失败: %w", err)
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("解析配置文件失败: %w", err)
-	}
 	ruleList := make([]interface{}, len(configs))
 	for i, c := range configs {
 		m := map[string]interface{}{
@@ -253,13 +242,8 @@ func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) err
 		}
 		ruleList[i] = m
 	}
-	raw["outbound_rules"] = ruleList
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
-		return fmt.Errorf("写入配置文件失败: %w", err)
+	if err := api.configPersistence().ReplaceSection("outbound_rules", ruleList); err != nil {
+		return fmt.Errorf("写入 outbound_rules 失败: %w", err)
 	}
 	// 同步更新内存中的 cfg.OutboundRules
 	api.cfg.OutboundRules = configs

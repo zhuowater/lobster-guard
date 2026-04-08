@@ -12,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 type CanaryRotationRecord struct {
@@ -84,22 +82,7 @@ func genToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 func (api *ManagementAPI) persistRawSection(section string, value map[string]interface{}) error {
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		return err
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	raw[section] = value
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(api.cfgPath, out, 0644)
+	return api.configPersistence().ReplaceSection(section, value)
 }
 func (r *CanaryRotator) Rotate() (string, error) {
 	r.mu.Lock()
