@@ -480,61 +480,26 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// v10.0: 响应侧规则检测（v28.0: 使用租户感知版本）
-		var llmRespDecision string
-		var llmRespRules []string
-		if lp.ruleEngine != nil && len(respBody) > 0 {
-			respMatches := lp.ruleEngine.CheckResponseWithTenant(string(respBody), auditCtx.TenantID)
-			if len(respMatches) > 0 {
-				action, topMatch := HighestPriorityAction(respMatches)
-				llmRespDecision = action
-				for _, m := range respMatches {
-					llmRespRules = append(llmRespRules, m.RuleName)
-				}
-				// v31.1: LLM 响应 auto-review
-				if action == "block" && lp.ruleEngine.autoReviewMgr != nil && len(llmRespRules) > 0 {
-					allInReview := true
-					for _, rule := range llmRespRules {
-						lp.ruleEngine.autoReviewMgr.RecordBlock(rule)
-						if !lp.ruleEngine.autoReviewMgr.IsInReview(rule) {
-							allInReview = false
-						}
-					}
-					if allInReview {
-						action = lp.ruleEngine.autoReviewMgr.ReviewWithLLM(llmRespRules[0], string(respBody))
-						llmRespDecision = action
-						log.Printf("[LLM规则] 响应 auto-review: %s → %s rule=%s", "block", action, llmRespRules[0])
-					}
-				}
-				switch action {
-				case "block":
-					log.Printf("[LLM规则] 响应被阻断: rule=%s category=%s",
-						topMatch.RuleID, topMatch.Category)
-					// v18.0: 执行信封
-					if lp.envelopeMgr != nil {
-						lp.envelopeMgr.Seal(traceID, "llm_response", string(respBody), "block", llmRespRules, "")
-					}
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(403)
-					fmt.Fprintf(w, `{"error":"Response blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
-						topMatch.RuleName, topMatch.RuleID, topMatch.Category)
-					go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
-					return
-				case "rewrite":
-					newBody := lp.ruleEngine.ApplyRewrite(string(respBody), respMatches)
-					respBody = []byte(newBody)
-					// 删除上游的 Content-Length，让 Go HTTP 根据实际 body 长度重新计算
-					w.Header().Del("Content-Length")
-					log.Printf("[LLM规则] 响应已改写: rule=%s category=%s len=%d",
-						topMatch.RuleID, topMatch.Category, len(respBody))
-				case "warn":
-					log.Printf("[LLM规则] 响应告警: rule=%s category=%s",
-						topMatch.RuleID, topMatch.Category)
-				case "log":
-					log.Printf("[LLM规则] 响应日志: rule=%s category=%s",
-						topMatch.RuleID, topMatch.Category)
-				}
+		// v36.4: 非流式响应规则阶段收口到 response policy helper
+		respEval := lp.evaluateLLMResponseRules(respBody, auditCtx.TenantID)
+		llmRespDecision := respEval.Decision
+		llmRespRules := respEval.RuleNames
+		respBody = respEval.Body
+		if respEval.Decision == "rewrite" {
+			// 删除上游的 Content-Length，让 Go HTTP 根据实际 body 长度重新计算
+			w.Header().Del("Content-Length")
+		}
+		if respEval.Decision == "block" && respEval.HasMatch {
+			// v18.0: 执行信封
+			if lp.envelopeMgr != nil {
+				lp.envelopeMgr.Seal(traceID, "llm_response", string(respBody), "block", llmRespRules, "")
 			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			fmt.Fprintf(w, `{"error":"Response blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
+				respEval.TopMatch.RuleName, respEval.TopMatch.RuleID, respEval.TopMatch.Category)
+			go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+			return
 		}
 		// v20.0: 工具策略引擎 — 非流式响应中的 tool_calls 检测
 		if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
@@ -869,29 +834,16 @@ func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.R
 
 	fullContent := contentAccum.String()
 
-	// 应用 rewrite 规则
-	var rewritten bool
-	if lp.ruleEngine != nil {
-		respMatches := lp.ruleEngine.CheckResponseWithTenant(fullContent, auditCtx.TenantID)
-		if len(respMatches) > 0 {
-			action, topMatch := HighestPriorityAction(respMatches)
-			if action == "rewrite" {
-				newContent := lp.ruleEngine.ApplyRewrite(fullContent, respMatches)
-				log.Printf("[LLM规则] SSE 缓冲改写: rule=%s category=%s len=%d→%d",
-					topMatch.RuleID, topMatch.Category, len(fullContent), len(newContent))
-				fullContent = newContent
-				rewritten = true
-			} else if action == "block" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(200)
-				fmt.Fprintf(w, `{"error":"Response blocked by security rule: %s"}`, topMatch.RuleName)
-				log.Printf("[LLM规则] SSE 缓冲拦截: rule=%s category=%s", topMatch.RuleID, topMatch.Category)
-				go lp.auditor.ProcessResponse(auditCtx, 200, []byte(fullContent))
-				return
-			}
-		}
+	// v36.4: SSE 缓冲模式也复用 response policy helper
+	respEval := lp.evaluateLLMResponseRules([]byte(fullContent), auditCtx.TenantID)
+	if respEval.Decision == "block" && respEval.HasMatch {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		fmt.Fprintf(w, `{"error":"Response blocked by security rule: %s"}`, respEval.TopMatch.RuleName)
+		go lp.auditor.ProcessResponse(auditCtx, 200, []byte(fullContent))
+		return
 	}
-	_ = rewritten
+	fullContent = string(respEval.Body)
 
 	// 构造非流式 JSON 响应
 	id := ""
