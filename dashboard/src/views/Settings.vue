@@ -811,7 +811,7 @@ const engineList = [
 const engineOnCount = computed(() => engineList.filter(e => e.alwaysOn || engineSettings[e.configPath]).length)
 const engineOffCount = computed(() => engineList.length - engineOnCount.value)
 
-// configPath → Config JSON 的取值路径映射
+// configPath → Config JSON 的取值路径映射（兼容旧后端；新后端优先使用 engine_toggles）
 const engineConfigPaths = {
   // top-level bool 字段：Go JSON 序列化为 PascalCase
   engine_inbound_detect: 'InboundDetectEnabled',
@@ -819,31 +819,36 @@ const engineConfigPaths = {
   engine_llm_detect: 'LLMDetectEnabled',
   engine_envelope: 'EnvelopeEnabled',
   engine_evolution: 'EvolutionEnabled',
-  // 嵌套结构体字段：Go JSON 保持小写 key
+  // 嵌套结构体字段
   engine_semantic: 'SemanticDetector.enabled',
-  engine_honeypot_deep: 'honeypot_deep.enabled',
-  engine_singularity: 'singularity.enabled',
+  engine_honeypot_deep: 'HoneypotDeep.enabled',
+  engine_singularity: 'Singularity.enabled',
   engine_ifc: 'ifc.enabled',
   engine_ifc_quarantine: 'ifc.quarantine_enabled',
   engine_ifc_hiding: 'ifc.hiding_enabled',
   engine_path_policy: 'path_policy.enabled',
-  engine_tool_policy: 'tool_policy.enabled',
+  engine_tool_policy: 'ToolPolicy.enabled',
   engine_plan_compiler: 'plan_compiler.enabled',
   engine_capability: 'capability.enabled',
   engine_deviation: 'deviation.enabled',
   engine_counterfactual: 'counterfactual.enabled',
-  engine_adaptive: 'adaptive_decision.enabled',
+  engine_adaptive: 'AdaptiveDecision.enabled',
   engine_taint_tracker: 'TaintTracker.enabled',
   engine_taint_reversal: 'TaintReversal.enabled',
-  engine_event_bus: 'event_bus.enabled',
+  engine_event_bus: 'EventBus.Enabled',
 }
 
 async function loadEngineSettings() {
   enginesLoading.value = true
   try {
     const d = await api('/api/v1/config/settings')
+    const engineToggles = d?.engine_toggles || {}
     for (const eng of engineList) {
       if (eng.alwaysOn) continue
+      if (Object.prototype.hasOwnProperty.call(engineToggles, eng.configPath)) {
+        engineSettings[eng.configPath] = engineToggles[eng.configPath] !== false
+        continue
+      }
       const jsonPath = engineConfigPaths[eng.configPath] || eng.configPath
       const parts = jsonPath.split('.')
       let val = d

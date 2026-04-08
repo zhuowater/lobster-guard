@@ -1003,6 +1003,31 @@ func (api *ManagementAPI) handleConfigSettingsGet(w http.ResponseWriter, r *http
 	}
 	var result map[string]interface{}
 	json.Unmarshal(data, &result)
+
+	// v35.2: 提供扁平化 engine_toggles，避免前端猜测 Go JSON 字段路径
+	result["engine_toggles"] = map[string]bool{
+		"engine_inbound_detect": api.cfg.InboundDetectEnabled,
+		"engine_session_detect": api.cfg.SessionDetectEnabled,
+		"engine_llm_detect": api.cfg.LLMDetectEnabled,
+		"engine_semantic": api.cfg.SemanticDetector.Enabled,
+		"engine_honeypot_deep": api.cfg.HoneypotDeep.Enabled,
+		"engine_singularity": api.cfg.Singularity.Enabled,
+		"engine_ifc": api.cfg.IFC.Enabled,
+		"engine_ifc_quarantine": api.cfg.IFC.QuarantineEnabled,
+		"engine_ifc_hiding": api.cfg.IFC.HidingEnabled,
+		"engine_path_policy": api.cfg.PathPolicy.Enabled,
+		"engine_tool_policy": api.cfg.ToolPolicy.Enabled,
+		"engine_plan_compiler": api.cfg.PlanCompiler.Enabled,
+		"engine_capability": api.cfg.Capability.Enabled,
+		"engine_deviation": api.cfg.Deviation.Enabled,
+		"engine_counterfactual": api.cfg.Counterfactual.Enabled,
+		"engine_envelope": api.cfg.EnvelopeEnabled,
+		"engine_evolution": api.cfg.EvolutionEnabled,
+		"engine_adaptive": api.cfg.AdaptiveDecision.Enabled,
+		"engine_taint_tracker": api.cfg.TaintTracker.Enabled,
+		"engine_taint_reversal": api.cfg.TaintReversal.Enabled,
+		"engine_event_bus": api.cfg.EventBus.Enabled,
+	}
 	jsonResponse(w, 200, result)
 }
 
