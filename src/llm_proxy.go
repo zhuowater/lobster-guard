@@ -993,31 +993,13 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		eventBuf.WriteString(line + "\n")
 	}
 
-	// v35.1: 流结束 — 对全量累积内容执行 rewrite，并在 [DONE] 前追加修正事件
-	if !sseBlocked && lp.ruleEngine != nil {
-		fullContent := contentAccum.String()
-		respMatches := lp.ruleEngine.CheckResponseWithTenant(fullContent, sseTenantIDEarly)
-		if len(respMatches) > 0 {
-			action, topMatch := HighestPriorityAction(respMatches)
-			if action == "rewrite" {
-				newContent := lp.ruleEngine.ApplyRewrite(fullContent, respMatches)
-				if newContent != fullContent {
-					log.Printf("[LLM规则] SSE 尾部改写: rule=%s category=%s len=%d→%d",
-						topMatch.RuleID, topMatch.Category, len(fullContent), len(newContent))
-					// 追加 security_rewrite 事件：客户端可据此覆盖已显示的内容
-					corrObj := map[string]interface{}{
-						"content":      newContent,
-						"rewritten_by": topMatch.RuleName,
-					}
-					corrJSON, _ := json.Marshal(corrObj)
-					fmt.Fprintf(w, "event: security_rewrite\ndata: %s\n\n", corrJSON)
-					if hasFlusher {
-						flusher.Flush()
-					}
-				}
-			} else if action == "block" || action == "warn" {
-				log.Printf("[LLM规则] SSE 流结束检测: rule=%s action=%s 累积 %d 字节",
-					topMatch.RuleID, action, len(fullContent))
+	// v36.4: 流结束 tail rewrite/finalize 阶段收口为 helper
+	if !sseBlocked {
+		tailEval := lp.evaluateLLMSSETailRewrite(contentAccum.String(), sseTenantIDEarly)
+		if tailEval.ShouldRewrite && tailEval.RewriteEvent != "" {
+			fmt.Fprint(w, tailEval.RewriteEvent)
+			if hasFlusher {
+				flusher.Flush()
 			}
 		}
 	}
@@ -1157,9 +1139,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 			}
 			reversalContent = strings.TrimSpace(reversalContent)
 			if reversalContent != "" {
-				sseEvent := fmt.Sprintf("event: lobster_guard_taint_reversal\ndata: %s\n\n",
-					strings.ReplaceAll(reversalContent, "\n", "\ndata: "))
-				fmt.Fprint(w, sseEvent)
+				fmt.Fprint(w, buildSSETextEvent("lobster_guard_taint_reversal", reversalContent))
 				if hasFlusher {
 					flusher.Flush()
 				}

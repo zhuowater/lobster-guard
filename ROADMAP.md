@@ -947,9 +947,9 @@
     4. response policy
     5. SSE / stream finalize
     6. observability hooks
-  - 当前进展：已抽出 `src/llm_request_preprocess.go`，先收拢 trace/taint/request-path 三个 request preprocess helper；新增 `src/llm_response_policy.go` 收口非流式 + SSE 缓冲模式的响应规则阶段；新增 `src/llm_proxy_pipeline_test.go` 与 `src/llm_response_policy_test.go` 覆盖 request/response pipeline 基础行为
+  - 当前进展：已抽出 `src/llm_request_preprocess.go`，先收拢 trace/taint/request-path 三个 request preprocess helper；新增 `src/llm_response_policy.go` 收口非流式 + SSE 缓冲模式的响应规则阶段；新增 `src/llm_stream_finalize.go` 收口 SSE 尾部 rewrite/event formatting helper；新增 `src/llm_proxy_pipeline_test.go`、`src/llm_response_policy_test.go`、`src/llm_stream_finalize_test.go` 覆盖 request/response/stream finalize 基础行为
   - 重点保障：rewrite、taint reversal、reasoning_content fallback、tool policy、counterfactual、SSE 尾包行为完全可回归测试
-  - 测试：`src/llm_proxy_pipeline_test.go` / `src/llm_response_policy_test.go`
+  - 测试：`src/llm_proxy_pipeline_test.go` / `src/llm_response_policy_test.go` / `src/llm_stream_finalize_test.go`
 
 - [ ] **v36.5 config.yaml / conf.d 优先级规则固化**
   - 文档：`docs/config-precedence.md`
