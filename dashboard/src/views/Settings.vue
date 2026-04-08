@@ -10,102 +10,32 @@
 
     <!-- Tab 1: 配置管理 -->
     <div v-show="activeTab === 'config'">
-      <Skeleton v-if="configLoading" type="text" />
-      <template v-else>
-        <div class="card config-card" style="margin-bottom: 16px; border-color: rgba(99,102,241,.22); background: linear-gradient(135deg, rgba(49,46,129,.18), rgba(15,23,42,.96));">
-          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-            <div>
-              <div class="card-title" style="color:#e0e7ff;">🚀 快速配置向导</div>
-              <div class="config-desc" style="margin-top:6px;color:#a5b4fc;">适合新手：4 步生成可下载的 config.yaml 模板，不会直接写入服务器。</div>
-            </div>
-            <button class="btn btn-sm btn-primary" style="background:#4f46e5;border-color:#6366f1;" @click="wizardVisible = true">打开向导</button>
-          </div>
-        </div>
-        <div class="config-group-nav">
-          <button v-for="g in configGroups" :key="g.key" class="config-group-btn" :class="{ active: activeGroup === g.key }" @click="activeGroup = g.key">{{ g.icon }} {{ g.label }}</button>
-        </div>
-        <div v-if="hasChanges" class="changes-bar">
-          <div class="changes-bar-inner">
-            <span class="changes-dot">●</span>
-            <span>{{ changedFields.length }} 项配置已修改</span>
-            <button class="btn btn-sm" @click="showChangesPreview = !showChangesPreview" style="margin-left:8px">{{ showChangesPreview ? '收起' : '查看变更' }}</button>
-            <button class="btn btn-sm btn-primary" @click="saveConfig" :disabled="configSaving" style="margin-left:4px">{{ configSaving ? '保存中...' : '💾 保存' }}</button>
-            <button class="btn btn-sm btn-ghost" @click="resetConfig" style="margin-left:4px">撤销</button>
-          </div>
-          <div v-if="showChangesPreview" class="changes-preview">
-            <div v-for="c in changedFields" :key="c.key" class="change-row">
-              <span class="change-key">{{ c.label }}</span>
-              <span class="change-old">{{ c.oldVal }}</span>
-              <span class="change-arrow">→</span>
-              <span class="change-new">{{ c.newVal }}</span>
-              <span v-if="c.restart" class="cfg-restart-tag">需重启</span>
-            </div>
-          </div>
-        </div>
-
-        <div v-for="group in visibleGroups" :key="group.key" v-show="activeGroup === group.key" class="config-section">
-          <div class="card config-card">
-            <div class="card-header"><span class="card-icon">{{ group.icon }}</span><span class="card-title">{{ group.title }}</span></div>
-            <div class="config-desc">{{ group.desc }}</div>
-            <div class="config-items">
-              <div v-for="item in group.items" :key="item.key || item.field" class="cfg-item">
-                <div class="cfg-item-head">
-                  <span class="cfg-item-label">{{ item.label }}</span>
-                  <span v-if="item.restart" class="cfg-restart-tag">需重启</span>
-                  <span v-if="item.field ? isRLChanged(item.field) : isChanged(item.key)" class="cfg-changed-dot">●</span>
-                </div>
-                <div class="cfg-item-desc">{{ item.desc }}</div>
-                <select v-if="item.options" v-model="form[item.key]" class="cfg-select"><option v-for="o in item.options" :key="o.value" :value="o.value">{{ o.label }}</option></select>
-                <div v-else-if="item.type === 'toggle'" class="cfg-toggle-row"><label class="toggle-switch"><input type="checkbox" v-model="form[item.key]" /><span class="toggle-slider"></span></label><span class="cfg-toggle-label">{{ form[item.key] ? '已开启' : '已关闭' }}</span></div>
-                <div v-else-if="item.field" class="cfg-inline"><input type="number" :value="form.rate_limit[item.field]" @input="form.rate_limit[item.field] = Number($event.target.value)" class="cfg-input-num" :min="item.min" :max="item.max" :step="item.step" /><span v-if="item.unit" class="cfg-unit">{{ item.unit }}</span></div>
-                <div v-else-if="item.type === 'number'" class="cfg-inline"><input type="number" v-model.number="form[item.key]" class="cfg-input-num" :min="item.min" :max="item.max" :step="item.step" /><span v-if="item.unit" class="cfg-unit">{{ item.unit }}</span></div>
-                <input v-else type="text" v-model="form[item.key]" class="cfg-input" :class="{ 'cfg-input-wide': item.wide }" :placeholder="item.placeholder" />
-                <span v-if="item.key && errors[item.key]" class="cfg-error">{{ errors[item.key] }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 告警特殊区域 -->
-        <div v-show="activeGroup === 'alerts'" class="config-section" style="margin-top:0">
-          <div class="card config-card" style="margin-bottom:16px">
-            <div class="card-header"><span class="card-icon">🔔</span><span class="card-title">告警通知</span></div>
-            <div class="config-desc">Webhook 通知与告警频率设置</div>
-            <div class="config-items">
-              <div class="cfg-item">
-                <div class="cfg-item-head"><span class="cfg-item-label">Webhook URL</span><span v-if="isChanged('alert_webhook')" class="cfg-changed-dot">●</span></div>
-                <div class="cfg-item-desc">告警推送目标地址</div>
-                <input type="text" v-model="form.alert_webhook" class="cfg-input cfg-input-wide" placeholder="https://your-webhook-url" />
-              </div>
-              <div class="cfg-item">
-                <div class="cfg-item-head"><span class="cfg-item-label">告警格式</span></div>
-                <div class="cfg-item-desc">推送消息格式</div>
-                <select v-model="form.alert_format" class="cfg-select"><option value="generic">通用 JSON</option><option value="lanxin">蓝信</option></select>
-              </div>
-              <div class="cfg-item">
-                <div class="cfg-item-head"><span class="cfg-item-label">最小间隔</span></div>
-                <div class="cfg-item-desc">两次告警之间的最小间隔，防告警风暴</div>
-                <div class="cfg-inline"><input type="number" v-model.number="form.alert_min_interval" class="cfg-input-num" min="0" max="3600" step="10" /><span class="cfg-unit">秒</span></div>
-              </div>
-            </div>
-            <div class="cfg-actions-row">
-              <button class="btn btn-sm" @click="testAlert" :disabled="!form.alert_webhook || alertTesting">{{ alertTesting ? '发送中...' : '📤 测试告警' }}</button>
-              <span v-if="alertTestResult" class="cfg-hint" :style="{ color: alertTestResult.ok ? 'var(--color-success)' : 'var(--color-danger)' }">{{ alertTestResult.msg }}</span>
-            </div>
-          </div>
-          <div class="card config-card">
-            <div class="card-header"><span class="card-icon">📋</span><span class="card-title">最近告警</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadAlertHistory">刷新</button></div></div>
-            <Skeleton v-if="alertsLoading" type="table" />
-            <div v-else-if="!alerts.length" class="empty"><div class="empty-icon">🔕</div>暂无告警记录</div>
-            <div v-else class="alert-list">
-              <div v-for="a in alerts" :key="a.id" class="alert-item">
-                <div class="alert-meta"><span class="alert-dir" :class="'dir-' + a.direction">{{ a.direction === 'inbound' ? '⬇ 入站' : '⬆ 出站' }}</span><span class="alert-time">{{ fmtTime(a.timestamp) }}</span><span class="alert-sender">{{ a.sender_id || '--' }}</span></div>
-                <div class="alert-reason">{{ a.reason }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
+      <SettingsConfigTab
+        :config-loading="configLoading"
+        :config-groups="configGroups"
+        :active-group="activeGroup"
+        :has-changes="hasChanges"
+        :changed-fields="changedFields"
+        :show-changes-preview="showChangesPreview"
+        :config-saving="configSaving"
+        :visible-groups="visibleGroups"
+        :form="form"
+        :errors="errors"
+        :alerts-loading="alertsLoading"
+        :alerts="alerts"
+        :alert-testing="alertTesting"
+        :alert-test-result="alertTestResult"
+        :is-changed="isChanged"
+        :is-r-l-changed="isRLChanged"
+        :fmt-time="fmtTime"
+        @open-wizard="wizardVisible = true"
+        @update:active-group="activeGroup = $event"
+        @toggle-changes-preview="showChangesPreview = !showChangesPreview"
+        @save-config="saveConfig"
+        @reset-config="resetConfig"
+        @test-alert="testAlert"
+        @load-alert-history="loadAlertHistory"
+      />
     </div>
 
     <div v-show="activeTab === 'security'" class="card canary-card" style="margin-top:16px; border-color: rgba(99,102,241,.22);">
@@ -160,209 +90,70 @@
 
     <!-- Tab: 数据库 -->
     <div v-show="activeTab === 'database'">
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-header"><span class="card-icon">🗄️</span><span class="card-title">SQLite 监控</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="loadSQLiteStats">刷新</button></div></div>
-        <Skeleton v-if="sqliteStatsLoading && !sqliteStats" type="text" />
-        <div v-else-if="sqliteStats" class="sqlite-panel">
-          <div class="sqlite-overview">
-            <div class="sqlite-stat-card">
-              <div class="sqlite-stat-label">数据库文件</div>
-              <div class="sqlite-stat-value">{{ sqliteStats.database?.size_human || '--' }}</div>
-              <div class="sqlite-stat-sub">{{ sqliteStats.database?.size_bytes || 0 }} B</div>
-            </div>
-            <div class="sqlite-stat-card">
-              <div class="sqlite-stat-label">WAL 文件</div>
-              <div class="sqlite-stat-value">{{ sqliteStats.database?.wal_size_human || '--' }}</div>
-              <div class="sqlite-stat-sub">{{ sqliteStats.database?.wal_size_bytes || 0 }} B</div>
-            </div>
-            <div class="sqlite-stat-card">
-              <div class="sqlite-stat-label">表数量</div>
-              <div class="sqlite-stat-value">{{ sqliteStats.table_count ?? '--' }}</div>
-              <div class="sqlite-stat-sub">page_count={{ sqliteStats.pragmas?.page_count ?? '--' }}</div>
-            </div>
-            <div class="sqlite-stat-card">
-              <div class="sqlite-stat-label">最近写入 QPS</div>
-              <div class="sqlite-stat-value">{{ formatQPS(sqliteStats.write_qps) }}</div>
-              <div class="sqlite-stat-sub">1 分钟 {{ sqliteStats.recent_writes_1m || 0 }} 次</div>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-header"><span class="card-icon">⚙️</span><span class="card-title">SQLite PRAGMA</span></div>
-            <div class="status-row"><span class="status-key">page_size</span><span class="status-val">{{ sqliteStats.pragmas?.page_size ?? '--' }}</span></div>
-            <div class="status-row"><span class="status-key">page_count</span><span class="status-val">{{ sqliteStats.pragmas?.page_count ?? '--' }}</span></div>
-            <div class="status-row"><span class="status-key">wal_autocheckpoint</span><span class="status-val">{{ sqliteStats.pragmas?.wal_autocheckpoint ?? '--' }}</span></div>
-          </div>
-
-          <div class="card">
-            <div class="card-header"><span class="card-icon">📊</span><span class="card-title">Top 10 表行数</span></div>
-            <div v-if="!(sqliteStats.tables || []).length" class="empty" style="padding:24px">暂无表数据</div>
-            <div v-else class="sqlite-bars">
-              <div v-for="table in sqliteStats.tables" :key="table.name" class="sqlite-bar-row">
-                <div class="sqlite-bar-head">
-                  <span class="sqlite-bar-name">{{ table.name }}</span>
-                  <span class="sqlite-bar-value">{{ table.rows }}</span>
-                </div>
-                <div class="sqlite-bar-track">
-                  <div class="sqlite-bar-fill" :style="{ width: sqliteBarWidth(table.rows) + '%' }"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SettingsDatabaseTab
+        :sqlite-stats-loading="sqliteStatsLoading"
+        :sqlite-stats="sqliteStats"
+        :load-sqlite-stats="loadSQLiteStats"
+        :format-q-p-s="formatQPS"
+        :sqlite-bar-width="sqliteBarWidth"
+      />
     </div>
 
     <!-- Tab 3: 系统信息 -->
     <div v-show="activeTab === 'system'">
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span><span class="card-title">系统信息</span><div class="card-actions"><button class="btn btn-ghost btn-sm" @click="refreshHealth">刷新</button></div></div>
-        <Skeleton v-if="!appState.health" type="text" />
-        <div v-else>
-          <div class="status-grid">
-            <div class="ring-chart"><svg width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8" /><circle cx="50" cy="50" r="40" fill="none" :stroke="ringColor" stroke-width="8" :stroke-dasharray="C" :stroke-dashoffset="ringOffset" stroke-linecap="round" style="transition:stroke-dashoffset .6s" /></svg><span class="ring-label" :style="{ color: ringColor }">{{ pct }}%</span></div>
-            <div class="status-info">
-              <div class="status-row"><span class="status-key">总体状态</span><span class="status-val" :style="{ color: statusColor }">{{ statusText }}</span></div>
-              <div class="status-row"><span class="status-key">版本</span><span class="status-val">{{ health.version }}</span></div>
-              <div class="status-row"><span class="status-key">运行时间</span><span class="status-val">{{ formattedUptime }}</span></div>
-              <div class="status-row"><span class="status-key">模式</span><span class="status-val">{{ health.mode || '--' }}</span></div>
-              <div class="status-row"><span class="status-key">上游</span><span class="status-val">{{ healthyUp }}/{{ totalUp }}</span></div>
-              <div class="status-row"><span class="status-key">路由数</span><span class="status-val">{{ health.routes?.total || 0 }}</span></div>
-              <div class="status-row"><span class="status-key">审计日志</span><span class="status-val">{{ health.audit?.total || 0 }}</span></div>
-              <div class="status-row"><span class="status-key">限流</span><span class="status-val">{{ rlText }}</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="card-title">健康检查详情</span></div>
-        <Skeleton v-if="!appState.health || !appState.health.checks" type="text" />
-        <div v-else><div v-for="hc in healthCheckList" :key="hc.name" class="status-row"><span class="status-key">{{ hc.icon }} {{ hc.name }}</span><span class="status-val" :style="{ color: hc.color }">{{ hc.val }}</span></div></div>
-      </div>
+      <SettingsSystemTab
+        :app-state="appState"
+        :refresh-health="refreshHealth"
+        :c="C"
+        :health="health"
+        :healthy-up="healthyUp"
+        :total-up="totalUp"
+        :pct="pct"
+        :ring-color="ringColor"
+        :ring-offset="ringOffset"
+        :status-color="statusColor"
+        :status-text="statusText"
+        :rl-text="rlText"
+        :formatted-uptime="formattedUptime"
+        :health-check-list="healthCheckList"
+      />
     </div>
 
     <!-- Tab 4: LLM 代理 -->
     <div v-show="activeTab === 'llm'">
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44"/></svg></span><span class="card-title">LLM 代理配置</span></div>
-        <Skeleton v-if="llmConfigLoading" type="text" />
-        <div v-else-if="!llmConfig" style="color:var(--text-tertiary);font-size:var(--text-sm)">LLM 代理未启用</div>
-        <div v-else>
-          <div class="llm-row"><span class="llm-label">启用状态</span><span class="llm-val"><label class="toggle-switch"><input type="checkbox" v-model="llmConfig.enabled" /><span class="toggle-slider"></span></label><span style="margin-left:8px;font-size:var(--text-xs);color:var(--text-tertiary)">{{ llmConfig.enabled ? '已启用' : '未启用' }} · 修改需重启</span></span></div>
-          <div class="llm-row"><span class="llm-label">监听端口</span><input type="text" v-model="llmConfig.listen" class="llm-input-sm" style="width:140px;font-family:var(--font-mono)" placeholder=":8445" /><span class="llm-hint">修改需重启</span></div>
-          <div id="section-security" class="llm-section-title">安全策略</div>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.scan_pii_in_response" /> 扫描响应中的 PII</label>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.prompt_injection_scan" /> 扫描 Prompt Injection</label>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.security.block_high_risk_tools" /> 拦截高危工具调用</label>
-          <div class="llm-row" style="margin-top:8px"><span class="llm-label">高危工具</span><input type="text" v-model="highRiskToolsStr" class="llm-input" placeholder="exec, shell, bash" /></div>
-          <div id="section-canary" class="llm-section-title">🐤 Canary Token</div>
-          <label class="llm-checkbox"><input type="checkbox" v-model="canaryEnabled" /> 启用 Canary Token</label>
-          <template v-if="canaryEnabled">
-            <div class="llm-row"><span class="llm-label">Token</span><span class="llm-val" style="font-family:var(--font-mono);font-size:var(--text-xs)">{{ canaryStatus.token || '(未配置)' }}</span><button class="btn btn-sm" @click="rotateCanary" style="margin-left:8px;font-size:11px;padding:2px 8px">轮换</button></div>
-            <div class="llm-row"><span class="llm-label">泄露动作</span><select v-model="canaryAlertAction" class="llm-input-sm" style="width:100px"><option value="log">log</option><option value="warn">warn</option><option value="block">block</option></select></div>
-            <label class="llm-checkbox"><input type="checkbox" v-model="canaryAutoRotate" /> 每24h自动轮换</label>
-            <div class="llm-row"><span class="llm-label">最近泄露</span><span class="llm-val" :style="{ color: (canaryStatus.leak_count||0) > 0 ? 'var(--color-danger)' : 'var(--text-secondary)' }">{{ canaryStatus.leak_count || 0 }} 次</span></div>
-          </template>
-          <div id="section-budget" class="llm-section-title"><Icon name="bar-chart" :size="16" /> Response Budget</div>
-          <label class="llm-checkbox"><input type="checkbox" v-model="budgetEnabled" /> 启用预算控制</label>
-          <div v-if="budgetEnabled">
-            <div class="llm-row"><span class="llm-label">最大工具调用</span><input type="number" v-model.number="budgetMaxTools" class="llm-input-sm" min="1" max="100" /><span class="llm-hint">次/请求</span></div>
-            <div class="llm-row"><span class="llm-label">单类工具</span><input type="number" v-model.number="budgetMaxSingle" class="llm-input-sm" min="1" max="50" /><span class="llm-hint">次/请求</span></div>
-            <div class="llm-row"><span class="llm-label">最大 Token</span><input type="number" v-model.number="budgetMaxTokens" class="llm-input-sm" style="width:100px" min="1000" max="10000000" step="10000" /><span class="llm-hint">Token/请求</span></div>
-            <div class="llm-row"><span class="llm-label">超限动作</span><select v-model="budgetAction" class="llm-input-sm" style="width:100px"><option value="warn">warn</option><option value="block">block</option></select></div>
-            <div class="llm-row"><span class="llm-label">工具限制</span><input type="text" v-model="budgetToolLimitsStr" class="llm-input" placeholder="exec=3, shell=2" /></div>
-            <div class="llm-row"><span class="llm-label">24h超限</span><span class="llm-val" :style="{ color: (budgetStatus.violations_24h||0) > 0 ? 'var(--color-warning)' : 'var(--text-secondary)' }">{{ budgetStatus.violations_24h || 0 }} 次</span></div>
-          </div>
-          <div class="llm-section-title">审计配置</div>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_input" /> 记录工具调用输入</label>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_tool_result" /> 记录工具调用结果</label>
-          <label class="llm-checkbox"><input type="checkbox" v-model="llmConfig.audit.log_system_prompt" /> 记录 System Prompt</label>
-          <div class="llm-row" style="margin-top:8px"><span class="llm-label">摘要长度</span><input type="number" v-model.number="llmConfig.audit.max_preview_len" class="llm-input-sm" min="100" max="5000" /><span class="llm-hint">字符</span></div>
-          <div id="section-cost" class="llm-section-title">成本预警</div>
-          <div class="llm-row"><span class="llm-label">日限额</span><span class="llm-hint" style="margin-right:4px">$</span><input type="number" v-model.number="llmConfig.cost_alert.daily_limit_usd" class="llm-input-sm" min="0" step="5" /><span class="llm-hint">USD</span></div>
-          <div class="llm-row"><span class="llm-label">Webhook</span><input type="text" v-model="llmConfig.cost_alert.webhook_url" class="llm-input" placeholder="https://..." /></div>
-          <div class="llm-section-title llm-advanced-toggle" @click="showAdvanced = !showAdvanced" style="cursor:pointer;user-select:none"><span>{{ showAdvanced ? '▾' : '▸' }} 高级配置</span></div>
-          <div v-show="showAdvanced">
-            <div class="llm-row"><span class="llm-label">超时</span><input type="number" v-model.number="llmConfig.timeout_sec" class="llm-input-sm" min="5" max="300" /><span class="llm-hint">秒</span></div>
-            <div class="llm-row"><span class="llm-label">请求体限制</span><input type="number" v-model.number="llmConfig.max_body_bytes" class="llm-input-sm" style="width:120px" min="0" step="1048576" /><span class="llm-hint">字节</span></div>
-            <div v-if="llmConfig.targets && llmConfig.targets.length" class="llm-targets"><div v-for="t in llmConfig.targets" :key="t.name" class="llm-target-row"><code>{{ t.name }}</code><span style="color:var(--text-tertiary)">{{ t.upstream }}</span></div></div>
-          </div>
-          <div style="margin-top:var(--space-4);display:flex;align-items:center;gap:var(--space-3)">
-            <button class="btn btn-sm" @click="saveLLMConfig" :disabled="llmSaving">{{ llmSaving ? '保存中...' : '保存配置' }}</button>
-            <span class="llm-restart-hint">⚠️ 部分变更需重启生效</span>
-          </div>
-        </div>
-      </div>
+      <SettingsLLMTab
+        :llm-config-loading="llmConfigLoading"
+        :llm-config="llmConfig"
+        :llm-saving="llmSaving"
+        :show-advanced="showAdvanced"
+        :canary-status="canaryStatus"
+        :canary-rotation-status="canaryRotationStatus"
+        :canary-rotation-history="canaryRotationHistory"
+        :budget-status="budgetStatus"
+        :fmt-time="fmtTime"
+        :rotate-canary="rotateCanary"
+        :save-l-l-m-config="saveLLMConfig"
+        :confirm-canary-rotate-now="confirmCanaryRotateNow"
+        :toggle-show-advanced="() => { showAdvanced = !showAdvanced }"
+      />
     </div>
 
     <!-- Tab: 检测引擎开关 -->
     <div v-show="activeTab === 'engines'">
-      <Skeleton v-if="enginesLoading" type="table" />
-      <template v-else>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-header">
-            <span class="card-icon">🧠</span><span class="card-title">检测引擎总览</span>
-            <div class="card-actions">
-              <span class="engine-stats"><span class="engine-stat-on">{{ engineOnCount }} 启用</span><span class="engine-stat-off">{{ engineOffCount }} 关闭</span></span>
-              <button class="btn btn-ghost btn-sm" @click="loadEngineSettings">刷新</button>
-            </div>
-          </div>
-          <div class="config-desc">统一管理所有安全引擎的启用/禁用状态，修改即时生效。</div>
-        </div>
-        <div class="engine-list">
-          <div v-for="eng in engineList" :key="eng.configPath" class="engine-row card">
-            <div class="engine-info">
-              <div class="engine-name-row">
-                <span class="engine-status-dot" :class="{ on: eng.alwaysOn || engineSettings[eng.configPath] }"></span>
-                <span class="engine-name">{{ eng.name }}</span>
-                <span v-if="eng.alwaysOn" class="engine-always-on-tag">始终启用</span>
-              </div>
-              <div class="engine-desc">{{ eng.desc }}</div>
-              <div class="engine-path"><code>{{ eng.configPath }}</code></div>
-            </div>
-            <div class="engine-toggle">
-              <label v-if="!eng.alwaysOn" class="toggle-switch toggle-switch-lg"><input type="checkbox" :checked="engineSettings[eng.configPath]" @change="toggleEngine(eng, $event)" :disabled="eng.saving" /><span class="toggle-slider"></span></label>
-              <span v-else class="engine-locked">🔒</span>
-              <span v-if="eng.saving" class="engine-saving">保存中...</span>
-            </div>
-          </div>
-        </div>
-        <!-- 污染逆转模式 — 指向 TaintTracker 页面 -->
-        <div class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
-          <div class="card-header"><span class="card-icon">🔄</span><span class="card-title">污染逆转模式</span></div>
-          <div style="padding:8px 20px 16px;display:flex;align-items:center;gap:12px">
-            <span style="font-size:13px;color:var(--text-secondary)">请求侧 (pre-inject) + 响应侧 (soft/hard/stealth) 双模式配置</span>
-            <a href="#/taint" class="btn btn-primary btn-sm" style="white-space:nowrap">前往污点追踪页配置 →</a>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
-          <div class="card-header"><span class="card-icon">🧩</span><span class="card-title">CaMeL 三引擎独立开关</span></div>
-          <div class="engine-list">
-            <div v-for="item in camelEngines" :key="item.name" class="engine-row card">
-              <div class="engine-info">
-                <div class="engine-name-row"><span class="engine-status-dot" :class="{ on: item.enabled }"></span><span class="engine-name">{{ item.title }}</span></div>
-                <div class="engine-desc">{{ item.desc }}</div>
-                <div class="engine-path"><code>{{ item.name }}</code></div>
-                <div class="engine-desc" style="margin-top:8px">{{ item.stat1Label }}：{{ item.stat1 }} · {{ item.stat2Label }}：{{ item.stat2 }}</div>
-              </div>
-              <div class="engine-toggle">
-                <label class="toggle-switch toggle-switch-lg"><input type="checkbox" :checked="item.enabled" @change="toggleCamelEngine(item, $event)" /><span class="toggle-slider"></span></label>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
+      <SettingsEngineTab
+        :engines-loading="enginesLoading"
+        :engine-on-count="engineOnCount"
+        :engine-off-count="engineOffCount"
+        :engine-list="engineList"
+        :engine-settings="engineSettings"
+        :camel-engines="camelEngines"
+        :on-refresh="loadEngineSettings"
+        :on-toggle-engine="toggleEngine"
+        :on-toggle-camel-engine="toggleCamelEngine"
+      />
     </div>
 
-    <div v-show="activeTab === 'llm'" class="card" style="margin-top:16px;border-color:rgba(99,102,241,.22)">
-      <div class="card-header"><span class="card-icon">🐤</span><span class="card-title">金丝雀令牌管理</span></div>
-      <div class="config-desc">创建时间：{{ canaryRotationStatus.token_created_at || '--' }} · 下次自动轮换：{{ canaryRotationStatus.next_rotation_at || '--' }}</div>
-      <div style="margin-top:12px"><button class="btn btn-sm btn-primary" @click="confirmCanaryRotateNow">立即轮换</button></div>
-      <div style="margin-top:16px" v-if="canaryRotationHistory.length">
-        <div v-for="item in canaryRotationHistory" :key="item.rotated_at" class="status-row"><span class="status-key">{{ fmtTime(item.rotated_at) }}</span><span class="status-val">{{ item.old_token_hash }} → {{ item.new_token_hash }}</span></div>
-      </div>
-    </div>
+
 
     <!-- Tab: AC 智能分级 -->
     <div v-show="activeTab === 'autoreview'">
@@ -476,6 +267,11 @@ import Icon from '../components/Icon.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import Skeleton from '../components/Skeleton.vue'
 import ConfigWizard from '../components/ConfigWizard.vue'
+import SettingsConfigTab from './settings/SettingsConfigTab.vue'
+import SettingsEngineTab from './settings/SettingsEngineTab.vue'
+import SettingsLLMTab from './settings/SettingsLLMTab.vue'
+import SettingsSystemTab from './settings/SettingsSystemTab.vue'
+import SettingsDatabaseTab from './settings/SettingsDatabaseTab.vue'
 
 const appState = inject('appState')
 const route = useRoute()

@@ -934,10 +934,10 @@
   - 新增 `src/config_dto_test.go` 契约测试；`dashboard/src/views/Settings.vue` 改为 DTO-first，并兼容 PascalCase 旧字段回退
   - 全量验证：`go test ./...` + `go build ./...` + `vite build` 全绿
 
-- [ ] **v36.3 Settings 控制面拆分**
-  - 将 `dashboard/src/views/Settings.vue` 拆为独立 tab 组件：Config / Engines / LLM / System / Database
-  - 保持 UI 行为不变，先拆职责，后考虑 composable 抽取
-  - 目标：降低前后端契约耦合、减少超大前端文件维护风险
+- [x] **v36.3 Settings 控制面拆分** ✅ (2026-04-08)
+  - 新建 `dashboard/src/views/settings/SettingsConfigTab.vue` / `SettingsEngineTab.vue` / `SettingsLLMTab.vue` / `SettingsSystemTab.vue` / `SettingsDatabaseTab.vue`
+  - `dashboard/src/views/Settings.vue` 收敛为顶层编排，保留既有 tab 行为与 API 逻辑，只拆模板职责边界
+  - 验证：`cd dashboard && npm run build` + `cd src && go test ./...` + `cd src && go build ./...` 全绿
 
 - [ ] **v36.4 LLM Proxy 管线化重构**
   - 将 `src/llm_proxy.go` 拆成显式阶段：
