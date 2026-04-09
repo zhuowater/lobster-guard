@@ -424,13 +424,17 @@ func loadConfDir(cfg *Config, mainConfigPath string) error {
 		if err != nil {
 			return fmt.Errorf("读取模块配置 %s 失败: %w", f, err)
 		}
-		// 保存已有规则 slice — yaml.Unmarshal 对 slice 是替换不是追加
+		// 保存已有 slice 字段 — yaml.Unmarshal 对 slice 是替换不是追加
 		prevInbound := append([]InboundRuleConfig{}, cfg.InboundRules...)
 		prevOutbound := append([]OutboundRuleConfig{}, cfg.OutboundRules...)
+		prevStaticUpstreams := append([]StaticUpstreamConfig{}, cfg.StaticUpstreams...)
+		prevRoutePolicies := append([]RoutePolicyConfig{}, cfg.RoutePolicies...)
+		prevRuleBindings := append([]RuleBindingConfig{}, cfg.RuleBindings...)
+		prevOutboundPII := append([]OutboundPIIPatternConfig{}, cfg.OutboundPIIPatterns...)
+		prevLLMTargets := append([]LLMTargetConfig{}, cfg.LLMProxy.Targets...)
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return fmt.Errorf("解析模块配置 %s 失败: %w", filepath.Base(f), err)
 		}
-		// conf.d 多文件的同名 slice 字段追加合并（去重在 mergeInboundRules 处理）
 		if len(prevInbound) > 0 && len(cfg.InboundRules) > 0 {
 			cfg.InboundRules = appendUniqueInbound(prevInbound, cfg.InboundRules)
 		} else if len(cfg.InboundRules) == 0 {
@@ -441,10 +445,141 @@ func loadConfDir(cfg *Config, mainConfigPath string) error {
 		} else if len(cfg.OutboundRules) == 0 {
 			cfg.OutboundRules = prevOutbound
 		}
+		if len(prevStaticUpstreams) > 0 && len(cfg.StaticUpstreams) > 0 {
+			cfg.StaticUpstreams = appendUniqueStaticUpstreams(prevStaticUpstreams, cfg.StaticUpstreams)
+		} else if len(cfg.StaticUpstreams) == 0 {
+			cfg.StaticUpstreams = prevStaticUpstreams
+		}
+		if len(prevRoutePolicies) > 0 && len(cfg.RoutePolicies) > 0 {
+			cfg.RoutePolicies = appendUniqueRoutePolicies(prevRoutePolicies, cfg.RoutePolicies)
+		} else if len(cfg.RoutePolicies) == 0 {
+			cfg.RoutePolicies = prevRoutePolicies
+		}
+		if len(prevRuleBindings) > 0 && len(cfg.RuleBindings) > 0 {
+			cfg.RuleBindings = appendUniqueRuleBindings(prevRuleBindings, cfg.RuleBindings)
+		} else if len(cfg.RuleBindings) == 0 {
+			cfg.RuleBindings = prevRuleBindings
+		}
+		if len(prevOutboundPII) > 0 && len(cfg.OutboundPIIPatterns) > 0 {
+			cfg.OutboundPIIPatterns = appendUniqueOutboundPIIPatterns(prevOutboundPII, cfg.OutboundPIIPatterns)
+		} else if len(cfg.OutboundPIIPatterns) == 0 {
+			cfg.OutboundPIIPatterns = prevOutboundPII
+		}
+		if len(prevLLMTargets) > 0 && len(cfg.LLMProxy.Targets) > 0 {
+			cfg.LLMProxy.Targets = appendUniqueLLMTargets(prevLLMTargets, cfg.LLMProxy.Targets)
+		} else if len(cfg.LLMProxy.Targets) == 0 {
+			cfg.LLMProxy.Targets = prevLLMTargets
+		}
 		log.Printf("[config] 加载模块配置: %s", filepath.Base(f))
 	}
 
 	return nil
+}
+
+func appendUniqueStaticUpstreams(base, override []StaticUpstreamConfig) []StaticUpstreamConfig {
+	out := append([]StaticUpstreamConfig{}, base...)
+	index := make(map[string]int)
+	for i, item := range out {
+		if item.ID != "" {
+			index[item.ID] = i
+		}
+	}
+	for _, item := range override {
+		if item.ID != "" {
+			if idx, ok := index[item.ID]; ok {
+				out[idx] = item
+				continue
+			}
+			index[item.ID] = len(out)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func routePolicyKey(p RoutePolicyConfig) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%t", p.Match.Department, p.Match.EmailSuffix, p.Match.Email, p.Match.AppID, p.Match.Default)
+}
+
+func appendUniqueRoutePolicies(base, override []RoutePolicyConfig) []RoutePolicyConfig {
+	out := append([]RoutePolicyConfig{}, base...)
+	index := make(map[string]int)
+	for i, item := range out {
+		index[routePolicyKey(item)] = i
+	}
+	for _, item := range override {
+		key := routePolicyKey(item)
+		if idx, ok := index[key]; ok {
+			out[idx] = item
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
+func appendUniqueRuleBindings(base, override []RuleBindingConfig) []RuleBindingConfig {
+	out := append([]RuleBindingConfig{}, base...)
+	index := make(map[string]int)
+	for i, item := range out {
+		if item.AppID != "" {
+			index[item.AppID] = i
+		}
+	}
+	for _, item := range override {
+		if item.AppID != "" {
+			if idx, ok := index[item.AppID]; ok {
+				out[idx] = item
+				continue
+			}
+			index[item.AppID] = len(out)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func appendUniqueOutboundPIIPatterns(base, override []OutboundPIIPatternConfig) []OutboundPIIPatternConfig {
+	out := append([]OutboundPIIPatternConfig{}, base...)
+	index := make(map[string]int)
+	for i, item := range out {
+		if item.Name != "" {
+			index[item.Name] = i
+		}
+	}
+	for _, item := range override {
+		if item.Name != "" {
+			if idx, ok := index[item.Name]; ok {
+				out[idx] = item
+				continue
+			}
+			index[item.Name] = len(out)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func appendUniqueLLMTargets(base, override []LLMTargetConfig) []LLMTargetConfig {
+	out := append([]LLMTargetConfig{}, base...)
+	index := make(map[string]int)
+	for i, item := range out {
+		if item.Name != "" {
+			index[item.Name] = i
+		}
+	}
+	for _, item := range override {
+		if item.Name != "" {
+			if idx, ok := index[item.Name]; ok {
+				out[idx] = item
+				continue
+			}
+			index[item.Name] = len(out)
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (cfg *Config) IsMetricsEnabled() bool {

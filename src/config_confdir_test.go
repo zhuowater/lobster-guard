@@ -313,3 +313,82 @@ func TestLoadConfDir_YmlExtension(t *testing.T) {
 		t.Errorf("expected log_level=debug from .yml file, got %q", cfg.LogLevel)
 	}
 }
+
+func TestLoadConfDir_StaticUpstreamsMergeByID(t *testing.T) {
+	mainPath, confDir := setupTestConfig(t, `
+static_upstreams:
+  - id: "up-a"
+    address: "127.0.0.1"
+    port: 8001
+  - id: "up-b"
+    address: "127.0.0.2"
+    port: 8002
+`)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "upstreams.yaml"), []byte(`
+static_upstreams:
+  - id: "up-b"
+    address: "10.0.0.2"
+    port: 9002
+  - id: "up-c"
+    address: "10.0.0.3"
+    port: 9003
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.StaticUpstreams) != 3 {
+		t.Fatalf("expected 3 static upstreams, got %d", len(cfg.StaticUpstreams))
+	}
+	ports := map[string]int{}
+	for _, up := range cfg.StaticUpstreams {
+		ports[up.ID] = up.Port
+	}
+	if ports["up-a"] != 8001 || ports["up-b"] != 9002 || ports["up-c"] != 9003 {
+		t.Fatalf("unexpected upstream merge result: %#v", ports)
+	}
+}
+
+func TestLoadConfDir_LLMTargetsMergeByName(t *testing.T) {
+	mainPath, confDir := setupTestConfig(t, `
+llm_proxy:
+  enabled: true
+  targets:
+    - name: "anthropic"
+      upstream: "https://a.example.com"
+    - name: "openai"
+      upstream: "https://o.example.com"
+`)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "llm-targets.yaml"), []byte(`
+llm_proxy:
+  targets:
+    - name: "openai"
+      upstream: "https://override.example.com"
+    - name: "gemini"
+      upstream: "https://g.example.com"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LLMProxy.Targets) != 3 {
+		t.Fatalf("expected 3 llm targets, got %d", len(cfg.LLMProxy.Targets))
+	}
+	ups := map[string]string{}
+	for _, target := range cfg.LLMProxy.Targets {
+		ups[target.Name] = target.Upstream
+	}
+	if ups["anthropic"] != "https://a.example.com" || ups["openai"] != "https://override.example.com" || ups["gemini"] != "https://g.example.com" {
+		t.Fatalf("unexpected llm target merge result: %#v", ups)
+	}
+}
