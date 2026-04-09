@@ -15,3 +15,10 @@ func TestEvaluateIFCForTool_NoEngineNoop(t *testing.T) {
 		t.Fatal("expected no block without ifc engine")
 	}
 }
+
+func TestCollectIFCVarIDs_PreservesIDs(t *testing.T) {
+	ids := collectIFCVarIDs([]IFCVariable{{ID: "a"}, {ID: "b"}})
+	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("unexpected ids: %#v", ids)
+	}
+}

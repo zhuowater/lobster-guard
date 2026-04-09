@@ -79,6 +79,40 @@ func TestParseAnthropicResponse_NoToolUse(t *testing.T) {
 	}
 }
 
+func TestParseAnthropicResponse_OpenAIStyleToolCallsAndUsageFallback(t *testing.T) {
+	body := `{
+		"model": "gpt-4.1",
+		"choices": [{
+			"message": {
+				"tool_calls": [{
+					"function": {"name": "execute_code", "arguments": "{\"code\":\"print(1)\"}"}
+				}]
+			}
+		}],
+		"usage": {"prompt_tokens": 123, "completion_tokens": 45, "total_tokens": 168}
+	}`
+
+	info := ParseAnthropicResponse([]byte(body))
+	if info == nil {
+		t.Fatal("expected non-nil info")
+	}
+	if info.Model != "gpt-4.1" {
+		t.Fatalf("model = %q, want gpt-4.1", info.Model)
+	}
+	if !info.HasToolUse || info.ToolCount != 1 {
+		t.Fatalf("expected one tool call, got %+v", info)
+	}
+	if len(info.ToolNames) != 1 || info.ToolNames[0] != "execute_code" {
+		t.Fatalf("unexpected tool names: %v", info.ToolNames)
+	}
+	if len(info.ToolInputs) != 1 || info.ToolInputs[0] == "" {
+		t.Fatalf("unexpected tool inputs: %v", info.ToolInputs)
+	}
+	if info.InputTokens != 123 || info.OutputTokens != 45 || info.TotalTokens != 168 {
+		t.Fatalf("unexpected token counts: in=%d out=%d total=%d", info.InputTokens, info.OutputTokens, info.TotalTokens)
+	}
+}
+
 func TestParseSSEEvents(t *testing.T) {
 	events := `event: message_start
 data: {"type":"message_start","message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":500}}}
