@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -55,5 +56,32 @@ func TestEvaluateToolPolicyForResponseTool_PathPolicyEscalatesToBlock(t *testing
 	}
 	if event.RuleHit != "web_fetch_then_send_email" {
 		t.Fatalf("expected path policy rule hit, got %#v", event)
+	}
+}
+
+func TestMaybeRunCounterfactualForTool_SyncBlockWritesResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cf-1","choices":[{"message":{"role":"assistant","content":"safe"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	verifier := NewCounterfactualVerifier(openTestSQLite(t), CFConfig{Enabled: true, Mode: "sync", RiskThreshold: 50, TimeoutSec: 5}, nil)
+	lp := &LLMProxy{cfVerifier: verifier, mainCfg: &Config{Counterfactual: CFConfig{Enabled: true}}}
+	rr := httptest.NewRecorder()
+	ctx := llmToolGovernanceContext{
+		TraceID:     "trace-cf",
+		ReqBody:     []byte(`{"messages":[{"role":"user","content":"send it"}]}`),
+		UpstreamURL: srv.URL,
+	}
+	result := lp.maybeRunCounterfactualForTool(rr, ctx, "send_email", `{"to":"a@example.com"}`, &ToolCallEvent{RiskLevel: "high"})
+	if !result.Blocked {
+		t.Fatalf("expected counterfactual block, got %#v", result)
+	}
+	if rr.Code != 403 {
+		t.Fatalf("expected 403, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "counterfactual verification") {
+		t.Fatalf("unexpected body: %q", rr.Body.String())
 	}
 }

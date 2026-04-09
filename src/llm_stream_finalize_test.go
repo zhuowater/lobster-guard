@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -54,5 +57,32 @@ func TestEvaluateLLMSSETailRewrite_Block(t *testing.T) {
 	}
 	if result.ShouldRewrite {
 		t.Fatalf("block result should not rewrite: %#v", result)
+	}
+}
+
+func TestHandleSSEResponse_RewriteEventPrecedesDone(t *testing.T) {
+	engine := NewLLMRuleEngine([]LLMRule{{
+		ID: "sse-rewrite-order", Name: "rewrite-secret", Category: "pii_leak", Direction: "response",
+		Type: "keyword", Patterns: []string{"secret-token"}, Action: "rewrite", RewriteTo: "[MASKED]", Enabled: true, Priority: 10,
+	}})
+	lp := &LLMProxy{ruleEngine: engine}
+	sseBody := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"hello "}}]}`,
+		`data: {"choices":[{"delta":{"content":"secret-token"}}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(sseBody))}
+	rr := httptest.NewRecorder()
+	lp.handleSSEResponse(rr, resp, &LLMAuditContext{TraceID: "trace-sse-order", TenantID: "default"}, "")
+
+	body := rr.Body.String()
+	rewriteIdx := strings.Index(body, "event: security_rewrite")
+	doneIdx := strings.Index(body, "data: [DONE]")
+	if rewriteIdx == -1 || doneIdx == -1 {
+		t.Fatalf("expected rewrite event and done marker, got %q", body)
+	}
+	if rewriteIdx > doneIdx {
+		t.Fatalf("expected rewrite event before done marker, got %q", body)
 	}
 }
