@@ -1,4 +1,4 @@
-# 🦞 Lobster Guard — 龙虾卫士 v35.0 智能管控
+# 🦞 Lobster Guard — 龙虾卫士 v36.5 智能管控
 
 
 ## 连接配置
