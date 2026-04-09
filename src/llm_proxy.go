@@ -428,40 +428,9 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					lp.evaluateCapabilityForTool(deepCtx, tcName25, i25, info25.ToolNames)
 
 					// v25.2: DeviationDetector — 综合偏差检测
-					if lp.deviationDetector != nil && lp.isEngineEnabled("deviation") {
-						devResult := lp.deviationDetector.Detect(traceID, tcName25, tcArgs25)
-						if devResult.HasDeviation {
-							log.Printf("[Deviation] 检测到偏差: tool=%s type=%s severity=%s decision=%s trace=%s",
-								tcName25, devResult.Deviation.Type, devResult.Deviation.Severity, devResult.Decision, traceID)
-							// v26.3: 写入审计日志
-							if lp.auditLogger != nil {
-								devAction := "warn"
-								if devResult.Decision == "block" {
-									devAction = "block"
-								}
-								lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, devAction,
-									fmt.Sprintf("[Deviation] %s: %s", devResult.Deviation.Type, devResult.Reason),
-									fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
-							}
-							// v28: 如果修复成功，替换工具名和参数
-							if devResult.Repaired {
-								if devResult.RepairedTool != "" {
-									log.Printf("[Deviation] 自动修复: %s → %s trace=%s", tcName25, devResult.RepairedTool, traceID)
-									tcName25 = devResult.RepairedTool
-								}
-								if devResult.RepairedArgs != "" {
-									tcArgs25 = devResult.RepairedArgs
-								}
-								// 修复后继续执行，不 block
-							} else if devResult.Decision == "block" {
-								w.Header().Set("Content-Type", "application/json")
-								w.WriteHeader(403)
-								fmt.Fprintf(w, `{"error":"Tool call blocked by deviation detector","tool":"%s","reason":"%s"}`,
-									tcName25, devResult.Reason)
-								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
-								return
-							}
-						}
+					tcName25, tcArgs25, blockedByDeviation := lp.evaluateDeviationForTool(w, llmDeviationGovernanceContext{TraceID: traceID, SenderID: auditCtx.SenderID, RespBody: respBody, StatusCode: resp.StatusCode, AuditCtx: auditCtx}, tcName25, tcArgs25)
+					if blockedByDeviation {
+						return
 					}
 
 					if lp.evaluateIFCForTool(w, llmIFCGovernanceContext{TraceID: traceID, SenderID: auditCtx.SenderID, RespBody: respBody, StatusCode: resp.StatusCode, AuditCtx: auditCtx}, tcName25, tcArgs25) {
