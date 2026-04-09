@@ -36,3 +36,24 @@ func TestEnforceToolPolicyDecision_BlockWritesResponse(t *testing.T) {
 		t.Fatalf("unexpected body: %q", rr.Body.String())
 	}
 }
+
+func TestEvaluateToolPolicyForResponseTool_PathPolicyEscalatesToBlock(t *testing.T) {
+	db := openTestSQLite(t)
+	lp := &LLMProxy{
+		toolPolicy:       NewToolPolicyEngine(db, ToolPolicyConfig{Enabled: true, DefaultAction: "allow"}),
+		pathPolicyEngine: NewPathPolicyEngine(db),
+	}
+	ctx := llmToolGovernanceContext{TraceID: "trace-1", TenantID: "default"}
+	lp.pathPolicyEngine.RegisterStep(ctx.TraceID, PathStep{Stage: "tool_call", Action: "web_fetch"})
+
+	event, ok := lp.evaluateToolPolicyForResponseTool(ctx, "send_email", `{}`)
+	if !ok {
+		t.Fatal("expected tool policy evaluation to succeed")
+	}
+	if event.Decision != "block" {
+		t.Fatalf("expected path policy block override, got %#v", event)
+	}
+	if event.RuleHit != "web_fetch_then_send_email" {
+		t.Fatalf("expected path policy rule hit, got %#v", event)
+	}
+}
