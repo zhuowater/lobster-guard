@@ -2,14 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 func (api *ManagementAPI) handleSessionRisks(w http.ResponseWriter, r *http.Request) {
@@ -270,28 +266,20 @@ func (api *ManagementAPI) handleSessionCorrelatorConfigUpdate(w http.ResponseWri
 
 // saveSessionCorrelatorConfig 将 session correlator 配置写回 config.yaml
 func (api *ManagementAPI) saveSessionCorrelatorConfig() error {
-	api.cfgMu.Lock()
-	defer api.cfgMu.Unlock()
-	data, err := os.ReadFile(api.cfgPath)
-	if err != nil {
-		return fmt.Errorf("读取配置文件失败: %w", err)
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("解析配置文件失败: %w", err)
-	}
+	patch := map[string]interface{}{}
 	if api.cfg.SessionIdleTimeoutMin > 0 {
-		raw["session_idle_timeout_min"] = api.cfg.SessionIdleTimeoutMin
+		patch["session_idle_timeout_min"] = api.cfg.SessionIdleTimeoutMin
 	}
 	if api.cfg.SessionFPWindowSec > 0 {
-		raw["session_fp_window_sec"] = api.cfg.SessionFPWindowSec
+		patch["session_fp_window_sec"] = api.cfg.SessionFPWindowSec
 	}
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-	if err := os.WriteFile(api.cfgPath, out, 0644); err != nil {
-		return fmt.Errorf("写入配置文件失败: %w", err)
+	if err := api.configPersistence().PatchWith(func(raw map[string]interface{}) error {
+		for k, v := range patch {
+			raw[k] = v
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	log.Printf("[会话关联] 配置已保存: idle=%dmin, fp=%ds", api.cfg.SessionIdleTimeoutMin, api.cfg.SessionFPWindowSec)
 	return nil

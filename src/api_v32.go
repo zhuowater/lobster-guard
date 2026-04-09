@@ -396,7 +396,7 @@ func (api *ManagementAPI) handleEngineToggle(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	*m.ptr = *req.Enabled
-	_ = api.persistRawSection(m.key, map[string]interface{}{"enabled": *req.Enabled})
+	_ = api.configPersistence().PatchSection(m.key, map[string]interface{}{"enabled": *req.Enabled})
 	jsonResponse(w, 200, map[string]interface{}{"ok": true, "name": name, "enabled": *req.Enabled})
 }
 

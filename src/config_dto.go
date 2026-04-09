@@ -128,6 +128,9 @@ func buildConfigSettingsEngineToggles(cfg *Config) ConfigSettingsEngineToggles {
 	}
 }
 
+// buildConfigSettingsResponse 返回合并响应：兼容旧 PascalCase 字段（如 RateLimit、InboundListen）
+// + 新 snake_case DTO 字段（如 rate_limit、basic、engine_toggles）。
+// 两套字段并存是有意为之，供前端平滑迁移；待 UI 完全切换到 DTO 字段后可移除 legacy 部分。
 func buildConfigSettingsResponse(cfg *Config) (map[string]interface{}, error) {
 	legacy, err := structToMap(cfg)
 	if err != nil {
