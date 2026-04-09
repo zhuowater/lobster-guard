@@ -368,15 +368,12 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Del("Content-Length")
 		}
 		if respEval.Decision == "block" && respEval.HasMatch {
-			// v18.0: 执行信封
-			if lp.envelopeMgr != nil {
-				lp.envelopeMgr.Seal(traceID, "llm_response", string(respBody), "block", llmRespRules, "")
-			}
+			lp.sealLLMResponseEnvelope(traceID, llmResponseRecord{Decision: "block", Rules: llmRespRules, Body: respBody})
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(403)
 			fmt.Fprintf(w, `{"error":"Response blocked by LLM security rule: %s","rule_id":"%s","category":"%s"}`,
 				respEval.TopMatch.RuleName, respEval.TopMatch.RuleID, respEval.TopMatch.Category)
-			go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+			lp.auditLLMResponse(auditCtx, resp.StatusCode, respBody)
 			return
 		}
 		// v20.0: 工具策略引擎 — 非流式响应中的 tool_calls 检测
@@ -645,7 +642,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if decision == "" {
 				decision = "pass"
 			}
-			lp.envelopeMgr.Seal(traceID, "llm_response", string(respBody), decision, llmRespRules, "")
+			lp.sealLLMResponseEnvelope(traceID, llmResponseRecord{Decision: decision, Rules: llmRespRules, Body: respBody})
 		}
 
 		w.WriteHeader(resp.StatusCode)
@@ -665,7 +662,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 异步审计
-		go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+		lp.auditLLMResponse(auditCtx, resp.StatusCode, respBody)
 	}
 }
 
@@ -718,7 +715,7 @@ func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.R
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
 		fmt.Fprintf(w, `{"error":"Response blocked by security rule: %s"}`, respEval.TopMatch.RuleName)
-		go lp.auditor.ProcessResponse(auditCtx, 200, []byte(fullContent))
+		lp.auditLLMResponse(auditCtx, 200, []byte(fullContent))
 		return
 	}
 	fullContent = string(respEval.Body)
@@ -763,7 +760,7 @@ func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.R
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
 
-	go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+	lp.auditLLMResponse(auditCtx, resp.StatusCode, respBody)
 }
 
 // handleSSEResponse 处理 SSE 流式响应
@@ -894,36 +891,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 	eventData := make([]byte, eventBuf.Len())
 	copy(eventData, eventBuf.Bytes())
 
-	// v10.0: SSE 流式响应的规则检测（v28.0: 使用租户感知版本，仅 log/warn，数据已推送给客户端）
-	if lp.ruleEngine != nil && len(eventData) > 0 {
-		sseTenantID := auditCtx.TenantID
-		go func() {
-			respMatches := lp.ruleEngine.CheckResponseWithTenant(string(eventData), sseTenantID)
-			if len(respMatches) > 0 {
-				action, topMatch := HighestPriorityAction(respMatches)
-				if topMatch != nil {
-					log.Printf("[LLM规则] SSE 响应检测: rule=%s category=%s action=%s (流式模式仅记录)",
-						topMatch.RuleID, topMatch.Category, topMatch.Action)
-				}
-				// v18.0: 执行信封 — SSE 响应侧
-				if lp.envelopeMgr != nil {
-					var rules []string
-					for _, m := range respMatches {
-						rules = append(rules, m.RuleName)
-					}
-					lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), action, rules, "")
-				}
-			} else if lp.envelopeMgr != nil {
-				// 无规则匹配时也记录 pass 信封
-				lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), "pass", nil, "")
-			}
-		}()
-	} else if lp.envelopeMgr != nil && len(eventData) > 0 {
-		// 规则引擎不存在但信封管理器存在
-		go func() {
-			lp.envelopeMgr.Seal(auditCtx.TraceID, "llm_response", string(eventData), "pass", nil, "")
-		}()
-	}
+	lp.sealSSEEnvelope(auditCtx, eventData)
 
 	// v20.0: 工具策略引擎 — SSE 流式响应中的 tool_calls 评估（异步，仅 log/warn）
 	if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
@@ -1027,7 +995,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		}
 	}
 
-	go lp.auditor.ProcessSSEBuffer(auditCtx, eventData)
+	lp.auditSSEBuffer(auditCtx, eventData)
 }
 
 // ============================================================
