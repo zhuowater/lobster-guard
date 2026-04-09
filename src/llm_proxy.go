@@ -414,65 +414,18 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
 			info25 := ParseAnthropicResponse(respBody)
 			if info25 != nil && info25.HasToolUse {
+				deepCtx := llmDeepGovernanceContext{TraceID: traceID, SenderID: auditCtx.SenderID, RespBody: respBody, StatusCode: resp.StatusCode, AuditCtx: auditCtx}
 				for i25, tcName25 := range info25.ToolNames {
 					tcArgs25 := ""
 					if i25 < len(info25.ToolInputs) { tcArgs25 = info25.ToolInputs[i25] }
 
 					// v25.0: PlanCompiler — 比对 tool_call vs 计划模板
-					if lp.planCompiler != nil && lp.isEngineEnabled("plan_compiler") {
-						planEval := lp.planCompiler.EvaluateToolCall(traceID, tcName25, tcArgs25)
-						if planEval != nil && planEval.Violation != nil {
-							log.Printf("[PlanCompiler] 计划偏离: tool=%s violation=%s severity=%s decision=%s trace=%s",
-								tcName25, planEval.Violation.Description, planEval.Violation.Severity, planEval.Decision, traceID)
-							if planEval.Decision == "block" {
-								w.Header().Set("Content-Type", "application/json")
-								w.WriteHeader(403)
-								fmt.Fprintf(w, `{"error":"Tool call blocked by plan compiler","tool":"%s","violation":"%s"}`,
-									tcName25, planEval.Violation.Description)
-								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
-								return
-							}
-						}
+					if lp.evaluatePlanForTool(w, deepCtx, tcName25, tcArgs25) {
+						return
 					}
 
 					// v25.1+v28.0g: CapabilityEngine — 数据级权限检查 + CaMeL source propagation
-					if lp.capabilityEngine != nil && lp.isEngineEnabled("capability") {
-						toolDataID := fmt.Sprintf("tool-%s-%d", tcName25, i25)
-						lp.capabilityEngine.RegisterToolResult(traceID, tcName25, toolDataID)
-
-						// CaMeL: propagate sources from prior tool results in this trace
-						// If previous tool outputs feed into this tool, the lineage carries forward
-						if i25 > 0 {
-							var parentIDs []string
-							for j := 0; j < i25; j++ {
-								parentIDs = append(parentIDs, fmt.Sprintf("tool-%s-%d", info25.ToolNames[j], j))
-							}
-							lp.capabilityEngine.PropagateData(traceID, toolDataID, "tool:"+tcName25, parentIDs)
-						}
-
-						capEval := lp.capabilityEngine.EvaluateWithProvenance(traceID, toolDataID, "execute", tcName25)
-						if capEval != nil && (capEval.Decision == "deny" || capEval.Decision == "warn") {
-							log.Printf("[Capability] %s: tool=%s reason=%s trace=%s", capEval.Decision, tcName25, capEval.Reason, traceID)
-							if capEval.Decision == "deny" && lp.eventBus != nil {
-								lp.eventBus.Emit(&SecurityEvent{
-									Type: "capability_deny", Severity: "high", Domain: "llm", TraceID: traceID,
-									Summary: fmt.Sprintf("Capability denied: %s (%s)", tcName25, capEval.Reason),
-								})
-							}
-							if capEval.Decision == "warn" && lp.eventBus != nil {
-								lp.eventBus.Emit(&SecurityEvent{
-									Type: "capability_warn", Severity: "medium", Domain: "llm", TraceID: traceID,
-									Summary: fmt.Sprintf("Capability warn (untrusted lineage): %s (%s)", tcName25, capEval.Reason),
-								})
-							}
-							// v26.3: 写入审计日志
-							if lp.auditLogger != nil {
-								lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, capEval.Decision,
-									fmt.Sprintf("[Capability] %s: %s", capEval.Decision, capEval.Reason),
-									fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
-							}
-						}
-					}
+					lp.evaluateCapabilityForTool(deepCtx, tcName25, i25, info25.ToolNames)
 
 					// v25.2: DeviationDetector — 综合偏差检测
 					if lp.deviationDetector != nil && lp.isEngineEnabled("deviation") {
