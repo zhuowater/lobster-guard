@@ -215,6 +215,26 @@ func TestRouteLookupByApp(t *testing.T) {
 	}
 }
 
+func TestUpstreamTCPAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		port int
+		want string
+	}{
+		{name: "ipv4", host: "127.0.0.1", port: 8080, want: "127.0.0.1:8080"},
+		{name: "hostname", host: "localhost", port: 9090, want: "localhost:9090"},
+		{name: "ipv6", host: "2001:db8::1", port: 8443, want: "[2001:db8::1]:8443"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := upstreamTCPAddr(tc.host, tc.port); got != tc.want {
+				t.Fatalf("upstreamTCPAddr(%q, %d) = %q want %q", tc.host, tc.port, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRouteStats(t *testing.T) {
 	rt := NewRouteTable(nil, false)
 

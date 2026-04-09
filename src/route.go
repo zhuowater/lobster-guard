@@ -28,21 +28,25 @@ import (
 // ============================================================
 
 type Upstream struct {
-	ID            string                 `json:"id"`
-	Address       string                 `json:"address"`
-	Port          int                    `json:"port"`
-	PathPrefix    string                 `json:"path_prefix,omitempty"`
-	Healthy       bool                   `json:"healthy"`
-	RegisteredAt  time.Time              `json:"registered_at"`
-	LastHeartbeat time.Time              `json:"last_heartbeat"`
-	Tags          map[string]string      `json:"tags"`
-	Load          map[string]interface{} `json:"load"`
-	UserCount     int                    `json:"user_count"`
-	Static        bool                   `json:"static"`
-	GatewayToken       string                 `json:"-"` // 不暴露在 JSON 响应中！安全考虑
-	GatewayOrigin      string                 `json:"-"` // v29.0: HTTPS origin for WSS connect
-	OpenClawConfigPath string                 `json:"-"` // openclaw.json 路径（同机时直接扫描）
-	proxy         *httputil.ReverseProxy
+	ID                 string                 `json:"id"`
+	Address            string                 `json:"address"`
+	Port               int                    `json:"port"`
+	PathPrefix         string                 `json:"path_prefix,omitempty"`
+	Healthy            bool                   `json:"healthy"`
+	RegisteredAt       time.Time              `json:"registered_at"`
+	LastHeartbeat      time.Time              `json:"last_heartbeat"`
+	Tags               map[string]string      `json:"tags"`
+	Load               map[string]interface{} `json:"load"`
+	UserCount          int                    `json:"user_count"`
+	Static             bool                   `json:"static,omitempty"` // 是否静态配置上游（不依赖心跳）
+	GatewayToken       string                 `json:"-"`                // 不暴露在 JSON 响应中！安全考虑
+	GatewayOrigin      string                 `json:"-"`                // v29.0: HTTPS origin for WSS connect
+	OpenClawConfigPath string                 `json:"-"`                // openclaw.json 路径（同机时直接扫描）
+	proxy              *httputil.ReverseProxy
+}
+
+func upstreamTCPAddr(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 type UpstreamPool struct {
@@ -407,7 +411,7 @@ func (pool *UpstreamPool) HealthCheck(ctx context.Context) {
 			for _, up := range pool.upstreams {
 				if !up.Static { continue }
 				go func(u *Upstream) {
-					addr := fmt.Sprintf("%s:%d", u.Address, u.Port)
+					addr := upstreamTCPAddr(u.Address, u.Port)
 					conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
 					if err != nil {
 						pool.mu.Lock()
