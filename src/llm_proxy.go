@@ -464,65 +464,8 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 
-					// v26.0: IFC 信息流控制 — tool_call 安全检查
-					if lp.ifcEngine != nil && lp.ifcEngine.config.Enabled {
-						// 注册 tool result 变量
-						toolSource := "tool:" + tcName25
-						toolVar := lp.ifcEngine.RegisterVariable(traceID, "tool_result_"+tcName25, toolSource, tcArgs25)
-						// 获取该 trace 的所有变量 ID 作为输入
-						if toolVar != nil {
-							allVars := lp.ifcEngine.GetVariables(traceID)
-							var varIDs []string
-							for _, v := range allVars {
-								varIDs = append(varIDs, v.ID)
-							}
-							// 检查 tool call 是否违反 IFC 规则
-							ifcDecision := lp.ifcEngine.CheckToolCall(traceID, tcName25, varIDs)
-							if ifcDecision != nil && !ifcDecision.Allowed && ifcDecision.Decision == "block" {
-								log.Printf("[IFC] 信息流违规阻断: tool=%s type=%s trace=%s", tcName25, ifcDecision.Violation.Type, traceID)
-								// v26.3: 写入审计日志
-								if lp.auditLogger != nil {
-									lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, "block",
-										fmt.Sprintf("[IFC] %s violation: %s", ifcDecision.Violation.Type, ifcDecision.Reason),
-										fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
-								}
-								w.Header().Set("Content-Type", "application/json")
-								w.WriteHeader(403)
-								fmt.Fprintf(w, `{"error":"Tool call blocked by IFC: %s","tool":"%s","type":"%s"}`,
-									ifcDecision.Reason, tcName25, ifcDecision.Violation.Type)
-								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
-								return
-							} else if ifcDecision != nil && ifcDecision.Decision == "warn" {
-								log.Printf("[IFC] 信息流告警: tool=%s reason=%s trace=%s", tcName25, ifcDecision.Reason, traceID)
-								// v26.3: 写入审计日志
-								if lp.auditLogger != nil {
-									lp.auditLogger.LogWithTrace("outbound", auditCtx.SenderID, "warn",
-										fmt.Sprintf("[IFC] %s: %s", ifcDecision.Violation.Type, ifcDecision.Reason),
-										fmt.Sprintf("tool_call: %s", tcName25), "", 0, "", "", traceID)
-								}
-							}
-
-							// v26.1: IFC 隔离路由
-							if lp.ifcQuarantine != nil && lp.ifcEngine.config.QuarantineEnabled {
-								if lp.ifcQuarantine.ShouldRoute(traceID, varIDs) {
-									quarantineURL, sessionID, qErr := lp.ifcQuarantine.Route(traceID, varIDs)
-									if qErr == nil && quarantineURL != "" {
-										log.Printf("[IFC-Quarantine] 被污染数据路由到隔离LLM: trace=%s upstream=%s session=%s", traceID, quarantineURL, sessionID)
-									}
-								}
-							}
-
-							// v26.2: DOE 数据过度暴露检测
-							fields := extractFieldNames(tcArgs25)
-							if len(fields) > 0 {
-								doeResult := lp.ifcEngine.DetectDOE(traceID, tcName25, fields, nil)
-								if doeResult != nil && doeResult.Severity == "critical" {
-									log.Printf("[IFC-DOE] 严重数据过度暴露: tool=%s excess=%v trace=%s", tcName25, doeResult.ExcessFields, traceID)
-								} else if doeResult != nil && doeResult.Severity == "warning" {
-									log.Printf("[IFC-DOE] 数据过度暴露告警: tool=%s excess=%v trace=%s", tcName25, doeResult.ExcessFields, traceID)
-								}
-							}
-						}
+					if lp.evaluateIFCForTool(w, llmIFCGovernanceContext{TraceID: traceID, SenderID: auditCtx.SenderID, RespBody: respBody, StatusCode: resp.StatusCode, AuditCtx: auditCtx}, tcName25, tcArgs25) {
+						return
 					}
 				}
 			}
