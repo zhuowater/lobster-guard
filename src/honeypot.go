@@ -71,6 +71,18 @@ func NewHoneypotEngine(db *sql.DB) *HoneypotEngine {
 	return hp
 }
 
+func (hp *HoneypotEngine) SetEnabled(enabled bool) {
+	hp.mu.Lock()
+	defer hp.mu.Unlock()
+	hp.enabled = enabled
+}
+
+func (hp *HoneypotEngine) IsEnabled() bool {
+	hp.mu.RLock()
+	defer hp.mu.RUnlock()
+	return hp.enabled
+}
+
 func (hp *HoneypotEngine) initSchema() {
 	hp.db.Exec(`CREATE TABLE IF NOT EXISTS honeypot_templates (
 		id TEXT PRIMARY KEY,
@@ -357,7 +369,10 @@ func (hp *HoneypotEngine) GetTrigger(id string) (*HoneypotTrigger, error) {
 
 // CheckDetonation 扫描出站内容是否包含已知水印，返回匹配的水印列表
 func (hp *HoneypotEngine) CheckDetonation(content string) []string {
-	if content == "" {
+	hp.mu.RLock()
+	enabled := hp.enabled
+	hp.mu.RUnlock()
+	if !enabled || content == "" {
 		return nil
 	}
 	rows, err := hp.db.Query(`SELECT watermark FROM honeypot_triggers WHERE detonated = 0`)

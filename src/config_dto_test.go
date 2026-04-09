@@ -36,6 +36,7 @@ func TestBuildConfigSettingsResponse_ProvidesStableDTOSections(t *testing.T) {
 		LLMDetectEnabled:      true,
 		EnvelopeEnabled:       true,
 		EvolutionEnabled:      false,
+		Honeypot:              HoneypotConfig{Enabled: true},
 		SemanticDetector:      SemanticConfig{Enabled: true},
 		HoneypotDeep:          HoneypotDeepConfig{Enabled: false},
 		Singularity:           SingularityConfig{Enabled: true},
@@ -100,6 +101,7 @@ func TestBuildConfigSettingsResponse_ProvidesStableDTOSections(t *testing.T) {
 
 	engines := requireObject(t, got, "engine_toggles")
 	assertEqual(t, engines["engine_inbound_detect"], true, "engine_toggles.engine_inbound_detect")
+	assertEqual(t, engines["engine_honeypot"], true, "engine_toggles.engine_honeypot")
 	assertEqual(t, engines["engine_tool_policy"], false, "engine_toggles.engine_tool_policy")
 	assertEqual(t, engines["engine_event_bus"], true, "engine_toggles.engine_event_bus")
 }

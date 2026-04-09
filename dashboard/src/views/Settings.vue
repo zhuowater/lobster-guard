@@ -623,7 +623,7 @@ const engineList = [
   { name: '会话检测', configPath: 'engine_session_detect', desc: '多轮会话上下文关联+风险累积' },
   { name: 'LLM检测', configPath: 'engine_llm_detect', desc: 'Pipeline内LLM调用检测' },
   { name: '语义检测', configPath: 'engine_semantic', desc: '基于embedding的语义匹配' },
-  { name: '蜜罐引擎', configPath: 'honeypot', desc: '模式匹配→假响应+水印', alwaysOn: true },
+  { name: '蜜罐引擎', configPath: 'engine_honeypot', desc: '模式匹配→假响应+水印' },
   { name: '深度蜜罐', configPath: 'engine_honeypot_deep', desc: '多轮交互蜜罐+行为建模' },
   { name: '奇点引擎', configPath: 'engine_singularity', desc: '概率性诱饵投放+预算控制' },
   { name: 'IFC引擎', configPath: 'engine_ifc', desc: 'Bell-LaPadula双标签信息流控制' },
@@ -655,6 +655,7 @@ const engineConfigPaths = {
   engine_evolution: 'EvolutionEnabled',
   // 嵌套结构体字段
   engine_semantic: 'SemanticDetector.enabled',
+  engine_honeypot: 'Honeypot.enabled',
   engine_honeypot_deep: 'HoneypotDeep.enabled',
   engine_singularity: 'Singularity.enabled',
   engine_ifc: 'ifc.enabled',

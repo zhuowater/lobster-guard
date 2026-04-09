@@ -56,6 +56,9 @@ detect_timeout_ms: 200             # 单次检测超时
 #   enabled: false
 #   mode: "async"
 
+# honeypot:
+#   enabled: false   # 基础蜜罐总开关；当前代码默认启用，显式设 false 可关闭
+
 # api_keys:
 #   - name: "demo"
 #     key: "replace-me"

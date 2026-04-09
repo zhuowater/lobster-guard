@@ -464,7 +464,7 @@ llm_proxy:
 # v18 修复: 蜜罐已集成到代理数据流，引爆事件自动关联 trace_id
 # ============================================================
 # honeypot:
-#   enabled: false                          # 是否启用蜜罐（默认 false）
+#   enabled: false                          # 基础蜜罐总开关（当前代码默认 true，显式设 false 可关闭）
 #   templates:                              # 蜜罐模板（8 种可选）
 #     - name: "fake_api_key"                # 假 API Key 蜜罐
 #       type: "credential"

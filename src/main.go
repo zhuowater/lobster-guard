@@ -157,6 +157,7 @@ func main() {
 
 	// --- 蜜罐引擎（需要在 initAllEngines 之前）---
 	honeypotEngine := NewHoneypotEngine(logger.DB())
+	honeypotEngine.SetEnabled(cfg.Honeypot.Enabled)
 
 	// === 核心：集中初始化所有安全引擎 ===
 	engines := initAllEngines(cfg, store, logger, pool, routes, engine, outboundEngine, llmRuleEngine, llmAuditor, llmProxy, tenantMgr, honeypotEngine)

@@ -302,6 +302,22 @@ func TestCheckDetonationNoMatch(t *testing.T) {
 	}
 }
 
+func TestCheckDetonationDisabledEngine(t *testing.T) {
+	db := setupTestHoneypotDB(t)
+	defer db.Close()
+	hp := NewHoneypotEngine(db)
+
+	hp.RecordTrigger(&HoneypotTrigger{
+		TenantID: "default", SenderID: "user", TemplateID: "tpl-1", TemplateName: "Test",
+		TriggerType: "credential_request", Watermark: "HONEY-disabled-cccc",
+	})
+	hp.SetEnabled(false)
+	matched := hp.CheckDetonation("content with HONEY-disabled-cccc")
+	if len(matched) != 0 {
+		t.Fatalf("expected no detonation match when engine is disabled, got %v", matched)
+	}
+}
+
 // 14. 测试 GenerateFakeResponse 模板替换
 func TestGenerateFakeResponse(t *testing.T) {
 	db := setupTestHoneypotDB(t)

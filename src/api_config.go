@@ -1221,6 +1221,7 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		"engine_llm_detect":      {&api.cfg.LLMDetectEnabled, "", "llm_detect_enabled"},
 		"engine_semantic":        {&api.cfg.SemanticDetector.Enabled, "semantic_detector", ""},
 		// 蜜罐
+		"engine_honeypot":        {&api.cfg.Honeypot.Enabled, "honeypot", ""},
 		"engine_honeypot_deep":   {&api.cfg.HoneypotDeep.Enabled, "honeypot_deep", ""},
 		"engine_singularity":     {&api.cfg.Singularity.Enabled, "singularity", ""},
 		// IFC
@@ -1276,6 +1277,9 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 					sub["enabled"] = b
 				}
 				raw[eng.yamlKey] = sub
+			}
+			if reqKey == "engine_honeypot" && api.honeypotEngine != nil {
+				api.honeypotEngine.SetEnabled(b)
 			}
 			updated = append(updated, reqKey)
 			needRestart = true

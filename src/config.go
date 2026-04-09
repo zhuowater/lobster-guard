@@ -124,6 +124,10 @@ type InboundRuleTemplate struct {
 	Enabled     bool                `json:"enabled" yaml:"enabled"` // v30.0: 全局开关，启用后对所有流量生效
 }
 
+type HoneypotConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
 type Config struct {
 	Channel                 string                 `yaml:"channel"` // "lanxin" (default) | "feishu" | "generic"
 	Mode                    string                 `yaml:"mode"`    // "webhook" (default) | "bridge"
@@ -227,12 +231,15 @@ type Config struct {
 	EnvelopeBatchSize int    `yaml:"envelope_batch_size"` // Merkle Tree 批次大小（默认 64）
 	// v18.1 事件总线
 	EventBus EventBusConfig `yaml:"event_bus"`
-	// v18.2 配置安全
+	// v14.2 配置安全
 	ConfigEncryptionKey string `yaml:"config_encryption_key"` // 敏感字段加密密钥
 	APITokenRotation    bool   `yaml:"api_token_rotation"`    // Token 自动轮换开关
+	// v15.0 基础蜜罐总开关
+	Honeypot HoneypotConfig `yaml:"honeypot" json:"honeypot"`
 	// v19.0 对抗性自进化
 	EvolutionEnabled     bool `yaml:"evolution_enabled"`
 	EvolutionIntervalMin int  `yaml:"evolution_interval_min"` // 默认 360（6小时）
+
 	// v18.3 自适应决策 + 奇点蜜罐
 	AdaptiveDecision AdaptiveDecisionConfig `yaml:"adaptive_decision"`
 	Singularity      SingularityConfig      `yaml:"singularity"`
@@ -380,6 +387,7 @@ func loadConfig(path string) (*Config, error) {
 		InboundDetectEnabled: true, OutboundAuditEnabled: true,
 		ManagementListen: ":9090", HeartbeatIntervalSec: 10, HeartbeatTimeoutCount: 3,
 		RouteDefaultPolicy: "least-users", RoutePersist: true,
+		Honeypot: HoneypotConfig{Enabled: true},
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)

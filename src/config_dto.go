@@ -108,6 +108,7 @@ func buildConfigSettingsEngineToggles(cfg *Config) ConfigSettingsEngineToggles {
 		"engine_session_detect": cfg.SessionDetectEnabled,
 		"engine_llm_detect":     cfg.LLMDetectEnabled,
 		"engine_semantic":       cfg.SemanticDetector.Enabled,
+		"engine_honeypot":       cfg.Honeypot.Enabled,
 		"engine_honeypot_deep":  cfg.HoneypotDeep.Enabled,
 		"engine_singularity":    cfg.Singularity.Enabled,
 		"engine_ifc":            cfg.IFC.Enabled,

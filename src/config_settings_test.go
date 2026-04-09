@@ -19,6 +19,8 @@ session_detect_enabled: false
 llm_detect_enabled: true
 envelope_enabled: false
 evolution_enabled: true
+honeypot:
+  enabled: false
 semantic_detector:
   enabled: false
 honeypot_deep:
@@ -85,6 +87,7 @@ event_bus:
 		"engine_session_detect": false,
 		"engine_llm_detect": true,
 		"engine_semantic": false,
+		"engine_honeypot": false,
 		"engine_honeypot_deep": true,
 		"engine_singularity": false,
 		"engine_ifc": true,
@@ -126,6 +129,8 @@ session_detect_enabled: true
 llm_detect_enabled: true
 envelope_enabled: true
 evolution_enabled: true
+honeypot:
+  enabled: true
 semantic_detector:
   enabled: true
 honeypot_deep:
@@ -171,6 +176,7 @@ event_bus:
 		"engine_session_detect": false,
 		"engine_llm_detect": false,
 		"engine_semantic": false,
+		"engine_honeypot": false,
 		"engine_honeypot_deep": false,
 		"engine_singularity": false,
 		"engine_ifc": false,
@@ -211,6 +217,7 @@ event_bus:
 	assertPathBool(t, raw, "llm_detect_enabled", false)
 	assertPathBool(t, raw, "envelope_enabled", false)
 	assertPathBool(t, raw, "evolution_enabled", false)
+	assertPathBool(t, raw, "honeypot.enabled", false)
 	assertPathBool(t, raw, "semantic_detector.enabled", false)
 	assertPathBool(t, raw, "honeypot_deep.enabled", false)
 	assertPathBool(t, raw, "singularity.enabled", false)
@@ -227,6 +234,34 @@ event_bus:
 	assertPathBool(t, raw, "taint_tracker.enabled", false)
 	assertPathBool(t, raw, "taint_reversal.enabled", false)
 	assertPathBool(t, raw, "event_bus.enabled", false)
+}
+
+func TestConfigSettingsUpdate_UpdatesHoneypotRuntimeState(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	initial := `honeypot:
+  enabled: true
+`
+	if err := os.WriteFile(cfgPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hp := &HoneypotEngine{enabled: true}
+	api := &ManagementAPI{cfg: cfg, cfgPath: cfgPath, honeypotEngine: hp}
+
+	body, _ := json.Marshal(map[string]bool{"engine_honeypot": false})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/v1/config/settings", bytes.NewReader(body))
+	api.handleConfigSettingsUpdate(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("PUT code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if api.honeypotEngine.IsEnabled() {
+		t.Fatal("expected honeypot engine runtime state to be disabled")
+	}
 }
 
 func assertPathBool(t *testing.T, raw map[string]interface{}, path string, want bool) {
