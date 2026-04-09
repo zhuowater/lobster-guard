@@ -380,74 +380,31 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if lp.toolPolicy != nil && lp.toolPolicy.config.Enabled {
 			info := ParseAnthropicResponse(respBody)
 			if info != nil && info.HasToolUse {
+				toolCtx := llmToolGovernanceContext{
+					TraceID:     traceID,
+					TenantID:    tenantID,
+					UpstreamURL: upstreamURL,
+					AuthHeader:  r.Header.Get("Authorization"),
+					SenderID:    auditCtx.SenderID,
+					ReqBody:     bodyBytes,
+					RespBody:    respBody,
+					StatusCode:  resp.StatusCode,
+					AuditCtx:    auditCtx,
+				}
 				for i, tcName := range info.ToolNames {
 					tcArgs := ""
 					if i < len(info.ToolInputs) {
 						tcArgs = info.ToolInputs[i]
 					}
-					// v27.0: 租户工具黑名单检查
-					if lp.tenantMgr != nil {
-						tcfg := lp.tenantMgr.GetConfig(tenantID)
-						if tcfg != nil && isToolBlacklisted(tcName, tcfg.ToolBlacklist) {
-							log.Printf("[ToolPolicy] 租户黑名单拦截: tool=%s tenant=%s trace=%s", tcName, tenantID, traceID)
-							continue
-						}
+					tpEvent, ok := lp.evaluateToolPolicyForResponseTool(toolCtx, tcName, tcArgs)
+					if !ok {
+						continue
 					}
-					tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, traceID, tenantID)
-					// v23.0: 路径策略引擎 — 注册 tool_call 步骤并评估
-					if lp.pathPolicyEngine != nil && lp.isEngineEnabled("path_policy") {
-						lp.pathPolicyEngine.RegisterStep(traceID, PathStep{Stage: "tool_call", Action: tcName, Details: tcArgs})
-						ppDec := lp.pathPolicyEngine.Evaluate(traceID, tcName)
-						if actionSev(ppDec.Decision) > actionSev(tpEvent.Decision) {
-							tpEvent.Decision = ppDec.Decision
-							tpEvent.RuleHit = ppDec.RuleName
-							tpEvent.RiskLevel = "high"
-						}
-					}
-					if tpEvent.Decision == "block" {
-						log.Printf("[ToolPolicy] 工具调用被阻断: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
-						if lp.eventBus != nil {
-							lp.eventBus.Emit(&SecurityEvent{
-								Type: "tool_block", Severity: "high", Domain: "llm",
-								TraceID: traceID,
-								Summary: fmt.Sprintf("工具调用阻断: %s (%s)", tcName, tpEvent.RuleHit),
-								Details: map[string]interface{}{"tool_name": tcName, "rule_hit": tpEvent.RuleHit, "risk_level": tpEvent.RiskLevel},
-							})
-						}
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(403)
-						fmt.Fprintf(w, `{"error":"Tool call blocked by policy: %s","tool":"%s","rule":"%s"}`,
-							tpEvent.RuleHit, tcName, tpEvent.RuleHit)
-						go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
+					if result := lp.enforceToolPolicyDecision(w, toolCtx, tcName, tpEvent); result.Blocked {
 						return
-					} else if tpEvent.Decision == "warn" {
-						log.Printf("[ToolPolicy] 工具调用告警: tool=%s rule=%s trace=%s", tcName, tpEvent.RuleHit, traceID)
 					}
-					// v24.0: 反事实验证 — 在 tool_call 被 ToolPolicy 评估后
-					if lp.cfVerifier != nil && lp.isEngineEnabled("counterfactual") && lp.cfVerifier.ShouldVerify(tcName, tcArgs, traceID, tpEvent.RiskScoreNum()) {
-						cfUpstream := upstreamURL
-						cfAuth := r.Header.Get("Authorization")
-						cfCfg := lp.cfVerifier.GetConfig()
-						// v24.1: 传入 senderID 用于攻击者画像联动
-						cfSenderID := auditCtx.SenderID
-						if cfCfg.Mode == "sync" {
-							cfResult := lp.cfVerifier.Verify(r.Context(), bodyBytes, tcName, tcArgs, cfUpstream, cfAuth, cfSenderID)
-							if cfResult != nil && cfResult.Decision == "block" {
-								log.Printf("[Counterfactual] 反事实验证阻断: tool=%s verdict=%s attribution=%.2f trace=%s",
-									tcName, cfResult.Verdict, cfResult.AttributionScore, traceID)
-								w.Header().Set("Content-Type", "application/json")
-								w.WriteHeader(403)
-								fmt.Fprintf(w, `{"error":"Tool call blocked by counterfactual verification","tool":"%s","verdict":"%s","attribution_score":%.2f}`,
-									tcName, cfResult.Verdict, cfResult.AttributionScore)
-								go lp.auditor.ProcessResponse(auditCtx, resp.StatusCode, respBody)
-								return
-							}
-						} else {
-							// async 模式: 后台验证，不阻塞
-							go func(body []byte, tn, ta, url, auth, sid string) {
-								lp.cfVerifier.Verify(context.Background(), body, tn, ta, url, auth, sid)
-							}(bodyBytes, tcName, tcArgs, cfUpstream, cfAuth, cfSenderID)
-						}
+					if result := lp.maybeRunCounterfactualForTool(w, toolCtx, tcName, tcArgs, tpEvent); result.Blocked {
+						return
 					}
 				}
 			}
