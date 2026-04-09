@@ -618,22 +618,14 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// v20.1: LLM 响应侧污染传播（使用关联的 IM trace_id）
-		if lp.taintTracker != nil {
-			lp.taintTracker.Propagate(taintTraceID, "llm_response",
-				fmt.Sprintf("LLM response received (llm_trace=%s)", traceID))
-		}
+		// v36.4: 响应后处理阶段 helper
+		lp.applyLLMResponseTaint(traceID, taintTraceID)
 
 		// v20.2: 污染链逆转 — 对被污染的 LLM 响应自动注入缓解提示
-		if lp.reversalEngine != nil && len(respBody) > 0 {
-			reversed, record := lp.reversalEngine.Reverse(taintTraceID, string(respBody))
-			if record != nil {
-				respBody = []byte(reversed)
-				log.Printf("[LLM代理] 🔄 污染逆转 trace=%s taint_trace=%s mode=%s template=%s",
-					traceID, taintTraceID, record.Mode, record.TemplateID)
-				// 更新 Content-Length
-				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
-			}
+		if reversedBody, changed := lp.applyLLMResponseReversal(traceID, taintTraceID, respBody); changed {
+			respBody = reversedBody
+			// 更新 Content-Length
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
 		}
 
 		// v18.0: 执行信封 — 响应侧（非 block 的也要记录）
@@ -648,18 +640,8 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 
-		// v20.3: LLM 响应缓存 — 存储（非流式，仅 200 成功响应）
-		if lp.llmCache != nil && cacheQuery != "" && resp.StatusCode == 200 {
-			// 判断是否被污染
-			tainted := false
-			if lp.taintTracker != nil {
-				te := lp.taintTracker.GetTaint(traceID)
-				if te != nil && len(te.Labels) > 0 {
-					tainted = true
-				}
-			}
-			go lp.llmCache.Store(cacheQuery, string(respBody), model, tenantID, tainted)
-		}
+		// v36.4: 响应缓存存储 helper
+		lp.storeLLMCacheEntry(cacheQuery, respBody, model, tenantID, traceID, resp.StatusCode)
 
 		// 异步审计
 		lp.auditLLMResponse(auditCtx, resp.StatusCode, respBody)
