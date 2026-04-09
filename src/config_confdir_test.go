@@ -392,3 +392,127 @@ llm_proxy:
 		t.Fatalf("unexpected llm target merge result: %#v", ups)
 	}
 }
+
+func TestLoadConfDir_RoutePoliciesMergeByMatch(t *testing.T) {
+	mainPath, confDir := setupTestConfig(t, `
+route_policies:
+  - match:
+      app_id: "app-a"
+    upstream_id: "up-a"
+  - match:
+      department: "finance"
+    upstream_id: "up-finance"
+`)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "route-policies.yaml"), []byte(`
+route_policies:
+  - match:
+      department: "finance"
+    upstream_id: "up-finance-v2"
+  - match:
+      email_suffix: "@corp.local"
+    upstream_id: "up-mail"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.RoutePolicies) != 3 {
+		t.Fatalf("expected 3 route policies, got %d", len(cfg.RoutePolicies))
+	}
+	byKey := map[string]string{}
+	for _, policy := range cfg.RoutePolicies {
+		byKey[routePolicyKey(policy)] = policy.UpstreamID
+	}
+	if byKey[routePolicyKey(RoutePolicyConfig{Match: RoutePolicyMatch{AppID: "app-a"}})] != "up-a" {
+		t.Fatalf("expected app-a route to remain, got %#v", byKey)
+	}
+	if byKey[routePolicyKey(RoutePolicyConfig{Match: RoutePolicyMatch{Department: "finance"}})] != "up-finance-v2" {
+		t.Fatalf("expected finance route override, got %#v", byKey)
+	}
+	if byKey[routePolicyKey(RoutePolicyConfig{Match: RoutePolicyMatch{EmailSuffix: "@corp.local"}})] != "up-mail" {
+		t.Fatalf("expected email suffix route append, got %#v", byKey)
+	}
+}
+
+func TestLoadConfDir_RuleBindingsMergeByAppID(t *testing.T) {
+	mainPath, confDir := setupTestConfig(t, `
+rule_bindings:
+  - app_id: "bot-a"
+    groups: ["default"]
+  - app_id: "bot-b"
+    groups: ["finance"]
+`)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "rule-bindings.yaml"), []byte(`
+rule_bindings:
+  - app_id: "bot-b"
+    groups: ["finance", "strict"]
+  - app_id: "bot-c"
+    groups: ["guest"]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.RuleBindings) != 3 {
+		t.Fatalf("expected 3 rule bindings, got %d", len(cfg.RuleBindings))
+	}
+	groups := map[string][]string{}
+	for _, binding := range cfg.RuleBindings {
+		groups[binding.AppID] = binding.Groups
+	}
+	if strings.Join(groups["bot-a"], ",") != "default" {
+		t.Fatalf("expected bot-a binding retained, got %#v", groups)
+	}
+	if strings.Join(groups["bot-b"], ",") != "finance,strict" {
+		t.Fatalf("expected bot-b binding overridden, got %#v", groups)
+	}
+	if strings.Join(groups["bot-c"], ",") != "guest" {
+		t.Fatalf("expected bot-c binding appended, got %#v", groups)
+	}
+}
+
+func TestLoadConfDir_OutboundPIIPatternsMergeByName(t *testing.T) {
+	mainPath, confDir := setupTestConfig(t, `
+outbound_pii_patterns:
+  - name: "phone"
+    pattern: "\\d{11}"
+  - name: "email"
+    pattern: ".+@example\\.com"
+`)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "pii-patterns.yaml"), []byte(`
+outbound_pii_patterns:
+  - name: "email"
+    pattern: ".+@corp\\.local"
+  - name: "id-card"
+    pattern: "[0-9]{18}"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.OutboundPIIPatterns) != 3 {
+		t.Fatalf("expected 3 outbound pii patterns, got %d", len(cfg.OutboundPIIPatterns))
+	}
+	patterns := map[string]string{}
+	for _, item := range cfg.OutboundPIIPatterns {
+		patterns[item.Name] = item.Pattern
+	}
+	if patterns["phone"] != "\\d{11}" || patterns["email"] != ".+@corp\\.local" || patterns["id-card"] != "[0-9]{18}" {
+		t.Fatalf("unexpected outbound pii merge result: %#v", patterns)
+	}
+}

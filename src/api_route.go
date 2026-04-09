@@ -466,7 +466,7 @@ func (api *ManagementAPI) saveRoutePolicies(policies []RoutePolicyConfig) error 
 		}
 		policyList[i] = m
 	}
-	if err := api.configPersistence().ReplaceSection("route_policies", policyList); err != nil {
+	if err := api.configPersistence().ReplaceSectionAndSyncConfD("route_policies", policyList); err != nil {
 		return fmt.Errorf("写入 route_policies 失败: %w", err)
 	}
 	log.Printf("[策略路由] 已保存 %d 条策略到 %s", len(policies), api.cfgPath)

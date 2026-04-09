@@ -939,7 +939,7 @@
   - `dashboard/src/views/Settings.vue` 收敛为顶层编排，保留既有 tab 行为与 API 逻辑，只拆模板职责边界
   - 验证：`cd dashboard && npm run build` + `cd src && go test ./...` + `cd src && go build ./...` 全绿
 
-- [ ] **v36.4 LLM Proxy 管线化重构**
+- [x] **v36.4 LLM Proxy 管线化重构** ✅ (2026-04-08)
   - 将 `src/llm_proxy.go` 拆成显式阶段：
     1. request preprocess
     2. request policy
@@ -951,10 +951,12 @@
   - 重点保障：rewrite、taint reversal、reasoning_content fallback、tool policy、counterfactual、SSE 尾包行为完全可回归测试；已补 OpenAI-style tool_calls/usage fallback 解析回归，以及 block/no-op/helper 边界测试，避免阶段拆分后出现静默行为漂移
   - 测试：`src/llm_proxy_pipeline_test.go` / `src/llm_request_policy_test.go` / `src/llm_upstream_forward_test.go` / `src/llm_response_policy_test.go` / `src/llm_stream_finalize_test.go` / `src/llm_observability_test.go` / `src/llm_response_postprocess_test.go` / `src/llm_tool_governance_test.go` / `src/llm_deep_governance_test.go` / `src/llm_ifc_governance_test.go` / `src/llm_deviation_governance_test.go`
 
-- [ ] **v36.5 config.yaml / conf.d 优先级规则固化**
-  - 文档：`docs/config-precedence.md`
-  - 明确：哪些 section 只写主配置、哪些 section 必须同步 `conf.d`、重启时冲突优先级如何判定
-  - 消灭“API 看起来保存了，重启后又被 conf.d 覆盖”的模糊地带
+- [x] **v36.5 config.yaml / conf.d 优先级规则固化** ✅ (2026-04-09)
+  - 新增文档：`docs/config-precedence.md`，明确主配置 / `conf.d` 加载顺序、slice merge key、API 写回与重启冲突判定
+  - `src/config_confdir_test.go` 补齐 `route_policies` / `rule_bindings` / `outbound_pii_patterns` / `llm_proxy.targets` / `static_upstreams` 的 precedence 回归矩阵
+  - `src/api_route.go`、`src/api_rules.go` 改为 `ReplaceSectionAndSyncConfD(...)`，与现有 `llm_proxy` 一致，消灭 route/outbound 运行期写回后被旧模块文件打回的问题
+  - `src/config_persistence.go` 写回同步路径改为遵循 `conf_dir`（默认/相对/绝对路径一致），并补齐 `*.yaml` + `*.yml` 模块文件同步
+  - 回归：`src/config_persistence_test.go` 新增自定义 `conf_dir` / `.yml` / section sync 测试；全量验证 `go test ./...` + `go build ./...` + `vite build` 全绿
 
 - [ ] **v36 成功标准**
   - Config 写回不再散落在多个 API handler

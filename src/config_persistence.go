@@ -67,11 +67,15 @@ func (p *ConfigPersistence) ReplaceSectionAndSyncConfD(section string, value int
 		return err
 	}
 	normalized := normalizeYAMLValue(value)
+	updates, err := p.prepareConfDSectionUpdatesUnlocked(raw, section, normalized)
+	if err != nil {
+		return err
+	}
 	raw[section] = normalized
 	if err := p.saveRawUnlocked(raw); err != nil {
 		return err
 	}
-	return p.syncConfDSectionUnlocked(section, normalized)
+	return p.writePreparedConfDUpdatesUnlocked(updates)
 }
 
 func (p *ConfigPersistence) PatchWith(fn func(raw map[string]interface{}) error) error {
@@ -118,42 +122,77 @@ func (p *ConfigPersistence) saveRawUnlocked(raw map[string]interface{}) error {
 }
 
 func (p *ConfigPersistence) syncConfDSectionUnlocked(section string, value interface{}) error {
-	confDir := filepath.Join(filepath.Dir(p.cfgPath), "conf.d")
+	raw, err := p.loadRawUnlocked()
+	if err != nil {
+		return err
+	}
+	updates, err := p.prepareConfDSectionUpdatesUnlocked(raw, section, normalizeYAMLValue(value))
+	if err != nil {
+		return err
+	}
+	return p.writePreparedConfDUpdatesUnlocked(updates)
+}
+
+func (p *ConfigPersistence) prepareConfDSectionUpdatesUnlocked(raw map[string]interface{}, section string, value interface{}) (map[string]map[string]interface{}, error) {
+	confDir := resolveConfDirPathFromRaw(p.cfgPath, raw)
 	entries, err := os.ReadDir(confDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("read conf.d failed: %w", err)
+		return nil, fmt.Errorf("read conf.d failed: %w", err)
 	}
 
+	updates := make(map[string]map[string]interface{})
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+		if entry.IsDir() {
 			continue
 		}
-		confPath := filepath.Join(confDir, entry.Name())
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		confPath := filepath.Join(confDir, name)
 		confData, err := os.ReadFile(confPath)
 		if err != nil {
-			return fmt.Errorf("read conf.d/%s failed: %w", entry.Name(), err)
+			return nil, fmt.Errorf("read conf.d/%s failed: %w", name, err)
 		}
 		var confRaw map[string]interface{}
 		if err := yaml.Unmarshal(confData, &confRaw); err != nil {
-			return fmt.Errorf("parse conf.d/%s failed: %w", entry.Name(), err)
+			return nil, fmt.Errorf("parse conf.d/%s failed: %w", name, err)
 		}
 		confNorm := normalizeStringMap(confRaw)
 		if _, hasSection := confNorm[section]; !hasSection {
 			continue
 		}
 		confNorm[section] = normalizeYAMLValue(value)
+		updates[confPath] = confNorm
+	}
+	return updates, nil
+}
+
+func (p *ConfigPersistence) writePreparedConfDUpdatesUnlocked(updates map[string]map[string]interface{}) error {
+	for confPath, confNorm := range updates {
 		out, err := yaml.Marshal(confNorm)
 		if err != nil {
-			return fmt.Errorf("marshal conf.d/%s failed: %w", entry.Name(), err)
+			return fmt.Errorf("marshal %s failed: %w", filepath.Base(confPath), err)
 		}
 		if err := os.WriteFile(confPath, out, 0644); err != nil {
-			return fmt.Errorf("write conf.d/%s failed: %w", entry.Name(), err)
+			return fmt.Errorf("write %s failed: %w", filepath.Base(confPath), err)
 		}
 	}
 	return nil
+}
+
+func resolveConfDirPathFromRaw(cfgPath string, raw map[string]interface{}) string {
+	confDir, _ := raw["conf_dir"].(string)
+	if confDir == "" {
+		confDir = "conf.d"
+	}
+	if filepath.IsAbs(confDir) {
+		return confDir
+	}
+	return filepath.Join(filepath.Dir(cfgPath), confDir)
 }
 
 func normalizeStringMap(v interface{}) map[string]interface{} {

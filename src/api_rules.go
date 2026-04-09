@@ -242,7 +242,7 @@ func (api *ManagementAPI) persistOutboundRules(configs []OutboundRuleConfig) err
 		}
 		ruleList[i] = m
 	}
-	if err := api.configPersistence().ReplaceSection("outbound_rules", ruleList); err != nil {
+	if err := api.configPersistence().ReplaceSectionAndSyncConfD("outbound_rules", ruleList); err != nil {
 		return fmt.Errorf("写入 outbound_rules 失败: %w", err)
 	}
 	// 同步更新内存中的 cfg.OutboundRules
