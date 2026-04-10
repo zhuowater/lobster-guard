@@ -94,6 +94,58 @@
           </div>
         </div>
       </div>
+      <!-- 人工确认配置 -->
+      <div v-show="activeGroup === 'human-confirm'" class="config-section">
+        <div class="card config-card">
+          <div class="card-header"><span class="card-icon">🤝</span><span class="card-title">人工确认引擎</span></div>
+          <div class="config-desc">当 IM 消息命中 confirm 规则时，挂起请求并向用户发送 Y/N 提示，根据回复决定放行或拦截。引擎开关在"检测引擎"Tab 管理。</div>
+          <div class="config-items">
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">确认超时</span></div>
+              <div class="cfg-item-desc">用户未回复时，等待多少秒后执行超时动作</div>
+              <div class="cfg-inline"><input type="number" v-model.number="form.human_confirm.timeout_sec" class="cfg-input-num" min="5" max="300" step="5" /><span class="cfg-unit">秒</span></div>
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">超时默认动作</span></div>
+              <div class="cfg-item-desc">超时后对原始请求执行的全局默认动作（可被规则级 timeout_action 覆盖）</div>
+              <select v-model="form.human_confirm.timeout_action" class="cfg-select">
+                <option value="block">block（拦截）</option>
+                <option value="pass">pass（放行）</option>
+              </select>
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">放行关键词</span></div>
+              <div class="cfg-item-desc">每行一个，用户回复匹配任意一个则放行原始请求</div>
+              <textarea v-model="form.human_confirm.confirm_keywords_text" rows="4" class="cfg-input cfg-input-wide cfg-textarea" placeholder="Y&#10;y&#10;是&#10;继续"></textarea>
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">取消关键词</span></div>
+              <div class="cfg-item-desc">每行一个，用户回复匹配任意一个则取消原始请求</div>
+              <textarea v-model="form.human_confirm.cancel_keywords_text" rows="4" class="cfg-input cfg-input-wide cfg-textarea" placeholder="N&#10;n&#10;否&#10;取消"></textarea>
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">确认提示消息</span></div>
+              <div class="cfg-item-desc">触发确认时向用户发送的提示文本</div>
+              <input type="text" v-model="form.human_confirm.confirm_msg" class="cfg-input cfg-input-wide" placeholder="⚠️ 触发安全规则，请回复 Y 放行或 N 取消（15秒内有效）" />
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">放行反馈消息</span></div>
+              <div class="cfg-item-desc">用户确认放行后发送的反馈文本</div>
+              <input type="text" v-model="form.human_confirm.confirmed_msg" class="cfg-input cfg-input-wide" placeholder="✅ 已放行" />
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">取消反馈消息</span></div>
+              <div class="cfg-item-desc">用户取消请求后发送的反馈文本</div>
+              <input type="text" v-model="form.human_confirm.cancelled_msg" class="cfg-input cfg-input-wide" placeholder="🚫 已取消" />
+            </div>
+            <div class="cfg-item">
+              <div class="cfg-item-head"><span class="cfg-item-label">超时反馈消息</span></div>
+              <div class="cfg-item-desc">超时后发送给用户的反馈文本</div>
+              <input type="text" v-model="form.human_confirm.timeout_msg" class="cfg-input cfg-input-wide" placeholder="⏰ 超时已取消" />
+            </div>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -159,6 +211,7 @@ defineEmits([
 .cfg-input { background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); padding: 6px 10px; font-size: var(--text-sm); outline: none; width: 200px; max-width: 100%; font-family: var(--font-mono); transition: border-color var(--transition-fast); }
 .cfg-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-dim); }
 .cfg-input-wide { width: 360px; }
+.cfg-textarea { resize: vertical; font-family: var(--font-mono); height: auto; }
 .cfg-input-num { width: 100px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); padding: 6px 10px; font-size: var(--text-sm); outline: none; font-family: var(--font-mono); }
 .cfg-input-num:focus { border-color: var(--color-primary); }
 .cfg-select { background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); padding: 6px 10px; font-size: var(--text-sm); outline: none; min-width: 140px; cursor: pointer; }

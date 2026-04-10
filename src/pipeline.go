@@ -98,8 +98,8 @@ func (p *DetectPipeline) Execute(ctx *DetectContext) *PipelineResult {
 			result.FinalMessage = stageResult.Detail
 		}
 
-		// block 立即终止
-		if stageResult.Action == "block" {
+		// block / confirm 立即终止
+		if stageResult.Action == "block" || stageResult.Action == "confirm" {
 			break
 		}
 	}
@@ -148,7 +148,8 @@ func (s *KeywordStage) Detect(ctx *DetectContext) *StageResult {
 		if !isRuleApplicable(rule.Group, applicableGroups) {
 			continue
 		}
-		action := levelToAction(rule.Level)
+		action := rule.Action
+		if action == "" { action = levelToAction(rule.Level) }
 		if bestMatch == nil || rule.Priority > bestMatch.Priority ||
 			(rule.Priority == bestMatch.Priority && actionWeight(action) > actionWeight(bestMatch.Action)) {
 			bestMatch = &matchedRule{Name: rule.Name, Priority: rule.Priority, Action: action, Message: rule.Message}
@@ -209,7 +210,8 @@ func (s *RegexStage) Detect(ctx *DetectContext) *StageResult {
 		if !matched {
 			continue
 		}
-		action := levelToAction(rr.Level)
+		action := rr.Action
+		if action == "" { action = levelToAction(rr.Level) }
 		if bestMatch == nil || rr.Priority > bestMatch.Priority ||
 			(rr.Priority == bestMatch.Priority && actionWeight(action) > actionWeight(bestMatch.Action)) {
 			bestMatch = &matchedRule{Name: rr.Name, Priority: rr.Priority, Action: action, Message: rr.Message}

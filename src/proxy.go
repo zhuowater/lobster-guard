@@ -81,6 +81,8 @@ type InboundProxy struct {
 	// v27.0 租户识别
 	tenantMgr *TenantManager
 	apiKeyMgr *APIKeyManager
+	// v37.0 人工确认
+	confirmStore *ConfirmStore
 }
 
 func NewInboundProxy(cfg *Config, channel ChannelPlugin, engine *RuleEngine, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, metrics *MetricsCollector, ruleHits *RuleHitStats, userCache *UserInfoCache, policyEng *RoutePolicyEngine, honeypot *HoneypotEngine) *InboundProxy {
@@ -654,6 +656,13 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ip.traceCorrelator != nil && senderID != "" { ip.traceCorrelator.Set(senderID, traceID) }
 	if ip.sessionCorrelator != nil && msgText != "" { ip.sessionCorrelator.RegisterIMSession(msgText, traceID, senderID, appID) }
 
+	// --- 3.5. 确认等待拦截（v37.0）---
+	if ip.confirmStore != nil && senderID != "" && ip.confirmStore.Has(senderID) {
+		if ip.handleConfirmReply(w, senderID, msgText, traceID, start) {
+			return
+		}
+	}
+
 	// --- 4. 限流 ---
 	if ip.limiter != nil {
 		allowed, reason := ip.limiter.Allow(senderID)
@@ -732,6 +741,10 @@ func (ip *InboundProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	latMs := float64(time.Since(start).Microseconds()) / 1000.0
 	if act == "block" {
 		ip.handleBlockAction(w, senderID, appID, msgText, traceID, rh, upstreamID, detectResult, reason, latMs)
+		return
+	}
+	if act == "confirm" && ip.confirmStore != nil {
+		ip.handleConfirmAction(w, senderID, appID, msgText, traceID, rh, upstreamID, detectResult, body, r.URL.Path, latMs)
 		return
 	}
 	if act == "warn" {

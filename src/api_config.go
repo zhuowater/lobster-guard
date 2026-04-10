@@ -1304,6 +1304,53 @@ func (api *ManagementAPI) handleConfigSettingsUpdate(w http.ResponseWriter, r *h
 		updated = append(updated, "taint_reversal_response_mode")
 	}
 
+	// v37.0 人工确认配置（接受 human_confirm 子对象）
+	if v, ok := req["human_confirm"]; ok {
+		if sub, ok2 := v.(map[string]interface{}); ok2 {
+			existing := toStringMap(raw["human_confirm"])
+			if b, ok3 := sub["enabled"]; ok3 {
+				if bv, ok4 := b.(bool); ok4 {
+					api.cfg.HumanConfirm.Enabled = bv
+					existing["enabled"] = bv
+				}
+			}
+			if n, ok3 := sub["timeout_sec"]; ok3 {
+				nv := toInt(n)
+				api.cfg.HumanConfirm.TimeoutSec = nv
+				existing["timeout_sec"] = nv
+				_ = ok3
+			}
+			if s, ok3 := sub["timeout_action"]; ok3 {
+				sv := fmt.Sprintf("%v", s)
+				api.cfg.HumanConfirm.TimeoutAction = sv
+				existing["timeout_action"] = sv
+			}
+			if s, ok3 := sub["confirm_msg"]; ok3 {
+				sv := fmt.Sprintf("%v", s)
+				api.cfg.HumanConfirm.ConfirmMsg = sv
+				existing["confirm_msg"] = sv
+			}
+			if s, ok3 := sub["confirmed_msg"]; ok3 {
+				sv := fmt.Sprintf("%v", s)
+				api.cfg.HumanConfirm.ConfirmedMsg = sv
+				existing["confirmed_msg"] = sv
+			}
+			if s, ok3 := sub["cancelled_msg"]; ok3 {
+				sv := fmt.Sprintf("%v", s)
+				api.cfg.HumanConfirm.CancelledMsg = sv
+				existing["cancelled_msg"] = sv
+			}
+			if s, ok3 := sub["timeout_msg"]; ok3 {
+				sv := fmt.Sprintf("%v", s)
+				api.cfg.HumanConfirm.TimeoutMsg = sv
+				existing["timeout_msg"] = sv
+			}
+			raw["human_confirm"] = existing
+			updated = append(updated, "human_confirm")
+			needRestart = true
+		}
+	}
+
 		if len(updated) == 0 {
 			return errNoFieldsToUpdate
 		}

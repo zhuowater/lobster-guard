@@ -37,10 +37,28 @@
               <label>动作</label>
               <select v-model="form.action">
                 <option value="block">block (拦截)</option>
+                <option value="confirm" v-if="isInbound">confirm (人工确认)</option>
                 <option value="review">review (LLM复核)</option>
                 <option value="warn">warn (警告)</option>
                 <option value="log">log (记录)</option>
                 <option value="redact" v-if="!isInbound">redact (脱敏替换)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" v-if="form.action === 'confirm'">
+            <div class="form-group" style="flex:1">
+              <label>超时动作 <span class="hint">(超时未回复)</span></label>
+              <select v-model="form.timeout_action">
+                <option value="block">block (拦截)</option>
+                <option value="pass">pass (放行)</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label>默认动作 <span class="hint">(非Y/N回复时)</span></label>
+              <select v-model="form.default_action">
+                <option value="">等待（不处理）</option>
+                <option value="confirm">confirm (自动放行)</option>
+                <option value="cancel">cancel (自动取消)</option>
               </select>
             </div>
           </div>
@@ -111,6 +129,8 @@ const form = ref({
   patternsText: '',
   message: '',
   replacement: '',
+  timeout_action: 'block',
+  default_action: '',
   direction: 'inbound',
 })
 
@@ -125,12 +145,15 @@ watch(() => props.visible, (v) => {
       patternsText: (props.rule.patterns || []).join('\n'),
       message: props.rule.message || '',
       replacement: props.rule.replacement || '',
+      timeout_action: props.rule.timeout_action || 'block',
+      default_action: props.rule.default_action || '',
       direction: props.direction || 'inbound',
     }
   } else if (v) {
     form.value = {
       name: '', type: 'keyword', action: 'block', priority: 0,
       group: '', patternsText: '', message: '', replacement: '',
+      timeout_action: 'block', default_action: '',
       direction: props.direction || 'inbound',
     }
   }
@@ -175,6 +198,11 @@ function submit() {
   // Include replacement only for redact action
   if (form.value.action === 'redact') {
     data.replacement = form.value.replacement.trim()
+  }
+  // Include confirm settings only for confirm action
+  if (form.value.action === 'confirm') {
+    data.timeout_action = form.value.timeout_action
+    if (form.value.default_action) data.default_action = form.value.default_action
   }
   emit('save', data)
 }

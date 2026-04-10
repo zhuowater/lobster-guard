@@ -83,17 +83,20 @@ type LLMAuditConfig struct {
 
 // InboundRuleConfig 入站规则配置（v3.5 外部化）
 type InboundRuleConfig struct {
-	Name        string   `yaml:"name" json:"name"`
-	DisplayName string   `yaml:"display_name,omitempty" json:"display_name,omitempty"` // 中文显示名称
-	Patterns    []string `yaml:"patterns" json:"patterns"`
-	Action      string   `yaml:"action" json:"action"`           // block / warn / log
-	Category    string   `yaml:"category" json:"category"`       // prompt_injection / jailbreak / command_injection / pii 等
-	Priority    int      `yaml:"priority" json:"priority"`       // v3.6 优先级权重，数字越大越高，默认 0
-	Message     string   `yaml:"message" json:"message"`         // v3.6 自定义拦截提示，为空则用默认
-	Type        string   `yaml:"type" json:"type"`               // v3.11 规则类型: "keyword"（默认，AC 自动机）或 "regex"（正则）
-	Group       string   `yaml:"group" json:"group"`             // v3.11 规则分组标签（如 "jailbreak"/"injection"/"social_engineering"/"pii"）
-	ShadowMode  bool     `yaml:"shadow_mode" json:"shadow_mode"` // 影子模式：只记录不拦截
-	Enabled     *bool    `yaml:"enabled" json:"enabled"`         // 启用/禁用（nil = 默认启用）
+	Name          string   `yaml:"name" json:"name"`
+	DisplayName   string   `yaml:"display_name,omitempty" json:"display_name,omitempty"` // 中文显示名称
+	Patterns      []string `yaml:"patterns" json:"patterns"`
+	Action        string   `yaml:"action" json:"action"`                                  // block / warn / log / confirm
+	Category      string   `yaml:"category" json:"category"`                              // prompt_injection / jailbreak / command_injection / pii 等
+	Priority      int      `yaml:"priority" json:"priority"`                              // v3.6 优先级权重，数字越大越高，默认 0
+	Message       string   `yaml:"message" json:"message"`                                // v3.6 自定义拦截提示，为空则用默认
+	Type          string   `yaml:"type" json:"type"`                                      // v3.11 规则类型: "keyword"（默认，AC 自动机）或 "regex"（正则）
+	Group         string   `yaml:"group" json:"group"`                                    // v3.11 规则分组标签（如 "jailbreak"/"injection"/"social_engineering"/"pii"）
+	ShadowMode    bool     `yaml:"shadow_mode" json:"shadow_mode"`                        // 影子模式：只记录不拦截
+	Enabled       *bool    `yaml:"enabled" json:"enabled"`                                // 启用/禁用（nil = 默认启用）
+	// v37.0 confirm 动作专属字段
+	TimeoutAction string   `yaml:"timeout_action,omitempty" json:"timeout_action,omitempty"` // 超时动作覆盖（"block"|"pass"）
+	DefaultAction string   `yaml:"default_action,omitempty" json:"default_action,omitempty"` // 非Y/N时动作（"confirm"|"cancel"|""继续等待）
 }
 
 // RuleBindingConfig 规则绑定配置（v3.11 按 app_id 绑定规则组）
@@ -280,6 +283,21 @@ type Config struct {
 	CanaryRotation CanaryRotationConfig `yaml:"canary_rotation" json:"canary_rotation"`
 	// v32.14 定时报告
 	ReportSchedule ReportScheduleConfig `yaml:"report_schedule" json:"report_schedule"`
+	// v37.0 人工确认
+	HumanConfirm HumanConfirmConfig `yaml:"human_confirm" json:"human_confirm"`
+}
+
+// HumanConfirmConfig 人工确认配置（v37.0 action: confirm）
+type HumanConfirmConfig struct {
+	Enabled         bool     `yaml:"enabled" json:"enabled"`
+	TimeoutSec      int      `yaml:"timeout_sec" json:"timeout_sec"`           // 超时秒数，默认 60
+	TimeoutAction   string   `yaml:"timeout_action" json:"timeout_action"`     // "block"|"pass"，默认 "block"
+	ConfirmKeywords []string `yaml:"confirm_keywords" json:"confirm_keywords"` // 确认关键词，默认 [Y y 是 继续]
+	CancelKeywords  []string `yaml:"cancel_keywords" json:"cancel_keywords"`   // 取消关键词，默认 [N n 否 取消]
+	ConfirmMsg      string   `yaml:"confirm_msg" json:"confirm_msg"`           // 发给用户的确认提示
+	ConfirmedMsg    string   `yaml:"confirmed_msg" json:"confirmed_msg"`       // 确认后的反馈
+	CancelledMsg    string   `yaml:"cancelled_msg" json:"cancelled_msg"`       // 取消后的反馈
+	TimeoutMsg      string   `yaml:"timeout_msg" json:"timeout_msg"`           // 超时通知
 }
 
 // CanaryRotationConfig 金丝雀自动轮换配置
@@ -600,7 +618,7 @@ func (cfg *Config) IsMetricsEnabled() bool {
 // validateInboundAction 验证入站规则的 action 字段
 func validateInboundAction(action string) bool {
 	switch action {
-	case "block", "review", "warn", "log":
+	case "block", "review", "warn", "log", "confirm":
 		return true
 	default:
 		return false

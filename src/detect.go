@@ -422,11 +422,13 @@ func (re *RuleEngine) ListRules() []InboundRuleSummary {
 type DetectResult struct { Action string; Reasons []string; PIIs []string; Message string; MatchedRules []string; ShadowReasons []string }
 
 // actionWeight returns a numeric weight for action precedence (higher = more severe)
-// Used when multiple rules have the same priority: block > redact > review > warn > log
+// Used when multiple rules have the same priority: block > confirm > redact > review > warn > log
 func actionWeight(action string) int {
 	switch action {
 	case "block":
 		return 5
+	case "confirm":
+		return 4
 	case "redact":
 		return 4
 	case "review":
@@ -648,17 +650,19 @@ func (re *RuleEngine) GetRuleConfigs() []InboundRuleConfig {
 	cp := make([]InboundRuleConfig, len(re.ruleConfigs))
 	for i, c := range re.ruleConfigs {
 		rc := InboundRuleConfig{
-			Name:        c.Name,
-			DisplayName: c.DisplayName,
-			Patterns:    make([]string, len(c.Patterns)),
-			Action:      c.Action,
-			Category:    c.Category,
-			Priority:    c.Priority,
-			Message:     c.Message,
-			Type:        c.Type,
-			Group:       c.Group,
-			ShadowMode:  c.ShadowMode,
-			Enabled:     c.Enabled,
+			Name:          c.Name,
+			DisplayName:   c.DisplayName,
+			Patterns:      make([]string, len(c.Patterns)),
+			Action:        c.Action,
+			Category:      c.Category,
+			Priority:      c.Priority,
+			Message:       c.Message,
+			Type:          c.Type,
+			Group:         c.Group,
+			ShadowMode:    c.ShadowMode,
+			Enabled:       c.Enabled,
+			TimeoutAction: c.TimeoutAction,
+			DefaultAction: c.DefaultAction,
 		}
 		// 如果没有 DisplayName，从全局映射表查找（兼容旧配置）
 		if rc.DisplayName == "" {
@@ -900,17 +904,19 @@ func (re *RuleEngine) GetTenantRules(tenantID string) []InboundRuleConfig {
 	cp := make([]InboundRuleConfig, len(rules))
 	for i, c := range rules {
 		rc := InboundRuleConfig{
-			Name:        c.Name,
-			DisplayName: c.DisplayName,
-			Patterns:    make([]string, len(c.Patterns)),
-			Action:      c.Action,
-			Category:    c.Category,
-			Priority:    c.Priority,
-			Message:     c.Message,
-			Type:        c.Type,
-			Group:       c.Group,
-			ShadowMode:  c.ShadowMode,
-			Enabled:     c.Enabled,
+			Name:          c.Name,
+			DisplayName:   c.DisplayName,
+			Patterns:      make([]string, len(c.Patterns)),
+			Action:        c.Action,
+			Category:      c.Category,
+			Priority:      c.Priority,
+			Message:       c.Message,
+			Type:          c.Type,
+			Group:         c.Group,
+			ShadowMode:    c.ShadowMode,
+			Enabled:       c.Enabled,
+			TimeoutAction: c.TimeoutAction,
+			DefaultAction: c.DefaultAction,
 		}
 		if rc.DisplayName == "" {
 			rc.DisplayName = inboundRuleDisplayNames[rc.Name]

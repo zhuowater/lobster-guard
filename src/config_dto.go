@@ -126,6 +126,7 @@ func buildConfigSettingsEngineToggles(cfg *Config) ConfigSettingsEngineToggles {
 		"engine_taint_tracker":  cfg.TaintTracker.Enabled,
 		"engine_taint_reversal": cfg.TaintReversal.Enabled,
 		"engine_event_bus":      cfg.EventBus.Enabled,
+		"engine_human_confirm":  cfg.HumanConfirm.Enabled,
 	}
 }
 

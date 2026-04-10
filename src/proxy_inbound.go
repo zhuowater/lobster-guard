@@ -3,12 +3,165 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// ============================================================
+// v37.0 人工确认动作 (action: confirm)
+// ============================================================
+
+// handleConfirmAction 处理 confirm 动作：ACK IM 平台，将消息挂起等待人工确认
+func (ip *InboundProxy) handleConfirmAction(w http.ResponseWriter, senderID, appID, msgText, traceID, rh, upstreamID string, detectResult DetectResult, body []byte, reqPath string, latMs float64) {
+	cfg := ip.cfg.HumanConfirm
+	if ip.slog != nil {
+		ip.slog.Warn("inbound", "等待确认", "sender_id", senderID, "rule", strings.Join(detectResult.MatchedRules, ","), "trace_id", traceID)
+	} else {
+		log.Printf("[确认] 挂起请求 sender=%s rules=%v trace_id=%s", senderID, detectResult.MatchedRules, traceID)
+	}
+
+	// 从规则配置中查找 per-rule 设置
+	timeoutAction := ""
+	defaultAction := ""
+	ruleName := ""
+	if len(detectResult.MatchedRules) > 0 && ip.engine != nil {
+		ruleName = detectResult.MatchedRules[0]
+		for _, rc := range ip.engine.GetRuleConfigs() {
+			if rc.Name == ruleName {
+				timeoutAction = rc.TimeoutAction
+				defaultAction = rc.DefaultAction
+				break
+			}
+		}
+	}
+
+	// 超时时长
+	timeoutSec := cfg.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
+
+	// 构建待确认记录
+	pc := &PendingConfirm{
+		SenderID:      senderID,
+		AppID:         appID,
+		MsgText:       msgText,
+		Body:          body,
+		ReqPath:       reqPath,
+		TraceID:       traceID,
+		UpstreamID:    upstreamID,
+		RuleName:      ruleName,
+		TimeoutAction: timeoutAction,
+		DefaultAction: defaultAction,
+		ExpiresAt:     time.Now().Add(time.Duration(timeoutSec) * time.Second),
+	}
+	ip.confirmStore.Add(pc)
+
+	// 发送确认提示
+	confirmMsg := cfg.ConfirmMsg
+	if confirmMsg == "" {
+		confirmMsg = fmt.Sprintf("⚠️ 您的消息触发了安全规则（%s），请回复 Y 放行或 N 取消（%d 秒内有效）",
+			ruleName, timeoutSec)
+	}
+	go ip.sendFixedReplyViaOutbound(senderID, confirmMsg)
+
+	// 告警通知
+	if ip.alertNotifier != nil {
+		ip.alertNotifier.Notify("inbound", senderID, ruleName, msgText, appID)
+	}
+
+	// 事件总线
+	if ip.eventBus != nil {
+		ip.eventBus.Emit(&SecurityEvent{
+			Type: "inbound_confirm", Severity: "medium", Domain: "inbound",
+			TraceID: traceID, SenderID: senderID,
+			Summary: fmt.Sprintf("人工确认等待: %s", strings.Join(detectResult.Reasons, "; ")),
+			Details: map[string]interface{}{"rules": detectResult.MatchedRules, "app_id": appID, "timeout_sec": timeoutSec},
+		})
+	}
+
+	// ACK IM 平台
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Trace-ID", traceID)
+	w.WriteHeader(200)
+	w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+}
+
+// isConfirmKeyword 检查消息是否为确认关键词（精确匹配，忽略首尾空格）
+func isConfirmKeyword(msg string, keywords []string) bool {
+	trimmed := strings.TrimSpace(msg)
+	for _, kw := range keywords {
+		if trimmed == kw {
+			return true
+		}
+	}
+	return false
+}
+
+// handleConfirmReply 拦截待确认 senderID 的 Y/N 回复（ServeHTTP 早期拦截）
+// 返回 true 表示已处理（消息被消费），false 表示继续正常流程
+func (ip *InboundProxy) handleConfirmReply(w http.ResponseWriter, senderID, msgText, traceID string, start time.Time) bool {
+	cfg := ip.cfg.HumanConfirm
+	confirmKW := cfg.ConfirmKeywords
+	if len(confirmKW) == 0 {
+		confirmKW = []string{"Y", "y", "是", "继续"}
+	}
+	cancelKW := cfg.CancelKeywords
+	if len(cancelKW) == 0 {
+		cancelKW = []string{"N", "n", "否", "取消"}
+	}
+
+	isYes := isConfirmKeyword(msgText, confirmKW)
+	isNo := isConfirmKeyword(msgText, cancelKW)
+
+	if !isYes && !isNo {
+		// 非 Y/N：检查 pending 的 default_action
+		pc := ip.confirmStore.peekDefaultAction(senderID)
+		if pc == "" {
+			return false // 继续等待，当前消息正常处理
+		}
+		if pc == "confirm" {
+			isYes = true
+		} else if pc == "cancel" {
+			isNo = true
+		} else {
+			return false // 继续等待
+		}
+	}
+
+	pending := ip.confirmStore.Pop(senderID)
+	if pending == nil {
+		return false
+	}
+
+	if isYes {
+		log.Printf("[确认] ✅ 用户确认放行 sender=%s trace=%s rule=%s", senderID, pending.TraceID, pending.RuleName)
+		msg := cfg.ConfirmedMsg
+		if msg == "" {
+			msg = "✅ 已放行，正在处理您的请求"
+		}
+		go ip.sendFixedReplyViaOutbound(senderID, msg)
+		go ip.replayConfirmedRequest(pending)
+	} else {
+		log.Printf("[确认] 🚫 用户取消请求 sender=%s trace=%s rule=%s", senderID, pending.TraceID, pending.RuleName)
+		msg := cfg.CancelledMsg
+		if msg == "" {
+			msg = "🚫 已取消，请求被拒绝"
+		}
+		go ip.sendFixedReplyViaOutbound(senderID, msg)
+	}
+
+	// ACK 当前 Y/N 消息（不转发给上游）
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Trace-ID", traceID)
+	w.WriteHeader(200)
+	w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+	return true
+}
 
 // inboundParsedMsg 入站消息解析结果
 type inboundParsedMsg struct {
@@ -311,4 +464,55 @@ func (ip *InboundProxy) recordInboundObservability(senderID, appID, traceID, msg
 			ip.ruleHits.Record(ruleName)
 		}
 	}
+}
+
+// ============================================================
+// v37.0 确认重放辅助
+// ============================================================
+
+type discardResponseWriter struct {
+	header http.Header
+	code   int
+}
+
+func newDiscardResponseWriter() *discardResponseWriter {
+	return &discardResponseWriter{header: make(http.Header), code: 200}
+}
+func (d *discardResponseWriter) Header() http.Header          { return d.header }
+func (d *discardResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (d *discardResponseWriter) WriteHeader(code int)        { d.code = code }
+
+// replayConfirmedRequest 将待确认请求异步重放到上游（用户确认 Y 后调用）
+func (ip *InboundProxy) replayConfirmedRequest(pc *PendingConfirm) {
+	upstreamID := pc.UpstreamID
+	proxy := ip.pool.GetProxy(upstreamID)
+	if proxy == nil {
+		var fallback string
+		proxy, fallback = ip.pool.GetAnyHealthyProxy()
+		if proxy == nil {
+			log.Printf("[确认] 重放失败：无可用上游 sender=%s trace=%s", pc.SenderID, pc.TraceID)
+			return
+		}
+		upstreamID = fallback
+	}
+
+	path := pc.ReqPath
+	if path == "" {
+		path = "/"
+	}
+	req, err := http.NewRequest("POST", path, bytes.NewReader(pc.Body))
+	if err != nil {
+		log.Printf("[确认] 重放请求创建失败: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Trace-ID", pc.TraceID+"-confirmed")
+	req.Header.Set("X-Human-Confirmed", "true")
+	req.ContentLength = int64(len(pc.Body))
+	req.URL.Path = path
+
+	dw := newDiscardResponseWriter()
+	proxy.ServeHTTP(dw, req)
+	log.Printf("[确认] ✅ 重放完成 sender=%s trace=%s upstream=%s status=%d",
+		pc.SenderID, pc.TraceID, upstreamID, dw.code)
 }

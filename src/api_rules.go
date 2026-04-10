@@ -388,7 +388,7 @@ func (api *ManagementAPI) handleAddInboundRule(w http.ResponseWriter, r *http.Re
 		req.Action = "block"
 	}
 	if !validateInboundAction(req.Action) {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log/confirm"})
 		return
 	}
 	if req.Type != "" && req.Type != "keyword" && req.Type != "regex" {
@@ -426,21 +426,23 @@ func (api *ManagementAPI) handleAddInboundRule(w http.ResponseWriter, r *http.Re
 // handleUpdateInboundRule PUT /api/v1/inbound-rules/update — 更新入站规则
 func (api *ManagementAPI) handleUpdateInboundRule(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name     string   `json:"name"`
-		Patterns []string `json:"patterns"`
-		Action   string   `json:"action"`
-		Category string   `json:"category"`
-		Priority int      `json:"priority"`
-		Message  string   `json:"message"`
-		Type     string   `json:"type"`
-		Group    string   `json:"group"`
+		Name          string   `json:"name"`
+		Patterns      []string `json:"patterns"`
+		Action        string   `json:"action"`
+		Category      string   `json:"category"`
+		Priority      int      `json:"priority"`
+		Message       string   `json:"message"`
+		Type          string   `json:"type"`
+		Group         string   `json:"group"`
+		TimeoutAction string   `json:"timeout_action"`
+		DefaultAction string   `json:"default_action"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Name == "" {
 		jsonResponse(w, 400, map[string]string{"error": "invalid request, name required"})
 		return
 	}
 	if req.Action != "" && !validateInboundAction(req.Action) {
-		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log"})
+		jsonResponse(w, 400, map[string]string{"error": "invalid action, must be block/review/warn/log/confirm"})
 		return
 	}
 	if req.Type != "" && req.Type != "keyword" && req.Type != "regex" {
@@ -467,6 +469,12 @@ func (api *ManagementAPI) handleUpdateInboundRule(w http.ResponseWriter, r *http
 				configs[i].Type = req.Type
 			}
 			configs[i].Group = req.Group
+			if req.TimeoutAction != "" {
+				configs[i].TimeoutAction = req.TimeoutAction
+			}
+			if req.DefaultAction != "" {
+				configs[i].DefaultAction = req.DefaultAction
+			}
 			found = true
 			break
 		}

@@ -389,6 +389,7 @@ func (api *ManagementAPI) handleEngineToggle(w http.ResponseWriter, r *http.Requ
 		"plan-compiler":      {&api.cfg.PlanCompiler.Enabled, "plan_compiler"},
 		"capability-engine":  {&api.cfg.Capability.Enabled, "capability"},
 		"deviation-detector": {&api.cfg.Deviation.Enabled, "deviation"},
+		"human-confirm":      {&api.cfg.HumanConfirm.Enabled, "human_confirm"},
 	}
 	m, ok := mapping[name]
 	if !ok {
@@ -408,6 +409,7 @@ func (api *ManagementAPI) handleEngineToggleGet(w http.ResponseWriter, r *http.R
 		"plan-compiler":      &api.cfg.PlanCompiler.Enabled,
 		"capability-engine":  &api.cfg.Capability.Enabled,
 		"deviation-detector": &api.cfg.Deviation.Enabled,
+		"human-confirm":      &api.cfg.HumanConfirm.Enabled,
 	}
 	ptr, ok := mapping[name]
 	if !ok {

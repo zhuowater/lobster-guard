@@ -440,6 +440,13 @@ func (e *EngineSet) wireInbound(ip *InboundProxy, cfg *Config, engine *RuleEngin
 	ip.SetTenantManager(tenantMgr)
 	ip.SetAPIKeyManager(e.APIKeyMgr)
 
+	// 人工确认引擎（v37.0）
+	if cfg.HumanConfirm.Enabled {
+		cs := NewConfirmStore()
+		cs.proxy = ip
+		ip.confirmStore = cs
+	}
+
 	// 执行信封 + 事件总线
 	if e.EnvelopeMgr != nil { ip.envelopeMgr = e.EnvelopeMgr }
 	if e.EventBus != nil { ip.eventBus = e.EventBus }

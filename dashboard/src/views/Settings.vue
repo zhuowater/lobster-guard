@@ -310,6 +310,7 @@ const configGroups = [
   { key: 'session', label: '会话关联', icon: '🔗' },
   { key: 'alerts', label: '告警配置', icon: '🔔' },
   { key: 'advanced', label: '高级配置', icon: '⚙️' },
+  { key: 'human-confirm', label: '人工确认', icon: '🤝' },
 ]
 const activeGroup = ref('basic')
 const configLoading = ref(true)
@@ -328,6 +329,16 @@ const form = reactive({
   db_path: '', heartbeat_interval_sec: 10, route_default_policy: 'least-users',
   audit_retention_days: 30, ws_idle_timeout: 300, backup_auto_interval: 0,
   // 引擎开关已统一到 "检测引擎" Tab
+  human_confirm: {
+    timeout_sec: 15,
+    timeout_action: 'block',
+    confirm_keywords_text: 'Y\ny\n是\n继续',
+    cancel_keywords_text: 'N\nn\n否\n取消',
+    confirm_msg: '⚠️ 触发安全规则，请回复 Y 放行或 N 取消（15秒内有效）',
+    confirmed_msg: '✅ 已放行',
+    cancelled_msg: '🚫 已取消',
+    timeout_msg: '⏰ 超时已取消',
+  },
 })
 const errors = reactive({})
 
@@ -446,6 +457,16 @@ function fillForm(d) {
   form.ws_idle_timeout = settingValue(advanced.ws_idle_timeout, legacySetting(d, 'ws_idle_timeout', 'WSIdleTimeout'), 300)
   form.backup_auto_interval = settingValue(advanced.backup_auto_interval, legacySetting(d, 'backup_auto_interval', 'BackupAutoInterval'), 0)
   // 引擎开关已统一到 "检测引擎" Tab，不再在配置管理表单中管理
+
+  const hc = d?.human_confirm || {}
+  form.human_confirm.timeout_sec = hc.timeout_sec ?? 15
+  form.human_confirm.timeout_action = hc.timeout_action || 'block'
+  form.human_confirm.confirm_keywords_text = (hc.confirm_keywords || ['Y','y','是','继续']).join('\n')
+  form.human_confirm.cancel_keywords_text = (hc.cancel_keywords || ['N','n','否','取消']).join('\n')
+  form.human_confirm.confirm_msg = hc.confirm_msg || '⚠️ 触发安全规则，请回复 Y 放行或 N 取消（15秒内有效）'
+  form.human_confirm.confirmed_msg = hc.confirmed_msg || '✅ 已放行'
+  form.human_confirm.cancelled_msg = hc.cancelled_msg || '🚫 已取消'
+  form.human_confirm.timeout_msg = hc.timeout_msg || '⏰ 超时已取消'
 }
 function extractForm() {
   return { inbound_listen: form.inbound_listen, outbound_listen: form.outbound_listen, management_listen: form.management_listen,
@@ -455,6 +476,16 @@ function extractForm() {
     alert_webhook: form.alert_webhook, alert_format: form.alert_format, alert_min_interval: form.alert_min_interval,
     db_path: form.db_path, heartbeat_interval_sec: form.heartbeat_interval_sec, route_default_policy: form.route_default_policy,
     audit_retention_days: form.audit_retention_days, ws_idle_timeout: form.ws_idle_timeout, backup_auto_interval: form.backup_auto_interval,
+    human_confirm: {
+      timeout_sec: form.human_confirm.timeout_sec,
+      timeout_action: form.human_confirm.timeout_action,
+      confirm_keywords: form.human_confirm.confirm_keywords_text.split('\n').map(s => s.trim()).filter(Boolean),
+      cancel_keywords: form.human_confirm.cancel_keywords_text.split('\n').map(s => s.trim()).filter(Boolean),
+      confirm_msg: form.human_confirm.confirm_msg,
+      confirmed_msg: form.human_confirm.confirmed_msg,
+      cancelled_msg: form.human_confirm.cancelled_msg,
+      timeout_msg: form.human_confirm.timeout_msg,
+    },
     }
 }
 function resetConfig() { fillForm(originalConfig.value); Object.keys(errors).forEach(k => delete errors[k]); showChangesPreview.value = false }
@@ -641,6 +672,7 @@ const engineList = [
   { name: '污点追踪', configPath: 'engine_taint_tracker', desc: '全链路数据流标记' },
   { name: '污点溯源', configPath: 'engine_taint_reversal', desc: '反向追踪数据来源' },
   { name: '事件总线', configPath: 'engine_event_bus', desc: '引擎间事件发布/订阅' },
+  { name: '人工确认', configPath: 'engine_human_confirm', desc: 'IM 消息触发 Y/N 二次确认，挂起后等待人工放行' },
 ]
 const engineOnCount = computed(() => engineList.filter(e => e.alwaysOn || engineSettings[e.configPath]).length)
 const engineOffCount = computed(() => engineList.length - engineOnCount.value)
@@ -671,6 +703,7 @@ const engineConfigPaths = {
   engine_taint_tracker: 'TaintTracker.enabled',
   engine_taint_reversal: 'TaintReversal.enabled',
   engine_event_bus: 'EventBus.Enabled',
+  engine_human_confirm: 'human_confirm.enabled',
 }
 
 async function loadEngineSettings() {
