@@ -26,6 +26,7 @@ type WSProxyManager struct {
 	mu             sync.RWMutex
 	connections    map[string]*WSConnection // connID -> connection
 	connCounter    int64                    // 连接 ID 计数器
+	activeSlots    int64                    // 当前占用的连接槽位（含握手中）
 	engine         *RuleEngine
 	outboundEngine *OutboundRuleEngine
 	logger         *AuditLogger
@@ -98,9 +99,7 @@ func NewWSProxyManager(cfg *Config, engine *RuleEngine, outboundEngine *Outbound
 
 // ActiveCount 返回当前活跃连接数
 func (wm *WSProxyManager) ActiveCount() int {
-	wm.mu.RLock()
-	defer wm.mu.RUnlock()
-	return len(wm.connections)
+	return int(atomic.LoadInt64(&wm.activeSlots))
 }
 
 // TotalCount 返回历史总连接数
@@ -146,6 +145,30 @@ func (wm *WSProxyManager) addConnection(conn *WSConnection) {
 	wm.connections[conn.ID] = conn
 	wm.mu.Unlock()
 	atomic.AddInt64(&wm.totalConnections, 1)
+}
+
+func (wm *WSProxyManager) tryAcquireSlot(maxConn int) bool {
+	for {
+		current := atomic.LoadInt64(&wm.activeSlots)
+		if int(current) >= maxConn {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(&wm.activeSlots, current, current+1) {
+			return true
+		}
+	}
+}
+
+func (wm *WSProxyManager) releaseSlot() {
+	for {
+		current := atomic.LoadInt64(&wm.activeSlots)
+		if current <= 0 {
+			return
+		}
+		if atomic.CompareAndSwapInt64(&wm.activeSlots, current, current-1) {
+			return
+		}
+	}
 }
 
 // removeConnection 移除连接
@@ -231,11 +254,17 @@ func IsWebSocketUpgrade(r *http.Request) bool {
 func (wm *WSProxyManager) HandleWebSocket(w http.ResponseWriter, r *http.Request, senderID, appID string) {
 	// 并发连接限制检查
 	maxConn := wm.getWSMaxConnections()
-	if wm.ActiveCount() >= maxConn {
+	if !wm.tryAcquireSlot(maxConn) {
 		log.Printf("[WebSocket] 并发连接数已达上限 %d，拒绝新连接 sender=%s", maxConn, senderID)
 		http.Error(w, "Service Unavailable: too many WebSocket connections", 503)
 		return
 	}
+	slotHeld := true
+	defer func() {
+		if slotHeld {
+			wm.releaseSlot()
+		}
+	}()
 
 	// 路由决策：确定上游
 	upstreamID, upstreamAddr := wm.resolveUpstream(senderID, appID)
@@ -284,6 +313,7 @@ func (wm *WSProxyManager) HandleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 
 	wm.addConnection(conn)
+	slotHeld = false
 
 	// 记录指标
 	if wm.metrics != nil {
@@ -651,6 +681,7 @@ func (wm *WSProxyManager) closeConnection(conn *WSConnection, closeCode int, rea
 
 	// 移除连接
 	wm.removeConnection(conn.ID)
+	wm.releaseSlot()
 
 	// 指标
 	if wm.metrics != nil {
@@ -692,12 +723,12 @@ func (wm *WSProxyManager) HandleWSConnectionsAPI(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"connections":   conns,
-		"active":        wm.ActiveCount(),
-		"total":         wm.TotalCount(),
-		"max":           wm.getWSMaxConnections(),
-		"mode":          wm.getWSMode(),
-		"idle_timeout":  wm.cfg.WSIdleTimeout,
-		"max_duration":  wm.cfg.WSMaxDuration,
+		"connections":  conns,
+		"active":       wm.ActiveCount(),
+		"total":        wm.TotalCount(),
+		"max":          wm.getWSMaxConnections(),
+		"mode":         wm.getWSMode(),
+		"idle_timeout": wm.cfg.WSIdleTimeout,
+		"max_duration": wm.cfg.WSMaxDuration,
 	})
 }

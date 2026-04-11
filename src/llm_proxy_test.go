@@ -3,6 +3,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,7 @@ func setupTestLLMProxy(t *testing.T, handler http.HandlerFunc) (*LLMProxy, *sql.
 			},
 		},
 		TimeoutSec:   30,
-		MaxBodyBytes:  10 * 1024 * 1024,
+		MaxBodyBytes: 10 * 1024 * 1024,
 	}
 
 	proxy := NewLLMProxy(proxyCfg, auditor, nil)
@@ -92,6 +93,13 @@ func TestLLMProxy_TransparentForward(t *testing.T) {
 	}
 }
 
+func TestNewLLMProxy_RaisesDefaultLimits(t *testing.T) {
+	proxy := NewLLMProxy(LLMProxyConfig{}, nil, nil)
+	if proxy.cfg.MaxBodyBytes != defaultLLMProxyMaxBodyBytes {
+		t.Fatalf("MaxBodyBytes = %d, want %d", proxy.cfg.MaxBodyBytes, defaultLLMProxyMaxBodyBytes)
+	}
+}
+
 func TestLLMProxy_SSEStreaming(t *testing.T) {
 	sseData := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-20250514\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\ndata: [DONE]\n"
 
@@ -126,6 +134,60 @@ func TestLLMProxy_SSEStreaming(t *testing.T) {
 	}
 	if !strings.Contains(respBody, "[DONE]") {
 		t.Error("SSE response should contain [DONE]")
+	}
+}
+
+func TestLLMProxy_RejectsRequestBodyOverLimit(t *testing.T) {
+	upstreamCalled := false
+	proxy, db, upstream := setupTestLLMProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.WriteHeader(200)
+	})
+	defer db.Close()
+	defer upstream.Close()
+
+	proxy.cfg.MaxBodyBytes = 64
+	body := fmt.Sprintf(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"%s"}]}`,
+		strings.Repeat("x", 256))
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d body=%q", rr.Code, http.StatusRequestEntityTooLarge, rr.Body.String())
+	}
+	if upstreamCalled {
+		t.Fatal("upstream should not be called when request body exceeds MaxBodyBytes")
+	}
+}
+
+func TestLLMProxy_SSEOversizedEventEmitsError(t *testing.T) {
+	oversizedContent := strings.Repeat("a", defaultLLMSSEScannerMaxTokenBytes+32)
+	sseData := fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"content\":\"%s\"}}]}\n\ndata: [DONE]\n", oversizedContent)
+
+	proxy, db, upstream := setupTestLLMProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(sseData))
+	})
+	defer db.Close()
+	defer upstream.Close()
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "event: error") {
+		t.Fatalf("expected SSE error event for oversized upstream frame, got %q", body[:min(200, len(body))])
+	}
+	if !strings.Contains(body, "too large") {
+		t.Fatalf("expected oversized-frame hint in error event, got %q", body[:min(200, len(body))])
 	}
 }
 

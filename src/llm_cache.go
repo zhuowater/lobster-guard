@@ -217,28 +217,40 @@ func (c *LLMCache) Lookup(query string, model string, tenantID string) (*CacheEn
 
 	hash := cacheHash(query)
 
-	// 1. 精确匹配：同 hash + 同 tenant
+	// 1. 精确匹配：同 hash + 同 model + 同 tenant
 	for _, e := range c.entries {
-		if e.QueryHash == hash {
-			if c.config.TenantIsolation && e.TenantID != tenantID {
-				continue
-			}
-			// 检查 TTL
-			if c.isExpired(e) {
-				continue
-			}
-			c.touchLocked(e)
-			atomic.AddInt64(&c.totalHits, 1)
-			return c.cloneEntry(e), true
+		if e.QueryHash != hash {
+			continue
 		}
+		if e.Model != model {
+			continue
+		}
+		if c.config.TenantIsolation && e.TenantID != tenantID {
+			continue
+		}
+		if c.isExpired(e) {
+			continue
+		}
+		c.touchLocked(e)
+		atomic.AddInt64(&c.totalHits, 1)
+		return c.cloneEntry(e), true
 	}
 
-	// 2. 语义相似匹配
+	// 多轮对话上下文使用精确缓存，避免语义匹配把不同历史误判为同一请求。
+	if isConversationCacheKey(query) {
+		atomic.AddInt64(&c.totalMisses, 1)
+		return nil, false
+	}
+
+	// 2. 语义相似匹配（同 model 空间内）
 	queryTokens := cacheTokenize(query)
 	var bestEntry *CacheEntry
 	bestSim := 0.0
 
 	for _, e := range c.entries {
+		if e.Model != model {
+			continue
+		}
 		if c.config.TenantIsolation && e.TenantID != tenantID {
 			continue
 		}
@@ -699,6 +711,13 @@ func cacheCosineSim(a, b map[string]float64) float64 {
 	return dot / d
 }
 
+func isConversationCacheKey(query string) bool {
+	return strings.Contains(query, "\n") ||
+		strings.Contains(query, "system:") ||
+		strings.Contains(query, "assistant:") ||
+		strings.Contains(query, "tool:")
+}
+
 // extractUserQuery 从 LLM 请求体中提取用户查询文本
 // 支持 Anthropic 格式和 OpenAI 格式
 func extractUserQuery(body []byte) string {
@@ -710,31 +729,80 @@ func extractUserQuery(body []byte) string {
 		return ""
 	}
 
-	// 尝试从 messages 中提取最后一条 user 消息
-	if msgs, ok := req["messages"].([]interface{}); ok {
-		for i := len(msgs) - 1; i >= 0; i-- {
-			if m, ok := msgs[i].(map[string]interface{}); ok {
-				if role, _ := m["role"].(string); role == "user" {
-					if content, ok := m["content"].(string); ok {
-						return content
+	msgs, ok := req["messages"].([]interface{})
+	if !ok || len(msgs) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(msgs))
+	for _, rawMsg := range msgs {
+		msg, ok := rawMsg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		content := extractCacheMessageContent(msg["content"])
+		toolCallID, _ := msg["tool_call_id"].(string)
+		if toolCallID != "" {
+			content = content + " tool_call_id=" + toolCallID
+		}
+		if role == "" && content == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s", role, content))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func extractCacheMessageContent(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			typ, _ := itemMap["type"].(string)
+			switch typ {
+			case "text", "input_text", "output_text", "text_delta":
+				if text, ok := itemMap["text"].(string); ok && text != "" {
+					parts = append(parts, strings.TrimSpace(text))
+				}
+			case "tool_result", "tool_use", "tool_call":
+				if name, ok := itemMap["name"].(string); ok && name != "" {
+					parts = append(parts, typ+":"+name)
+				} else {
+					parts = append(parts, typ)
+				}
+				if input, ok := itemMap["input"]; ok {
+					if b, err := json.Marshal(input); err == nil {
+						parts = append(parts, string(b))
 					}
-					// content 可能是数组（Anthropic 格式）
-					if content, ok := m["content"].([]interface{}); ok {
-						for _, c := range content {
-							if cm, ok := c.(map[string]interface{}); ok {
-								if t, _ := cm["type"].(string); t == "text" {
-									if text, ok := cm["text"].(string); ok {
-										return text
-									}
-								}
-							}
-						}
+				}
+				if text, ok := itemMap["text"].(string); ok && text != "" {
+					parts = append(parts, strings.TrimSpace(text))
+				}
+			default:
+				if text, ok := itemMap["text"].(string); ok && text != "" {
+					parts = append(parts, strings.TrimSpace(text))
+				}
+				if len(parts) == 0 {
+					if b, err := json.Marshal(itemMap); err == nil {
+						parts = append(parts, string(b))
 					}
 				}
 			}
 		}
+		return strings.Join(parts, " ")
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return ""
 	}
-	return ""
 }
 
 // estimateTokens 估算响应的 token 数

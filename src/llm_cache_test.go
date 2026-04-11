@@ -4,6 +4,7 @@ package main
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -515,18 +516,22 @@ func TestCacheDisabled(t *testing.T) {
 // 14. TestCacheExtractUserQuery — 提取用户查询
 // ============================================================
 func TestCacheExtractUserQuery(t *testing.T) {
-	// Anthropic 格式
+	// Anthropic / OpenAI 统一抽取完整上下文，而不是只看最后一条 user
 	body1 := `{"model":"claude-3","messages":[{"role":"system","content":"You are helpful"},{"role":"user","content":"Hello world"}]}`
 	q1 := extractUserQuery([]byte(body1))
-	if q1 != "Hello world" {
-		t.Fatalf("Expected 'Hello world', got '%s'", q1)
+	if q1 == "" {
+		t.Fatal("expected non-empty canonical cache query")
+	}
+	if !containsAll(q1, []string{"system:", "You are helpful", "user:", "Hello world"}) {
+		t.Fatalf("expected canonical query to include full conversation, got %q", q1)
 	}
 
-	// OpenAI 格式
-	body2 := `{"model":"gpt-4","messages":[{"role":"user","content":"What is AI?"},{"role":"assistant","content":"AI is..."},{"role":"user","content":"Tell me more"}]}`
-	q2 := extractUserQuery([]byte(body2))
-	if q2 != "Tell me more" {
-		t.Fatalf("Expected 'Tell me more', got '%s'", q2)
+	body2a := `{"model":"gpt-4","messages":[{"role":"system","content":"History A"},{"role":"user","content":"same last turn"}]}`
+	body2b := `{"model":"gpt-4","messages":[{"role":"system","content":"History B"},{"role":"user","content":"same last turn"}]}`
+	q2a := extractUserQuery([]byte(body2a))
+	q2b := extractUserQuery([]byte(body2b))
+	if q2a == q2b {
+		t.Fatalf("different conversation histories should produce different cache queries: %q", q2a)
 	}
 
 	// 空消息
@@ -541,6 +546,69 @@ func TestCacheExtractUserQuery(t *testing.T) {
 	if q4 != "" {
 		t.Fatalf("Expected empty for invalid JSON, got '%s'", q4)
 	}
+}
+
+func TestCacheLookupMissWithDifferentModel(t *testing.T) {
+	cache, db := setupTestCache(t, LLMCacheConfig{
+		TenantIsolation: true,
+		SkipTainted:     true,
+	})
+	defer db.Close()
+
+	if err := cache.Store("same query", `{"answer":"Paris"}`, "gpt-4", "tenant-a", false); err != nil {
+		t.Fatalf("Store failed: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	if entry, hit := cache.Lookup("same query", "claude-3", "tenant-a"); hit {
+		t.Fatalf("expected miss for different model, got hit: %+v", entry)
+	}
+}
+
+func TestCacheLookupMissWithDifferentConversationHistory(t *testing.T) {
+	cache, db := setupTestCache(t, LLMCacheConfig{
+		TenantIsolation: true,
+		SkipTainted:     true,
+		SimilarityMin:   0.70,
+	})
+	defer db.Close()
+
+	historyA := "system:History A\nuser:same last turn"
+	historyB := "system:History B\nuser:same last turn"
+	if err := cache.Store(historyA, `{"answer":"from-history-a"}`, "gpt-4", "tenant-a", false); err != nil {
+		t.Fatalf("Store failed: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	if entry, hit := cache.Lookup(historyB, "gpt-4", "tenant-a"); hit {
+		t.Fatalf("expected miss for different conversation history, got hit: %+v", entry)
+	}
+}
+
+func TestCacheExtractUserQuery_AnthropicStructuredContentStable(t *testing.T) {
+	bodyA := `{"model":"claude-3","messages":[{"role":"user","content":[{"type":"text","text":"先看这个工具结果"},{"type":"tool_result","name":"web_fetch","input":{"url":"https://example.com/a"},"text":"结果A"}]}]}`
+	bodyB := `{"model":"claude-3","messages":[{"role":"user","content":[{"type":"text","text":"先看这个工具结果"},{"type":"tool_result","name":"web_fetch","input":{"url":"https://example.com/b"},"text":"结果B"}]}]}`
+
+	qA := extractUserQuery([]byte(bodyA))
+	qB := extractUserQuery([]byte(bodyB))
+	if qA == "" || qB == "" {
+		t.Fatalf("expected non-empty canonical queries, got qA=%q qB=%q", qA, qB)
+	}
+	if qA == qB {
+		t.Fatalf("different anthropic structured content should yield different cache keys: %q", qA)
+	}
+	if !containsAll(qA, []string{"user:", "tool_result:web_fetch", `"url":"https://example.com/a"`, "结果A"}) {
+		t.Fatalf("expected structured anthropic content in canonical query, got %q", qA)
+	}
+}
+
+func containsAll(s string, needles []string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(s, needle) {
+			return false
+		}
+	}
+	return true
 }
 
 // ============================================================

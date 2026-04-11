@@ -33,13 +33,15 @@ func (api *ManagementAPI) handleToolPolicyEvents(w http.ResponseWriter, r *http.
 	toolName := q.Get("tool")
 	decision := q.Get("decision")
 	risk := q.Get("risk")
+	semanticClass := q.Get("semantic_class")
+	contextSignal := q.Get("context_signal")
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	if limit <= 0 {
 		limit = 50
 	}
 
-	events, total, err := api.toolPolicy.QueryEvents(toolName, decision, risk, limit, offset)
+	events, total, err := api.toolPolicy.QueryEvents(toolName, decision, risk, semanticClass, contextSignal, limit, offset)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -145,8 +147,8 @@ func (api *ManagementAPI) handleToolPolicyRulesDelete(w http.ResponseWriter, r *
 func (api *ManagementAPI) handleToolPolicyConfigGet(w http.ResponseWriter, r *http.Request) {
 	if api.toolPolicy == nil {
 		jsonResponse(w, 200, map[string]interface{}{
-			"enabled":          false,
-			"default_action":   "allow",
+			"enabled":           false,
+			"default_action":    "allow",
 			"max_calls_per_min": 60,
 		})
 		return
@@ -173,6 +175,146 @@ func (api *ManagementAPI) handleToolPolicyConfigUpdate(w http.ResponseWriter, r 
 	})
 }
 
+// handleToolSemanticRulesList GET /api/v1/tools/semantic-rules
+func (api *ManagementAPI) handleToolSemanticRulesList(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 200, map[string]interface{}{"rules": []interface{}{}, "total": 0})
+		return
+	}
+	rules := api.toolPolicy.ListSemanticRules()
+	jsonResponse(w, 200, map[string]interface{}{"rules": rules, "total": len(rules)})
+}
+
+// handleToolSemanticRulesCreate POST /api/v1/tools/semantic-rules
+func (api *ManagementAPI) handleToolSemanticRulesCreate(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "tool policy not enabled"})
+		return
+	}
+	var rule ToolSemanticRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := api.toolPolicy.AddSemanticRule(rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "created", "rule": rule})
+}
+
+// handleToolSemanticRulesUpdate PUT /api/v1/tools/semantic-rules/:id
+func (api *ManagementAPI) handleToolSemanticRulesUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "tool policy not enabled"})
+		return
+	}
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		jsonResponse(w, 400, map[string]string{"error": "missing rule id"})
+		return
+	}
+	var rule ToolSemanticRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	rule.ID = parts[len(parts)-1]
+	if err := api.toolPolicy.UpdateSemanticRule(rule); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "rule": rule})
+}
+
+// handleToolSemanticRulesDelete DELETE /api/v1/tools/semantic-rules/:id
+func (api *ManagementAPI) handleToolSemanticRulesDelete(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "tool policy not enabled"})
+		return
+	}
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		jsonResponse(w, 400, map[string]string{"error": "missing rule id"})
+		return
+	}
+	if err := api.toolPolicy.RemoveSemanticRule(parts[len(parts)-1]); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": parts[len(parts)-1]})
+}
+
+// handleToolContextPoliciesList GET /api/v1/tools/context-policies
+func (api *ManagementAPI) handleToolContextPoliciesList(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 200, map[string]interface{}{"policies": []interface{}{}, "total": 0})
+		return
+	}
+	policies := api.toolPolicy.ListContextPolicies()
+	jsonResponse(w, 200, map[string]interface{}{"policies": policies, "total": len(policies)})
+}
+
+// handleToolContextPoliciesCreate POST /api/v1/tools/context-policies
+func (api *ManagementAPI) handleToolContextPoliciesCreate(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "tool policy not enabled"})
+		return
+	}
+	var policy ToolContextPolicy
+	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := api.toolPolicy.AddContextPolicy(policy); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "created", "policy": policy})
+}
+
+// handleToolContextPoliciesUpdate PUT /api/v1/tools/context-policies/:id
+func (api *ManagementAPI) handleToolContextPoliciesUpdate(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "tool policy not enabled"})
+		return
+	}
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		jsonResponse(w, 400, map[string]string{"error": "missing policy id"})
+		return
+	}
+	var policy ToolContextPolicy
+	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	policy.ID = parts[len(parts)-1]
+	if err := api.toolPolicy.UpdateContextPolicy(policy); err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "updated", "policy": policy})
+}
+
+// handleToolContextPoliciesDelete DELETE /api/v1/tools/context-policies/:id
+func (api *ManagementAPI) handleToolContextPoliciesDelete(w http.ResponseWriter, r *http.Request) {
+	if api.toolPolicy == nil {
+		jsonResponse(w, 400, map[string]string{"error": "tool policy not enabled"})
+		return
+	}
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		jsonResponse(w, 400, map[string]string{"error": "missing policy id"})
+		return
+	}
+	if err := api.toolPolicy.RemoveContextPolicy(parts[len(parts)-1]); err != nil {
+		jsonResponse(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResponse(w, 200, map[string]interface{}{"status": "deleted", "id": parts[len(parts)-1]})
+}
+
 // handleToolPolicyEvaluate POST /api/v1/tools/evaluate
 func (api *ManagementAPI) handleToolPolicyEvaluate(w http.ResponseWriter, r *http.Request) {
 	if api.toolPolicy == nil {
@@ -180,13 +322,26 @@ func (api *ManagementAPI) handleToolPolicyEvaluate(w http.ResponseWriter, r *htt
 		return
 	}
 	var req struct {
-		ToolName  string `json:"tool_name"`
-		Arguments string `json:"arguments"`
+		ToolName   string          `json:"tool_name"`
+		Arguments  json.RawMessage `json:"arguments"`
+		Parameters json.RawMessage `json:"parameters"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	event := api.toolPolicy.Evaluate(req.ToolName, req.Arguments, "test-eval", "test")
+	argBytes := req.Arguments
+	if len(argBytes) == 0 {
+		argBytes = req.Parameters
+	}
+	argText := ""
+	if len(argBytes) > 0 {
+		if len(argBytes) > 0 && argBytes[0] == '"' {
+			_ = json.Unmarshal(argBytes, &argText)
+		} else {
+			argText = string(argBytes)
+		}
+	}
+	event := api.toolPolicy.Evaluate(req.ToolName, argText, "test-eval", "test")
 	jsonResponse(w, 200, event)
 }

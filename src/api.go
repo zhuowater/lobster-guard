@@ -1205,6 +1205,22 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleToolPolicyConfigGet(w, r)
 	case path == "/api/v1/tools/config" && method == "PUT":
 		api.handleToolPolicyConfigUpdate(w, r)
+	case path == "/api/v1/tools/semantic-rules" && method == "GET":
+		api.handleToolSemanticRulesList(w, r)
+	case path == "/api/v1/tools/semantic-rules" && method == "POST":
+		api.handleToolSemanticRulesCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tools/semantic-rules/") && method == "PUT":
+		api.handleToolSemanticRulesUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tools/semantic-rules/") && method == "DELETE":
+		api.handleToolSemanticRulesDelete(w, r)
+	case path == "/api/v1/tools/context-policies" && method == "GET":
+		api.handleToolContextPoliciesList(w, r)
+	case path == "/api/v1/tools/context-policies" && method == "POST":
+		api.handleToolContextPoliciesCreate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tools/context-policies/") && method == "PUT":
+		api.handleToolContextPoliciesUpdate(w, r)
+	case strings.HasPrefix(path, "/api/v1/tools/context-policies/") && method == "DELETE":
+		api.handleToolContextPoliciesDelete(w, r)
 	case path == "/api/v1/tools/evaluate" && method == "POST":
 		api.handleToolPolicyEvaluate(w, r)
 

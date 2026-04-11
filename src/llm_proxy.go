@@ -19,6 +19,11 @@ import (
 	"time"
 )
 
+const (
+	defaultLLMProxyMaxBodyBytes       int64 = 64 * 1024 * 1024
+	defaultLLMSSEScannerMaxTokenBytes       = 8 * 1024 * 1024
+)
+
 // LLMProxy — LLM 侧透明反向代理
 type LLMProxy struct {
 	cfg        LLMProxyConfig
@@ -78,7 +83,7 @@ func NewLLMProxy(cfg LLMProxyConfig, auditor *LLMAuditor, ruleEngine *LLMRuleEng
 		cfg.TimeoutSec = 300
 	}
 	if cfg.MaxBodyBytes <= 0 {
-		cfg.MaxBodyBytes = 10 * 1024 * 1024 // 10MB
+		cfg.MaxBodyBytes = defaultLLMProxyMaxBodyBytes // 64MB
 	}
 
 	transport := &http.Transport{
@@ -184,11 +189,22 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 读取请求体
+	// 读取请求体（超限时显式拒绝，避免静默截断）
 	var bodyBytes []byte
 	if r.Body != nil {
-		bodyBytes, _ = io.ReadAll(io.LimitReader(r.Body, lp.cfg.MaxBodyBytes))
+		limitedBody, readErr := io.ReadAll(io.LimitReader(r.Body, lp.cfg.MaxBodyBytes+1))
 		r.Body.Close()
+		if readErr != nil {
+			log.Printf("[LLM代理] 读取请求体失败: %v", readErr)
+			http.Error(w, `{"error":"failed to read request body"}`, 400)
+			return
+		}
+		if int64(len(limitedBody)) > lp.cfg.MaxBodyBytes {
+			log.Printf("[LLM代理] 请求体超过限制: size>%d trace=%s", lp.cfg.MaxBodyBytes, traceID)
+			http.Error(w, `{"error":"request body too large"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		bodyBytes = limitedBody
 	}
 
 	// 提取 model（用于审计上下文）
@@ -417,7 +433,9 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				deepCtx := llmDeepGovernanceContext{TraceID: traceID, SenderID: auditCtx.SenderID, RespBody: respBody, StatusCode: resp.StatusCode, AuditCtx: auditCtx}
 				for i25, tcName25 := range info25.ToolNames {
 					tcArgs25 := ""
-					if i25 < len(info25.ToolInputs) { tcArgs25 = info25.ToolInputs[i25] }
+					if i25 < len(info25.ToolInputs) {
+						tcArgs25 = info25.ToolInputs[i25]
+					}
 
 					// v25.0: PlanCompiler — 比对 tool_call vs 计划模板
 					if lp.evaluatePlanForTool(w, deepCtx, tcName25, tcArgs25) {
@@ -474,7 +492,7 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // 先积累所有 delta.content，流结束后统一改写，最终以 JSON 格式返回给客户端。
 func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.Response, auditCtx *LLMAuditContext, taintTraceID string) {
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), defaultLLMSSEScannerMaxTokenBytes)
 
 	var contentAccum strings.Builder
 	var firstFrame map[string]interface{} // 保存第一帧元信息（id/model/created）
@@ -509,6 +527,14 @@ func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.R
 				}
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[LLM代理] SSE buffered rewrite scan failed: %v trace=%s", err, auditCtx.TraceID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `{"error":"upstream SSE frame too large or malformed"}`)
+		lp.auditLLMResponse(auditCtx, http.StatusBadGateway, []byte(fmt.Sprintf(`{"error":"%v"}`, err)))
+		return
 	}
 
 	fullContent := contentAccum.String()
@@ -571,8 +597,8 @@ func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.R
 func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response, auditCtx *LLMAuditContext, taintTraceID string) {
 	flusher, hasFlusher := w.(http.Flusher)
 	scanner := bufio.NewScanner(resp.Body)
-	// 增大缓冲区以处理大的 SSE 事件
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// 增大缓冲区以处理更大的 SSE 事件
+	scanner.Buffer(make([]byte, 0, 64*1024), defaultLLMSSEScannerMaxTokenBytes)
 	var eventBuf bytes.Buffer
 
 	// v31.1: SSE 实时检测 — 累积 content delta, 每 512 字节过一次 AC 检测
@@ -592,7 +618,6 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 			if dataPayload == "[DONE]" {
 				// v35.1: 拦截 [DONE]，暂不转发，留到流结束后统一处理 rewrite
 				doneIntercepted = true
-				eventBuf.WriteString(line + "\n")
 				continue
 			}
 			// 尝试提取 choices[0].delta.content
@@ -671,6 +696,18 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 		// 同时记录到审计缓冲
 		eventBuf.WriteString(line + "\n")
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[LLM代理] SSE scan failed: %v trace=%s", err, auditCtx.TraceID)
+		errEvent := buildSSEJSONEvent("error", map[string]interface{}{
+			"error": "upstream SSE frame too large or malformed",
+		})
+		fmt.Fprint(w, errEvent)
+		if hasFlusher {
+			flusher.Flush()
+		}
+		eventBuf.WriteString(errEvent)
+		sseBlocked = true
+	}
 
 	// v36.4: 流结束 tail rewrite/finalize 阶段收口为 helper
 	if !sseBlocked {
@@ -680,15 +717,46 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 			if hasFlusher {
 				flusher.Flush()
 			}
+			eventBuf.WriteString(tailEval.RewriteEvent)
 		}
 	}
 
-	// 发出之前拦截的 [DONE]
+	// v20.2: SSE 流式响应侧 taint 传播 + 逆转
+	if lp.taintTracker != nil && taintTraceID != "" {
+		lp.taintTracker.Propagate(taintTraceID, "llm_response",
+			fmt.Sprintf("SSE stream completed (llm_trace=%s)", auditCtx.TraceID))
+	}
+	if lp.reversalEngine != nil && eventBuf.Len() > 0 && taintTraceID != "" {
+		originalStr := eventBuf.String()
+		reversed, record := lp.reversalEngine.Reverse(taintTraceID, originalStr)
+		if record != nil {
+			// 提取追加的缓解提示（reversed = original + template content）
+			reversalContent := strings.TrimPrefix(reversed, originalStr)
+			if reversalContent == "" {
+				// hard 模式下 reversed 替换了原始内容
+				reversalContent = reversed
+			}
+			reversalContent = strings.TrimSpace(reversalContent)
+			if reversalContent != "" {
+				reversalEvent := buildSSETextEvent("lobster_guard_taint_reversal", reversalContent)
+				fmt.Fprint(w, reversalEvent)
+				if hasFlusher {
+					flusher.Flush()
+				}
+				eventBuf.WriteString(reversalEvent)
+			}
+			log.Printf("[LLM代理] 🔄 SSE 污染逆转 trace=%s taint_trace=%s mode=%s template=%s",
+				auditCtx.TraceID, taintTraceID, record.Mode, record.TemplateID)
+		}
+	}
+
+	// 发出之前拦截的 [DONE] —— 必须始终为最终事件
 	if doneIntercepted {
 		fmt.Fprintf(w, "data: [DONE]\n\n")
 		if hasFlusher {
 			flusher.Flush()
 		}
+		eventBuf.WriteString("data: [DONE]\n\n")
 	}
 
 	// 流结束，异步解析完整的审计数据
@@ -770,33 +838,6 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 				}
 			}
 		}()
-	}
-
-	// v20.2: SSE 流式响应侧 taint 传播 + 逆转
-	if lp.taintTracker != nil && taintTraceID != "" {
-		lp.taintTracker.Propagate(taintTraceID, "llm_response",
-			fmt.Sprintf("SSE stream completed (llm_trace=%s)", auditCtx.TraceID))
-	}
-	if lp.reversalEngine != nil && len(eventData) > 0 && taintTraceID != "" {
-		originalStr := string(eventData)
-		reversed, record := lp.reversalEngine.Reverse(taintTraceID, originalStr)
-		if record != nil {
-			// 提取追加的缓解提示（reversed = original + template content）
-			reversalContent := strings.TrimPrefix(reversed, originalStr)
-			if reversalContent == "" {
-				// hard 模式下 reversed 替换了原始内容
-				reversalContent = reversed
-			}
-			reversalContent = strings.TrimSpace(reversalContent)
-			if reversalContent != "" {
-				fmt.Fprint(w, buildSSETextEvent("lobster_guard_taint_reversal", reversalContent))
-				if hasFlusher {
-					flusher.Flush()
-				}
-			}
-			log.Printf("[LLM代理] 🔄 SSE 污染逆转 trace=%s taint_trace=%s mode=%s template=%s",
-				auditCtx.TraceID, taintTraceID, record.Mode, record.TemplateID)
-		}
 	}
 
 	lp.auditSSEBuffer(auditCtx, eventData)
@@ -990,7 +1031,9 @@ func (lp *LLMProxy) applySelectiveHide(traceID string, body []byte) []byte {
 	// System and user messages are trusted (⊥ in Fides)
 	for _, msg := range messages {
 		m, ok := msg.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		role, _ := m["role"].(string)
 		if role == "system" || role == "user" {
 			// These don't raise context — they are trusted/public
@@ -1004,12 +1047,18 @@ func (lp *LLMProxy) applySelectiveHide(traceID string, body []byte) []byte {
 	// Second pass: check tool messages and selectively hide
 	for i, msg := range messages {
 		m, ok := msg.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		role, _ := m["role"].(string)
-		if role != "tool" { continue }
+		if role != "tool" {
+			continue
+		}
 
 		content, _ := m["content"].(string)
-		if content == "" { continue }
+		if content == "" {
+			continue
+		}
 
 		// Infer tool name from context (previous assistant message's tool_call)
 		toolName := lp.inferToolNameFromMessages(messages, i)
@@ -1052,21 +1101,31 @@ func (lp *LLMProxy) applySelectiveHide(traceID string, body []byte) []byte {
 func (lp *LLMProxy) inferToolNameFromMessages(messages []interface{}, toolMsgIdx int) string {
 	// Tool message usually has a "tool_call_id" matching an assistant message's tool_call
 	toolMsg, ok := messages[toolMsgIdx].(map[string]interface{})
-	if !ok { return "" }
+	if !ok {
+		return ""
+	}
 	toolCallID, _ := toolMsg["tool_call_id"].(string)
 
 	// Walk backwards to find matching assistant tool_call
 	for i := toolMsgIdx - 1; i >= 0; i-- {
 		m, ok := messages[i].(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		role, _ := m["role"].(string)
-		if role != "assistant" { continue }
+		if role != "assistant" {
+			continue
+		}
 
 		toolCalls, ok := m["tool_calls"].([]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		for _, tc := range toolCalls {
 			tcMap, ok := tc.(map[string]interface{})
-			if !ok { continue }
+			if !ok {
+				continue
+			}
 			id, _ := tcMap["id"].(string)
 			if id == toolCallID || toolCallID == "" {
 				fn, ok := tcMap["function"].(map[string]interface{})

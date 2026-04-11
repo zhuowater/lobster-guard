@@ -21,6 +21,8 @@
     <div class="tab-bar">
       <button class="tab-btn" :class="{active:activeTab==='test'}" @click="activeTab='test'"><Icon name="test" :size="14"/> 实时测试</button>
       <button class="tab-btn" :class="{active:activeTab==='rules'}" @click="activeTab='rules'"><Icon name="file-text" :size="14"/> 规则管理 ({{ rules.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='semantic'}" @click="activeTab='semantic'">🧠 语义规则 ({{ semanticRules.length }})</button>
+      <button class="tab-btn" :class="{active:activeTab==='context'}" @click="activeTab='context'">🔗 上下文策略 ({{ contextPolicies.length }})</button>
       <button class="tab-btn" :class="{active:activeTab==='events'}" @click="activeTab='events'">📜 事件日志 ({{ events.length }})</button>
     </div>
 
@@ -30,6 +32,7 @@
         <h3 class="section-title">实时工具评估</h3>
         <div class="test-row">
           <div class="test-field"><label class="field-label">工具名 <span class="required">*</span></label><input v-model="testTool" class="field-input" placeholder="e.g. shell_exec"></div>
+          <div class="test-field"><label class="field-label">样例库</label><select v-model="selectedSample" class="field-select" @change="applySample"><option value="">选择内置样例</option><option v-for="s in testSamples" :key="s.name" :value="s.name">{{ s.name }}</option></select></div>
         </div>
         <div class="test-field" style="margin-top:var(--space-2)"><label class="field-label">参数 JSON</label><textarea v-model="testParams" class="test-input" rows="3" placeholder='{"cmd": "rm -rf /"}'></textarea></div>
         <button class="btn btn-primary" @click="evaluateTool" :disabled="evaluating||!testTool.trim()" style="margin-top:var(--space-2)">
@@ -39,8 +42,10 @@
       <div v-if="evalResult" class="eval-result">
         <div class="result-header"><span>评估结果</span><button class="btn-close" @click="evalResult=null">✕</button></div>
         <div class="eval-decision" :class="'decision-'+(evalResult.decision||evalResult.action)">{{ (evalResult.decision||evalResult.action||'').toUpperCase() }}</div>
-        <div v-if="evalResult.matched_rule||evalResult.rule" class="eval-detail"><strong>命中规则：</strong>{{ evalResult.matched_rule||evalResult.rule }}</div>
+        <div v-if="evalResult.matched_rule||evalResult.rule_hit||evalResult.rule" class="eval-detail"><strong>命中规则：</strong>{{ evalResult.matched_rule||evalResult.rule_hit||evalResult.rule }}</div>
         <div v-if="evalResult.risk_level!=null" class="eval-detail"><strong>风险等级：</strong>{{ evalResult.risk_level }}</div>
+        <div v-if="evalResult.semantic_class" class="eval-detail"><strong>语义分类：</strong>{{ evalResult.semantic_class }}</div>
+        <div v-if="evalResult.context_signals?.length" class="eval-detail"><strong>上下文信号：</strong>{{ evalResult.context_signals.join(' / ') }}</div>
       </div>
     </div>
 
@@ -94,12 +99,56 @@
       </div>
     </div>
 
-    <!-- Events Tab -->
-    <div v-if="activeTab==='events'" class="section">
+    <div v-if="activeTab==='semantic'" class="section">
+      <div class="rules-toolbar">
+        <div class="toolbar-right">
+          <button class="btn btn-sm" @click="exportSemanticRules">导出 JSON</button>
+          <button class="btn btn-sm" @click="openImportSemanticRules">导入 JSON</button>
+          <button class="btn btn-primary btn-sm" @click="openNewSemanticRule">➕ 新建语义规则</button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>时间</th><th>工具名</th><th>决策</th><th>风险等级</th><th>规则命中</th><th>TraceID</th></tr></thead>
-          <tbody><tr v-for="(ev,idx) in events" :key="idx"><td class="td-mono">{{ formatTime(ev.timestamp||ev.time) }}</td><td class="td-mono">{{ ev.tool_name||ev.tool }}</td><td><span class="action-badge" :class="'action-'+(ev.decision||ev.action)">{{ ev.decision||ev.action }}</span></td><td class="td-mono">{{ ev.risk_level??'-' }}</td><td>{{ ev.matched_rule||ev.rule||'-' }}</td><td class="td-mono td-trace">{{ truncate(ev.trace_id,16) }}</td></tr></tbody>
+          <thead><tr><th>名称</th><th>工具模式</th><th>参数键</th><th>匹配类型</th><th>语义类</th><th>动作</th><th>风险</th><th>优先级</th><th>操作</th></tr></thead>
+          <tbody><tr v-for="r in semanticRules" :key="r.id||r.name"><td>{{ r.name }}</td><td class="td-mono">{{ r.tool_pattern }}</td><td class="td-mono">{{ (r.param_keys||[]).join(', ') }}</td><td>{{ r.match_type }}</td><td class="td-mono">{{ r.class }}</td><td><span class="action-badge" :class="'action-'+r.action">{{ r.action }}</span></td><td>{{ r.risk_level||'-' }}</td><td>{{ r.priority??'-' }}</td><td class="td-actions"><button class="btn-icon" @click="editSemanticRule(r)">✏️</button><button class="btn-icon" @click="deleteSemanticRule(r)">🗑️</button></td></tr></tbody>
+        </table>
+        <EmptyState v-if="semanticRules.length===0" icon="🧠" title="暂无语义规则" description="定义参数如何被解释为语义类"/>
+      </div>
+    </div>
+
+    <div v-if="activeTab==='context'" class="section">
+      <div class="rules-toolbar">
+        <div class="toolbar-right">
+          <button class="btn btn-primary btn-sm" @click="openNewContextPolicy">➕ 新建上下文策略</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>名称</th><th>源语义类</th><th>目标语义类</th><th>目标工具</th><th>动作</th><th>风险</th><th>窗口</th><th>优先级</th><th>操作</th></tr></thead>
+          <tbody><tr v-for="p in contextPolicies" :key="p.id||p.name"><td>{{ p.name }}</td><td class="td-mono">{{ (p.source_classes||[]).join(', ') }}</td><td class="td-mono">{{ (p.target_classes||[]).join(', ') }}</td><td class="td-mono">{{ (p.target_tools||[]).join(', ')||'-' }}</td><td><span class="action-badge" :class="'action-'+p.action">{{ p.action }}</span></td><td>{{ p.risk_level||'-' }}</td><td>{{ p.window_size||'-' }}</td><td>{{ p.priority??'-' }}</td><td class="td-actions"><button class="btn-icon" @click="editContextPolicy(p)">✏️</button><button class="btn-icon" @click="deleteContextPolicy(p)">🗑️</button></td></tr></tbody>
+        </table>
+        <EmptyState v-if="contextPolicies.length===0" icon="🔗" title="暂无上下文策略" description="定义多步行为链如何升级风险"/>
+      </div>
+    </div>
+
+    <!-- Events Tab -->
+    <div v-if="activeTab==='events'" class="section">
+      <div class="rules-toolbar">
+        <div class="search-box">
+          <input v-model="eventSemanticFilter" placeholder="按语义类筛选，如 command:build_test" class="search-input"/>
+        </div>
+        <div class="search-box">
+          <input v-model="eventContextFilter" placeholder="按上下文信号筛选，如 source:path:sensitive" class="search-input"/>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-sm" @click="loadEvents">应用筛选</button>
+          <button class="btn btn-sm btn-ghost" @click="eventSemanticFilter=''; eventContextFilter=''; loadEvents()">清空</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>时间</th><th>工具名</th><th>决策</th><th>风险等级</th><th>语义分类</th><th>规则命中</th><th>上下文信号</th><th>TraceID</th></tr></thead>
+          <tbody><tr v-for="(ev,idx) in events" :key="idx"><td class="td-mono">{{ formatTime(ev.timestamp||ev.time) }}</td><td class="td-mono">{{ ev.tool_name||ev.tool }}</td><td><span class="action-badge" :class="'action-'+(ev.decision||ev.action)">{{ ev.decision||ev.action }}</span></td><td class="td-mono">{{ ev.risk_level??'-' }}</td><td class="td-mono">{{ ev.semantic_class||'-' }}</td><td>{{ ev.matched_rule||ev.rule_hit||ev.rule||'-' }}</td><td>{{ Array.isArray(ev.context_signals)?ev.context_signals.join(' / '):'-' }}</td><td class="td-mono td-trace">{{ truncate(ev.trace_id,16) }}</td></tr></tbody>
         </table>
         <EmptyState v-if="events.length===0" icon="📜" title="暂无事件"/>
       </div>
@@ -123,6 +172,41 @@
       </div>
     </div>
 
+    <div v-if="showSemanticDialog" class="dialog-overlay" @click.self="showSemanticDialog=false">
+      <div class="dialog">
+        <div class="dialog-header">{{ editingSemanticRule?'编辑语义规则':'新建语义规则' }}</div>
+        <div class="dialog-body">
+          <div class="config-field"><label class="field-label">名称</label><input v-model="semanticForm.name" class="field-input"></div>
+          <div class="config-field"><label class="field-label">工具模式</label><input v-model="semanticForm.tool_pattern" class="field-input" placeholder="*command*"></div>
+          <div class="config-field"><label class="field-label">参数键（逗号分隔）</label><input v-model="semanticForm.param_keys" class="field-input" placeholder="command,cmd"></div>
+          <div class="config-field"><label class="field-label">匹配类型</label><select v-model="semanticForm.match_type" class="field-select"><option value="regex">regex</option><option value="exists">exists</option><option value="always">always</option></select></div>
+          <div class="config-field"><label class="field-label">匹配模式</label><textarea v-model="semanticForm.pattern" class="test-input" rows="3"></textarea></div>
+          <div class="config-field"><label class="field-label">语义类</label><input v-model="semanticForm.class" class="field-input" placeholder="command:build_test"></div>
+          <div class="config-field"><label class="field-label">动作</label><select v-model="semanticForm.action" class="field-select"><option value="allow">allow</option><option value="warn">warn</option><option value="block">block</option></select></div>
+          <div class="config-field"><label class="field-label">风险等级</label><input v-model="semanticForm.risk_level" class="field-input" placeholder="low/medium/high"></div>
+          <div class="config-field"><label class="field-label">优先级</label><input v-model.number="semanticForm.priority" class="field-input" type="number"></div>
+        </div>
+        <div class="dialog-footer"><button class="btn btn-sm" @click="showSemanticDialog=false">取消</button><button class="btn btn-primary btn-sm" @click="saveSemanticRule">保存</button></div>
+      </div>
+    </div>
+
+    <div v-if="showContextDialog" class="dialog-overlay" @click.self="showContextDialog=false">
+      <div class="dialog">
+        <div class="dialog-header">{{ editingContextPolicy?'编辑上下文策略':'新建上下文策略' }}</div>
+        <div class="dialog-body">
+          <div class="config-field"><label class="field-label">名称</label><input v-model="contextForm.name" class="field-input"></div>
+          <div class="config-field"><label class="field-label">源语义类（逗号分隔）</label><input v-model="contextForm.source_classes" class="field-input" placeholder="path:sensitive"></div>
+          <div class="config-field"><label class="field-label">目标语义类（逗号分隔）</label><input v-model="contextForm.target_classes" class="field-input" placeholder="url:external"></div>
+          <div class="config-field"><label class="field-label">目标工具（逗号分隔，可选）</label><input v-model="contextForm.target_tools" class="field-input" placeholder="http_request,send_email"></div>
+          <div class="config-field"><label class="field-label">动作</label><select v-model="contextForm.action" class="field-select"><option value="warn">warn</option><option value="block">block</option><option value="allow">allow</option></select></div>
+          <div class="config-field"><label class="field-label">风险等级</label><input v-model="contextForm.risk_level" class="field-input" placeholder="medium/high"></div>
+          <div class="config-field"><label class="field-label">窗口大小</label><input v-model.number="contextForm.window_size" class="field-input" type="number"></div>
+          <div class="config-field"><label class="field-label">优先级</label><input v-model.number="contextForm.priority" class="field-input" type="number"></div>
+        </div>
+        <div class="dialog-footer"><button class="btn btn-sm" @click="showContextDialog=false">取消</button><button class="btn btn-primary btn-sm" @click="saveContextPolicy">保存</button></div>
+      </div>
+    </div>
+
     <ConfirmModal :visible="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message" :type="confirmModal.type" @confirm="confirmModal.onConfirm" @cancel="confirmModal.show=false"/>
     <div v-if="error" class="error-banner">⚠️ {{ error }}</div>
   </div>
@@ -141,6 +225,8 @@ import { showToast } from '../stores/app.js'
 const activeTab = ref('test')
 const stats = ref({})
 const rules = ref([])
+const semanticRules = ref([])
+const contextPolicies = ref([])
 const events = ref([])
 const error = ref('')
 const testTool = ref('')
@@ -148,14 +234,22 @@ const testParams = ref('')
 const evaluating = ref(false)
 const evalResult = ref(null)
 const showDialog = ref(false)
+const showSemanticDialog = ref(false)
+const showContextDialog = ref(false)
 const editingRule = ref(null)
+const editingSemanticRule = ref(null)
+const editingContextPolicy = ref(null)
 const saving = ref(false)
 const initialLoading = ref(true)
 const ruleSearch = ref('')
 const actionFilter = ref('all')
 const selectedIds = ref(new Set())
 const expandedRuleId = ref(null)
+const eventSemanticFilter = ref('')
+const eventContextFilter = ref('')
 const form = reactive({ name:'', tool_pattern:'', action:'block', priority:0, reason:'' })
+const semanticForm = reactive({ name:'', tool_pattern:'*', param_keys:'', match_type:'regex', pattern:'', class:'', action:'allow', risk_level:'low', priority:100 })
+const contextForm = reactive({ name:'', source_classes:'', target_classes:'', target_tools:'', action:'block', risk_level:'high', window_size:12, priority:100 })
 const formErrors = reactive({ name:'', tool_pattern:'' })
 const confirmModal = reactive({ show:false, title:'', message:'', type:'danger', onConfirm:()=>{} })
 
@@ -192,7 +286,9 @@ async function loadStats() {
     }
   } catch(e){ error.value='加载规则失败: '+e.message }
 }
-async function loadEvents() { try{const d=await api('/api/v1/tools/events?limit=50');events.value=d.events||d||[]}catch(e){error.value='加载事件失败: '+e.message} }
+async function loadSemanticRules() { try{const d=await api('/api/v1/tools/semantic-rules');semanticRules.value=d.rules||[]}catch(e){error.value='加载语义规则失败: '+e.message} }
+async function loadContextPolicies() { try{const d=await api('/api/v1/tools/context-policies');contextPolicies.value=d.policies||[]}catch(e){error.value='加载上下文策略失败: '+e.message} }
+async function loadEvents() { try{const qs=new URLSearchParams({limit:'50'}); if(eventSemanticFilter.value.trim()) qs.set('semantic_class', eventSemanticFilter.value.trim()); if(eventContextFilter.value.trim()) qs.set('context_signal', eventContextFilter.value.trim()); const d=await api('/api/v1/tools/events?'+qs.toString());events.value=d.events||d||[]}catch(e){error.value='加载事件失败: '+e.message} }
 
 async function evaluateTool() {
   if(!testTool.value.trim()){showToast('请输入工具名','warning');return}
@@ -231,6 +327,31 @@ function confirmDeleteRule(r) {
   confirmModal.show=true
 }
 
+function csvToList(v){return (v||'').split(',').map(s=>s.trim()).filter(Boolean)}
+function openNewSemanticRule(){editingSemanticRule.value=null;Object.assign(semanticForm,{name:'',tool_pattern:'*',param_keys:'',match_type:'regex',pattern:'',class:'',action:'allow',risk_level:'low',priority:100});showSemanticDialog.value=true}
+function editSemanticRule(r){editingSemanticRule.value=r;Object.assign(semanticForm,{name:r.name||'',tool_pattern:r.tool_pattern||'*',param_keys:(r.param_keys||[]).join(', '),match_type:r.match_type||'regex',pattern:r.pattern||'',class:r.class||'',action:r.action||'allow',risk_level:r.risk_level||'low',priority:r.priority??100});showSemanticDialog.value=true}
+async function saveSemanticRule(){
+  const body={name:semanticForm.name,tool_pattern:semanticForm.tool_pattern,param_keys:csvToList(semanticForm.param_keys),match_type:semanticForm.match_type,pattern:semanticForm.pattern,class:semanticForm.class,action:semanticForm.action,risk_level:semanticForm.risk_level,priority:semanticForm.priority,enabled:true}
+  try{
+    if(editingSemanticRule.value) await apiPut('/api/v1/tools/semantic-rules/'+(editingSemanticRule.value.id||editingSemanticRule.value.name),body)
+    else await apiPost('/api/v1/tools/semantic-rules',body)
+    showSemanticDialog.value=false;showToast('语义规则已保存','success');loadSemanticRules()
+  }catch(e){showToast('保存语义规则失败: '+e.message,'error')}
+}
+function deleteSemanticRule(r){confirmModal.title='删除语义规则';confirmModal.message='确定删除语义规则 "'+r.name+'" 吗？';confirmModal.type='danger';confirmModal.onConfirm=async()=>{confirmModal.show=false;try{await apiDelete('/api/v1/tools/semantic-rules/'+(r.id||r.name));showToast('已删除语义规则','success');loadSemanticRules()}catch(e){showToast('删除失败: '+e.message,'error')}};confirmModal.show=true}
+
+function openNewContextPolicy(){editingContextPolicy.value=null;Object.assign(contextForm,{name:'',source_classes:'',target_classes:'',target_tools:'',action:'block',risk_level:'high',window_size:12,priority:100});showContextDialog.value=true}
+function editContextPolicy(p){editingContextPolicy.value=p;Object.assign(contextForm,{name:p.name||'',source_classes:(p.source_classes||[]).join(', '),target_classes:(p.target_classes||[]).join(', '),target_tools:(p.target_tools||[]).join(', '),action:p.action||'block',risk_level:p.risk_level||'high',window_size:p.window_size??12,priority:p.priority??100});showContextDialog.value=true}
+async function saveContextPolicy(){
+  const body={name:contextForm.name,source_classes:csvToList(contextForm.source_classes),target_classes:csvToList(contextForm.target_classes),target_tools:csvToList(contextForm.target_tools),action:contextForm.action,risk_level:contextForm.risk_level,window_size:contextForm.window_size,priority:contextForm.priority,enabled:true}
+  try{
+    if(editingContextPolicy.value) await apiPut('/api/v1/tools/context-policies/'+(editingContextPolicy.value.id||editingContextPolicy.value.name),body)
+    else await apiPost('/api/v1/tools/context-policies',body)
+    showContextDialog.value=false;showToast('上下文策略已保存','success');loadContextPolicies()
+  }catch(e){showToast('保存上下文策略失败: '+e.message,'error')}
+}
+function deleteContextPolicy(p){confirmModal.title='删除上下文策略';confirmModal.message='确定删除上下文策略 "'+p.name+'" 吗？';confirmModal.type='danger';confirmModal.onConfirm=async()=>{confirmModal.show=false;try{await apiDelete('/api/v1/tools/context-policies/'+(p.id||p.name));showToast('已删除上下文策略','success');loadContextPolicies()}catch(e){showToast('删除失败: '+e.message,'error')}};confirmModal.show=true}
+
 async function batchAction(action) {
   const ids=[...selectedIds.value]; if(!ids.length) return
   if(action==='delete'){
@@ -244,7 +365,7 @@ async function batchAction(action) {
   }
 }
 
-function loadAll() { error.value=''; Promise.all([loadStats(),loadEvents()]).finally(()=>{initialLoading.value=false}) }
+function loadAll() { error.value=''; Promise.all([loadStats(),loadSemanticRules(),loadContextPolicies(),loadEvents()]).finally(()=>{initialLoading.value=false}) }
 function truncate(s,max) { return s&&s.length>max?s.slice(0,max)+'…':s||'-' }
 function formatTime(ts) { if(!ts) return '-'; try{const d=new Date(ts);return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch{return ts} }
 onMounted(loadAll)
