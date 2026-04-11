@@ -314,6 +314,8 @@ async function loadSemanticRules() { try{const d=await api('/api/v1/tools/semant
 async function loadContextPolicies() { try{const d=await api('/api/v1/tools/context-policies');contextPolicies.value=d.policies||[]}catch(e){error.value='加载上下文策略失败: '+e.message} }
 async function loadEvents() { try{const qs=new URLSearchParams({limit:'50'}); if(eventSemanticFilter.value.trim()) qs.set('semantic_class', eventSemanticFilter.value.trim()); if(eventContextFilter.value.trim()) qs.set('context_signal', eventContextFilter.value.trim()); const d=await api('/api/v1/tools/events?'+qs.toString());events.value=d.events||d||[]}catch(e){error.value='加载事件失败: '+e.message} }
 
+function applySample(){ const s=testSamples.find(x=>x.name===selectedSample.value); if(!s) return; testTool.value=s.tool; testParams.value=JSON.stringify(s.params,null,2) }
+
 async function evaluateTool() {
   if(!testTool.value.trim()){showToast('请输入工具名','warning');return}
   evaluating.value=true; evalResult.value=null
@@ -375,6 +377,25 @@ async function saveContextPolicy(){
   }catch(e){showToast('保存上下文策略失败: '+e.message,'error')}
 }
 function deleteContextPolicy(p){confirmModal.title='删除上下文策略';confirmModal.message='确定删除上下文策略 "'+p.name+'" 吗？';confirmModal.type='danger';confirmModal.onConfirm=async()=>{confirmModal.show=false;try{await apiDelete('/api/v1/tools/context-policies/'+(p.id||p.name));showToast('已删除上下文策略','success');loadContextPolicies()}catch(e){showToast('删除失败: '+e.message,'error')}};confirmModal.show=true}
+
+function downloadJson(filename, data){ const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); URL.revokeObjectURL(a.href) }
+function exportSemanticRules(){ downloadJson('tool-semantic-rules.json', semanticRules.value) }
+function exportContextPolicies(){ downloadJson('tool-context-policies.json', contextPolicies.value) }
+function openImportSemanticRules(){ importMode.value='semantic'; importJson.value=''; showImportDialog.value=true }
+function openImportContextPolicies(){ importMode.value='context'; importJson.value=''; showImportDialog.value=true }
+async function submitImport(){
+  try{
+    const items=JSON.parse(importJson.value)
+    if(!Array.isArray(items)) throw new Error('JSON 必须是数组')
+    for(const item of items){
+      if(importMode.value==='semantic') await apiPost('/api/v1/tools/semantic-rules', item)
+      else await apiPost('/api/v1/tools/context-policies', item)
+    }
+    showImportDialog.value=false
+    if(importMode.value==='semantic'){ await loadSemanticRules(); showToast('语义规则导入完成','success') }
+    else { await loadContextPolicies(); showToast('上下文策略导入完成','success') }
+  }catch(e){showToast('导入失败: '+e.message,'error')}
+}
 
 async function batchAction(action) {
   const ids=[...selectedIds.value]; if(!ids.length) return
