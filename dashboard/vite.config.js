@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   base: './',
   build: {
-    outDir: '../src/dashboard/dist',
+    outDir: 'dist',
     assetsInlineLimit: 100000,
   },
   server: {

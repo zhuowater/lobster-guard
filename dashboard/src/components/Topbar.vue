@@ -235,7 +235,7 @@ const allNavItems = {
   'ab-testing':        { label: 'A/B 测试' },
   'upstream':          { label: '上游管理' },
   'plan-compiler':     { label: '执行计划' },
-  'agent':             { label: 'Agent 行为' },
+  'agent':             { label: '工具行为审计' },
   'path-policy':       { label: '路径治理' },
   'counterfactual':    { label: '反事实验证' },
   'capability':        { label: '能力标签' },

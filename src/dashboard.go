@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-//go:embed dashboard/dist/*
+//go:embed dashboard/dist/**
 var dashboardFS embed.FS
 
 // getDashboardHandler 返回 Dashboard 静态文件 handler

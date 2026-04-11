@@ -1,0 +1,16 @@
+listen_inbound: ":18443"
+listen_outbound: ":18444"
+management_port: 9090
+management_token: "hermes-test-token"
+upstreams:
+  - id: "default"
+    address: "127.0.0.1"
+    port: 19444
+channel_type: "generic"
+inbound_detect_enabled: true
+outbound_audit_enabled: true
+detect_timeout_ms: 200
+auth:
+  enabled: true
+  jwt_secret: "abcdefghijklmnopqrstuvwxyz123456"
+db_path: "./tmp-hermes-audit.db"

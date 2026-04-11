@@ -26,6 +26,7 @@ type AgentProfile struct {
 	AgentID         string            `json:"agent_id"`
 	TenantID        string            `json:"tenant_id"`
 	DisplayName     string            `json:"display_name"`
+	Department      string            `json:"department"`
 	TypicalTools    []ToolUsage       `json:"typical_tools"`
 	AvgTokensPerReq float64           `json:"avg_tokens"`
 	AvgToolsPerReq  float64           `json:"avg_tools_per_req"`
@@ -127,11 +128,16 @@ func (bp *BehaviorProfileEngine) BuildProfile(agentID, tenantID string) (*AgentP
 		tenantID = "default"
 	}
 
+	displayName, department := lookupSenderIdentity(bp.db, agentID)
 	profile := &AgentProfile{
 		AgentID:     agentID,
 		TenantID:    tenantID,
 		DisplayName: agentID,
+		Department:  department,
 		RiskLevel:   "normal",
+	}
+	if displayName != "" {
+		profile.DisplayName = displayName
 	}
 
 	var totalReq int

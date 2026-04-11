@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,7 @@ import (
 type UserRiskProfile struct {
 	UserID            string    `json:"user_id"`
 	DisplayName       string    `json:"display_name"`
+	Department        string    `json:"department"`
 	RiskScore         int       `json:"risk_score"`
 	RiskLevel         string    `json:"risk_level"`
 	TotalRequests     int64     `json:"total_requests"`
@@ -56,6 +58,21 @@ type UserRiskStats struct {
 // UserProfileEngine 用户画像引擎
 type UserProfileEngine struct {
 	db *sql.DB
+}
+
+func lookupSenderIdentity(db *sql.DB, senderID string) (string, string) {
+	if db == nil || senderID == "" {
+		return "", ""
+	}
+
+	var name, dept string
+	if err := db.QueryRow(`SELECT name, department FROM user_info_cache WHERE sender_id = ? ORDER BY updated_at DESC LIMIT 1`, senderID).Scan(&name, &dept); err == nil {
+		return strings.TrimSpace(name), strings.TrimSpace(dept)
+	}
+	if err := db.QueryRow(`SELECT display_name, department FROM user_routes WHERE sender_id = ? ORDER BY updated_at DESC LIMIT 1`, senderID).Scan(&name, &dept); err == nil {
+		return strings.TrimSpace(name), strings.TrimSpace(dept)
+	}
+	return "", ""
 }
 
 // NewUserProfileEngine 创建用户画像引擎
@@ -163,9 +180,14 @@ func (e *UserProfileEngine) GetTopRiskUsersTenant(limit int, tenantID string) ([
 
 // GetUserProfile 获取单个用户的风险画像
 func (e *UserProfileEngine) GetUserProfile(userID string) (*UserRiskProfile, error) {
+	displayName, department := lookupSenderIdentity(e.db, userID)
 	p := &UserRiskProfile{
 		UserID:      userID,
 		DisplayName: userID,
+		Department:  department,
+	}
+	if displayName != "" {
+		p.DisplayName = displayName
 	}
 
 	// 总请求数和拦截数

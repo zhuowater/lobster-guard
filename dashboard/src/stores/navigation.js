@@ -10,8 +10,8 @@ const TABS = {
     label: '威胁中心',
     icon: 'search',
     groups: [
-      { label: 'IM 安全', routes: ['audit', 'sessions', 'session-detail', 'attack-chains', 'user-profiles', 'user-detail', 'behavior'] },  // behavior = 安全画像
-      { label: 'LLM 安全', routes: ['semantic', 'prompts', 'taint'] },
+      { label: 'IM 安全', routes: ['audit', 'sessions', 'session-detail', 'attack-chains', 'user-profiles', 'user-detail', 'behavior'] },
+      { label: 'LLM 安全', routes: ['agent-profiles', 'semantic', 'prompts', 'taint'] },
       { label: '对抗测试', routes: ['honeypot', 'singularity', 'redteam'] }
     ]
   },

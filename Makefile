@@ -31,7 +31,7 @@ build: embed-prep
 	cd src && CGO_ENABLED=1 go build $(GO_FLAGS) -o ../$(APP_NAME) .
 	@$(MAKE) embed-clean
 
-# 构建 Vue 前端（dashboard/dist/ 被 go:embed 嵌入）
+# 构建 Vue 前端（dashboard/dist/ 在 embed-prep 时复制到 src/dashboard/dist/）
 .PHONY: dashboard
 dashboard:
 	cd dashboard && npm run build

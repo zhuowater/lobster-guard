@@ -41,7 +41,7 @@
       <div class="filter-bar-inner">
         <div class="search-box">
           <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input v-model="searchText" class="search-input" placeholder="搜索 Agent ID 或名称..." />
+          <input v-model="searchText" class="search-input" placeholder="搜索 Agent ID、姓名或部门..." />
           <button v-if="searchText" class="search-clear" @click="searchText=''">&times;</button>
         </div>
         <div class="filter-selects">
@@ -56,8 +56,11 @@
       <div class="profile-card" v-for="p in pagedProfiles" :key="p.agent_id" :class="cardClass(p)">
         <div class="profile-header">
           <div class="profile-id">
-            <a class="profile-name link-accent" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(p.agent_id))">{{ p.agent_id }}</a>
-            <span class="profile-display" v-if="p.display_name && p.display_name !== p.agent_id">{{ p.display_name }}</span>
+            <a class="profile-name link-accent" @click.stop="$router.push('/user-profiles/' + encodeURIComponent(p.agent_id))">{{ p.display_name || p.agent_id }}</a>
+            <div class="profile-subline">
+              <span v-if="p.display_name && p.display_name !== p.agent_id" class="profile-display mono">{{ p.agent_id }}</span>
+              <span v-if="p.department" class="profile-dept">{{ p.department }}</span>
+            </div>
           </div>
           <div class="profile-header-right">
             <span class="risk-badge" :class="'risk-' + p.risk_level">{{ riskIcon(p.risk_level) }} {{ riskLabel(p.risk_level) }}</span>
@@ -141,6 +144,7 @@
       <div class="modal-content">
         <div class="modal-header"><h3>{{ detailProfile.agent_id }} — 详细画像</h3><button class="btn-close" @click="detailProfile=null">✕</button></div>
         <div class="modal-body">
+          <div class="detail-kv"><span class="dl">身份</span><span>{{ detailProfile.display_name || detailProfile.agent_id }}<span v-if="detailProfile.display_name && detailProfile.display_name !== detailProfile.agent_id" class="mono" style="margin-left:8px;color:var(--text-tertiary)">{{ detailProfile.agent_id }}</span><span v-if="detailProfile.department" class="profile-dept" style="margin-left:8px">{{ detailProfile.department }}</span></span></div>
           <div class="detail-kv"><span class="dl">风险等级</span><span class="risk-badge" :class="'risk-'+detailProfile.risk_level">{{ riskLabel(detailProfile.risk_level) }}</span></div>
           <div class="detail-kv"><span class="dl">总请求</span><span>{{ detailProfile.total_requests }}</span></div>
           <div class="detail-kv"><span class="dl">平均 Token</span><span>{{ Math.round(detailProfile.avg_tokens) }}</span></div>
@@ -225,7 +229,7 @@ const weightItems=[{key:'tool_risk',label:'工具风险'},{key:'pattern_risk',la
 
 const filteredProfiles=computed(()=>{
   let list=[...profiles.value]
-  if(searchText.value){const q=searchText.value.toLowerCase();list=list.filter(p=>p.agent_id.toLowerCase().includes(q)||(p.display_name||'').toLowerCase().includes(q))}
+  if(searchText.value){const q=searchText.value.toLowerCase();list=list.filter(p=>p.agent_id.toLowerCase().includes(q)||(p.display_name||'').toLowerCase().includes(q)||(p.department||'').toLowerCase().includes(q))}
   if(filterRisk.value)list=list.filter(p=>p.risk_level===filterRisk.value)
   if(sortBy.value==='risk')list.sort((a,b)=>(riskOrder[a.risk_level]??9)-(riskOrder[b.risk_level]??9))
   else if(sortBy.value==='requests')list.sort((a,b)=>(b.total_requests||0)-(a.total_requests||0))
@@ -304,9 +308,11 @@ onUnmounted(()=>clearInterval(timer))
 
 .profile-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .profile-header-right{display:flex;align-items:center;gap:8px}
-.profile-id{display:flex;align-items:center;gap:8px}
-.profile-name{font-size:var(--text-base);font-weight:700;font-family:var(--font-mono)}
+.profile-id{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.profile-name{font-size:var(--text-base);font-weight:700}
+.profile-subline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .profile-display{font-size:var(--text-sm);color:var(--text-tertiary)}
+.profile-dept{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(99,102,241,.12);color:var(--color-primary);font-size:var(--text-xs);font-weight:600}
 .profile-dropdown{position:relative}
 .btn-icon{background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:var(--radius-sm)}
 .btn-icon:hover{background:var(--bg-elevated);color:var(--text-primary)}

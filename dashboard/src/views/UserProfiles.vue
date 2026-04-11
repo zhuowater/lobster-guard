@@ -14,7 +14,7 @@
       <div class="filter-bar-inner">
         <div class="search-box">
           <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input v-model="searchText" class="search-input" placeholder="搜索用户ID或名称..." />
+          <input v-model="searchText" class="search-input" placeholder="搜索用户ID、姓名或部门..." />
           <button v-if="searchText" class="search-clear" @click="searchText=''">&times;</button>
         </div>
         <div class="filter-selects">
@@ -44,7 +44,13 @@
                 <td class="rank-cell">{{ (currentPage - 1) * pageSize + i + 1 }}</td>
                 <td class="user-cell">
                   <span class="user-avatar" :class="'avatar-' + u.risk_level">{{ u.user_id.charAt(0).toUpperCase() }}</span>
-                  <span>{{ u.display_name || u.user_id }}</span>
+                  <div class="user-identity">
+                    <div class="user-primary-row">
+                      <span class="user-primary-name">{{ u.display_name || u.user_id }}</span>
+                      <span v-if="u.department" class="user-dept-badge">{{ u.department }}</span>
+                    </div>
+                    <div v-if="u.display_name && u.display_name !== u.user_id" class="user-secondary-id">{{ u.user_id }}</div>
+                  </div>
                 </td>
                 <td>
                   <div class="score-bar"><div class="score-fill" :style="{ width: u.risk_score + '%', background: riskColor(u.risk_level) }"></div><span class="score-num">{{ u.risk_score }}</span></div>
@@ -111,7 +117,7 @@ function goToDetail(userId){router.push('/user-profiles/'+encodeURIComponent(use
 
 const filteredUsers=computed(()=>{
   let list=[...users.value]
-  if(searchText.value){const q=searchText.value.toLowerCase();list=list.filter(u=>(u.user_id||'').toLowerCase().includes(q)||(u.display_name||'').toLowerCase().includes(q))}
+  if(searchText.value){const q=searchText.value.toLowerCase();list=list.filter(u=>(u.user_id||'').toLowerCase().includes(q)||(u.display_name||'').toLowerCase().includes(q)||(u.department||'').toLowerCase().includes(q))}
   if(filterRisk.value)list=list.filter(u=>u.risk_level===filterRisk.value)
   if(sortBy.value==='risk')list.sort((a,b)=>(riskOrder[a.risk_level]??9)-(riskOrder[b.risk_level]??9)||(b.risk_score||0)-(a.risk_score||0))
   else if(sortBy.value==='requests')list.sort((a,b)=>(b.total_requests||0)-(a.total_requests||0))
@@ -153,6 +159,11 @@ onUnmounted(()=>clearInterval(timer))
 .row-clickable{cursor:pointer;transition:background .15s}.row-clickable:hover{background:rgba(99,102,241,.06)!important}
 .rank-cell{font-weight:700;color:var(--color-primary);text-align:center}
 .user-cell{display:flex;align-items:center;gap:8px}
+.user-identity{display:flex;flex-direction:column;gap:2px;min-width:0}
+.user-primary-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.user-primary-name{font-weight:600;color:var(--text-primary)}
+.user-secondary-id{font-size:var(--text-xs);color:var(--text-tertiary);font-family:var(--font-mono)}
+.user-dept-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(99,102,241,.12);color:var(--color-primary);font-size:var(--text-xs);font-weight:600}
 .user-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
 .avatar-critical{background:#EF4444}.avatar-high{background:#F59E0B}.avatar-medium{background:#3B82F6}.avatar-low{background:#6B7280}
 .score-bar{position:relative;width:80px;height:20px;background:var(--bg-elevated);border-radius:10px;overflow:hidden;display:inline-flex;align-items:center}

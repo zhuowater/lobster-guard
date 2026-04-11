@@ -147,7 +147,8 @@ const allNavItems = {
   'attack-chains':     { path: '/attack-chains',  label: '攻击链分析',     icon: 'link' },
   'user-profiles':     { path: '/user-profiles',  label: '用户画像',       icon: 'user-scan' },
   'user-detail':       { path: '/user-profiles',  label: '用户详情',       icon: 'user-scan', hidden: true },
-  'behavior':          { path: '/behavior',       label: '行为画像',       icon: 'behavior' },
+  'behavior':          { path: '/behavior',       label: '安全画像',       icon: 'shield' },
+  'agent-profiles':    { path: '/agent-profiles', label: 'Agent 画像',     icon: 'behavior' },
   'honeypot':          { path: '/honeypot',       label: 'Agent 蜜罐',    icon: 'flame' },
   'singularity':       { path: '/singularity',    label: '奇点蜜罐',      icon: 'orbit' },
   'prompts':           { path: '/prompts',        label: 'Prompt 追踪',   icon: 'file-check' },
@@ -168,7 +169,7 @@ const allNavItems = {
   'ab-testing':        { path: '/ab-testing',     label: 'A/B 测试',      icon: 'split' },
   'upstream':          { path: '/upstream',       label: '上游管理',       icon: 'server' },
   'plan-compiler':     { path: '/plan-compiler',  label: '执行计划',       icon: 'play' },
-  'agent':             { path: '/agent',          label: 'Agent 行为',    icon: 'bot' },
+  'agent':             { path: '/agent',          label: '工具行为审计',   icon: 'bot' },
   // 治理引擎
   'path-policy':       { path: '/path-policy',    label: '路径治理',       icon: 'target' },
   'counterfactual':    { path: '/counterfactual', label: '反事实验证',     icon: 'rewind' },

@@ -13,6 +13,7 @@
     "vue-router": "^4.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@vitejs/plugin-vue": "^5.2",
     "vite": "^6.2"
   }

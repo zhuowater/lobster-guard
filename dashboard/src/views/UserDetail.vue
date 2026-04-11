@@ -24,7 +24,13 @@
         </div>
         <div class="user-info">
           <div class="user-info-top">
-            <h2 class="user-name">{{ profile.display_name || profile.user_id }}</h2>
+            <div class="user-title-block">
+              <h2 class="user-name">{{ profile.display_name || profile.user_id }}</h2>
+              <div class="user-identity-row">
+                <span v-if="profile.display_name && profile.display_name !== profile.user_id" class="user-id-chip">{{ profile.user_id }}</span>
+                <span v-if="profile.department" class="user-dept-chip">{{ profile.department }}</span>
+              </div>
+            </div>
             <div class="user-tags">
               <span class="tag" v-for="tag in userTags" :key="tag" :class="'tag-' + tag">{{ tagLabels[tag] || tag }}
                 <button class="tag-remove" @click="removeTag(tag)">&times;</button>
@@ -238,8 +244,13 @@ onMounted(async()=>{
 .ring-score{font-size:24px;font-weight:800;color:var(--text-primary)}.ring-label{font-size:11px;font-weight:600;text-transform:uppercase}
 .ring-critical .ring-label{color:#EF4444}.ring-high .ring-label{color:#F59E0B}.ring-medium .ring-label{color:#3B82F6}.ring-low .ring-label{color:#6B7280}
 
-.user-info{flex:1}.user-info-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.user-info{flex:1}.user-info-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.user-title-block{display:flex;flex-direction:column;gap:6px}
 .user-name{font-size:1.25rem;font-weight:700;color:var(--text-primary);margin:0}
+.user-identity-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.user-id-chip,.user-dept-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:var(--text-xs);font-weight:600}
+.user-id-chip{background:rgba(107,114,128,.14);color:var(--text-secondary);font-family:var(--font-mono)}
+.user-dept-chip{background:rgba(99,102,241,.12);color:var(--color-primary)}
 .user-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:var(--text-sm);color:var(--text-secondary)}
 
 .user-tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center;position:relative}
