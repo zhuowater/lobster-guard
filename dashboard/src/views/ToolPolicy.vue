@@ -119,6 +119,8 @@
     <div v-if="activeTab==='context'" class="section">
       <div class="rules-toolbar">
         <div class="toolbar-right">
+          <button class="btn btn-sm" @click="exportContextPolicies">导出 JSON</button>
+          <button class="btn btn-sm" @click="openImportContextPolicies">导入 JSON</button>
           <button class="btn btn-primary btn-sm" @click="openNewContextPolicy">➕ 新建上下文策略</button>
         </div>
       </div>
@@ -204,6 +206,16 @@
           <div class="config-field"><label class="field-label">优先级</label><input v-model.number="contextForm.priority" class="field-input" type="number"></div>
         </div>
         <div class="dialog-footer"><button class="btn btn-sm" @click="showContextDialog=false">取消</button><button class="btn btn-primary btn-sm" @click="saveContextPolicy">保存</button></div>
+      </div>
+    </div>
+
+    <div v-if="showImportDialog" class="dialog-overlay" @click.self="showImportDialog=false">
+      <div class="dialog">
+        <div class="dialog-header">导入 {{ importMode==='semantic'?'语义规则':'上下文策略' }} JSON</div>
+        <div class="dialog-body">
+          <div class="config-field"><label class="field-label">JSON 数组</label><textarea v-model="importJson" class="test-input" rows="12" placeholder='[{"name":"..."}]'></textarea></div>
+        </div>
+        <div class="dialog-footer"><button class="btn btn-sm" @click="showImportDialog=false">取消</button><button class="btn btn-primary btn-sm" @click="submitImport">导入</button></div>
       </div>
     </div>
 
