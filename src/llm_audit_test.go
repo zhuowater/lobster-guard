@@ -283,8 +283,8 @@ func TestLLMAuditor_Stats(t *testing.T) {
 
 	// Seed some data
 	callID1, _ := auditor.RecordCall("2026-01-01T00:00:00Z", "t1", "claude-sonnet-4-20250514", 100, 50, 150, 1000, 200, true, 2, "", false, false, "")
-	auditor.RecordToolCall(callID1, "2026-01-01T00:00:00Z", "exec", "", "")
-	auditor.RecordToolCall(callID1, "2026-01-01T00:00:00Z", "read_file", "", "")
+	auditor.RecordToolCallWithSource(callID1, "2026-01-01T00:00:00Z", "exec", "", "", &SourceDescriptor{SourceKey: "tool:exec:internal_api", Category: "internal_api"})
+	auditor.RecordToolCallWithSource(callID1, "2026-01-01T00:00:00Z", "read_file", "", "", &SourceDescriptor{SourceKey: "tool:read_file:public_web", Category: "public_web"})
 
 	callID2, _ := auditor.RecordCall("2026-01-01T01:00:00Z", "t2", "gpt-4", 200, 100, 300, 2000, 200, false, 0, "", false, false, "")
 	_ = callID2
@@ -297,6 +297,14 @@ func TestLLMAuditor_Stats(t *testing.T) {
 	total, ok := stats["total"].(int)
 	if !ok || total != 2 {
 		t.Errorf("total = %v, want 2", stats["total"])
+	}
+
+	bySource, ok := stats["by_source_category"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("by_source_category type = %T, want []map[string]interface{}", stats["by_source_category"])
+	}
+	if len(bySource) != 2 {
+		t.Fatalf("by_source_category len = %d, want 2", len(bySource))
 	}
 
 	// Verify JSON serializable

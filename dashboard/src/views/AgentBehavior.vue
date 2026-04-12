@@ -28,6 +28,7 @@
       <StatCard :iconSvg="svgAlert" :value="stats.high_risk_count" label="高危调用" color="red" />
       <StatCard :iconSvg="svgFlag" :value="stats.flagged_count" label="已标记" color="yellow" />
       <StatCard :iconSvg="svgPercent" :value="stats.high_risk_rate" label="24h高危率" color="purple" />
+      <StatCard :iconSvg="svgGlobe" :value="stats.source_category_count" label="来源分类数" color="green" />
       <StatCard v-if="canaryLeakCount > 0" :iconSvg="svgCanary" :value="canaryLeakCount" label="Prompt 泄露" color="yellow" />
       <StatCard v-if="budgetViolationCount > 0" :iconSvg="svgBudget" :value="budgetViolationCount" label="预算超限" color="red" />
     </div>
@@ -104,6 +105,18 @@
         <div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span><span class="card-title">风险等级分布</span></div>
         <Skeleton v-if="!loaded" type="chart" />
         <PieChart v-else :data="pieData" :size="180" />
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><span class="card-icon"><Icon name="globe" :size="16" /></span><span class="card-title">来源分类分布</span></div>
+      <EmptyState v-if="loaded && !sourceCategoryRows.length" :iconSvg="svgGlobeLarge" title="暂无来源分类数据" description="当 tool call 被来源分类后，这里会显示 public_web / internal_api / external_api 等分布" />
+      <div v-else class="source-category-list">
+        <div v-for="row in sourceCategoryRows" :key="row.category" class="source-category-row">
+          <span class="source-badge">{{ row.category }}</span>
+          <div class="hbar-track source-track"><div class="hbar-fill hbar-fill-anim source-fill" :style="{ '--target-w': Math.max(6, row.pct) + '%' }">{{ row.count }}</div></div>
+          <span class="source-pct">{{ row.pct.toFixed(1) }}%</span>
+        </div>
       </div>
     </div>
 
@@ -211,6 +224,8 @@ const svgBar='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke
 const svgShieldCheck='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>'
 const svgCanary='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 15h8"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/></svg>'
 const svgBudget='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>'
+const svgGlobe='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>'
+const svgGlobeLarge='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>'
 
 const riskColors={low:'#6B7280',medium:'#3B82F6',high:'#F59E0B',critical:'#EF4444'}
 const criticalTools=new Set(['exec','shell','bash','run_command','execute_command'])
@@ -221,10 +236,11 @@ function classifyRisk(n){return criticalTools.has(n)?'critical':highTools.has(n)
 function getRiskColor(r){return riskColors[r]||'#6B7280'}
 
 const loaded=ref(false)
-const stats=ref({total:0,high_risk_count:0,flagged_count:0,high_risk_rate:'0%'})
+const stats=ref({total:0,high_risk_count:0,flagged_count:0,high_risk_rate:'0%',source_category_count:0})
 const timelineData=ref([]),trendRange=ref('24h'),topTools=ref([]),pieData=ref([])
 const highRiskRecords=ref([]),expandedIds=ref(new Set()),highRiskRef=ref(null)
 const canaryLeakCount=ref(0),budgetViolationCount=ref(0)
+const sourceCategoryRows=ref([])
 const searchText=ref(''),filterRisk=ref('')
 const showRules=ref(false)
 const rules=ref([
@@ -288,12 +304,15 @@ async function loadData(){
     const d=await api('/api/v1/llm/tools/stats')
     const hrc=(d.by_risk?.high||0)+(d.by_risk?.critical||0),total=d.total||0
     const rate=total>0?((d.high_risk_24h||0)/total*100).toFixed(1):'0.0'
-    stats.value={total,high_risk_count:hrc,flagged_count:d.flagged_count||0,high_risk_rate:rate+'%'}
+    const bySource=Array.isArray(d.by_source_category)?d.by_source_category:[]
+    stats.value={total,high_risk_count:hrc,flagged_count:d.flagged_count||0,high_risk_rate:rate+'%',source_category_count:bySource.length}
     const byTool=d.by_tool||[],maxC=byTool.length?byTool[0].count:1
     topTools.value=byTool.slice(0,10).map(t=>({name:t.name,count:t.count,pct:(t.count/maxC)*100}))
     const byRisk=d.by_risk||{}
     pieData.value=[{label:'critical',value:byRisk.critical||0,color:'#EF4444'},{label:'high',value:byRisk.high||0,color:'#F59E0B'},{label:'medium',value:byRisk.medium||0,color:'#3B82F6'},{label:'low',value:byRisk.low||0,color:'#6B7280'}].filter(d=>d.value>0)
-  }catch{stats.value={total:0,high_risk_count:0,flagged_count:0,high_risk_rate:'0%'};topTools.value=[];pieData.value=[]}
+    const sourceMax=bySource.length?bySource[0].count:1
+    sourceCategoryRows.value=bySource.map(s=>({category:s.category,count:s.count,pct:(s.count/sourceMax)*100}))
+  }catch{stats.value={total:0,high_risk_count:0,flagged_count:0,high_risk_rate:'0%',source_category_count:0};topTools.value=[];pieData.value=[];sourceCategoryRows.value=[]}
   await loadTimeline()
   try{const d=await api('/api/v1/llm/tools?risk_level=critical&limit=10'),d2=await api('/api/v1/llm/tools?risk_level=high&limit=10');highRiskRecords.value=[...(d.records||[]),...(d2.records||[])].sort((a,b)=>b.id-a.id).slice(0,20)}catch{highRiskRecords.value=[]}
   try{canaryLeakCount.value=(await api('/api/v1/llm/canary/status')).leak_count||0}catch{canaryLeakCount.value=0}
@@ -323,6 +342,11 @@ onUnmounted(()=>clearInterval(timer))
 .source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.28);color:#86efac;font-size:11px;font-family:var(--font-mono)}
 .source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .source-key{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);word-break:break-all}
+.source-category-list{display:flex;flex-direction:column;gap:10px}
+.source-category-row{display:grid;grid-template-columns:160px 1fr 64px;gap:10px;align-items:center}
+.source-track{height:18px}
+.source-fill{background:linear-gradient(90deg,#22c55e,#14b8a6);font-size:11px}
+.source-pct{font-size:12px;color:var(--text-secondary);text-align:right}
 
 .filter-bar{padding:12px 16px}.filter-bar-inner{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .search-box{position:relative;flex:1;min-width:200px}

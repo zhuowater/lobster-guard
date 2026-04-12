@@ -1309,11 +1309,12 @@ func (la *LLMAuditor) QueryToolCalls(toolName, riskLevel, from, to string, limit
 // ToolStats 返回工具统计
 func (la *LLMAuditor) ToolStats() (map[string]interface{}, error) {
 	stats := map[string]interface{}{
-		"total":         0,
-		"by_tool":       []map[string]interface{}{},
-		"by_risk":       map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0},
-		"high_risk_24h": 0,
-		"flagged_count": 0,
+		"total":              0,
+		"by_tool":            []map[string]interface{}{},
+		"by_risk":            map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0},
+		"by_source_category": []map[string]interface{}{},
+		"high_risk_24h":      0,
+		"flagged_count":      0,
 	}
 
 	var total int
@@ -1350,6 +1351,23 @@ func (la *LLMAuditor) ToolStats() (map[string]interface{}, error) {
 			}
 		}
 		stats["by_risk"] = byRisk
+	}
+
+	// by_source_category
+	rows3, err := la.db.Query("SELECT COALESCE(NULLIF(source_category,''),'unclassified') as source_category, COUNT(*) as cnt FROM llm_tool_calls GROUP BY source_category ORDER BY cnt DESC LIMIT 12")
+	if err == nil {
+		defer rows3.Close()
+		var bySource []map[string]interface{}
+		for rows3.Next() {
+			var category string
+			var count int
+			if rows3.Scan(&category, &count) == nil {
+				bySource = append(bySource, map[string]interface{}{"category": category, "count": count})
+			}
+		}
+		if bySource != nil {
+			stats["by_source_category"] = bySource
+		}
 	}
 
 	since24h := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
