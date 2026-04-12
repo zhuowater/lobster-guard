@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type llmToolGovernanceContext struct {
@@ -25,6 +26,58 @@ type llmToolGovernanceResult struct {
 	Reason  string
 }
 
+func pathSourceRiskDelta(sourceDesc *SourceDescriptor) float64 {
+	if sourceDesc == nil {
+		return 0
+	}
+	switch sourceDesc.Category {
+	case "metadata_service":
+		return 55
+	case "internal_api":
+		return 20
+	case "external_api":
+		if sourceDesc.AuthType != "" && sourceDesc.AuthType != "none" {
+			return 18
+		}
+		return 15
+	case "public_web":
+		return 5
+	default:
+		if sourceDesc.PrivateNetwork {
+			return 20
+		}
+		return 0
+	}
+}
+
+func applySourceClassificationToPathPolicy(engine *PathPolicyEngine, traceID string, sourceDesc *SourceDescriptor) {
+	if engine == nil || traceID == "" || sourceDesc == nil || sourceDesc.Category == "" {
+		return
+	}
+	engine.RegisterStep(traceID, PathStep{
+		Stage:     "source_classification",
+		Action:    "source:" + sourceDesc.Category,
+		RiskDelta: pathSourceRiskDelta(sourceDesc),
+		Details:   sourceDesc.SourceKey,
+	})
+	engine.AddTaintLabel(traceID, "SOURCE:"+strings.ToUpper(sourceDesc.Category))
+	engine.AddTaintLabel(traceID, "CONF:"+sourceDesc.Confidentiality.String())
+	engine.AddTaintLabel(traceID, "INTEG:"+sourceDesc.Integrity.String())
+	if sourceDesc.PrivateNetwork || sourceDesc.Category == "metadata_service" {
+		engine.AddTaintLabel(traceID, "PRIVATE_NETWORK")
+	}
+	if sourceDesc.AuthType != "" && sourceDesc.AuthType != "none" {
+		engine.AddTaintLabel(traceID, "AUTH:"+strings.ToUpper(sourceDesc.AuthType))
+	}
+}
+
+func registerCapabilityToolResultWithSource(engine *CapabilityEngine, tenantMgr *TenantManager, tenantID, traceID, toolName, dataID, toolArgs string) *CapToolResult {
+	if engine == nil {
+		return nil
+	}
+	return engine.RegisterToolResultWithSource(traceID, toolName, dataID, classifyToolSourceForTenant(tenantMgr, tenantID, toolName, toolArgs))
+}
+
 func (lp *LLMProxy) evaluateToolPolicyForResponseTool(ctx llmToolGovernanceContext, tcName, tcArgs string) (*ToolCallEvent, bool) {
 	if lp.tenantMgr != nil {
 		tcfg := lp.tenantMgr.GetConfig(ctx.TenantID)
@@ -34,7 +87,9 @@ func (lp *LLMProxy) evaluateToolPolicyForResponseTool(ctx llmToolGovernanceConte
 		}
 	}
 	tpEvent := lp.toolPolicy.Evaluate(tcName, tcArgs, ctx.TraceID, ctx.TenantID)
+	sourceDesc := classifyToolSourceForTenant(lp.tenantMgr, ctx.TenantID, tcName, tcArgs)
 	if lp.pathPolicyEngine != nil && lp.isEngineEnabled("path_policy") {
+		applySourceClassificationToPathPolicy(lp.pathPolicyEngine, ctx.TraceID, sourceDesc)
 		lp.pathPolicyEngine.RegisterStep(ctx.TraceID, PathStep{Stage: "tool_call", Action: tcName, Details: tcArgs})
 		ppDec := lp.pathPolicyEngine.Evaluate(ctx.TraceID, tcName)
 		if actionSev(ppDec.Decision) > actionSev(tpEvent.Decision) {

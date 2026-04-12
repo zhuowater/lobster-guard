@@ -536,9 +536,18 @@ func TestPathPolicyEngine_DefaultRulesCount(t *testing.T) {
 	e := NewPathPolicyEngine(db)
 
 	rules := e.ListRules()
-	// 8 原始 + 5 AI Act + 2 Semiconductor + 3 v29.0 = 18
-	if len(rules) != 18 {
-		t.Errorf("expected 18 default rules (8 + 5 AI Act + 2 Semiconductor + 3 v29.0), got %d", len(rules))
+	// 8 原始 + 5 AI Act + 2 Semiconductor + 3 v29.0 + 5 source-aware = 23
+	if len(rules) != 23 {
+		t.Errorf("expected 23 default rules (8 + 5 AI Act + 2 Semiconductor + 3 v29.0 + 5 source-aware), got %d", len(rules))
+	}
+	ids := map[string]bool{}
+	for _, r := range rules {
+		ids[r.ID] = true
+	}
+	for _, id := range []string{"pp-019", "pp-020", "pp-021", "pp-022", "pp-023"} {
+		if !ids[id] {
+			t.Errorf("missing source-aware default rule %s", id)
+		}
 	}
 }
 

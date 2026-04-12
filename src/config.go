@@ -277,6 +277,8 @@ type Config struct {
 	Deviation DeviationConfig `yaml:"deviation" json:"deviation"`
 	// v26.0 信息流控制
 	IFC IFCConfig `yaml:"ifc" json:"ifc"`
+	// v37.x URL/API source classification
+	SourceClassifier ToolSourceClassifierConfig `yaml:"source_classifier" json:"source_classifier"`
 	// v31.0 AC 智能分级（自动模式）
 	AutoReview RuleAutoReviewConfig `yaml:"auto_review" json:"auto_review"`
 	// v32.13 金丝雀自动轮换
@@ -1430,6 +1432,19 @@ func validateConfig(cfg *Config) []string {
 	for _, p := range cfg.OutboundPIIPatterns {
 		if _, err := regexp.Compile(p.Pattern); err != nil {
 			errs = append(errs, fmt.Sprintf("PII 模式 %q 正则编译失败: pattern=%q error=%v", p.Name, p.Pattern, err))
+		}
+	}
+
+	// source_classifier 规则正则能编译
+	for _, rule := range cfg.SourceClassifier.Rules {
+		for _, pair := range [][2]string{{rule.HostPattern, "host_pattern"}, {rule.PathPattern, "path_pattern"}, {rule.MethodPattern, "method_pattern"}, {rule.AuthTypePattern, "auth_type_pattern"}, {rule.ToolPattern, "tool_pattern"}} {
+			pattern, field := pair[0], pair[1]
+			if pattern == "" {
+				continue
+			}
+			if _, err := regexp.Compile(pattern); err != nil {
+				errs = append(errs, fmt.Sprintf("source_classifier 规则 %q 的 %s 正则编译失败: pattern=%q error=%v", rule.Name, field, pattern, err))
+			}
 		}
 	}
 

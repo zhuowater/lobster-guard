@@ -22,11 +22,31 @@ func collectIFCVarIDs(vars []IFCVariable) []string {
 	return ids
 }
 
+func sourceDescriptorToIFCLabel(sourceDesc *SourceDescriptor) IFCLabel {
+	if sourceDesc == nil {
+		return IFCLabel{}
+	}
+	return IFCLabel{
+		Confidentiality: sourceDesc.Confidentiality,
+		Integrity:       sourceDesc.Integrity,
+	}
+}
+
 func (lp *LLMProxy) evaluateIFCForTool(w http.ResponseWriter, ctx llmIFCGovernanceContext, tool, args string) bool {
 	if lp.ifcEngine == nil || !lp.ifcEngine.config.Enabled {
 		return false
 	}
+	sourceDesc := NewToolSourceClassifier().Classify(tool, args)
 	toolSource := "tool:" + tool
+	if sourceDesc != nil {
+		toolSource = sourceDesc.SourceKey
+		if sourceDesc.URL != "" {
+			lp.ifcEngine.RegisterSourceRule(toolSource, sourceDescriptorToIFCLabel(sourceDesc))
+			log.Printf("[SourceClassify] tool=%s category=%s host=%s path=%s auth=%s conf=%s integ=%s trace=%s",
+				tool, sourceDesc.Category, sourceDesc.Host, sourceDesc.Path, sourceDesc.AuthType,
+				sourceDesc.Confidentiality, sourceDesc.Integrity, ctx.TraceID)
+		}
+	}
 	toolVar := lp.ifcEngine.RegisterVariable(ctx.TraceID, "tool_result_"+tool, toolSource, args)
 	if toolVar == nil {
 		return false

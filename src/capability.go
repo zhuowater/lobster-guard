@@ -34,14 +34,15 @@ type CapLabel struct {
 }
 
 type CapDataItem struct {
-	DataID     string     `json:"data_id"`
-	Content    string     `json:"content"`
-	Source     string     `json:"source"`
-	Sources    []string   `json:"sources"`    // CaMeL: accumulated source set (union of all ancestors)
-	ParentIDs  []string   `json:"parent_ids"` // CaMeL: dependency tracking for propagation
-	Labels     []CapLabel `json:"labels"`
-	TrustScore float64   `json:"trust_score"`
-	CreatedAt  string     `json:"created_at"`
+	DataID           string            `json:"data_id"`
+	Content          string            `json:"content"`
+	Source           string            `json:"source"`
+	Sources          []string          `json:"sources"`    // CaMeL: accumulated source set (union of all ancestors)
+	ParentIDs        []string          `json:"parent_ids"` // CaMeL: dependency tracking for propagation
+	Labels           []CapLabel        `json:"labels"`
+	TrustScore       float64           `json:"trust_score"`
+	SourceDescriptor *SourceDescriptor `json:"source_descriptor,omitempty"`
+	CreatedAt        string            `json:"created_at"`
 }
 
 type CapContext struct {
@@ -222,9 +223,53 @@ func (ce *CapabilityEngine) InitContext(traceID, userID string, userCaps []CapLa
 	return ctx
 }
 
+func capSourceTrustOverride(sourceDesc *SourceDescriptor, current float64) float64 {
+	if sourceDesc == nil {
+		return current
+	}
+	if sourceDesc.TrustScore > 0 {
+		if current == 0 || sourceDesc.TrustScore < current {
+			current = sourceDesc.TrustScore
+		}
+	}
+	switch sourceDesc.Category {
+	case "metadata_service":
+		if current == 0 || current > 0.05 { return 0.05 }
+	case "internal_api":
+		if current == 0 || current > 0.35 { return 0.35 }
+	case "external_api":
+		if current == 0 || current > 0.45 { return 0.45 }
+	case "public_web":
+		if current == 0 || current > 0.2 { return 0.2 }
+	}
+	return current
+}
+
+func capSourceLabels(sourceDesc *SourceDescriptor) []CapLabel {
+	if sourceDesc == nil {
+		return nil
+	}
+	labels := []CapLabel{
+		{Name: "source_category", Source: sourceDesc.SourceKey, Level: sourceDesc.Category, Granted: false},
+		{Name: "confidentiality", Source: sourceDesc.SourceKey, Level: strings.ToLower(sourceDesc.Confidentiality.String()), Granted: false},
+		{Name: "integrity", Source: sourceDesc.SourceKey, Level: strings.ToLower(sourceDesc.Integrity.String()), Granted: false},
+	}
+	if sourceDesc.AuthType != "" && sourceDesc.AuthType != "none" {
+		labels = append(labels, CapLabel{Name: "auth", Source: sourceDesc.SourceKey, Level: strings.ToLower(sourceDesc.AuthType), Granted: false})
+	}
+	return labels
+}
+
 func (ce *CapabilityEngine) RegisterToolResult(traceID, toolName, dataID string) *CapToolResult {
+	return ce.RegisterToolResultWithSource(traceID, toolName, dataID, nil)
+}
+
+func (ce *CapabilityEngine) RegisterToolResultWithSource(traceID, toolName, dataID string, sourceDesc *SourceDescriptor) *CapToolResult {
 	now := time.Now().UTC().Format(time.RFC3339)
 	rawCaps := []CapLabel{{Name: "none", Source: "tool_result", Level: "none", Granted: false}}
+	if extra := capSourceLabels(sourceDesc); len(extra) > 0 {
+		rawCaps = append(rawCaps, extra...)
+	}
 
 	ce.mu.Lock()
 	ctx := ce.contexts[traceID]
@@ -237,8 +282,18 @@ func (ce *CapabilityEngine) RegisterToolResult(traceID, toolName, dataID string)
 	if mappedCaps == nil { mappedCaps = []CapLabel{} }
 	tr := CapToolResult{ToolName: toolName, DataID: dataID, RawCaps: rawCaps, MappedCaps: mappedCaps, Timestamp: now}
 	tf := 0.0; if mp != nil { tf = mp.TrustFactor }
+	tf = capSourceTrustOverride(sourceDesc, tf)
+	sources := []string{"tool:" + toolName}
+	if sourceDesc != nil {
+		if sourceDesc.SourceKey != "" {
+			sources = append(sources, sourceDesc.SourceKey)
+		}
+		if sourceDesc.Category != "" {
+			sources = append(sources, "source:"+sourceDesc.Category)
+		}
+	}
 	ctx.ToolResults = append(ctx.ToolResults, tr)
-	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "tool_result:" + toolName, Sources: []string{"tool:" + toolName}, Labels: rawCaps, TrustScore: tf, CreatedAt: now}
+	ctx.DataItems[dataID] = &CapDataItem{DataID: dataID, Source: "tool_result:" + toolName, Sources: sources, Labels: rawCaps, TrustScore: tf, SourceDescriptor: sourceDesc, CreatedAt: now}
 	ctx.UpdatedAt = now
 	ce.mu.Unlock()
 	ce.capPersistCtx(ctx)
@@ -431,9 +486,11 @@ func (ce *CapabilityEngine) EvaluateWithProvenance(traceID, dataID, action, tool
 	ce.mu.RLock()
 	ctx := ce.contexts[traceID]
 	var sources []string
+	var sourceDesc *SourceDescriptor
 	if ctx != nil {
 		if di, ok := ctx.DataItems[dataID]; ok {
 			sources = di.Sources
+			sourceDesc = di.SourceDescriptor
 		}
 	}
 	ce.mu.RUnlock()
@@ -442,7 +499,11 @@ func (ce *CapabilityEngine) EvaluateWithProvenance(traceID, dataID, action, tool
 		// Untrusted sources in lineage — for dangerous actions, downgrade to warn
 		if action == "write" || action == "execute" || action == "admin" {
 			eval.Decision = "warn"
-			eval.Reason = fmt.Sprintf("untrusted sources in lineage: %v (original: %s)", sources, eval.Reason)
+			if sourceDesc != nil && sourceDesc.Category != "" {
+				eval.Reason = fmt.Sprintf("untrusted sources in lineage: %v (source_category=%s host=%s original: %s)", sources, sourceDesc.Category, sourceDesc.Host, eval.Reason)
+			} else {
+				eval.Reason = fmt.Sprintf("untrusted sources in lineage: %v (original: %s)", sources, eval.Reason)
+			}
 		}
 	}
 	return eval

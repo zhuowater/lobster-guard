@@ -399,6 +399,25 @@ func (e *IFCEngine) restoreCounters() {
 	}
 }
 
+func (e *IFCEngine) RegisterSourceRule(source string, label IFCLabel) {
+	if source == "" {
+		return
+	}
+
+	e.mu.Lock()
+	e.sourceRules[source] = label
+	e.mu.Unlock()
+
+	if e.db != nil {
+		e.db.Exec(`INSERT OR REPLACE INTO ifc_source_rules (source, conf, integ) VALUES (?, ?, ?)`,
+			source, int(label.Confidentiality), int(label.Integrity))
+	}
+}
+
+// ============================================================
+// RegisterVariable
+// ============================================================
+
 // ============================================================
 // RegisterVariable
 // ============================================================

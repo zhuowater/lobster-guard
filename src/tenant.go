@@ -447,18 +447,19 @@ func (tm *TenantManager) ListMembers(tenantID string) ([]TenantMember, error) {
 
 // TenantConfig 租户安全策略配置
 type TenantConfig struct {
-	TenantID       string `json:"tenant_id"`
-	DisabledRules  string `json:"disabled_rules"`    // 逗号分隔的禁用规则名
-	ExtraRulesYAML string `json:"extra_rules_yaml"`  // 租户额外规则（YAML格式）
-	StrictMode     bool   `json:"strict_mode"`
-	CanaryEnabled  bool   `json:"canary_enabled"`
-	BudgetEnabled  bool   `json:"budget_enabled"`
-	BudgetMaxTokens int   `json:"budget_max_tokens"` // 0=使用全局
-	BudgetMaxTools  int   `json:"budget_max_tools"`  // 0=使用全局
-	ToolBlacklist  string `json:"tool_blacklist"`     // 逗号分隔
-	AlertLevel     string `json:"alert_level"`        // low/medium/high/critical
-	AlertWebhook   string `json:"alert_webhook"`      // 租户专属 webhook
-	UpdatedAt      string `json:"updated_at"`
+	TenantID             string `json:"tenant_id"`
+	DisabledRules        string `json:"disabled_rules"`          // 逗号分隔的禁用规则名
+	ExtraRulesYAML       string `json:"extra_rules_yaml"`        // 租户额外规则（YAML格式）
+	SourceClassifierYAML string `json:"source_classifier_yaml"`  // 租户 source classifier override（YAML格式）
+	StrictMode           bool   `json:"strict_mode"`
+	CanaryEnabled        bool   `json:"canary_enabled"`
+	BudgetEnabled        bool   `json:"budget_enabled"`
+	BudgetMaxTokens      int    `json:"budget_max_tokens"` // 0=使用全局
+	BudgetMaxTools       int    `json:"budget_max_tools"`  // 0=使用全局
+	ToolBlacklist        string `json:"tool_blacklist"`     // 逗号分隔
+	AlertLevel           string `json:"alert_level"`        // low/medium/high/critical
+	AlertWebhook         string `json:"alert_webhook"`      // 租户专属 webhook
+	UpdatedAt            string `json:"updated_at"`
 }
 
 // initConfigSchema 初始化租户安全配置表
@@ -467,6 +468,7 @@ func (tm *TenantManager) initConfigSchema() {
 		tenant_id TEXT PRIMARY KEY,
 		disabled_rules TEXT DEFAULT '',
 		extra_rules_yaml TEXT DEFAULT '',
+		source_classifier_yaml TEXT DEFAULT '',
 		strict_mode INTEGER DEFAULT 0,
 		canary_enabled INTEGER DEFAULT 1,
 		budget_enabled INTEGER DEFAULT 1,
@@ -477,6 +479,7 @@ func (tm *TenantManager) initConfigSchema() {
 		alert_webhook TEXT DEFAULT '',
 		updated_at TEXT DEFAULT ''
 	)`)
+	tm.db.Exec(`ALTER TABLE tenant_configs ADD COLUMN source_classifier_yaml TEXT DEFAULT ''`)
 }
 
 // GetConfig 获取租户安全配置（不存在则返回默认值）
@@ -489,8 +492,8 @@ func (tm *TenantManager) GetConfig(tenantID string) *TenantConfig {
 	}
 
 	var strict, canary, budget int
-	err := tm.db.QueryRow(`SELECT disabled_rules, extra_rules_yaml, strict_mode, canary_enabled, budget_enabled, budget_max_tokens, budget_max_tools, tool_blacklist, alert_level, alert_webhook, updated_at FROM tenant_configs WHERE tenant_id=?`, tenantID).Scan(
-		&cfg.DisabledRules, &cfg.ExtraRulesYAML, &strict, &canary, &budget,
+	err := tm.db.QueryRow(`SELECT disabled_rules, extra_rules_yaml, source_classifier_yaml, strict_mode, canary_enabled, budget_enabled, budget_max_tokens, budget_max_tools, tool_blacklist, alert_level, alert_webhook, updated_at FROM tenant_configs WHERE tenant_id=?`, tenantID).Scan(
+		&cfg.DisabledRules, &cfg.ExtraRulesYAML, &cfg.SourceClassifierYAML, &strict, &canary, &budget,
 		&cfg.BudgetMaxTokens, &cfg.BudgetMaxTools, &cfg.ToolBlacklist,
 		&cfg.AlertLevel, &cfg.AlertWebhook, &cfg.UpdatedAt)
 	if err != nil {
@@ -516,11 +519,12 @@ func (tm *TenantManager) UpdateConfig(cfg *TenantConfig) error {
 	}
 	cfg.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 
-	_, err := tm.db.Exec(`INSERT INTO tenant_configs (tenant_id, disabled_rules, extra_rules_yaml, strict_mode, canary_enabled, budget_enabled, budget_max_tokens, budget_max_tools, tool_blacklist, alert_level, alert_webhook, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := tm.db.Exec(`INSERT INTO tenant_configs (tenant_id, disabled_rules, extra_rules_yaml, source_classifier_yaml, strict_mode, canary_enabled, budget_enabled, budget_max_tokens, budget_max_tools, tool_blacklist, alert_level, alert_webhook, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(tenant_id) DO UPDATE SET
 			disabled_rules=excluded.disabled_rules,
 			extra_rules_yaml=excluded.extra_rules_yaml,
+			source_classifier_yaml=excluded.source_classifier_yaml,
 			strict_mode=excluded.strict_mode,
 			canary_enabled=excluded.canary_enabled,
 			budget_enabled=excluded.budget_enabled,
@@ -530,7 +534,7 @@ func (tm *TenantManager) UpdateConfig(cfg *TenantConfig) error {
 			alert_level=excluded.alert_level,
 			alert_webhook=excluded.alert_webhook,
 			updated_at=excluded.updated_at`,
-		cfg.TenantID, cfg.DisabledRules, cfg.ExtraRulesYAML,
+		cfg.TenantID, cfg.DisabledRules, cfg.ExtraRulesYAML, cfg.SourceClassifierYAML,
 		boolToInt(cfg.StrictMode), boolToInt(cfg.CanaryEnabled), boolToInt(cfg.BudgetEnabled),
 		cfg.BudgetMaxTokens, cfg.BudgetMaxTools, cfg.ToolBlacklist,
 		cfg.AlertLevel, cfg.AlertWebhook, cfg.UpdatedAt)

@@ -695,6 +695,12 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleLLMTemplateList(w, r)
 	case path == "/api/v1/llm/templates" && method == "POST":
 		api.handleLLMTemplateCreate(w, r)
+	case path == "/api/v1/source-classifier" && method == "GET":
+		api.handleSourceClassifierGet(w, r)
+	case path == "/api/v1/source-classifier" && method == "PUT":
+		api.handleSourceClassifierUpdate(w, r)
+	case path == "/api/v1/source-classifier/explain" && method == "POST":
+		api.handleSourceClassifierExplain(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && strings.HasSuffix(path, "/enable") && method == "POST":
 		api.handleLLMTemplateEnable(w, r)
 	case strings.HasPrefix(path, "/api/v1/llm/templates/") && method == "GET":

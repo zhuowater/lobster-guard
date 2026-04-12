@@ -248,6 +248,47 @@
                 <div class="config-field compact flex1"><label>Webhook</label><input class="form-input" v-model="tenantConfigs[t.id].alert_webhook" placeholder="https://..." /></div>
               </div>
             </div>
+            <div class="config-group">
+              <div class="config-group-title"><Icon name="globe" :size="12" /> Source Classifier Override</div>
+              <div class="config-field">
+                <label>source_classifier_yaml</label>
+                <textarea class="form-input form-textarea code-textarea" v-model="tenantConfigs[t.id].source_classifier_yaml" rows="8" placeholder="rules:
+  - name: tenant-docs
+    host_pattern: '^docs\\.python\\.org$'
+    category: tenant_docs
+    confidentiality: 2
+    integrity: 2
+    trust_score: 0.77"></textarea>
+                <div class="field-hint">租户规则优先于全局 source_classifier。下面可直接对比 global vs override 的实际命中结果。</div>
+              </div>
+              <div class="config-row align-end">
+                <div class="config-field flex1">
+                  <label>Diff 预览 Tool</label>
+                  <input class="form-input" v-model="tenantSourcePreview[t.id].tool_name" placeholder="web_fetch" />
+                </div>
+                <div class="config-field flex1">
+                  <label>Diff 预览 URL</label>
+                  <input class="form-input" v-model="tenantSourcePreview[t.id].url" placeholder="https://docs.python.org/3/library/json.html" />
+                </div>
+                <button class="btn-sm btn-outline" @click="runTenantSourceDiff(t.id)" :disabled="tenantSourcePreviewLoading[t.id]">{{ tenantSourcePreviewLoading[t.id] ? '对比中...' : '比较差异' }}</button>
+              </div>
+              <div v-if="tenantSourcePreviewError[t.id]" class="field-error">{{ tenantSourcePreviewError[t.id] }}</div>
+              <div v-if="tenantSourcePreviewResult[t.id]" class="source-diff-grid">
+                <div class="source-diff-card">
+                  <div class="diff-title">Global</div>
+                  <div class="diff-line"><span>Category</span><strong>{{ tenantSourcePreviewResult[t.id].global_descriptor?.category || '-' }}</strong></div>
+                  <div class="diff-line"><span>Rule</span><strong>{{ tenantSourcePreviewResult[t.id].global_rule?.name || 'heuristic' }}</strong></div>
+                  <div class="diff-line"><span>Scope</span><strong>{{ tenantSourcePreviewResult[t.id].global_rule?.scope || 'global' }}</strong></div>
+                </div>
+                <div class="source-diff-card highlight-card">
+                  <div class="diff-title">Effective</div>
+                  <div class="diff-line"><span>Category</span><strong>{{ tenantSourcePreviewResult[t.id].effective_descriptor?.category || '-' }}</strong></div>
+                  <div class="diff-line"><span>Rule</span><strong>{{ tenantSourcePreviewResult[t.id].effective_rule?.name || 'heuristic' }}</strong></div>
+                  <div class="diff-line"><span>Scope</span><strong>{{ tenantSourcePreviewResult[t.id].effective_rule?.scope || '-' }}</strong></div>
+                </div>
+              </div>
+              <div v-if="tenantSourcePreviewResult[t.id]" class="field-hint">Override Active: <strong>{{ tenantSourcePreviewResult[t.id].tenant_override_active ? 'Yes' : 'No' }}</strong></div>
+            </div>
             <div class="config-actions">
               <button class="btn-sm btn-primary" @click="saveTenantConfig(t.id)" :disabled="savingConfig[t.id]">{{ savingConfig[t.id] ? '保存中...' : '保存配置' }}</button>
             </div>
@@ -356,6 +397,10 @@ const members = reactive({})
 const tenantConfigs = reactive({})
 const savingConfig = reactive({})
 const activeTab = reactive({})
+const tenantSourcePreview = reactive({})
+const tenantSourcePreviewResult = reactive({})
+const tenantSourcePreviewLoading = reactive({})
+const tenantSourcePreviewError = reactive({})
 const pageLoading = ref(true)
 const viewMode = ref('card')
 const searchQuery = ref('')
@@ -414,12 +459,17 @@ const memberPlaceholder = computed(() => {
 })
 
 function clearFormError(f) { const v = {...formErrors.value}; delete v[f]; formErrors.value = v }
+function ensureTenantSourcePreview(tid) {
+  if (!tenantSourcePreview[tid]) {
+    tenantSourcePreview[tid] = { tool_name: 'web_fetch', url: 'https://docs.python.org/3/library/json.html' }
+  }
+}
 
 async function loadTenants() {
   pageLoading.value = true
   try {
     const d = await api('/api/v1/tenants'); tenants.value = d.tenants || []
-    for (const t of tenants.value) { if (!activeTab[t.id]) activeTab[t.id] = 'members'; loadMembers(t.id) }
+    for (const t of tenants.value) { if (!activeTab[t.id]) activeTab[t.id] = 'members'; ensureTenantSourcePreview(t.id); loadMembers(t.id) }
   } catch { tenants.value = [] } finally { pageLoading.value = false }
 }
 
@@ -427,6 +477,7 @@ async function loadMembers(tid) { try { const d = await api('/api/v1/tenants/' +
 
 async function loadTenantConfig(tid) {
   if (tenantConfigs[tid]) return
+  ensureTenantSourcePreview(tid)
   try { const d = await api('/api/v1/tenants/' + tid + '/config'); tenantConfigs[tid] = d.config || {} }
   catch { tenantConfigs[tid] = { canary_enabled: true, budget_enabled: true, alert_level: 'high' } }
   // v27.0: 同时加载模板列表和租户策略
@@ -444,6 +495,24 @@ async function saveTenantConfig(tid) {
   savingConfig[tid] = true
   try { await apiPut('/api/v1/tenants/' + tid + '/config', tenantConfigs[tid]); showToast('安全配置已保存') }
   catch(e) { showToast('保存失败: ' + e.message) } finally { savingConfig[tid] = false }
+}
+
+async function runTenantSourceDiff(tid) {
+  ensureTenantSourcePreview(tid)
+  tenantSourcePreviewLoading[tid] = true
+  tenantSourcePreviewError[tid] = ''
+  try {
+    tenantSourcePreviewResult[tid] = await apiPost('/api/v1/source-classifier/explain', {
+      tenant_id: tid,
+      tool_name: tenantSourcePreview[tid].tool_name || 'web_fetch',
+      tool_args: { url: tenantSourcePreview[tid].url || '' },
+    })
+  } catch (e) {
+    tenantSourcePreviewResult[tid] = null
+    tenantSourcePreviewError[tid] = e.message || '比较失败'
+  } finally {
+    tenantSourcePreviewLoading[tid] = false
+  }
 }
 
 // v27.0: 策略模板管理
@@ -777,6 +846,13 @@ onMounted(loadTenants)
 .form-input { width: 100%; padding: 8px 12px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-md); color: var(--text-primary); font-size: var(--text-sm); outline: none; box-sizing: border-box; font-family: var(--font-sans); transition: border-color var(--transition-fast); }
 .form-input:focus { border-color: var(--color-primary); }
 .form-textarea { resize: vertical; min-height: 60px; font-family: var(--font-mono); }
+.code-textarea { min-height: 160px; line-height: 1.45; }
+.align-end { align-items: end; }
+.source-diff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-2); }
+.source-diff-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 12px; background: var(--bg-elevated); }
+.highlight-card { border-color: rgba(59, 130, 246, 0.45); box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15); }
+.diff-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px; }
+.diff-line { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 6px; }
 .input-error { border-color: #EF4444 !important; }
 .field-error { font-size: 11px; color: #EF4444; margin-top: 2px; }
 .form-check { padding-top: var(--space-1); }

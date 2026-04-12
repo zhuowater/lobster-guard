@@ -85,6 +85,45 @@ func TestCapabilityRegisterToolResult(t *testing.T) {
 	}
 }
 
+func TestCapabilityRegisterToolResultWithSourceDescriptor(t *testing.T) {
+	db := setupCapTestDB(t)
+	defer db.Close()
+	ce := NewCapabilityEngine(db, defaultCapConfig)
+	ce.InitContext("trace-src-1", "user-1", nil)
+
+	desc := &SourceDescriptor{
+		SourceKey:       "tool:http_request:metadata_service",
+		Category:        "metadata_service",
+		Host:            "169.254.169.254",
+		Confidentiality: ConfSecret,
+		Integrity:       IntegLow,
+		AuthType:        "none",
+		PrivateNetwork:  true,
+		TrustScore:      0.05,
+	}
+	tr := ce.RegisterToolResultWithSource("trace-src-1", "http_request", "data-meta-1", desc)
+	if tr == nil {
+		t.Fatal("expected non-nil tool result")
+	}
+	ctx := ce.GetContext("trace-src-1")
+	if ctx == nil {
+		t.Fatal("expected context")
+	}
+	item := ctx.DataItems["data-meta-1"]
+	if item == nil {
+		t.Fatal("expected data item")
+	}
+	if item.SourceDescriptor == nil || item.SourceDescriptor.Category != "metadata_service" {
+		t.Fatalf("expected source descriptor to be persisted, got %#v", item.SourceDescriptor)
+	}
+	if !containsString(item.Sources, "tool:http_request:metadata_service") {
+		t.Fatalf("expected source key in provenance sources, got %#v", item.Sources)
+	}
+	if item.TrustScore > 0.1 {
+		t.Fatalf("expected source-aware trust downgrade, got %.2f", item.TrustScore)
+	}
+}
+
 func TestCapabilityRegisterToolResultNoContext(t *testing.T) {
 	db := setupCapTestDB(t)
 	defer db.Close()
@@ -435,6 +474,40 @@ func TestCapability_EvaluateWithProvenance(t *testing.T) {
 	}
 	if !strings.Contains(eval.Reason, "untrusted sources") {
 		t.Errorf("reason should mention untrusted sources, got: %s", eval.Reason)
+	}
+}
+
+func TestCapability_EvaluateWithProvenance_SourceDescriptorReason(t *testing.T) {
+	db := setupCapTestDB(t)
+	defer db.Close()
+	ce := NewCapabilityEngine(db, CapConfig{Enabled: true, DefaultPolicy: "deny", TrustThreshold: 0.01, EnforceIntersect: true})
+	traceID := "test-provenance-source-" + capGenID()
+	ce.InitContext(traceID, "user1", nil)
+
+	ce.mu.Lock()
+	ce.toolMappings["send_email"] = &CapToolMapping{ToolName: "send_email", AllowedCaps: []string{"execute"}, TrustFactor: 0.9}
+	ce.mu.Unlock()
+
+	desc := &SourceDescriptor{
+		SourceKey:       "tool:http_request:metadata_service",
+		Category:        "metadata_service",
+		Host:            "169.254.169.254",
+		Confidentiality: ConfSecret,
+		Integrity:       IntegLow,
+		TrustScore:      0.05,
+	}
+	ce.RegisterToolResultWithSource(traceID, "http_request", "data-meta-1", desc)
+	ce.PropagateData(traceID, "data-email-meta", "tool:send_email", []string{"data-meta-1"})
+
+	eval := ce.EvaluateWithProvenance(traceID, "data-email-meta", "execute", "send_email")
+	if eval == nil {
+		t.Fatal("expected eval")
+	}
+	if eval.Decision != "warn" {
+		t.Fatalf("expected warn for metadata-derived lineage, got %s (%s)", eval.Decision, eval.Reason)
+	}
+	if !strings.Contains(eval.Reason, "metadata_service") {
+		t.Fatalf("expected reason to mention metadata_service, got %s", eval.Reason)
 	}
 }
 

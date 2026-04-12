@@ -809,7 +809,7 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 					// v25.1+v28.0g: CapabilityEngine — SSE 模式下注册 tool 结果 + source propagation
 					if lp.capabilityEngine != nil && lp.isEngineEnabled("capability") {
 						sseDataID := fmt.Sprintf("sse-tool-%s-%d", tcName, i)
-						lp.capabilityEngine.RegisterToolResult(auditCtx.TraceID, tcName, sseDataID)
+						registerCapabilityToolResultWithSource(lp.capabilityEngine, lp.tenantMgr, "default", auditCtx.TraceID, tcName, sseDataID, tcArgs)
 						// CaMeL: propagate sources from prior tools in this SSE batch
 						if i > 0 {
 							var parentIDs []string
