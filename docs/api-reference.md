@@ -66,6 +66,9 @@
 | GET | `/api/v1/leaderboard` | 安全排行榜 |
 | GET | `/api/v1/tenants` | 租户列表 |
 | POST | `/api/v1/tenants` | 创建租户 |
+| GET | `/api/v1/source-classifier` | 读取全局来源分类规则 |
+| PUT | `/api/v1/source-classifier` | 更新全局来源分类规则 |
+| POST | `/api/v1/source-classifier/explain` | tenant-aware dry-run explain（返回 global/effective descriptor、PathDecision、CapabilityEvaluation） |
 
 ## 高级功能
 
@@ -257,27 +260,60 @@
 ## API 调用示例
 
 ```bash
-TOKEN="your-management-token"
+BASE="http://localhost:9090"
 
 # JWT 登录
 curl -s -X POST -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"xxx"}' \
-  http://localhost:9090/api/v1/auth/login | jq .
+  -d '{"username":"admin","password": "***"}' \
+  "$BASE/api/v1/auth/login" | jq .
 
 # 健康检查
-curl -s http://localhost:9090/healthz | jq .
+curl -s "$BASE/healthz" | jq .
+
+# 下列管理接口请求需自行附带 Authorization: Bearer <MANAGEMENT_TOKEN>
+
+# 查看全局 source classifier 配置
+curl -s "$BASE/api/v1/source-classifier" | jq .
+
+# 更新全局 source classifier 规则
+curl -s -X PUT \
+  -H "Content-Type: application/json" \
+  "$BASE/api/v1/source-classifier" \
+  -d '{
+    "rules": [
+      {
+        "name": "corp-control-plane",
+        "host_pattern": "^control\\.corp\\.example$",
+        "category": "internal_control_plane",
+        "confidentiality": 3,
+        "integrity": 3,
+        "trust_score": 0.91
+      }
+    ]
+  }' | jq .
+
+# 对单个 tool call 做 tenant-aware explain
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  "$BASE/api/v1/source-classifier/explain" \
+  -d '{
+    "tenant_id": "tenant-a",
+    "tool_name": "web_fetch",
+    "tool_args": {
+      "url": "https://docs.python.org/3/library/json.html"
+    },
+    "proposed_action": "shell_exec",
+    "capability_action": "write"
+  }' | jq .
 
 # 端到端模拟测试
-curl -s -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:9090/api/v1/simulate/traffic | jq .
+curl -s -X POST "$BASE/api/v1/simulate/traffic" | jq .
 
 # 查询拦截日志
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:9090/api/v1/audit/logs?action=block&limit=20" | jq .
+curl -s "$BASE/api/v1/audit/logs?action=block&limit=20" | jq .
 
 # 触发 Red Team 测试
-curl -s -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:9090/api/v1/redteam/run | jq .
+curl -s -X POST "$BASE/api/v1/redteam/run" | jq .
 ```
 
 ## Phase 1 新增 API (v18-v20)

@@ -7,7 +7,7 @@
 <h1 align="center">lobster-guard（龙虾卫士）</h1>
 
 <p align="center">
-  <strong>AI Agent 安全网关 · 双安全域 · 密码学审计链 · 对抗性自进化 · 语义检测 · 污染追踪 · LLM缓存 · API网关 · Gateway监控</strong>
+  <strong>AI Agent 安全网关 · 双安全域 · 来源分类(Source Classifier) · 密码学审计链 · 对抗性自进化 · 语义检测 · 污染追踪 · LLM缓存 · API网关 · Gateway监控</strong>
 </p>
 
 <p align="center">
@@ -64,6 +64,7 @@
 | 🔬 **反事实验证(v24)** | 对照验证 · 因果归因 · 自适应策略 · 成本追踪 |
 | 🧩 **CaMeL(v25)** | 执行计划编译(20+ 模板) · Capability 权限标签 · 偏差检测 + 自动修复 |
 | 🏛️ **IFC 信息流控制(v26)** | Bell-LaPadula 双标签(机密性+完整性) · Selective Hide · 隔离路由 |
+| 🌍 **来源分类(Source Classifier)** | 基于 tool args 中 URL / host / path / auth 的来源分类 · tenant override · explain dry-run |
 | 🔑 **API Key 身份(v27)** | SHA-256 哈希存储 · 日配额 · 租户绑定 · 热缓存 |
 | 🌐 **Gateway 远程管理(v29)** | 持久化 WSS RPC(88 methods) · Sessions/Cron/Agent/Skills/Config 全功能管理 |
 | 📋 **行业模板(v31)** | 40 模板 × 12 分类 · 一键启用全链路(入站+LLM+出站) · 租户绑定 |
@@ -217,6 +218,7 @@ open http://localhost:9090/
 | [🔀 上游管理](docs/upstream-management.md) | CRUD API · 四种来源 · 路由策略 · Dashboard |
 | [🧪 测试说明](docs/testing.md) | 1252 用例 · 端到端模拟 · 性能指标 |
 | [📋 配置参考](docs/configuration.md) | 分层配置(config.yaml + conf.d/) · 引擎开关 |
+| [🌍 来源分类](docs/source-classifier.md) | 全局规则 · tenant override · explain API · Dashboard 用法 |
 | [🖥️ 管理后台](docs/dashboard.md) | 50 页面 · 75 组件 · 导航分组 · 版本变更日志 |
 
 ### 其他文档
