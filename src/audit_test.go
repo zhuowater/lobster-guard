@@ -27,11 +27,15 @@ func TestAuditLogger(t *testing.T) {
 	tmpDB := "/tmp/lobster-guard-test-audit.db"
 	defer os.Remove(tmpDB)
 	db, err := initDB(tmpDB)
-	if err != nil { t.Fatalf("初始化数据库失败: %v", err) }
+	if err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
 	defer db.Close()
 
 	logger, err := NewAuditLogger(db)
-	if err != nil { t.Fatalf("初始化审计日志失败: %v", err) }
+	if err != nil {
+		t.Fatalf("初始化审计日志失败: %v", err)
+	}
 	defer logger.Close()
 
 	logger.Log("inbound", "user1", "block", "prompt_injection", "ignore previous", "hash123", 0.5, "up-1", "app-1")
@@ -41,11 +45,17 @@ func TestAuditLogger(t *testing.T) {
 	logger.Flush() // v32.1: 确保批量缓冲区写入 DB
 
 	logs, err := logger.QueryLogs("inbound", "block", "", 10)
-	if err != nil { t.Fatalf("查询失败: %v", err) }
-	if len(logs) == 0 { t.Fatal("应查到至少1条") }
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("应查到至少1条")
+	}
 
 	stats := logger.Stats()
-	if stats["total"] == nil { t.Fatal("统计应包含 total") }
+	if stats["total"] == nil {
+		t.Fatal("统计应包含 total")
+	}
 }
 
 // ============================================================
@@ -59,7 +69,9 @@ func TestInitDB(t *testing.T) {
 	tmpDB := "/tmp/lobster-guard-test-initdb.db"
 	defer os.Remove(tmpDB)
 	db, err := initDB(tmpDB)
-	if err != nil { t.Fatalf("初始化失败: %v", err) }
+	if err != nil {
+		t.Fatalf("初始化失败: %v", err)
+	}
 	defer db.Close()
 
 	// 验证表存在
@@ -67,7 +79,9 @@ func TestInitDB(t *testing.T) {
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
-		if err != nil { t.Fatalf("表 %s 不存在: %v", table, err) }
+		if err != nil {
+			t.Fatalf("表 %s 不存在: %v", table, err)
+		}
 	}
 }
 
@@ -84,7 +98,6 @@ func TestInitDBIdempotent(t *testing.T) {
 	db2.Close()
 }
 
-
 // ============================================================
 // v3.10 审计日志增强 + 告警通知 测试
 // ============================================================
@@ -94,9 +107,14 @@ func setupTestAuditLogger(t *testing.T) (*sql.DB, *AuditLogger, func()) {
 	t.Helper()
 	tmpDB := t.TempDir() + "/test_v310.db"
 	db, err := initDB(tmpDB)
-	if err != nil { t.Fatalf("initDB failed: %v", err) }
+	if err != nil {
+		t.Fatalf("initDB failed: %v", err)
+	}
 	logger, err := NewAuditLogger(db)
-	if err != nil { db.Close(); t.Fatalf("NewAuditLogger failed: %v", err) }
+	if err != nil {
+		db.Close()
+		t.Fatalf("NewAuditLogger failed: %v", err)
+	}
 	return db, logger, func() { logger.Close(); db.Close() }
 }
 
@@ -117,24 +135,42 @@ func TestQueryLogsEx_FullTextSearch(t *testing.T) {
 
 	// Search for "ignore"
 	logs, err := logger.QueryLogsEx("", "", "", "", "ignore", 100)
-	if err != nil { t.Fatalf("QueryLogsEx error: %v", err) }
-	if len(logs) != 1 { t.Fatalf("expected 1 log with 'ignore', got %d", len(logs)) }
-	if logs[0]["sender_id"] != "user2" { t.Errorf("expected user2, got %v", logs[0]["sender_id"]) }
+	if err != nil {
+		t.Fatalf("QueryLogsEx error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log with 'ignore', got %d", len(logs))
+	}
+	if logs[0]["sender_id"] != "user2" {
+		t.Errorf("expected user2, got %v", logs[0]["sender_id"])
+	}
 
 	// Search for "message"
 	logs, err = logger.QueryLogsEx("", "", "", "", "message", 100)
-	if err != nil { t.Fatalf("QueryLogsEx error: %v", err) }
-	if len(logs) != 1 { t.Fatalf("expected 1 log with 'message', got %d", len(logs)) }
+	if err != nil {
+		t.Fatalf("QueryLogsEx error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log with 'message', got %d", len(logs))
+	}
 
 	// Search with direction filter
 	logs, err = logger.QueryLogsEx("inbound", "", "", "", "hello", 100)
-	if err != nil { t.Fatalf("QueryLogsEx error: %v", err) }
-	if len(logs) != 1 { t.Fatalf("expected 1, got %d", len(logs)) }
+	if err != nil {
+		t.Fatalf("QueryLogsEx error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1, got %d", len(logs))
+	}
 
 	// Search with app_id filter
 	logs, err = logger.QueryLogsEx("", "", "", "app2", "", 100)
-	if err != nil { t.Fatalf("QueryLogsEx error: %v", err) }
-	if len(logs) != 1 { t.Fatalf("expected 1 for app2, got %d", len(logs)) }
+	if err != nil {
+		t.Fatalf("QueryLogsEx error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 for app2, got %d", len(logs))
+	}
 }
 
 func TestQueryLogsEx_AppIDFilter(t *testing.T) {
@@ -147,12 +183,74 @@ func TestQueryLogsEx_AppIDFilter(t *testing.T) {
 	insertTestLog(db, now, "outbound", "user1", "pass", "", "msg3", "bot-alpha")
 
 	logs, err := logger.QueryLogsEx("", "", "", "bot-alpha", "", 100)
-	if err != nil { t.Fatalf("error: %v", err) }
-	if len(logs) != 2 { t.Fatalf("expected 2 for bot-alpha, got %d", len(logs)) }
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 for bot-alpha, got %d", len(logs))
+	}
 
 	logs, err = logger.QueryLogsEx("", "", "", "bot-beta", "", 100)
-	if err != nil { t.Fatalf("error: %v", err) }
-	if len(logs) != 1 { t.Fatalf("expected 1 for bot-beta, got %d", len(logs)) }
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 for bot-beta, got %d", len(logs))
+	}
+}
+
+func TestQueryLogsExTenant_WithSourceClassifierContext(t *testing.T) {
+	db, logger, cleanup := setupTestAuditLogger(t)
+	defer cleanup()
+
+	llmAuditor := NewLLMAuditor(db, LLMAuditConfig{LogToolInput: true, LogToolResult: true, MaxPreviewLen: 512}, &LLMProxyConfig{})
+	traceID := "trace-audit-source"
+	ts := time.Now().UTC().Format(time.RFC3339)
+	insertTestLog(db, ts, "inbound", "user1", "warn", "source check", "fetch docs", "app1")
+	if _, err := db.Exec(`UPDATE audit_log SET trace_id=?, tenant_id='default' WHERE sender_id='user1' AND content_preview='fetch docs'`, traceID); err != nil {
+		t.Fatalf("update audit trace failed: %v", err)
+	}
+
+	callID, err := llmAuditor.RecordCallWithTenant(ts, traceID, "gpt-4o", 10, 20, 30, 12.5, 200, true, 1, "", false, false, "", "", "default")
+	if err != nil {
+		t.Fatalf("record llm call failed: %v", err)
+	}
+	if err := llmAuditor.RecordToolCallWithSource(callID, ts, "web_fetch", `{"url":"https://docs.example.com/runbook"}`, `{"ok":true}`, &SourceDescriptor{SourceKey: "docs.example.com", BaseTool: "web_fetch", URL: "https://docs.example.com/runbook", Host: "docs.example.com", Category: "internal_api"}); err != nil {
+		t.Fatalf("record tool call failed: %v", err)
+	}
+
+	logs, err := logger.QueryLogsExTenant("", "", "", "", "", traceID, "default", "", 20)
+	if err != nil {
+		t.Fatalf("QueryLogsExTenant error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if got := logs[0]["source_categories"]; got != "internal_api" {
+		t.Fatalf("expected source_categories=internal_api, got %v", got)
+	}
+	if got := logs[0]["source_keys"]; got != "docs.example.com" {
+		t.Fatalf("expected source_keys=docs.example.com, got %v", got)
+	}
+	if got := logs[0]["source_tool_call_count"]; got != 1 {
+		t.Fatalf("expected source_tool_call_count=1, got %v", got)
+	}
+
+	filtered, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "internal_api", 20)
+	if err != nil {
+		t.Fatalf("QueryLogsExTenant filtered error: %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered log, got %d", len(filtered))
+	}
+
+	missing, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "metadata_service", 20)
+	if err != nil {
+		t.Fatalf("QueryLogsExTenant missing filter error: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("expected 0 metadata_service logs, got %d", len(missing))
+	}
 }
 
 func TestAuditLogCleanup(t *testing.T) {
@@ -168,13 +266,21 @@ func TestAuditLogCleanup(t *testing.T) {
 
 	// Cleanup with 30 day retention
 	deleted, err := logger.CleanupOldLogs(30)
-	if err != nil { t.Fatalf("CleanupOldLogs error: %v", err) }
-	if deleted != 2 { t.Fatalf("expected 2 deleted, got %d", deleted) }
+	if err != nil {
+		t.Fatalf("CleanupOldLogs error: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected 2 deleted, got %d", deleted)
+	}
 
 	// Verify remaining
 	logs, err := logger.QueryLogs("", "", "", 100)
-	if err != nil { t.Fatalf("QueryLogs error: %v", err) }
-	if len(logs) != 1 { t.Fatalf("expected 1 remaining, got %d", len(logs)) }
+	if err != nil {
+		t.Fatalf("QueryLogs error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(logs))
+	}
 }
 
 func TestAuditLogCleanup_NoneToClean(t *testing.T) {
@@ -182,8 +288,12 @@ func TestAuditLogCleanup_NoneToClean(t *testing.T) {
 	defer cleanup()
 
 	deleted, err := logger.CleanupOldLogs(30)
-	if err != nil { t.Fatalf("error: %v", err) }
-	if deleted != 0 { t.Fatalf("expected 0, got %d", deleted) }
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("expected 0, got %d", deleted)
+	}
 }
 
 func TestAuditStats(t *testing.T) {
@@ -196,10 +306,18 @@ func TestAuditStats(t *testing.T) {
 	insertTestLog(db, ts2, "outbound", "user2", "block", "", "msg2", "")
 
 	stats := logger.AuditStats()
-	if stats["total"] != 2 { t.Fatalf("expected total=2, got %v", stats["total"]) }
-	if stats["earliest"] != ts1 { t.Errorf("expected earliest=%s, got %v", ts1, stats["earliest"]) }
-	if stats["latest"] != ts2 { t.Errorf("expected latest=%s, got %v", ts2, stats["latest"]) }
-	if stats["disk_bytes"] == nil { t.Error("expected disk_bytes") }
+	if stats["total"] != 2 {
+		t.Fatalf("expected total=2, got %v", stats["total"])
+	}
+	if stats["earliest"] != ts1 {
+		t.Errorf("expected earliest=%s, got %v", ts1, stats["earliest"])
+	}
+	if stats["latest"] != ts2 {
+		t.Errorf("expected latest=%s, got %v", ts2, stats["latest"])
+	}
+	if stats["disk_bytes"] == nil {
+		t.Error("expected disk_bytes")
+	}
 }
 
 func TestAuditTimeline(t *testing.T) {
@@ -215,18 +333,34 @@ func TestAuditTimeline(t *testing.T) {
 	insertTestLog(db, h2, "outbound", "user3", "warn", "", "msg3", "")
 
 	timeline := logger.Timeline(24)
-	if len(timeline) != 24 { t.Fatalf("expected 24 hours, got %d", len(timeline)) }
+	if len(timeline) != 24 {
+		t.Fatalf("expected 24 hours, got %d", len(timeline))
+	}
 
 	// The timeline should have entries with non-zero values for recent hours
-	totalPass := 0; totalBlock := 0; totalWarn := 0
+	totalPass := 0
+	totalBlock := 0
+	totalWarn := 0
 	for _, entry := range timeline {
-		if p, ok := entry["pass"].(int); ok { totalPass += p }
-		if b, ok := entry["block"].(int); ok { totalBlock += b }
-		if wa, ok := entry["warn"].(int); ok { totalWarn += wa }
+		if p, ok := entry["pass"].(int); ok {
+			totalPass += p
+		}
+		if b, ok := entry["block"].(int); ok {
+			totalBlock += b
+		}
+		if wa, ok := entry["warn"].(int); ok {
+			totalWarn += wa
+		}
 	}
-	if totalPass < 1 { t.Errorf("expected at least 1 pass, got %d", totalPass) }
-	if totalBlock < 1 { t.Errorf("expected at least 1 block, got %d", totalBlock) }
-	if totalWarn < 1 { t.Errorf("expected at least 1 warn, got %d", totalWarn) }
+	if totalPass < 1 {
+		t.Errorf("expected at least 1 pass, got %d", totalPass)
+	}
+	if totalBlock < 1 {
+		t.Errorf("expected at least 1 block, got %d", totalBlock)
+	}
+	if totalWarn < 1 {
+		t.Errorf("expected at least 1 warn, got %d", totalWarn)
+	}
 }
 
 func TestAuditTimeline_Empty(t *testing.T) {
@@ -234,7 +368,9 @@ func TestAuditTimeline_Empty(t *testing.T) {
 	defer cleanup()
 
 	timeline := logger.Timeline(24)
-	if len(timeline) != 24 { t.Fatalf("expected 24 empty hours, got %d", len(timeline)) }
+	if len(timeline) != 24 {
+		t.Fatalf("expected 24 empty hours, got %d", len(timeline))
+	}
 	for _, entry := range timeline {
 		if entry["pass"] != 0 || entry["block"] != 0 || entry["warn"] != 0 {
 			t.Error("expected all zeros in empty timeline")
@@ -262,13 +398,23 @@ func TestAuditExportCSV_API(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/export?format=csv", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditExport(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
-	if !strings.Contains(w.Header().Get("Content-Type"), "text/csv") { t.Error("expected csv content type") }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Type"), "text/csv") {
+		t.Error("expected csv content type")
+	}
 	body := w.Body.String()
-	if !strings.Contains(body, "id,timestamp,direction") { t.Error("expected CSV header") }
-	if !strings.Contains(body, "csv test msg") { t.Error("expected csv content") }
+	if !strings.Contains(body, "id,timestamp,direction") {
+		t.Error("expected CSV header")
+	}
+	if !strings.Contains(body, "csv test msg") {
+		t.Error("expected csv content")
+	}
 	lines := strings.Split(strings.TrimSpace(body), "\n")
-	if len(lines) != 3 { t.Errorf("expected 3 lines (header + 2 data), got %d", len(lines)) }
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines (header + 2 data), got %d", len(lines))
+	}
 }
 
 func TestAuditExportJSON_API(t *testing.T) {
@@ -289,14 +435,22 @@ func TestAuditExportJSON_API(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/export?format=json", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditExport(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
-	if !strings.Contains(w.Header().Get("Content-Type"), "application/json") { t.Error("expected json content type") }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Type"), "application/json") {
+		t.Error("expected json content type")
+	}
 	var logs []map[string]interface{}
 	if err := json.Unmarshal(w.Body.Bytes(), &logs); err != nil {
 		t.Fatalf("failed to parse JSON: %v", err)
 	}
-	if len(logs) != 1 { t.Fatalf("expected 1 log, got %d", len(logs)) }
-	if logs[0]["content_preview"] != "json test msg" { t.Error("expected 'json test msg'") }
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0]["content_preview"] != "json test msg" {
+		t.Error("expected 'json test msg'")
+	}
 }
 
 func TestAuditExportBadFormat(t *testing.T) {
@@ -316,7 +470,9 @@ func TestAuditExportBadFormat(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/export?format=xml", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditExport(w, req)
-	if w.Code != 400 { t.Fatalf("expected 400, got %d", w.Code) }
+	if w.Code != 400 {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
 }
 
 func TestAuditCleanup_API(t *testing.T) {
@@ -337,11 +493,17 @@ func TestAuditCleanup_API(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/audit/cleanup", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditCleanup(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	var result map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &result)
-	if result["status"] != "cleaned" { t.Error("expected status=cleaned") }
-	if result["deleted"].(float64) != 1 { t.Errorf("expected 1 deleted, got %v", result["deleted"]) }
+	if result["status"] != "cleaned" {
+		t.Error("expected status=cleaned")
+	}
+	if result["deleted"].(float64) != 1 {
+		t.Errorf("expected 1 deleted, got %v", result["deleted"])
+	}
 }
 
 func TestAuditStats_API(t *testing.T) {
@@ -362,11 +524,17 @@ func TestAuditStats_API(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/stats", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditStats(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	var stats map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &stats)
-	if stats["total"].(float64) != 1 { t.Errorf("expected total=1, got %v", stats["total"]) }
-	if stats["disk_bytes"] == nil { t.Error("expected disk_bytes") }
+	if stats["total"].(float64) != 1 {
+		t.Errorf("expected total=1, got %v", stats["total"])
+	}
+	if stats["disk_bytes"] == nil {
+		t.Error("expected disk_bytes")
+	}
 }
 
 func TestAuditTimeline_API(t *testing.T) {
@@ -387,12 +555,18 @@ func TestAuditTimeline_API(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/timeline?hours=12", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditTimeline(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	var result map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &result)
 	tl, ok := result["timeline"].([]interface{})
-	if !ok { t.Fatal("expected timeline array") }
-	if len(tl) != 12 { t.Fatalf("expected 12 hours, got %d", len(tl)) }
+	if !ok {
+		t.Fatal("expected timeline array")
+	}
+	if len(tl) != 12 {
+		t.Fatalf("expected 12 hours, got %d", len(tl))
+	}
 }
 
 func TestAlertNotifier_Basic(t *testing.T) {
@@ -418,18 +592,32 @@ func TestAlertNotifier_Basic(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if received == nil { t.Fatal("expected webhook to be called") }
+	if received == nil {
+		t.Fatal("expected webhook to be called")
+	}
 
 	var event AlertEvent
 	if err := json.Unmarshal(received, &event); err != nil {
 		t.Fatalf("failed to parse alert event: %v", err)
 	}
-	if event.Event != "block" { t.Errorf("expected event=block, got %s", event.Event) }
-	if event.Direction != "inbound" { t.Errorf("expected direction=inbound, got %s", event.Direction) }
-	if event.SenderID != "user-123" { t.Errorf("expected sender_id=user-123, got %s", event.SenderID) }
-	if event.Rule != "injection_rule" { t.Errorf("expected rule=injection_rule, got %s", event.Rule) }
-	if event.AppID != "bot-alpha" { t.Errorf("expected app_id=bot-alpha, got %s", event.AppID) }
-	if notifier.TotalAlerts() != 1 { t.Errorf("expected 1 alert, got %d", notifier.TotalAlerts()) }
+	if event.Event != "block" {
+		t.Errorf("expected event=block, got %s", event.Event)
+	}
+	if event.Direction != "inbound" {
+		t.Errorf("expected direction=inbound, got %s", event.Direction)
+	}
+	if event.SenderID != "user-123" {
+		t.Errorf("expected sender_id=user-123, got %s", event.SenderID)
+	}
+	if event.Rule != "injection_rule" {
+		t.Errorf("expected rule=injection_rule, got %s", event.Rule)
+	}
+	if event.AppID != "bot-alpha" {
+		t.Errorf("expected app_id=bot-alpha, got %s", event.AppID)
+	}
+	if notifier.TotalAlerts() != 1 {
+		t.Errorf("expected 1 alert, got %d", notifier.TotalAlerts())
+	}
 }
 
 func TestAlertNotifier_LanxinFormat(t *testing.T) {
@@ -452,19 +640,31 @@ func TestAlertNotifier_LanxinFormat(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if received == nil { t.Fatal("expected webhook call") }
+	if received == nil {
+		t.Fatal("expected webhook call")
+	}
 
 	var msg map[string]interface{}
 	if err := json.Unmarshal(received, &msg); err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if msg["msgType"] != "text" { t.Errorf("expected msgType=text, got %v", msg["msgType"]) }
+	if msg["msgType"] != "text" {
+		t.Errorf("expected msgType=text, got %v", msg["msgType"])
+	}
 	msgData, ok := msg["msgData"].(map[string]interface{})
-	if !ok { t.Fatal("expected msgData object") }
+	if !ok {
+		t.Fatal("expected msgData object")
+	}
 	text, ok := msgData["text"].(string)
-	if !ok { t.Fatal("expected text string") }
-	if !strings.Contains(text, "龙虾卫士告警") { t.Error("expected 龙虾卫士告警 in text") }
-	if !strings.Contains(text, "pii_leak") { t.Error("expected rule name in text") }
+	if !ok {
+		t.Fatal("expected text string")
+	}
+	if !strings.Contains(text, "龙虾卫士告警") {
+		t.Error("expected 龙虾卫士告警 in text")
+	}
+	if !strings.Contains(text, "pii_leak") {
+		t.Error("expected rule name in text")
+	}
 }
 
 func TestAlertNotifier_MinInterval(t *testing.T) {
@@ -553,18 +753,26 @@ func TestAuditExportWithFilters(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/export?format=csv&direction=inbound", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditExport(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
-	if len(lines) != 2 { t.Errorf("expected 2 lines (header + 1), got %d", len(lines)) }
+	if len(lines) != 2 {
+		t.Errorf("expected 2 lines (header + 1), got %d", len(lines))
+	}
 
 	// Export JSON with q filter
 	req = httptest.NewRequest("GET", "/api/v1/audit/export?format=json&q=blocked", nil)
 	w = httptest.NewRecorder()
 	api.handleAuditExport(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	var logs []map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &logs)
-	if len(logs) != 1 { t.Fatalf("expected 1 log, got %d", len(logs)) }
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
 }
 
 func TestConfigNewFields(t *testing.T) {
@@ -577,11 +785,21 @@ alert_format: "lanxin"
 	tmpFile := t.TempDir() + "/test_config.yaml"
 	os.WriteFile(tmpFile, []byte(yamlStr), 0644)
 	cfg, err := loadConfig(tmpFile)
-	if err != nil { t.Fatalf("loadConfig error: %v", err) }
-	if cfg.AuditRetentionDays != 7 { t.Errorf("expected 7, got %d", cfg.AuditRetentionDays) }
-	if cfg.AlertWebhook != "https://example.com/webhook" { t.Error("wrong webhook") }
-	if cfg.AlertMinInterval != 30 { t.Errorf("expected 30, got %d", cfg.AlertMinInterval) }
-	if cfg.AlertFormat != "lanxin" { t.Error("wrong format") }
+	if err != nil {
+		t.Fatalf("loadConfig error: %v", err)
+	}
+	if cfg.AuditRetentionDays != 7 {
+		t.Errorf("expected 7, got %d", cfg.AuditRetentionDays)
+	}
+	if cfg.AlertWebhook != "https://example.com/webhook" {
+		t.Error("wrong webhook")
+	}
+	if cfg.AlertMinInterval != 30 {
+		t.Errorf("expected 30, got %d", cfg.AlertMinInterval)
+	}
+	if cfg.AlertFormat != "lanxin" {
+		t.Error("wrong format")
+	}
 }
 
 func TestConfigDefaults_NewFields(t *testing.T) {
@@ -590,11 +808,21 @@ func TestConfigDefaults_NewFields(t *testing.T) {
 	tmpFile := t.TempDir() + "/test_config_defaults.yaml"
 	os.WriteFile(tmpFile, []byte(yamlStr), 0644)
 	cfg, err := loadConfig(tmpFile)
-	if err != nil { t.Fatalf("loadConfig error: %v", err) }
-	if cfg.AuditRetentionDays != 0 { t.Errorf("expected default 0, got %d", cfg.AuditRetentionDays) }
-	if cfg.AlertWebhook != "" { t.Error("expected empty webhook") }
-	if cfg.AlertMinInterval != 0 { t.Errorf("expected 0, got %d", cfg.AlertMinInterval) }
-	if cfg.AlertFormat != "" { t.Error("expected empty format") }
+	if err != nil {
+		t.Fatalf("loadConfig error: %v", err)
+	}
+	if cfg.AuditRetentionDays != 0 {
+		t.Errorf("expected default 0, got %d", cfg.AuditRetentionDays)
+	}
+	if cfg.AlertWebhook != "" {
+		t.Error("expected empty webhook")
+	}
+	if cfg.AlertMinInterval != 0 {
+		t.Errorf("expected 0, got %d", cfg.AlertMinInterval)
+	}
+	if cfg.AlertFormat != "" {
+		t.Error("expected empty format")
+	}
 }
 
 func TestAuditLogsAPI_WithQParam(t *testing.T) {
@@ -617,20 +845,28 @@ func TestAuditLogsAPI_WithQParam(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/audit/logs?q=search", nil)
 	w := httptest.NewRecorder()
 	api.handleAuditLogs(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	var result map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &result)
 	total := int(result["total"].(float64))
-	if total != 1 { t.Errorf("expected 1 result for q=search, got %d", total) }
+	if total != 1 {
+		t.Errorf("expected 1 result for q=search, got %d", total)
+	}
 
 	// Test with app_id param
 	req = httptest.NewRequest("GET", "/api/v1/audit/logs?app_id=app1", nil)
 	w = httptest.NewRecorder()
 	api.handleAuditLogs(w, req)
-	if w.Code != 200 { t.Fatalf("expected 200, got %d", w.Code) }
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
 	json.Unmarshal(w.Body.Bytes(), &result)
 	total = int(result["total"].(float64))
-	if total != 2 { t.Errorf("expected 2 results for app_id=app1, got %d", total) }
+	if total != 2 {
+		t.Errorf("expected 2 results for app_id=app1, got %d", total)
+	}
 }
 
 func TestServeHTTP_NewAuditEndpoints(t *testing.T) {
@@ -654,27 +890,43 @@ func TestServeHTTP_NewAuditEndpoints(t *testing.T) {
 
 	// Test /api/v1/audit/export
 	resp, err := client.Get(server.URL + "/api/v1/audit/export?format=json")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 { t.Errorf("export: expected 200, got %d", resp.StatusCode) }
+	if resp.StatusCode != 200 {
+		t.Errorf("export: expected 200, got %d", resp.StatusCode)
+	}
 
 	// Test /api/v1/audit/stats
 	resp2, err := client.Get(server.URL + "/api/v1/audit/stats")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp2.Body.Close()
-	if resp2.StatusCode != 200 { t.Errorf("stats: expected 200, got %d", resp2.StatusCode) }
+	if resp2.StatusCode != 200 {
+		t.Errorf("stats: expected 200, got %d", resp2.StatusCode)
+	}
 
 	// Test /api/v1/audit/timeline
 	resp3, err := client.Get(server.URL + "/api/v1/audit/timeline")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp3.Body.Close()
-	if resp3.StatusCode != 200 { t.Errorf("timeline: expected 200, got %d", resp3.StatusCode) }
+	if resp3.StatusCode != 200 {
+		t.Errorf("timeline: expected 200, got %d", resp3.StatusCode)
+	}
 
 	// Test /api/v1/audit/cleanup
 	resp4, err := client.Post(server.URL+"/api/v1/audit/cleanup", "application/json", nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp4.Body.Close()
-	if resp4.StatusCode != 200 { t.Errorf("cleanup: expected 200, got %d", resp4.StatusCode) }
+	if resp4.StatusCode != 200 {
+		t.Errorf("cleanup: expected 200, got %d", resp4.StatusCode)
+	}
 }
 
 func TestAlertNotifier_NilNotifier(t *testing.T) {
@@ -685,4 +937,3 @@ func TestAlertNotifier_NilNotifier(t *testing.T) {
 	}
 	// This just tests that the nil check works (no crash)
 }
-

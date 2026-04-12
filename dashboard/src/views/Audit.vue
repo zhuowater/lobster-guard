@@ -5,8 +5,9 @@
       <StatCard :iconSvg="svgShieldX" :value="auditStats.blocked||0" label="拦截数" color="red" :badge="'今日 +'+(auditStats.today_blocked||0)" />
       <StatCard :iconSvg="svgAlertTriangle" :value="auditStats.warned||0" label="告警数" color="yellow" />
       <StatCard :iconSvg="svgPercent" :value="blockRate" label="拦截率" color="green" />
+      <StatCard :iconSvg="svgGlobe" :value="sourceCategoryCount" label="来源分类" color="purple" />
     </div>
-    <div class="audit-stats-grid" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
+    <div class="audit-stats-grid" v-else><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/><Skeleton type="card"/></div>
 
     <div class="card">
       <div class="card-header">
@@ -41,6 +42,7 @@
         <div class="filter-row">
           <select v-model="filters.direction" @change="applyFilters" class="filter-select"><option value="">全部方向</option><option value="inbound">🔽 入站</option><option value="outbound">🔼 出站</option></select>
           <select v-model="filters.action" @change="applyFilters" class="filter-select"><option value="">全部动作</option><option value="block">🔴 阻断</option><option value="warn">🟡 告警</option><option value="log">⚪ 记录</option><option value="pass">🟢 放行</option><option value="allow">🟢 允许</option></select>
+          <select v-model="filters.source_category" @change="applyFilters" class="filter-select"><option value="">全部来源</option><option v-for="opt in sourceCategoryOptions" :key="opt" :value="opt">{{ opt }}</option></select>
           <input v-model="filters.sender_id" placeholder="发送者 ID" class="filter-input" @keyup.enter="applyFilters"/>
           <input v-model="filters.trace_id" placeholder="Trace ID" class="filter-input filter-input-mono" @keyup.enter="applyFilters"/>
           <button class="btn btn-sm" @click="applyFilters" :disabled="loading">筛选</button>
@@ -69,6 +71,13 @@
         <template #cell-sender_id="{row}"><a v-if="row.sender_id" class="link-primary" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(row.sender_id))">{{ row.sender_id }}</a><span v-else class="text-muted">--</span></template>
         <template #cell-display_name="{row}"><span v-if="row.display_name">{{ row.display_name }}</span><span v-else class="text-muted">--</span></template>
         <template #cell-department="{row}"><span v-if="row.department" class="tag tag-dept">{{ row.department }}</span><span v-else class="text-muted">--</span></template>
+
+        <template #cell-source_categories="{row}">
+          <div v-if="sourceCategoryList(row).length" class="source-badge-list">
+            <span v-for="cat in sourceCategoryList(row)" :key="cat" class="source-chip">{{ cat }}</span>
+          </div>
+          <span v-else class="text-muted">--</span>
+        </template>
         <template #cell-trace_id="{row}">
           <span v-if="row.trace_id" class="trace-cell"><a class="trace-link" @click.stop="$router.push('/sessions/'+encodeURIComponent(row.trace_id))" :title="row.trace_id">{{ row.trace_id.substring(0,8) }}…</a><span class="trace-filter" @click.stop="filters.trace_id=row.trace_id;applyFilters()" title="筛选">🔍</span></span>
           <span v-else class="text-muted">--</span>
@@ -91,11 +100,15 @@
                 <div class="detail-row" v-if="row.display_name||row.department"><span class="detail-label">姓名/部门</span><span>{{ row.display_name||'--' }} / {{ row.department||'--' }}</span></div>
                 <div class="detail-row"><span class="detail-label">App ID</span><span class="mono">{{ row.app_id||'--' }}</span></div>
                 <div class="detail-row"><span class="detail-label">Trace ID</span><a v-if="row.trace_id" class="link-primary mono" @click.stop="$router.push('/sessions/'+encodeURIComponent(row.trace_id))">{{ row.trace_id }} ▶</a><span v-else class="text-muted">--</span></div>
+                <div class="detail-row"><span class="detail-label">来源分类</span><div v-if="sourceCategoryList(row).length" class="source-badge-list"><span v-for="cat in sourceCategoryList(row)" :key="cat" class="source-chip">{{ cat }}</span></div><span v-else class="text-muted">--</span></div>
+                <div class="detail-row" v-if="row.source_keys"><span class="detail-label">来源键</span><span class="mono source-key">{{ row.source_keys }}</span></div>
+                <div class="detail-row" v-if="row.source_tool_call_count"><span class="detail-label">关联 Tool Calls</span><span class="mono">{{ row.source_tool_call_count }}</span></div>
                 <div class="detail-row"><span class="detail-label">上游</span><span class="mono">{{ row.upstream_id||'--' }}</span></div>
               </div>
             </div>
             <div class="detail-section" v-if="row.reason"><h4 class="detail-title">匹配规则 / 原因</h4><div class="detail-reason">{{ row.reason }} <a class="link-primary" style="margin-left:8px" @click.stop="$router.push('/rules')">查看规则→</a></div></div>
             <div class="detail-section" v-if="row.content_preview"><h4 class="detail-title">请求内容</h4><div class="detail-content"><JsonHighlight :content="row.content_preview"/></div></div>
+            <div class="detail-section" v-if="row.source_descriptor_json"><h4 class="detail-title">来源描述符</h4><div class="detail-content"><JsonHighlight :content="formatSourceDescriptor(row.source_descriptor_json)"/></div></div>
           </div>
         </template>
       </DataTable>
@@ -159,6 +172,7 @@ const statsLoaded = ref(false)
 const auditStats = ref({})
 const detailStats = ref({})
 const archives = ref([])
+const sourceCategoryOptions = ['public_web','external_api','internal_api','metadata_service','unclassified']
 const selectedIds = ref([])
 const showStatsPanel = ref(false)
 const showArchivePanel = ref(false)
@@ -169,7 +183,7 @@ const confirmMessage = ref('')
 const confirmType = ref('warning')
 let confirmAction = null
 
-const filters = reactive({ direction:'', action:'', sender_id:'', app_id:'', trace_id:'', q:'', start_time:'', end_time:'' })
+const filters = reactive({ direction:'', action:'', source_category:'', sender_id:'', app_id:'', trace_id:'', q:'', start_time:'', end_time:'' })
 
 const timePresets = [{ label:'全部', value:'' },{ label:'今天', value:'today' },{ label:'7天', value:'7d' },{ label:'30天', value:'30d' },{ label:'自定义', value:'custom' }]
 
@@ -177,6 +191,7 @@ const svgFileText = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"
 const svgShieldX = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>'
 const svgAlertTriangle = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
 const svgPercent = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>'
+const svgGlobe = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>'
 
 const columns = [
   { key:'timestamp', label:'时间', sortable:true, width:'150px' },
@@ -185,6 +200,7 @@ const columns = [
   { key:'display_name', label:'姓名', sortable:true, width:'90px' },
   { key:'department', label:'部门', sortable:true, width:'100px' },
   { key:'action', label:'动作', sortable:true, width:'80px' },
+  { key:'source_categories', label:'来源分类', sortable:false, width:'160px' },
   { key:'trace_id', label:'Trace ID', sortable:false, width:'120px' },
   { key:'content_preview', label:'内容', sortable:false },
   { key:'reason', label:'原因', sortable:true },
@@ -192,11 +208,13 @@ const columns = [
 ]
 
 const blockRate = computed(() => { const t=auditStats.value.total||0,b=auditStats.value.blocked||0; return t===0?'0%':((b/t)*100).toFixed(1)+'%' })
-const hasActiveFilters = computed(() => !!(filters.direction||filters.action||filters.sender_id||filters.trace_id||filters.q||filters.start_time||filters.end_time))
+const sourceCategoryCount = computed(() => new Set(logs.value.flatMap(row => sourceCategoryList(row))).size)
+const hasActiveFilters = computed(() => !!(filters.direction||filters.action||filters.source_category||filters.sender_id||filters.trace_id||filters.q||filters.start_time||filters.end_time))
 const activeFilterTags = computed(() => {
   const tags = []
   if (filters.direction) tags.push({ key:'direction', label:'方向', value:filters.direction==='inbound'?'入站':'出站' })
   if (filters.action) tags.push({ key:'action', label:'动作', value:filters.action })
+  if (filters.source_category) tags.push({ key:'source_category', label:'来源', value:filters.source_category })
   if (filters.sender_id) tags.push({ key:'sender_id', label:'发送者', value:filters.sender_id })
   if (filters.trace_id) tags.push({ key:'trace_id', label:'Trace', value:filters.trace_id.substring(0,12) })
   if (filters.q) tags.push({ key:'q', label:'搜索', value:filters.q })
@@ -218,6 +236,8 @@ function relativeTime(ts) {
 function actionTagClass(a) { a=(a||'').toLowerCase(); return a==='block'?'tag-block':a==='warn'?'tag-warn':a==='log'?'tag-log':(a==='pass'||a==='allow')?'tag-pass':'tag-log' }
 function rowClass(row) { const a=(row.action||'').toLowerCase(); return a==='block'?'row-block':a==='warn'?'row-warn':'' }
 function latencyClass(row) { const ms=row.latency||row.latency_ms||0; return ms>1000?'latency-high':ms>300?'latency-mid':'' }
+function sourceCategoryList(row) { return String(row?.source_categories||'').split(',').map(s=>s.trim()).filter(Boolean) }
+function formatSourceDescriptor(raw) { if (!raw) return '--'; try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw } }
 function formatSize(bytes) { if (!bytes) return '--'; const kb=Math.round(bytes/1024); return kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB' }
 
 function setTimePreset(val) {
@@ -234,11 +254,12 @@ function removeFilter(key) {
   else filters[key]=''
   applyFilters()
 }
-function clearAllFilters() { filters.direction='';filters.action='';filters.sender_id='';filters.trace_id='';filters.q='';filters.start_time='';filters.end_time='';activeTimePreset.value='';applyFilters() }
+function clearAllFilters() { filters.direction='';filters.action='';filters.source_category='';filters.sender_id='';filters.trace_id='';filters.q='';filters.start_time='';filters.end_time='';activeTimePreset.value='';applyFilters() }
 
 function syncFiltersToURL() {
   const q={}
   if (filters.direction) q.direction=filters.direction; if (filters.action) q.action=filters.action
+  if (filters.source_category) q.source_category=filters.source_category
   if (filters.sender_id) q.sender_id=filters.sender_id; if (filters.trace_id) q.trace_id=filters.trace_id
   if (filters.q) q.q=filters.q; if (filters.start_time) q.from=filters.start_time; if (filters.end_time) q.to=filters.end_time
   if (activeTimePreset.value) q.preset=activeTimePreset.value
@@ -247,6 +268,7 @@ function syncFiltersToURL() {
 function loadFiltersFromURL() {
   const q=route.query
   if (q.direction) filters.direction=q.direction; if (q.action) filters.action=q.action
+  if (q.source_category) filters.source_category=q.source_category
   if (q.sender_id) filters.sender_id=q.sender_id; if (q.trace_id) filters.trace_id=q.trace_id
   if (q.q) filters.q=q.q; if (q.from) filters.start_time=q.from; if (q.to) filters.end_time=q.to
   if (q.preset) activeTimePreset.value=q.preset
@@ -259,6 +281,7 @@ async function loadLogs() {
   loading.value=true
   const p=[]; if (filters.direction) p.push('direction='+encodeURIComponent(filters.direction))
   if (filters.action) p.push('action='+encodeURIComponent(filters.action))
+  if (filters.source_category) p.push('source_category='+encodeURIComponent(filters.source_category))
   if (filters.sender_id) p.push('sender_id='+encodeURIComponent(filters.sender_id))
   if (filters.app_id) p.push('app_id='+encodeURIComponent(filters.app_id))
   if (filters.trace_id) p.push('trace_id='+encodeURIComponent(filters.trace_id))
@@ -292,6 +315,7 @@ async function exportAudit(fmt) {
   const p=['format='+fmt,'limit=10000']
   if (filters.direction) p.push('direction='+encodeURIComponent(filters.direction))
   if (filters.action) p.push('action='+encodeURIComponent(filters.action))
+  if (filters.source_category) p.push('source_category='+encodeURIComponent(filters.source_category))
   if (filters.sender_id) p.push('sender_id='+encodeURIComponent(filters.sender_id))
   if (filters.q) p.push('q='+encodeURIComponent(filters.q))
   if (filters.start_time) p.push('from='+encodeURIComponent(new Date(filters.start_time).toISOString()))
@@ -358,7 +382,7 @@ onUnmounted(() => clearInterval(refreshTimer))
 </script>
 <style scoped>
 .audit-page { display:flex; flex-direction:column; gap:var(--space-4); }
-.audit-stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-3); }
+.audit-stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:var(--space-3); }
 @media (max-width:900px) { .audit-stats-grid { grid-template-columns:repeat(2,1fr); } }
 .section-label { font-size:var(--text-sm); color:var(--text-secondary); margin-bottom:var(--space-2); font-weight:500; display:flex; align-items:center; gap:6px; }
 
@@ -456,4 +480,10 @@ onUnmounted(() => clearInterval(refreshTimer))
 /* Batch bar */
 .batch-bar { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); background:var(--color-primary-dim, rgba(99,102,241,0.1)); border-radius:var(--radius-md); margin-bottom:var(--space-2); }
 .batch-count { font-size:var(--text-sm); font-weight:600; color:var(--color-primary); }
+</style>
+
+<style scoped>
+.source-badge-list { display:flex; gap:4px; flex-wrap:wrap; }
+.source-chip { display:inline-flex; align-items:center; padding:1px 8px; border-radius:999px; background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.25); color:#16a34a; font-size:11px; font-family:var(--font-mono); }
+.source-key { word-break:break-all; }
 </style>

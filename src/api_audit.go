@@ -18,6 +18,7 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
 	traceID := r.URL.Query().Get("trace_id")
+	sourceCategory := r.URL.Query().Get("source_category")
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
@@ -27,21 +28,25 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	}
 	limit := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil { limit = n }
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
 	}
-	if limit > 10000 { limit = 10000 }
+	if limit > 10000 {
+		limit = 10000
+	}
 	var logs []map[string]interface{}
 	var err error
 	if from != "" || to != "" {
-		logs, err = api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, limit)
+		logs, err = api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, sourceCategory, limit)
 	} else {
-		logs, err = api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, limit)
+		logs, err = api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, sourceCategory, limit)
 	}
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs), "tenant": tenantID})
+	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs), "tenant": tenantID, "source_category": sourceCategory})
 }
 
 // handleAuditExport GET /api/v1/audit/export — 导出审计日志为 CSV 或 JSON（v3.10）
@@ -56,8 +61,9 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 	senderID := r.URL.Query().Get("sender_id")
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
-	from := r.URL.Query().Get("from")   // v12.1: 时间范围起始 (RFC3339 或 since 格式)
-	to := r.URL.Query().Get("to")       // v12.1: 时间范围结束
+	sourceCategory := r.URL.Query().Get("source_category")
+	from := r.URL.Query().Get("from") // v12.1: 时间范围起始 (RFC3339 或 since 格式)
+	to := r.URL.Query().Get("to")     // v12.1: 时间范围结束
 	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
 	// 支持 since 简写: from=24h → 转为 RFC3339
 	if from != "" && !strings.Contains(from, "T") {
@@ -65,11 +71,15 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 	}
 	limit := 1000
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil { limit = n }
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
 	}
-	if limit > 10000 { limit = 10000 }
+	if limit > 10000 {
+		limit = 10000
+	}
 
-	logs, err := api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, "", from, to, tenantID, limit)
+	logs, err := api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, "", from, to, tenantID, sourceCategory, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -81,7 +91,7 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(200)
 		cw := csv.NewWriter(w)
 		// 写表头
-		cw.Write([]string{"id", "timestamp", "direction", "sender_id", "action", "reason", "content_preview", "latency_ms", "upstream_id", "app_id"})
+		cw.Write([]string{"id", "timestamp", "direction", "sender_id", "action", "reason", "content_preview", "latency_ms", "upstream_id", "app_id", "source_categories", "source_keys", "source_tool_call_count"})
 		for _, log := range logs {
 			cw.Write([]string{
 				fmt.Sprintf("%v", log["id"]),
@@ -94,6 +104,9 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 				fmt.Sprintf("%v", log["latency_ms"]),
 				fmt.Sprintf("%v", log["upstream_id"]),
 				fmt.Sprintf("%v", log["app_id"]),
+				fmt.Sprintf("%v", log["source_categories"]),
+				fmt.Sprintf("%v", log["source_keys"]),
+				fmt.Sprintf("%v", log["source_tool_call_count"]),
 			})
 		}
 		cw.Flush()
@@ -101,7 +114,9 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=audit_logs.json")
 		w.WriteHeader(200)
-		if logs == nil { logs = []map[string]interface{}{} }
+		if logs == nil {
+			logs = []map[string]interface{}{}
+		}
 		json.NewEncoder(w).Encode(logs)
 	}
 }
@@ -109,7 +124,9 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 // handleAuditCleanup POST /api/v1/audit/cleanup — 手动触发日志清理（v3.10）
 func (api *ManagementAPI) handleAuditCleanup(w http.ResponseWriter, r *http.Request) {
 	retentionDays := api.cfg.AuditRetentionDays
-	if retentionDays <= 0 { retentionDays = 30 }
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
 	deleted, err := api.logger.CleanupOldLogs(retentionDays)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
@@ -133,10 +150,14 @@ func (api *ManagementAPI) handleAuditStats(w http.ResponseWriter, r *http.Reques
 func (api *ManagementAPI) handleAuditTimeline(w http.ResponseWriter, r *http.Request) {
 	hours := 24
 	if h := r.URL.Query().Get("hours"); h != "" {
-		if n, err := strconv.Atoi(h); err == nil && n > 0 { hours = n }
+		if n, err := strconv.Atoi(h); err == nil && n > 0 {
+			hours = n
+		}
 	}
 	timeline := api.logger.Timeline(hours)
-	if timeline == nil { timeline = []map[string]interface{}{} }
+	if timeline == nil {
+		timeline = []map[string]interface{}{}
+	}
 	jsonResponse(w, 200, map[string]interface{}{"timeline": timeline, "hours": hours})
 }
 

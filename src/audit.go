@@ -545,9 +545,39 @@ func (al *AuditLogger) StatsWithFilterTenant(sinceRFC3339, tenantID string) map[
 	return stats
 }
 
+func auditLLMSourceJoinClause() string {
+	return ` LEFT JOIN (
+		SELECT
+			lc.trace_id AS trace_id,
+			GROUP_CONCAT(DISTINCT COALESCE(NULLIF(ltc.source_category,''), 'unclassified')) AS source_categories,
+			GROUP_CONCAT(DISTINCT NULLIF(ltc.source_key,'')) AS source_keys,
+			MAX(CASE WHEN ltc.source_descriptor_json <> '' THEN ltc.source_descriptor_json ELSE '' END) AS source_descriptor_json,
+			COUNT(*) AS source_tool_call_count
+		FROM llm_calls lc
+		JOIN llm_tool_calls ltc ON ltc.llm_call_id = lc.id
+		WHERE COALESCE(lc.trace_id, '') <> ''
+		GROUP BY lc.trace_id
+	) lsrc ON a.trace_id = lsrc.trace_id`
+}
+
+func appendAuditSourceCategoryFilter(query string, args []interface{}, sourceCategory string) (string, []interface{}) {
+	if sourceCategory == "" {
+		return query, args
+	}
+	query += ` AND EXISTS (
+		SELECT 1
+		FROM llm_calls lc2
+		JOIN llm_tool_calls ltc2 ON ltc2.llm_call_id = lc2.id
+		WHERE lc2.trace_id = a.trace_id
+		AND COALESCE(NULLIF(ltc2.source_category,''), 'unclassified') = ?
+	)`
+	args = append(args, sourceCategory)
+	return query, args
+}
+
 // QueryLogsExTenant 租户感知的审计日志查询
-func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID string, limit int) ([]map[string]interface{}, error) {
-	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,'') FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id WHERE 1=1`
+func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, sourceCategory string, limit int) ([]map[string]interface{}, error) {
+	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,''), COALESCE(lsrc.source_categories,''), COALESCE(lsrc.source_keys,''), COALESCE(lsrc.source_descriptor_json,''), COALESCE(lsrc.source_tool_call_count,0) FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id` + auditLLMSourceJoinClause() + ` WHERE 1=1`
 	var args []interface{}
 
 	tClause, tArgs := TenantFilter(tenantID)
@@ -578,6 +608,7 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 		query += ` AND a.trace_id=?`
 		args = append(args, traceID)
 	}
+	query, args = appendAuditSourceCategoryFilter(query, args, sourceCategory)
 	query += ` ORDER BY a.id DESC`
 	if limit <= 0 {
 		limit = 50
@@ -595,16 +626,18 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 	defer rows.Close()
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int
-		var ts, dir, sid, act, reason, preview, uid, aid, tid, displayName, department string
+		var id, sourceToolCallCount int
+		var ts, dir, sid, act, reason, preview, uid, aid, tid, displayName, department, sourceCategories, sourceKeys, sourceDescriptorJSON string
 		var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid, &displayName, &department) != nil {
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid, &displayName, &department, &sourceCategories, &sourceKeys, &sourceDescriptorJSON, &sourceToolCallCount) != nil {
 			continue
 		}
 		r := map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
 			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
+			"source_categories": sourceCategories, "source_keys": sourceKeys,
+			"source_descriptor_json": sourceDescriptorJSON, "source_tool_call_count": sourceToolCallCount,
 		}
 		if displayName != "" {
 			r["display_name"] = displayName
@@ -618,8 +651,8 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 }
 
 // QueryLogsExFullTenant 完整查询（含时间范围+租户）
-func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID string, limit int) ([]map[string]interface{}, error) {
-	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,'') FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id WHERE 1=1`
+func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, sourceCategory string, limit int) ([]map[string]interface{}, error) {
+	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,''), COALESCE(lsrc.source_categories,''), COALESCE(lsrc.source_keys,''), COALESCE(lsrc.source_descriptor_json,''), COALESCE(lsrc.source_tool_call_count,0) FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id` + auditLLMSourceJoinClause() + ` WHERE 1=1`
 	var args []interface{}
 
 	tClause, tArgs := TenantFilter(tenantID)
@@ -658,6 +691,7 @@ func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID,
 		query += ` AND a.timestamp <= ?`
 		args = append(args, to)
 	}
+	query, args = appendAuditSourceCategoryFilter(query, args, sourceCategory)
 	query += ` ORDER BY a.id DESC`
 	if limit <= 0 {
 		limit = 50
@@ -675,16 +709,18 @@ func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID,
 	defer rows.Close()
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int
-		var ts, dir, sid, act, reason, preview, uid, aid, tid, displayName, department string
+		var id, sourceToolCallCount int
+		var ts, dir, sid, act, reason, preview, uid, aid, tid, displayName, department, sourceCategories, sourceKeys, sourceDescriptorJSON string
 		var latMs float64
-		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid, &displayName, &department) != nil {
+		if rows.Scan(&id, &ts, &dir, &sid, &act, &reason, &preview, &latMs, &uid, &aid, &tid, &displayName, &department, &sourceCategories, &sourceKeys, &sourceDescriptorJSON, &sourceToolCallCount) != nil {
 			continue
 		}
 		r := map[string]interface{}{
 			"id": id, "timestamp": ts, "direction": dir, "sender_id": sid,
 			"action": act, "reason": reason, "content_preview": preview,
 			"latency_ms": latMs, "upstream_id": uid, "app_id": aid, "trace_id": tid,
+			"source_categories": sourceCategories, "source_keys": sourceKeys,
+			"source_descriptor_json": sourceDescriptorJSON, "source_tool_call_count": sourceToolCallCount,
 		}
 		if displayName != "" {
 			r["display_name"] = displayName
@@ -941,6 +977,11 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
+	// source-classifier 关联字段
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_key TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_category TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_descriptor_json TEXT DEFAULT ''`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_source_category ON llm_tool_calls(source_category)`)
 
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)
