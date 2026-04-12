@@ -1,0 +1,46 @@
+# ============================================================
+# Source Classifier — 基于 URL / host / path / auth 的来源分类
+# 可选模块：不存在时静默跳过
+# ============================================================
+
+source_classifier:
+  rules:
+    # 公司内部控制面 / 管理 API
+    - name: "corp-control-plane"
+      tool_pattern: '^http_request$'
+      host_pattern: '^control\.corp\.example$'
+      path_pattern: '^/v1/admin/'
+      method_pattern: '^(GET|POST)$'
+      auth_type_pattern: '^(bearer|api_key)$'
+      category: "internal_control_plane"
+      confidentiality: 3
+      integrity: 3
+      trust_score: 0.91
+      private_network: true
+      tags:
+        - corp_override
+        - control_plane
+
+    # 内部文档站，允许通过 tenant override 再细化
+    - name: "corp-docs"
+      host_pattern: '^docs\.corp\.example$'
+      category: "internal_docs"
+      confidentiality: 2
+      integrity: 2
+      trust_score: 0.82
+      private_network: true
+      tags:
+        - docs
+
+    # Metadata / secrets 端点（高危）
+    - name: "metadata-service"
+      host_pattern: '^(169\.254\.169\.254|metadata\.google\.internal)$'
+      category: "metadata_service"
+      confidentiality: 3
+      integrity: 1
+      trust_score: 0.05
+      private_network: true
+      suspicious: true
+      tags:
+        - metadata
+        - secrets

@@ -118,23 +118,35 @@
       <EmptyState v-else-if="!filteredHighRisk.length" :iconSvg="svgShieldCheck" title="暂无高危调用" description="系统运行正常，未检测到高危工具调用" />
       <div v-else class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>时间</th><th>工具名</th><th>风险等级</th><th>参数摘要</th><th>标记原因</th><th>操作</th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>时间</th><th>工具名</th><th>来源分类</th><th>风险等级</th><th>参数摘要</th><th>标记原因</th><th>操作</th></tr></thead>
           <tbody>
             <template v-for="rec in filteredHighRisk" :key="rec.id">
               <tr :class="{'row-critical': rec.risk_level==='critical','row-high': rec.risk_level==='high','row-expanded': expandedIds.has(rec.id)}" @click="toggleExpand(rec.id)" style="cursor:pointer">
                 <td class="expand-toggle"><svg :class="{'rotated': expandedIds.has(rec.id)}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
                 <td>{{ fmtTime(rec.timestamp) }}</td>
                 <td><code>{{ rec.tool_name }}</code></td>
+                <td>
+                  <span v-if="rec.source_category" class="source-badge">{{ rec.source_category }}</span>
+                  <span v-else class="text-muted">--</span>
+                </td>
                 <td><span class="risk-badge" :class="'risk-'+rec.risk_level">{{ rec.risk_level }}</span></td>
                 <td class="td-preview" :title="rec.tool_input_preview">{{ rec.tool_input_preview || '--' }}</td>
                 <td>{{ rec.flag_reason || '--' }}</td>
                 <td @click.stop><button class="btn-sm btn-ghost" :class="{'btn-flagged': rec.flagged}" @click="toggleFlag(rec)">{{ rec.flagged ? '✅ 已标记' : '🚩 标记' }}</button></td>
               </tr>
               <tr v-if="expandedIds.has(rec.id)" class="detail-row">
-                <td colspan="7">
+                <td colspan="8">
                   <div class="detail-grid">
                     <div class="detail-section"><div class="detail-label">工具输入参数</div><JsonHighlight :content="rec.tool_input_preview || '(无数据)'" /></div>
                     <div class="detail-section"><div class="detail-label">工具返回结果</div><JsonHighlight :content="rec.tool_result_preview || '(无数据)'" /></div>
+                    <div v-if="rec.source_category || rec.source_key || rec.source_descriptor_json" class="detail-section">
+                      <div class="detail-label">来源分类</div>
+                      <div class="risk-assessment source-meta">
+                        <span v-if="rec.source_category" class="source-badge">{{ rec.source_category }}</span>
+                        <span v-if="rec.source_key" class="source-key">{{ rec.source_key }}</span>
+                      </div>
+                      <JsonHighlight v-if="rec.source_descriptor_json" :content="formatSourceDescriptor(rec.source_descriptor_json)" />
+                    </div>
                     <div class="detail-section" v-if="rec.risk_level==='critical'||rec.flag_reason">
                       <div class="detail-label">风险评估</div>
                       <div class="risk-assessment">
@@ -231,6 +243,11 @@ const filteredHighRisk=computed(()=>{
   return list
 })
 
+function formatSourceDescriptor(raw){
+  if(!raw) return '(无数据)'
+  try{return JSON.stringify(JSON.parse(raw), null, 2)}catch{return raw}
+}
+
 function toggleExpand(id){const s=new Set(expandedIds.value);s.has(id)?s.delete(id):s.add(id);expandedIds.value=s}
 function scrollToHighRisk(){nextTick(()=>{highRiskRef.value?.scrollIntoView({behavior:'smooth',block:'start'})})}
 function toggleFlag(rec){rec.flagged=!rec.flagged;showToast(rec.flagged?'已标记异常':'已取消标记','success')}
@@ -303,6 +320,9 @@ onUnmounted(()=>clearInterval(timer))
 .alert-config-link:hover{text-decoration:underline}
 .canary-alert{background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.25)}
 .budget-alert{background:rgba(234,88,12,.08);border:1px solid rgba(234,88,12,.25)}
+.source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.28);color:#86efac;font-size:11px;font-family:var(--font-mono)}
+.source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.source-key{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);word-break:break-all}
 
 .filter-bar{padding:12px 16px}.filter-bar-inner{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .search-box{position:relative;flex:1;min-width:200px}

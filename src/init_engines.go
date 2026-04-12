@@ -55,24 +55,24 @@ type EngineSet struct {
 	LLMCache       *LLMCache
 
 	// 分析 & 报告
-	UserProfileEng    *UserProfileEngine
-	HealthScoreEng    *HealthScoreEngine
-	OwaspMatrixEng    *OWASPMatrixEngine
-	SessionReplayEng  *SessionReplayEngine
-	PromptTracker     *PromptTracker
-	RedTeamEngine     *RedTeamEngine
-	LeaderboardEng    *LeaderboardEngine
-	ReportEngine      *ReportEngine
-	BehaviorProfile   *BehaviorProfileEngine
-	AttackChainEng    *AttackChainEngine
-	ABTestEngine      *ABTestEngine
+	UserProfileEng     *UserProfileEngine
+	HealthScoreEng     *HealthScoreEngine
+	OwaspMatrixEng     *OWASPMatrixEngine
+	SessionReplayEng   *SessionReplayEngine
+	PromptTracker      *PromptTracker
+	RedTeamEngine      *RedTeamEngine
+	LeaderboardEng     *LeaderboardEngine
+	ReportEngine       *ReportEngine
+	BehaviorProfile    *BehaviorProfileEngine
+	AttackChainEng     *AttackChainEngine
+	ABTestEngine       *ABTestEngine
 	UpstreamProfileEng *UpstreamProfileEngine
 
 	// 工具 & 网关
-	ToolPolicy     *ToolPolicyEngine
-	APIGateway     *APIGateway
-	APIKeyMgr      *APIKeyManager
-	K8sDiscovery   *K8sDiscovery
+	ToolPolicy   *ToolPolicyEngine
+	APIGateway   *APIGateway
+	APIKeyMgr    *APIKeyManager
+	K8sDiscovery *K8sDiscovery
 
 	// 运维
 	SuggestionQueue *SuggestionQueue
@@ -96,6 +96,9 @@ func applySourceClassifierConfig(cfg *Config) {
 // 保持原始初始化顺序和依赖关系
 func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *UpstreamPool, routes *RouteTable, engine *RuleEngine, outboundEngine *OutboundRuleEngine, llmRuleEngine *LLMRuleEngine, llmAuditor *LLMAuditor, llmProxy *LLMProxy, tenantMgr *TenantManager, honeypotEngine *HoneypotEngine) *EngineSet {
 	applySourceClassifierConfig(cfg)
+	if llmAuditor != nil {
+		llmAuditor.tenantMgr = tenantMgr
+	}
 	e := &EngineSet{}
 	db := logger.DB()
 
@@ -162,9 +165,24 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	{
 		e.SessionDetector = NewSessionDetector(SessionDetectorConfig{
 			Enabled: cfg.SessionDetectEnabled,
-			RiskThreshold: func() float64 { if cfg.SessionRiskThreshold > 0 { return cfg.SessionRiskThreshold }; return 10 }(),
-			Window:    func() int { if cfg.SessionWindow > 0 { return cfg.SessionWindow }; return 20 }(),
-			DecayRate: func() float64 { if cfg.SessionDecayRate > 0 { return cfg.SessionDecayRate }; return 1 }(),
+			RiskThreshold: func() float64 {
+				if cfg.SessionRiskThreshold > 0 {
+					return cfg.SessionRiskThreshold
+				}
+				return 10
+			}(),
+			Window: func() int {
+				if cfg.SessionWindow > 0 {
+					return cfg.SessionWindow
+				}
+				return 20
+			}(),
+			DecayRate: func() float64 {
+				if cfg.SessionDecayRate > 0 {
+					return cfg.SessionDecayRate
+				}
+				return 1
+			}(),
 		})
 		fmt.Printf("[初始化] ✅ 会话检测: threshold=%.0f, window=%d, decay_rate=%.1f/h\n",
 			e.SessionDetector.cfg.RiskThreshold, e.SessionDetector.cfg.Window, e.SessionDetector.cfg.DecayRate)
@@ -183,9 +201,13 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 
 	// --- 检测缓存 ---
 	cacheTTL := cfg.DetectCacheTTL
-	if cacheTTL <= 0 { cacheTTL = 300 }
+	if cacheTTL <= 0 {
+		cacheTTL = 300
+	}
 	cacheSize := cfg.DetectCacheSize
-	if cacheSize <= 0 { cacheSize = 1000 }
+	if cacheSize <= 0 {
+		cacheSize = 1000
+	}
 	e.DetectCache = NewDetectCache(cacheSize, time.Duration(cacheTTL)*time.Second)
 	fmt.Printf("[初始化] ✅ 检测缓存: size=%d, ttl=%ds\n", cacheSize, cacheTTL)
 
@@ -245,9 +267,13 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	// 总是初始化（需要 SecretKey），运行时靠 cfg.EnvelopeEnabled 控制
 	{
 		batchSize := cfg.EnvelopeBatchSize
-		if batchSize <= 0 { batchSize = 64 }
+		if batchSize <= 0 {
+			batchSize = 64
+		}
 		secretKey := cfg.EnvelopeSecretKey
-		if secretKey == "" { secretKey = "lobster-guard-default-key" }
+		if secretKey == "" {
+			secretKey = "lobster-guard-default-key"
+		}
 		e.EnvelopeMgr = NewEnvelopeManagerWithBatchSize(db, secretKey, batchSize)
 		e.EnvelopeMgr.startAutoFlush()
 		fmt.Printf("[初始化] ✅ 执行信封已就绪 (enabled=%v)\n", cfg.EnvelopeEnabled)
@@ -270,7 +296,9 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	e.EvolutionEngine = NewEvolutionEngine(db, e.RedTeamEngine, engine, outboundEngine, llmRuleEngine, e.EventBus)
 	if cfg.EvolutionEnabled {
 		intervalMin := cfg.EvolutionIntervalMin
-		if intervalMin <= 0 { intervalMin = 360 }
+		if intervalMin <= 0 {
+			intervalMin = 360
+		}
 		e.EvolutionEngine.StartAutoEvolution(intervalMin)
 		fmt.Printf("[初始化] ✅ 对抗性自进化已启用 (每 %d 分钟)\n", intervalMin)
 	} else {
@@ -315,10 +343,14 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 
 	// --- 反事实验证 ---
 	cfConfig := defaultCFConfig
-	if cfg.Counterfactual.Enabled { cfConfig = cfg.Counterfactual }
+	if cfg.Counterfactual.Enabled {
+		cfConfig = cfg.Counterfactual
+	}
 	e.CFVerifier = NewCounterfactualVerifier(db, cfConfig, nil)
 	e.CFVerifier.SetPathPolicy(e.PathPolicyEngine)
-	if llmProxy != nil { llmProxy.cfVerifier = e.CFVerifier }
+	if llmProxy != nil {
+		llmProxy.cfVerifier = e.CFVerifier
+	}
 	fmt.Println("[初始化] ✅ 反事实验证引擎已就绪 (AttriGuard 对照验证 + 归因分析)")
 
 	e.AdaptiveStrategy = NewAdaptiveStrategy(db, defaultAdaptiveConfig, e.PathPolicyEngine)
@@ -327,36 +359,54 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 
 	// --- CaMeL 框架 ---
 	planCfg := defaultPlanConfig
-	if cfg.PlanCompiler.Enabled { planCfg = cfg.PlanCompiler }
+	if cfg.PlanCompiler.Enabled {
+		planCfg = cfg.PlanCompiler
+	}
 	e.PlanCompiler = NewPlanCompiler(db, planCfg)
-	if llmProxy != nil { llmProxy.planCompiler = e.PlanCompiler }
+	if llmProxy != nil {
+		llmProxy.planCompiler = e.PlanCompiler
+	}
 	fmt.Println("[初始化] ✅ 执行计划编译器已就绪 (CaMeL 网关级程序解释器, 20+ 内置模板)")
 
 	capCfg := cfg.Capability
-	if capCfg.DefaultPolicy == "" { capCfg.DefaultPolicy = "allow" }
+	if capCfg.DefaultPolicy == "" {
+		capCfg.DefaultPolicy = "allow"
+	}
 	e.CapabilityEngine = NewCapabilityEngine(db, capCfg)
-	if llmProxy != nil { llmProxy.capabilityEngine = e.CapabilityEngine }
+	if llmProxy != nil {
+		llmProxy.capabilityEngine = e.CapabilityEngine
+	}
 	fmt.Println("[初始化] ✅ Capability 权限系统已就绪")
 
 	devCfg := cfg.Deviation
-	if devCfg.MaxRepairs == 0 { devCfg.MaxRepairs = 5 }
+	if devCfg.MaxRepairs == 0 {
+		devCfg.MaxRepairs = 5
+	}
 	e.DeviationDetector = NewDeviationDetector(db, devCfg, e.PlanCompiler, e.CapabilityEngine)
-	if llmProxy != nil { llmProxy.deviationDetector = e.DeviationDetector }
+	if llmProxy != nil {
+		llmProxy.deviationDetector = e.DeviationDetector
+	}
 	fmt.Println("[初始化] ✅ 偏差检测器已就绪")
 
 	// --- IFC ---
 	e.IFCEngine = NewIFCEngine(db, cfg.IFC)
-	if llmProxy != nil { llmProxy.ifcEngine = e.IFCEngine }
+	if llmProxy != nil {
+		llmProxy.ifcEngine = e.IFCEngine
+	}
 	fmt.Printf("[初始化] ✅ IFC 信息流控制已就绪 (来源规则=%d, 工具要求=%d, 隔离=%v, 隐藏=%v)\n",
 		len(e.IFCEngine.ListSourceRules()), len(e.IFCEngine.ListToolRequirements()),
 		cfg.IFC.QuarantineEnabled, cfg.IFC.HidingEnabled)
 
 	// 总是初始化，运行时靠 cfg.IFC.QuarantineEnabled 控制
 	e.IFCQuarantine = NewIFCQuarantine(e.IFCEngine, pool)
-	if llmProxy != nil { llmProxy.ifcQuarantine = e.IFCQuarantine }
+	if llmProxy != nil {
+		llmProxy.ifcQuarantine = e.IFCQuarantine
+	}
 	fmt.Printf("[初始化] ✅ IFC 隔离LLM已就绪 (enabled=%v)\n", cfg.IFC.QuarantineEnabled)
 
-	if llmProxy != nil { llmProxy.auditLogger = logger }
+	if llmProxy != nil {
+		llmProxy.auditLogger = logger
+	}
 
 	// --- 工具策略 ---
 	// 总是初始化，运行时靠 cfg.ToolPolicy.Enabled 控制
@@ -372,25 +422,33 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	e.TaintTracker = NewTaintTracker(db, cfg.TaintTracker)
 	e.TaintTracker.SetIFCEngine(e.IFCEngine)
 	fmt.Printf("[初始化] ✅ 信息流污染追踪已就绪 (enabled=%v)\n", cfg.TaintTracker.Enabled)
-	if llmProxy != nil { llmProxy.taintTracker = e.TaintTracker }
+	if llmProxy != nil {
+		llmProxy.taintTracker = e.TaintTracker
+	}
 
 	// --- 污染链逆转 ---
 	// 总是初始化，运行时靠 cfg.TaintReversal.Enabled 控制
 	e.ReversalEngine = NewTaintReversalEngine(db, e.TaintTracker, e.EnvelopeMgr, cfg.TaintReversal)
 	fmt.Printf("[初始化] ✅ 污染链逆转已就绪 (enabled=%v)\n", cfg.TaintReversal.Enabled)
-	if llmProxy != nil { llmProxy.reversalEngine = e.ReversalEngine }
+	if llmProxy != nil {
+		llmProxy.reversalEngine = e.ReversalEngine
+	}
 
 	// --- LLM 缓存 ---
 	// 总是初始化，运行时靠 cfg.LLMCache.Enabled 控制
 	e.LLMCache = NewLLMCache(db, cfg.LLMCache)
 	fmt.Printf("[初始化] ✅ LLM 响应缓存已就绪 (enabled=%v)\n", cfg.LLMCache.Enabled)
-	if llmProxy != nil { llmProxy.llmCache = e.LLMCache }
+	if llmProxy != nil {
+		llmProxy.llmCache = e.LLMCache
+	}
 
 	// --- API Gateway ---
 	// 总是初始化，运行时靠 cfg.APIGateway.Enabled 控制
 	e.APIGateway = NewAPIGateway(db, cfg.APIGateway)
 	fmt.Printf("[初始化] ✅ API Gateway 已就绪 (enabled=%v)\n", cfg.APIGateway.Enabled)
-	if llmProxy != nil { llmProxy.apiGateway = e.APIGateway }
+	if llmProxy != nil {
+		llmProxy.apiGateway = e.APIGateway
+	}
 
 	// --- K8s ---
 	if cfg.Discovery.Kubernetes.Enabled {
@@ -401,7 +459,12 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 		} else {
 			fmt.Printf("[初始化] ✅ K8s 服务发现: namespace=%s, service=%s, interval=%ds\n",
 				cfg.Discovery.Kubernetes.Namespace, cfg.Discovery.Kubernetes.Service,
-				func() int { if cfg.Discovery.Kubernetes.SyncInterval > 0 { return cfg.Discovery.Kubernetes.SyncInterval }; return 15 }())
+				func() int {
+					if cfg.Discovery.Kubernetes.SyncInterval > 0 {
+						return cfg.Discovery.Kubernetes.SyncInterval
+					}
+					return 15
+				}())
 		}
 	} else {
 		fmt.Println("[初始化] ⚠️ K8s 服务发现: 未启用")
@@ -417,9 +480,13 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	// --- 后台调度器 ---
 	e.BgScheduler = NewBackgroundScheduler(cfg, e.AttackChainEng, e.BehaviorProfile)
 	chainMin := cfg.ChainAnalysisIntervalMin
-	if chainMin <= 0 { chainMin = 5 }
+	if chainMin <= 0 {
+		chainMin = 5
+	}
 	behaviorMin := cfg.BehaviorScanIntervalMin
-	if behaviorMin <= 0 { behaviorMin = 10 }
+	if behaviorMin <= 0 {
+		behaviorMin = 10
+	}
 	fmt.Printf("[初始化] ✅ 后台调度器已就绪 (攻击链分析: %d 分钟, 行为画像扫描: %d 分钟)\n", chainMin, behaviorMin)
 	fmt.Println("[初始化] ✅ 报告引擎已就绪 (日报/周报/月报)")
 
@@ -457,13 +524,21 @@ func (e *EngineSet) wireInbound(ip *InboundProxy, cfg *Config, engine *RuleEngin
 	}
 
 	// 执行信封 + 事件总线
-	if e.EnvelopeMgr != nil { ip.envelopeMgr = e.EnvelopeMgr }
-	if e.EventBus != nil { ip.eventBus = e.EventBus }
+	if e.EnvelopeMgr != nil {
+		ip.envelopeMgr = e.EnvelopeMgr
+	}
+	if e.EventBus != nil {
+		ip.eventBus = e.EventBus
+	}
 
 	// 检测 Pipeline
 	additionalStages := map[string]DetectStage{}
-	if e.SessionDetector != nil { additionalStages["session"] = NewSessionStage(e.SessionDetector) }
-	if e.LLMDetector != nil { additionalStages["llm"] = NewLLMStage(e.LLMDetector) }
+	if e.SessionDetector != nil {
+		additionalStages["session"] = NewSessionStage(e.SessionDetector)
+	}
+	if e.LLMDetector != nil {
+		additionalStages["llm"] = NewLLMStage(e.LLMDetector)
+	}
 	if len(cfg.DetectPipeline) > 0 {
 		ip.pipeline = BuildPipelineFromConfig(cfg.DetectPipeline, engine, additionalStages)
 		fmt.Printf("[初始化] ✅ 检测链: %v\n", cfg.DetectPipeline)
@@ -485,8 +560,12 @@ func (e *EngineSet) wireOutbound(op *OutboundProxy, routes *RouteTable) {
 	op.alertNotifier = e.AlertNotifier
 	op.taintTracker = e.TaintTracker
 	op.reversalEngine = e.ReversalEngine
-	if e.EnvelopeMgr != nil { op.envelopeMgr = e.EnvelopeMgr }
-	if e.EventBus != nil { op.eventBus = e.EventBus }
+	if e.EnvelopeMgr != nil {
+		op.envelopeMgr = e.EnvelopeMgr
+	}
+	if e.EventBus != nil {
+		op.eventBus = e.EventBus
+	}
 	fmt.Println("[初始化] ✅ Trace 关联缓存 (入站↔出站 trace_id 自动关联, 5min 窗口)")
 }
 
@@ -541,8 +620,12 @@ func (e *EngineSet) wireMgmtAPI(m *ManagementAPI, tenantMgr *TenantManager, auth
 	m.apiGateway = e.APIGateway
 	m.apiKeyMgr = e.APIKeyMgr
 	m.autoReviewMgr = e.AutoReviewMgr
-	if e.EnvelopeMgr != nil { m.envelopeMgr = e.EnvelopeMgr }
-	if e.EventBus != nil { m.eventBus = e.EventBus }
+	if e.EnvelopeMgr != nil {
+		m.envelopeMgr = e.EnvelopeMgr
+	}
+	if e.EventBus != nil {
+		m.eventBus = e.EventBus
+	}
 
 	// 需要 mgmtAPI 引用的组件
 	e.CanaryRotator = NewCanaryRotator(m)
@@ -556,9 +639,15 @@ func (e *EngineSet) wireMgmtAPI(m *ManagementAPI, tenantMgr *TenantManager, auth
 
 // wireLLMProxy 将引擎注入 LLMProxy（仅当 LLMProxy 启用时调用）
 func (e *EngineSet) wireLLMProxy(lp *LLMProxy) {
-	if lp == nil { return }
-	if e.EnvelopeMgr != nil { lp.envelopeMgr = e.EnvelopeMgr }
-	if e.EventBus != nil { lp.eventBus = e.EventBus }
+	if lp == nil {
+		return
+	}
+	if e.EnvelopeMgr != nil {
+		lp.envelopeMgr = e.EnvelopeMgr
+	}
+	if e.EventBus != nil {
+		lp.eventBus = e.EventBus
+	}
 	lp.singularityEngine = e.SingularityEngine
 	lp.SetTenantManager(nil) // already set via initAllEngines tenantMgr injection
 	lp.SetAPIKeyManager(e.APIKeyMgr)
@@ -566,10 +655,22 @@ func (e *EngineSet) wireLLMProxy(lp *LLMProxy) {
 
 // stopAll 优雅停止所有引擎
 func (e *EngineSet) stopAll() {
-	if e.AutoReviewMgr != nil { e.AutoReviewMgr.Stop() }
-	if e.TaintTracker != nil { e.TaintTracker.Stop() }
-	if e.PlanCompiler != nil { e.PlanCompiler.Stop() }
-	if e.EvolutionEngine != nil { e.EvolutionEngine.StopAutoEvolution() }
-	if e.EventBus != nil { e.EventBus.Stop() }
-	if e.BgScheduler != nil { e.BgScheduler.Stop() }
+	if e.AutoReviewMgr != nil {
+		e.AutoReviewMgr.Stop()
+	}
+	if e.TaintTracker != nil {
+		e.TaintTracker.Stop()
+	}
+	if e.PlanCompiler != nil {
+		e.PlanCompiler.Stop()
+	}
+	if e.EvolutionEngine != nil {
+		e.EvolutionEngine.StopAutoEvolution()
+	}
+	if e.EventBus != nil {
+		e.EventBus.Stop()
+	}
+	if e.BgScheduler != nil {
+		e.BgScheduler.Stop()
+	}
 }

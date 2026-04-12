@@ -235,6 +235,48 @@ func TestLLMAuditor_RecordAndQuery(t *testing.T) {
 	}
 }
 
+func TestLLMAuditor_RecordToolCallWithSourcePersistsDescriptor(t *testing.T) {
+	auditor, db := setupTestLLMAuditor(t)
+	defer db.Close()
+
+	callID, err := auditor.RecordCall("2026-01-01T00:00:00Z", "trace-src", "claude-sonnet-4-20250514", 100, 50, 150, 1000.0, 200, true, 1, "", false, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sourceDesc := &SourceDescriptor{
+		SourceKey:       "tool:web_fetch:public_web:docs.python.org",
+		BaseTool:        "web_fetch",
+		Host:            "docs.python.org",
+		Path:            "/3/library/json.html",
+		Category:        "public_web",
+		Confidentiality: ConfPublic,
+		Integrity:       IntegTaint,
+		TrustScore:      0.25,
+		AuthType:        "none",
+	}
+	if err := auditor.RecordToolCallWithSource(callID, "2026-01-01T00:00:00Z", "web_fetch", `{"url":"https://docs.python.org/3/library/json.html"}`, "", sourceDesc); err != nil {
+		t.Fatal(err)
+	}
+
+	toolRecords, toolTotal, err := auditor.QueryToolCalls("web_fetch", "", "", "", 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolTotal != 1 || len(toolRecords) != 1 {
+		t.Fatalf("unexpected tool records: total=%d len=%d", toolTotal, len(toolRecords))
+	}
+	if toolRecords[0]["source_category"] != "public_web" {
+		t.Fatalf("unexpected source category: %#v", toolRecords[0])
+	}
+	if toolRecords[0]["source_key"] != sourceDesc.SourceKey {
+		t.Fatalf("unexpected source key: %#v", toolRecords[0])
+	}
+	if toolRecords[0]["source_descriptor_json"] == "" {
+		t.Fatalf("expected descriptor json, got %#v", toolRecords[0])
+	}
+}
+
 func TestLLMAuditor_Stats(t *testing.T) {
 	auditor, db := setupTestLLMAuditor(t)
 	defer db.Close()

@@ -14,11 +14,12 @@ import (
 
 // LLMAuditor — LLM 侧审计记录器（独立于 IM 侧）
 type LLMAuditor struct {
-	db             *sql.DB
-	cfg            LLMAuditConfig
-	highRisk       map[string]string // tool_name → risk_level
-	proxyCfg       *LLMProxyConfig   // v9.1 引用代理配置（用于读取 cost_alert 等）
-	promptTracker  *PromptTracker    // v13.1 Prompt 版本追踪器
+	db            *sql.DB
+	cfg           LLMAuditConfig
+	highRisk      map[string]string // tool_name → risk_level
+	proxyCfg      *LLMProxyConfig   // v9.1 引用代理配置（用于读取 cost_alert 等）
+	promptTracker *PromptTracker    // v13.1 Prompt 版本追踪器
+	tenantMgr     *TenantManager    // source-classifier tenant override support
 }
 
 // v9.1 模型定价表（每百万 Token 美元）
@@ -40,9 +41,9 @@ type LLMAuditContext struct {
 	CanaryToken string // v10.1: 本次请求注入的 canary token
 	TenantID    string // v14.0: 租户 ID（从 X-Tenant-Id 头或自动解析）
 	// v17.3: IM↔LLM 会话关联
-	IMTraceID   string // 关联的 IM 侧 trace_id（如果匹配到）
-	SenderID    string // 关联的 IM 发送者
-	SessionID   string // 会话 ID（同一用户连续对话共享）
+	IMTraceID string // 关联的 IM 侧 trace_id（如果匹配到）
+	SenderID  string // 关联的 IM 发送者
+	SessionID string // 会话 ID（同一用户连续对话共享）
 }
 
 // NewLLMAuditor 创建 LLM 审计器
@@ -82,6 +83,9 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 		tool_name TEXT NOT NULL,
 		tool_input_preview TEXT,
 		tool_result_preview TEXT,
+		source_key TEXT DEFAULT '',
+		source_category TEXT DEFAULT '',
+		source_descriptor_json TEXT DEFAULT '',
 		risk_level TEXT DEFAULT 'low',
 		flagged INTEGER DEFAULT 0,
 		flag_reason TEXT
@@ -107,7 +111,11 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls(session_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_key TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_category TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_descriptor_json TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_source_category ON llm_tool_calls(source_category)`)
 
 	// v18.0: 请求/响应预览列
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN request_preview TEXT DEFAULT ''`)
@@ -182,6 +190,11 @@ func (la *LLMAuditor) RecordCallWithTenant(ts string, traceID, model string, req
 
 // RecordToolCall 写入一条工具调用记录
 func (la *LLMAuditor) RecordToolCall(llmCallID int64, ts, toolName, inputPreview, resultPreview string) error {
+	return la.RecordToolCallWithSource(llmCallID, ts, toolName, inputPreview, resultPreview, nil)
+}
+
+// RecordToolCallWithSource 写入一条包含来源分类信息的工具调用记录
+func (la *LLMAuditor) RecordToolCallWithSource(llmCallID int64, ts, toolName, inputPreview, resultPreview string, sourceDesc *SourceDescriptor) error {
 	riskLevel := la.ClassifyToolRisk(toolName)
 	flagged := 0
 	flagReason := ""
@@ -199,10 +212,20 @@ func (la *LLMAuditor) RecordToolCall(llmCallID int64, ts, toolName, inputPreview
 		inputPreview = truncateRunes(inputPreview, la.cfg.MaxPreviewLen)
 		resultPreview = truncateRunes(resultPreview, la.cfg.MaxPreviewLen)
 	}
+	sourceKey := ""
+	sourceCategory := ""
+	sourceDescriptorJSON := ""
+	if sourceDesc != nil {
+		sourceKey = sourceDesc.SourceKey
+		sourceCategory = sourceDesc.Category
+		if b, err := json.Marshal(sourceDesc); err == nil {
+			sourceDescriptorJSON = string(b)
+		}
+	}
 	_, err := la.db.Exec(`INSERT INTO llm_tool_calls
-		(llm_call_id, timestamp, tool_name, tool_input_preview, tool_result_preview, risk_level, flagged, flag_reason)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		llmCallID, ts, toolName, inputPreview, resultPreview, riskLevel, flagged, flagReason)
+		(llm_call_id, timestamp, tool_name, tool_input_preview, tool_result_preview, source_key, source_category, source_descriptor_json, risk_level, flagged, flag_reason)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		llmCallID, ts, toolName, inputPreview, resultPreview, sourceKey, sourceCategory, sourceDescriptorJSON, riskLevel, flagged, flagReason)
 	return err
 }
 
@@ -233,15 +256,15 @@ func ParseAnthropicRequest(body []byte) (model string) {
 
 // AnthropicResponseInfo 从响应中提取的信息
 type AnthropicResponseInfo struct {
-	Model          string
-	InputTokens    int
-	OutputTokens   int
-	TotalTokens    int
-	HasToolUse     bool
-	ToolCount      int
-	ToolNames      []string
-	ToolInputs     []string
-	ErrorMessage   string
+	Model        string
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	HasToolUse   bool
+	ToolCount    int
+	ToolNames    []string
+	ToolInputs   []string
+	ErrorMessage string
 }
 
 // ParseAnthropicResponse 提取 Anthropic 响应中的 content、usage
@@ -479,7 +502,7 @@ type BudgetCheckResult struct {
 
 // BudgetViolation 预算超限详情
 type BudgetViolation struct {
-	Type     string `json:"type"`                // "total_tools" / "single_tool" / "tokens"
+	Type     string `json:"type"` // "total_tools" / "single_tool" / "tokens"
 	Limit    int    `json:"limit"`
 	Actual   int    `json:"actual"`
 	ToolName string `json:"tool_name,omitempty"` // 仅 single_tool 类型
@@ -665,7 +688,8 @@ func (la *LLMAuditor) ProcessResponse(ctx *LLMAuditContext, statusCode int, resp
 		if i < len(info.ToolInputs) {
 			inputPreview = info.ToolInputs[i]
 		}
-		if err := la.RecordToolCall(callID, ts, toolName, inputPreview, ""); err != nil {
+		sourceDesc := classifyToolSourceForTenant(la.tenantMgr, ctx.TenantID, toolName, inputPreview)
+		if err := la.RecordToolCallWithSource(callID, ts, toolName, inputPreview, "", sourceDesc); err != nil {
 			log.Printf("[LLMAudit] 写入 llm_tool_call 失败: %v", err)
 		}
 	}
@@ -749,7 +773,8 @@ func (la *LLMAuditor) ProcessSSEBuffer(ctx *LLMAuditContext, events []byte) {
 		if i < len(info.ToolInputs) {
 			inputPreview = info.ToolInputs[i]
 		}
-		if err := la.RecordToolCall(callID, ts, toolName, inputPreview, ""); err != nil {
+		sourceDesc := classifyToolSourceForTenant(la.tenantMgr, ctx.TenantID, toolName, inputPreview)
+		if err := la.RecordToolCallWithSource(callID, ts, toolName, inputPreview, "", sourceDesc); err != nil {
 			log.Printf("[LLMAudit] 写入 llm_tool_call(SSE) 失败: %v", err)
 		}
 	}
@@ -823,8 +848,8 @@ func (la *LLMAuditor) OverviewWithFilter(sinceRFC3339 string) (map[string]interf
 		// v9.1 成本看板新增字段
 		"cost_by_model":        []map[string]interface{}{},
 		"cost_trend":           []map[string]interface{}{},
-		"daily_limit_usd":     0.0,
-		"today_cost_usd":      0.0,
+		"daily_limit_usd":      0.0,
+		"today_cost_usd":       0.0,
 		"cost_alert_triggered": false,
 	}
 
@@ -955,20 +980,20 @@ func (la *LLMAuditor) OverviewWithFilterTenant(sinceRFC3339, tenantID string) (m
 	tClause, tArgs := TenantFilter(tenantID)
 
 	result := map[string]interface{}{
-		"total_calls":        0,
-		"total_tokens":       0,
-		"input_tokens":       0,
-		"output_tokens":      0,
-		"estimated_cost_usd": 0.0,
-		"avg_latency_ms":     0.0,
-		"error_rate":         0.0,
-		"tool_calls_total":   0,
-		"high_risk_24h":      0,
-		"models":             []map[string]interface{}{},
-		"cost_by_model":      []map[string]interface{}{},
-		"cost_trend":         []map[string]interface{}{},
-		"daily_limit_usd":    0.0,
-		"today_cost_usd":     0.0,
+		"total_calls":          0,
+		"total_tokens":         0,
+		"input_tokens":         0,
+		"output_tokens":        0,
+		"estimated_cost_usd":   0.0,
+		"avg_latency_ms":       0.0,
+		"error_rate":           0.0,
+		"tool_calls_total":     0,
+		"high_risk_24h":        0,
+		"models":               []map[string]interface{}{},
+		"cost_by_model":        []map[string]interface{}{},
+		"cost_trend":           []map[string]interface{}{},
+		"daily_limit_usd":      0.0,
+		"today_cost_usd":       0.0,
 		"cost_alert_triggered": false,
 	}
 
@@ -1182,8 +1207,12 @@ func (la *LLMAuditor) QueryCalls(model, hasToolUse, from, to string, limit, offs
 	copy(countArgs, args)
 	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls "+where, countArgs...).Scan(&total)
 
-	if limit <= 0 { limit = 50 }
-	if limit > 1000 { limit = 1000 }
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
 	query := "SELECT id, timestamp, COALESCE(trace_id,''), COALESCE(model,''), request_tokens, response_tokens, total_tokens, latency_ms, status_code, has_tool_use, tool_count, COALESCE(error_message,''), COALESCE(canary_leaked,0), COALESCE(budget_exceeded,0), COALESCE(budget_violations,'') FROM llm_calls " + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
@@ -1206,9 +1235,9 @@ func (la *LLMAuditor) QueryCalls(model, hasToolUse, from, to string, limit, offs
 			"request_tokens": reqTok, "response_tokens": respTok, "total_tokens": totalTok,
 			"latency_ms": latencyMs, "status_code": statusCode,
 			"has_tool_use": hasToolUseV != 0, "tool_count": toolCount,
-			"error_message": errMsg,
-			"canary_leaked": canaryLeakedV != 0,
-			"budget_exceeded": budgetExceededV != 0,
+			"error_message":     errMsg,
+			"canary_leaked":     canaryLeakedV != 0,
+			"budget_exceeded":   budgetExceededV != 0,
 			"budget_violations": budgetViolationsV,
 		})
 	}
@@ -1242,9 +1271,13 @@ func (la *LLMAuditor) QueryToolCalls(toolName, riskLevel, from, to string, limit
 	copy(countArgs, args)
 	la.db.QueryRow("SELECT COUNT(*) FROM llm_tool_calls "+where, countArgs...).Scan(&total)
 
-	if limit <= 0 { limit = 50 }
-	if limit > 1000 { limit = 1000 }
-	query := "SELECT id, COALESCE(llm_call_id,0), timestamp, tool_name, COALESCE(tool_input_preview,''), COALESCE(tool_result_preview,''), risk_level, flagged, COALESCE(flag_reason,'') FROM llm_tool_calls " + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	query := "SELECT id, COALESCE(llm_call_id,0), timestamp, tool_name, COALESCE(tool_input_preview,''), COALESCE(tool_result_preview,''), COALESCE(source_key,''), COALESCE(source_category,''), COALESCE(source_descriptor_json,''), risk_level, flagged, COALESCE(flag_reason,'') FROM llm_tool_calls " + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := la.db.Query(query, args...)
@@ -1256,15 +1289,18 @@ func (la *LLMAuditor) QueryToolCalls(toolName, riskLevel, from, to string, limit
 	var records []map[string]interface{}
 	for rows.Next() {
 		var id, llmCallID, flagged int
-		var ts, toolNameV, inputPreview, resultPreview, riskLevelV, flagReason string
-		if rows.Scan(&id, &llmCallID, &ts, &toolNameV, &inputPreview, &resultPreview, &riskLevelV, &flagged, &flagReason) != nil {
+		var ts, toolNameV, inputPreview, resultPreview, sourceKey, sourceCategory, sourceDescriptorJSON, riskLevelV, flagReason string
+		if rows.Scan(&id, &llmCallID, &ts, &toolNameV, &inputPreview, &resultPreview, &sourceKey, &sourceCategory, &sourceDescriptorJSON, &riskLevelV, &flagged, &flagReason) != nil {
 			continue
 		}
 		records = append(records, map[string]interface{}{
 			"id": id, "llm_call_id": llmCallID, "timestamp": ts,
 			"tool_name": toolNameV, "tool_input_preview": inputPreview,
-			"tool_result_preview": resultPreview, "risk_level": riskLevelV,
-			"flagged": flagged != 0, "flag_reason": flagReason,
+			"tool_result_preview": resultPreview,
+			"source_key":          sourceKey, "source_category": sourceCategory,
+			"source_descriptor_json": sourceDescriptorJSON,
+			"risk_level":             riskLevelV,
+			"flagged":                flagged != 0, "flag_reason": flagReason,
 		})
 	}
 	return records, total, nil
@@ -1273,9 +1309,9 @@ func (la *LLMAuditor) QueryToolCalls(toolName, riskLevel, from, to string, limit
 // ToolStats 返回工具统计
 func (la *LLMAuditor) ToolStats() (map[string]interface{}, error) {
 	stats := map[string]interface{}{
-		"total":        0,
-		"by_tool":      []map[string]interface{}{},
-		"by_risk":      map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0},
+		"total":         0,
+		"by_tool":       []map[string]interface{}{},
+		"by_risk":       map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0},
 		"high_risk_24h": 0,
 		"flagged_count": 0,
 	}
@@ -1330,8 +1366,12 @@ func (la *LLMAuditor) ToolStats() (map[string]interface{}, error) {
 
 // ToolTimeline 按小时聚合工具调用
 func (la *LLMAuditor) ToolTimeline(hours int) ([]map[string]interface{}, error) {
-	if hours <= 0 { hours = 24 }
-	if hours > 168 { hours = 168 }
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 168 {
+		hours = 168
+	}
 	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
 
 	rows, err := la.db.Query(`
@@ -1406,8 +1446,12 @@ func (la *LLMAuditor) CanaryStatus() map[string]interface{} {
 
 // QueryCanaryLeaks 查询 canary 泄露事件列表
 func (la *LLMAuditor) QueryCanaryLeaks(limit, offset int) ([]map[string]interface{}, int, error) {
-	if limit <= 0 { limit = 50 }
-	if limit > 1000 { limit = 1000 }
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
 
 	var total int
 	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE canary_leaked=1").Scan(&total)
@@ -1453,8 +1497,12 @@ func (la *LLMAuditor) BudgetStatus() map[string]interface{} {
 
 // QueryBudgetViolations 查询预算超限事件列表
 func (la *LLMAuditor) QueryBudgetViolations(limit, offset int) ([]map[string]interface{}, int, error) {
-	if limit <= 0 { limit = 50 }
-	if limit > 1000 { limit = 1000 }
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
 
 	var total int
 	la.db.QueryRow("SELECT COUNT(*) FROM llm_calls WHERE budget_exceeded=1").Scan(&total)
@@ -1610,7 +1658,7 @@ func (la *LLMAuditor) SeedDemoData(db *sql.DB) (int, int) {
 		respTokens := 200 + rng.Intn(1801)
 		if isToday {
 			reqTokens = 2000 + rng.Intn(8001) // 2000-10000
-			respTokens = 800 + rng.Intn(4201)  // 800-5000
+			respTokens = 800 + rng.Intn(4201) // 800-5000
 		}
 		totalTokens := reqTokens + respTokens
 		latencyMs := 500.0 + rng.Float64()*7500.0
@@ -1695,8 +1743,8 @@ func (la *LLMAuditor) SeedDemoData(db *sql.DB) (int, int) {
 	tx.Commit()
 
 	// v10.1: 注入 Canary 泄露 + Budget 超限的演示数据
-	canaryCount := 2 + rng.Intn(2)  // 2-3 条
-	budgetCount := 3 + rng.Intn(3)  // 3-5 条
+	canaryCount := 2 + rng.Intn(2) // 2-3 条
+	budgetCount := 3 + rng.Intn(3) // 3-5 条
 	for i := 0; i < canaryCount; i++ {
 		offsetSec := rng.Int63n(3 * 24 * 3600) // 过去 3 天
 		ts := now.Add(-time.Duration(offsetSec) * time.Second).UTC().Format(time.RFC3339)
@@ -1751,6 +1799,7 @@ func (la *LLMAuditor) ClearDemoData(db *sql.DB) int64 {
 	}
 	return total
 }
+
 // LogSingularityExpose 记录奇点蜜罐暴露事件到 LLM 审计日志
 func (la *LLMAuditor) LogSingularityExpose(traceID, channel, templateName string, level int) {
 	if la == nil || la.db == nil {
