@@ -96,6 +96,7 @@
       <StatCard :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" :badge="timeRange" color="yellow" :change="stats.warnedChange" :changeUp="false" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { action: 'warn', since: timeRange } })"/>
       <StatCard :iconSvg="svgPercent" :value="stats.rate" label="拦截率" :badge="timeRange" color="indigo" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/rules' })"/>
       <StatCard :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" badge="30d" color="red" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/user-profiles')"/>
+      <StatCard :iconSvg="svgGlobe" :value="sourceCategoryCount" label="来源分类" badge="LLM" color="green" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/agent')"/>
       <StatCard :iconSvg="svgIFC" :value="ifcStats ? ifcStats.total_violations : '--'" label="IFC 违规" badge="all" color="purple" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/ifc')"/>
       <StatCard :iconSvg="svgDeviation" :value="deviationStats ? deviationStats.total_deviations : '--'" label="计划偏差" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/deviations')"/>
       <StatCard :iconSvg="svgCapDeny" :value="capabilityStats ? capabilityStats.deny_count : '--'" label="能力拒绝" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/capability')"/>
@@ -159,9 +160,19 @@
     <div class="ov-row">
       <div class="card"><div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span><span class="card-title">拦截类型分布</span></div>
         <Skeleton v-if="!loaded" type="chart"/><PieChart v-else :data="pieData" :size="180"/></div>
+      <div class="card"><div class="card-header"><span class="card-icon"><Icon name="globe" :size="16" /></span><span class="card-title">来源分类分布</span><router-link to="/agent" class="card-more">查看工具审计 →</router-link></div>
+        <Skeleton v-if="!loaded" type="text"/><EmptyState v-else-if="!sourceCategoryRows.length" :iconSvg="svgGlobe" title="暂无来源分类数据" description="LLM 工具调用产生来源分类后，这里会显示 public_web / internal_api / external_api 等分布"/>
+        <div v-else><TransitionGroup name="list-anim" tag="div"><div class="hbar-row" v-for="(r,i) in sourceCategoryRows" :key="r.category"><span class="hbar-rank">#{{i+1}}</span><span class="hbar-name" :title="r.category">{{r.category}}</span><div class="hbar-track"><div class="hbar-fill hbar-fill-anim" :style="{'--target-w':Math.max(5,r.pct)+'%',background:sourceBarColors[i%sourceBarColors.length]}">{{r.count}}</div></div></div></TransitionGroup></div></div>
+    </div>
+
+    <div class="ov-row">
       <div class="card"><div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span class="card-title">规则命中 TOP5</span></div>
         <Skeleton v-if="!loaded" type="text"/><EmptyState v-else-if="!topRules.length" :iconSvg="svgTarget" title="规则正在保护中" description="命中数据将在检测到威胁后显示"/>
         <div v-else><TransitionGroup name="list-anim" tag="div"><div class="hbar-row" v-for="(r,i) in topRules" :key="r.name"><span class="hbar-rank">#{{i+1}}</span><span class="hbar-name" :title="r.name">{{r.name}}</span><div class="hbar-track"><div class="hbar-fill hbar-fill-anim" :style="{'--target-w':Math.max(5,r.pct)+'%',background:barColors[i%barColors.length]}">{{r.hits}}</div></div></div></TransitionGroup></div></div>
+      <div class="card"><div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span class="card-title">最近攻击事件</span></div>
+        <Skeleton v-if="!loaded" type="table"/><EmptyState v-else-if="!recentAttacks.length" :iconSvg="svgShieldCheck" title="当前环境安全" description="没有检测到攻击事件"/>
+        <div v-else class="table-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
+          <TransitionGroup name="list-anim" tag="tbody"><tr v-for="a in recentAttacks" :key="a.id||a.trace_id||a.timestamp" class="row-block" style="cursor:pointer" @click="$router.push('/audit')"><td>{{fmtTime(a.timestamp||a.time)}}</td><td>{{a.direction==='inbound'?'入站':'出站'}}</td><td><a v-if="a.sender_id" class="user-link" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(a.sender_id))">{{a.sender_id}}</a><span v-else>--</span></td><td>{{a.reason||'--'}}</td></tr></TransitionGroup></table></div></div>
     </div>
 
     <!-- 热力图 -->
@@ -189,11 +200,6 @@
       </div>
     </div>
 
-    <!-- 最近攻击事件 -->
-    <div class="card"><div class="card-header"><span class="card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span class="card-title">最近攻击事件</span></div>
-      <Skeleton v-if="!loaded" type="table"/><EmptyState v-else-if="!recentAttacks.length" :iconSvg="svgShieldCheck" title="当前环境安全" description="没有检测到攻击事件"/>
-      <div v-else class="table-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>发送者</th><th>原因</th></tr></thead>
-        <TransitionGroup name="list-anim" tag="tbody"><tr v-for="a in recentAttacks" :key="a.id||a.trace_id||a.timestamp" class="row-block" style="cursor:pointer" @click="$router.push('/audit')"><td>{{fmtTime(a.timestamp||a.time)}}</td><td>{{a.direction==='inbound'?'入站':'出站'}}</td><td><a v-if="a.sender_id" class="user-link" @click.stop="$router.push('/user-profiles/'+encodeURIComponent(a.sender_id))">{{a.sender_id}}</a><span v-else>--</span></td><td>{{a.reason||'--'}}</td></tr></TransitionGroup></table></div></div>
     <ConfirmModal :visible="cfmVisible" :title="cfmTitle" :message="cfmMsg" :type="cfmType" @confirm="doCfmAction" @cancel="cfmVisible = false" />
   </div>
 </template>
@@ -220,6 +226,7 @@ const router = useRouter()
 
 // ====== 常量 ======
 const barColors = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
+const sourceBarColors = ['#10B981', '#14B8A6', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444']
 const pieColors = ['#EF4444', '#F59E0B', '#6366F1', '#10B981', '#8B5CF6', '#06B6D4', '#EC4899', '#F97316']
 const timeRangeOptions = [
   { label: '1h', value: '1h' },
@@ -254,6 +261,7 @@ const trendData = ref([])
 const trendRange = ref('24h')
 const recentAttacks = ref([])
 const topRules = ref([])
+const sourceCategoryRows = ref([])
 const pieData = ref([])
 const heatmapData = ref([])
 const highRiskUserCount = ref(0)
@@ -337,6 +345,7 @@ const summaryRedteamVulns = computed(() => { const r = summary.value.redteam; re
 const summaryRedteamClass = computed(() => { const v = parseFloat(summaryRedteamRate.value); return v >= 80 ? 'success' : v >= 50 ? 'warning' : 'danger' })
 const summaryTopTenant = computed(() => { const lb = summary.value.leaderboard; return lb && lb.length ? lb[0].tenant_name || lb[0].tenant_id : '--' })
 const summaryTopScore = computed(() => { const lb = summary.value.leaderboard; return lb && lb.length ? lb[0].health_score : '--' })
+const sourceCategoryCount = computed(() => sourceCategoryRows.value.length)
 
 // ====== 辅助函数 ======
 function fmtTime(ts) { if (!ts) return '--'; const d = new Date(ts); return isNaN(d.getTime()) ? String(ts) : d.toLocaleString('zh-CN', { hour12: false }) }
@@ -448,6 +457,16 @@ async function loadData() {
     for (const t of tl) { if (!t.hour) continue; const dt = new Date(t.hour); if (isNaN(dt.getTime())) continue; const diffDays = Math.floor((now - dt) / 86400000); const dayIdx = 6 - Math.min(6, diffDays); const hourIdx = dt.getHours(); matrix[dayIdx][hourIdx] += (t.block || 0) + (t.warn || 0) }
     heatmapData.value = matrix
   } catch { heatmapData.value = [] }
+  try {
+    const toolStats = await api('/api/v1/llm/tools/stats')
+    const bySource = Array.isArray(toolStats.by_source_category) ? toolStats.by_source_category : []
+    const maxSource = bySource.length ? (bySource[0].count || 1) : 1
+    sourceCategoryRows.value = bySource.map(item => ({
+      category: item.category,
+      count: item.count,
+      pct: ((item.count || 0) / maxSource) * 100,
+    }))
+  } catch { sourceCategoryRows.value = [] }
   try { const rs = await api('/api/v1/users/risk-stats'); highRiskUserCount.value = (rs.critical_count || 0) + (rs.high_count || 0) } catch { highRiskUserCount.value = 0 }
   loaded.value = true
 }
