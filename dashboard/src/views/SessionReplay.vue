@@ -5,6 +5,7 @@
       <div class="stat-card sc-green"><div class="sv">{{ activeSessions }}</div><div class="sl2">活跃会话</div></div>
       <div class="stat-card sc-red"><div class="sv">{{ securityEvents }}</div><div class="sl2">安全事件</div></div>
       <div class="stat-card"><div class="sv">{{ avgMessages }}</div><div class="sl2">平均消息数</div></div>
+      <div class="stat-card sc-purple"><div class="sv">{{ sourceCategoryCount }}</div><div class="sl2">来源分类</div></div>
     </div>
     <div class="card">
       <div class="card-header">
@@ -20,6 +21,7 @@
         <div class="filter-group">
           <select v-model="f.range" @change="fc" class="filter-select"><option value="24h">最近24小时</option><option value="7d">最近7天</option><option value="30d">最近30天</option><option value="">全部</option></select>
           <select v-model="f.risk" @change="fc" class="filter-select"><option value="">全部风险</option><option value="critical">🔴 严重</option><option value="high">🟠 高危</option><option value="medium">🟡 中等</option><option value="low">🟢 低风险</option></select>
+          <select v-model="f.source_category" @change="fc" class="filter-select"><option value="">全部来源</option><option v-for="opt in sourceCategoryOptions" :key="opt" :value="opt">{{ opt }}</option></select>
           <select v-model="sortMode" @change="load" class="filter-select"><option value="newest">最新优先</option><option value="messages">最多消息</option><option value="risk">最高风险</option><option value="duration">最长时间</option></select>
           <div class="search-box"><Icon name="search" :size="14" class="search-icon" /><input v-model="f.q" placeholder="搜索 trace_id / 用户 / 内容..." @keyup.enter="fc" /><button v-if="f.q" class="search-clear" @click="f.q='';fc()">×</button></div>
           <button class="btn btn-sm btn-primary" @click="fc">搜索</button>
@@ -62,6 +64,7 @@
             <div class="sc-meta"><span v-if="s.sender_id" class="meta-item"><Icon name="users" :size="12" /> <span v-html="hl(s.display_name || s.sender_id)"></span><span v-if="s.display_name" class="meta-sub" :title="s.sender_id"> ({{ s.sender_id }})</span></span><span v-if="s.department" class="meta-item meta-dept">{{ s.department }}</span><span v-if="s.model" class="meta-item"><Icon name="brain" :size="12" /> {{ s.model }}</span></div>
             <div class="sc-stats"><span class="chip"><span class="chip-l">IM</span><span class="chip-v">{{ s.im_events }}</span></span><span class="chip"><span class="chip-l">LLM</span><span class="chip-v">{{ s.llm_calls }}</span></span><span class="chip"><span class="chip-l">Tools</span><span class="chip-v">{{ s.tool_calls }}</span></span><span class="chip"><span class="chip-l">Tokens</span><span class="chip-v">{{ fmtNum(s.total_tokens) }}</span></span></div>
             <div class="sc-flags" v-if="hasSec(s)"><span class="flag-danger" v-if="s.canary_leaked"><Icon name="alert-triangle" :size="12" /> Canary泄露</span><span class="flag-danger" v-if="s.blocked"><Icon name="shield" :size="12" /> 已拦截</span><span class="flag-warn" v-if="s.budget_exceeded"><Icon name="zap" :size="12" /> 预算超限</span><span class="flag-warn" v-if="s.flagged_tools>0"><Icon name="alert-triangle" :size="12" /> {{ s.flagged_tools }}可疑工具</span></div>
+            <div class="sc-source" v-if="(s.source_categories||[]).length"><span class="source-chip" v-for="cat in s.source_categories" :key="cat">{{ cat }}</span></div>
             <div class="sc-tags" v-if="(s.tags||[]).length"><span class="tag-pill" v-for="t in (s.tags||[]).slice(0,5)" :key="t">{{ t }}</span></div>
           </div>
           <div class="sc-footer">
@@ -111,11 +114,13 @@ const sortMode = ref('newest')
 const expId = ref(null)
 const pvLoading = ref(false)
 const pvMsgs = ref([])
-const f = reactive({ range:'7d', risk:'', q:'', sender_id:'', status:'', from:'', to:'' })
+const sourceCategoryOptions = ['public_web','external_api','internal_api','metadata_service','unclassified']
+const f = reactive({ range:'7d', risk:'', source_category:'', q:'', sender_id:'', status:'', from:'', to:'' })
 
 const activeSessions = computed(() => sessions.value.filter(s => !s.end_time || (Date.now()-new Date(s.end_time).getTime())<300000).length)
 const securityEvents = computed(() => sessions.value.filter(hasSec).length)
 const avgMessages = computed(() => { const l=sessions.value.length; return l ? Math.round(sessions.value.reduce((a,s)=>a+(s.im_events||0),0)/l) : 0 })
+const sourceCategoryCount = computed(() => new Set(sessions.value.flatMap(s => s.source_categories || [])).size)
 
 const rw = l => ({critical:4,high:3,medium:2,low:1})[l]||0
 const sorted = computed(() => {
@@ -135,6 +140,7 @@ const filterTags = computed(() => {
   const t=[]
   if(f.range) t.push({k:'range',l:{'24h':'24小时','7d':'7天','30d':'30天'}[f.range]||f.range})
   if(f.risk) t.push({k:'risk',l:rlabel(f.risk)})
+  if(f.source_category) t.push({k:'source_category',l:'来源:'+f.source_category})
   if(f.q) t.push({k:'q',l:'搜索:'+f.q})
   if(f.sender_id) t.push({k:'sender_id',l:'用户:'+f.sender_id})
   if(f.status) t.push({k:'status',l:{active:'活跃',ended:'已结束',blocked:'已拦截'}[f.status]})
@@ -145,7 +151,7 @@ const filterTags = computed(() => {
 const hasF = computed(() => filterTags.value.length>0)
 
 function rmF(k){ f[k]=''; fc() }
-function resetF(){ Object.assign(f,{range:'7d',risk:'',q:'',sender_id:'',status:'',from:'',to:''}); sortMode.value='newest'; fc() }
+function resetF(){ Object.assign(f,{range:'7d',risk:'',source_category:'',q:'',sender_id:'',status:'',from:'',to:''}); sortMode.value='newest'; fc() }
 function fmtTime(ts){ if(!ts)return'--'; const d=new Date(ts); return isNaN(d)?ts:d.toLocaleString('zh-CN',{hour12:false}) }
 function fmtTimeFull(ts){ if(!ts)return''; const d=new Date(ts); return isNaN(d)?ts:d.toLocaleTimeString('zh-CN',{hour12:false}) }
 function fmtDur(ms){ if(!ms||ms<=0)return'--'; if(ms<1000)return Math.round(ms)+'ms'; if(ms<60000)return(ms/1000).toFixed(1)+'s'; return Math.floor(ms/60000)+'m '+Math.floor((ms%60000)/1000)+'s' }
@@ -172,6 +178,7 @@ async function load(){
   if(f.to)p.push('to='+encodeURIComponent(f.to))
   if(f.sender_id)p.push('sender_id='+encodeURIComponent(f.sender_id))
   if(f.risk)p.push('risk='+f.risk)
+  if(f.source_category)p.push('source_category='+encodeURIComponent(f.source_category))
   if(f.q)p.push('q='+encodeURIComponent(f.q))
   p.push('limit='+pageSize,'offset='+((page.value-1)*pageSize))
   try{
@@ -196,7 +203,7 @@ onUnmounted(()=>clearInterval(timer))
 .stat-card:hover{border-color:var(--color-primary);transform:translateY(-2px)}
 .sv{font-size:1.75rem;font-weight:800;color:var(--text-primary);font-family:var(--font-mono);line-height:1.2}
 .sl2{font-size:11px;color:var(--text-tertiary);margin-top:4px;text-transform:uppercase;letter-spacing:.05em}
-.sc-green .sv{color:#22C55E}.sc-red .sv{color:#EF4444}
+.sc-green .sv{color:#22C55E}.sc-red .sv{color:#EF4444}.sc-purple .sv{color:#a855f7}
 @media(max-width:640px){.stats-row{grid-template-columns:repeat(2,1fr)}}
 
 .replay-filters{margin-bottom:12px}

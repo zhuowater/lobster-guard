@@ -43,9 +43,15 @@
           <div class="pill"><span class="pl">LLM</span><span class="pv">{{ sm.llm_calls }}</span></div>
           <div class="pill"><span class="pl">Tools</span><span class="pv">{{ sm.tool_calls }}</span></div>
           <div class="pill"><span class="pl">Tokens</span><span class="pv">{{ fmtN(sm.total_tokens) }}</span></div>
+          <div class="pill" v-if="(sm.source_categories||[]).length"><span class="pl">Sources</span><span class="pv">{{ sm.source_categories.length }}</span></div>
           <div class="pill pw" v-if="sm.canary_leaked"><span class="pv">🔴 Canary Leaked</span></div>
           <div class="pill pw" v-if="sm.budget_exceeded"><span class="pv">⚠️ Budget Exceeded</span></div>
           <div class="pill pw" v-if="sm.blocked"><span class="pv">🚫 Blocked</span></div>
+        </div>
+        <div v-if="(sm.source_categories||[]).length || (sm.source_keys||[]).length" class="sds-source">
+          <span class="tag-label">来源:</span>
+          <span class="src-chip" v-for="cat in (sm.source_categories||[])" :key="cat">{{ cat }}</span>
+          <span class="src-key" v-for="key in (sm.source_keys||[]).slice(0,4)" :key="key">{{ key }}</span>
         </div>
         <div class="sds-tags">
           <span class="tag-label">标签:</span>
@@ -158,9 +164,12 @@
                     <span class="tool-name">{{ ev.tool_name }}</span>
                     <span class="tool-risk" :class="'tr-'+ev.risk_level">{{ ev.risk_level }}</span>
                     <span class="tool-flag" v-if="ev.flagged">⚠️ flagged</span>
+                    <span class="src-chip" v-if="ev.source_category">{{ ev.source_category }}</span>
+                    <span class="src-key" v-if="ev.source_key">{{ ev.source_key }}</span>
                   </div>
                   <div class="se-code" v-if="ev.tool_input"><div class="code-lbl">Input:</div><pre class="code-blk">{{ ev.tool_input }}</pre></div>
                   <div class="se-code" v-if="ev.tool_result"><div class="code-lbl">Result:</div><pre class="code-blk">{{ ev.tool_result }}</pre></div>
+                  <div class="se-code" v-if="ev.source_descriptor_json"><div class="code-lbl">Source Descriptor:</div><pre class="code-blk">{{ fmtJSON(ev.source_descriptor_json) }}</pre></div>
                   <div class="se-flag-reason" v-if="ev.flag_reason">🚩 {{ ev.flag_reason }}</div>
                 </div>
               </div>
@@ -255,6 +264,7 @@ function fmtD(ms) { if (!ms||ms<=0) return '--'; if (ms<1000) return Math.round(
 function fmtN(n) { if (!n) return '0'; return n>=1000?(n/1000).toFixed(1)+'K':String(n) }
 function rl(l) { return {critical:'🔴 严重',high:'🟠 高危',medium:'🟡 中等',low:'🟢 低风险'}[l]||l||'未知' }
 function chatRowClass(ev) { const c=['cr-'+ev.type]; if(ev.flagged)c.push('cr-flagged'); if(ev.action==='block')c.push('cr-blocked'); if(ev.canary_leaked)c.push('cr-canary'); return c }
+function fmtJSON(raw){ if(!raw) return ''; try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw } }
 
 // API tag ops
 async function submitTag(ev) {
@@ -341,7 +351,7 @@ onMounted(() => { loadTimeline(); loadSessionTags(); loadNotes() })
 .b-high{background:rgba(249,115,22,.15);color:#F97316}
 .b-medium{background:rgba(234,179,8,.15);color:#EAB308}
 .b-low{background:rgba(34,197,94,.15);color:#22C55E}
-.sds-tags{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border-subtle)}
+.sds-source{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border-subtle);margin-bottom:12px}.src-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.22);color:#a855f7;font-size:11px;font-family:var(--font-mono)}.src-key{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);color:#60a5fa;font-size:11px;font-family:var(--font-mono);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sds-tags{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border-subtle)}
 .tag-label{font-size:11px;color:var(--text-tertiary);font-weight:500}
 .stag{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.08);color:var(--text-secondary)}
 .stag-warn{background:rgba(234,179,8,.15);color:#EAB308}
