@@ -477,6 +477,18 @@ func (lp *LLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			lp.sealLLMResponseEnvelope(traceID, llmResponseRecord{Decision: decision, Rules: llmRespRules, Body: respBody})
 		}
 
+		// v10.1 fix: Canary 泄露拦截 — 写出前检查，防止含 system prompt 的内容透传到客户端
+		// 同时立即轮换 token，后续请求使用新 token，历史 token 在 messages 里的引用不再触发误报
+		if activeCanaryToken != "" && strings.Contains(string(respBody), activeCanaryToken) {
+			log.Printf("[Canary] ⚠️ Prompt 泄露拦截! trace_id=%s", traceID)
+			lp.RotateCanaryToken()
+			lp.auditLLMResponse(auditCtx, resp.StatusCode, respBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			fmt.Fprintf(w, `{"error":"Response blocked: prompt leak detected","trace_id":"%s"}`, traceID)
+			return
+		}
+
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 
@@ -584,6 +596,17 @@ func (lp *LLMProxy) handleSSEBufferedRewrite(w http.ResponseWriter, resp *http.R
 		},
 	}
 	respBody, _ := json.Marshal(result)
+
+	// v10.1 fix: Canary 泄露拦截（SSE 缓冲模式）— 完整内容已积累，写出前拦截
+	if auditCtx.CanaryToken != "" && strings.Contains(fullContent, auditCtx.CanaryToken) {
+		log.Printf("[Canary] ⚠️ Prompt 泄露拦截(SSE buffered)! trace_id=%s", auditCtx.TraceID)
+		lp.RotateCanaryToken()
+		lp.auditLLMResponse(auditCtx, resp.StatusCode, respBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(403)
+		fmt.Fprintf(w, `{"error":"Response blocked: prompt leak detected","trace_id":"%s"}`, auditCtx.TraceID)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Del("Content-Length")
@@ -838,6 +861,13 @@ func (lp *LLMProxy) handleSSEResponse(w http.ResponseWriter, resp *http.Response
 				}
 			}
 		}()
+	}
+
+	// v10.1 fix: SSE 流已逐帧透传无法拦截，但流结束后立即轮换 token
+	// 这样后续多轮对话的 messages 历史虽含旧 token，但新注入的 token 已不同，不会持续误报
+	if auditCtx.CanaryToken != "" && strings.Contains(contentAccum.String(), auditCtx.CanaryToken) {
+		log.Printf("[Canary] ⚠️ SSE 流检测到 Prompt 泄露，已轮换 token! trace_id=%s", auditCtx.TraceID)
+		lp.RotateCanaryToken()
 	}
 
 	lp.auditSSEBuffer(auditCtx, eventData)
