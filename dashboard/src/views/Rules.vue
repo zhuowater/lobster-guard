@@ -798,8 +798,8 @@ async function saveRule(data) {
   const isOutbound = direction === 'outbound'
   const basePath = isOutbound ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
   try {
-    if (editingRule.value) { await apiPut(basePath + '/update', data); showToast('规则已更新: ' + data.name, 'success') }
-    else { await apiPost(basePath + '/add', data); showToast('规则已创建: ' + data.name, 'success') }
+    if (editingRule.value) { await apiPut(basePath + '/' + encodeURIComponent(data.name), data); showToast('规则已更新: ' + data.name, 'success') }
+    else { await apiPost(basePath, data); showToast('规则已创建: ' + data.name, 'success') }
     editorVisible.value = false
     if (isOutbound) loadOutbound(); else loadInbound()
   } catch (e) { showToast('操作失败: ' + e.message, 'error') }
@@ -822,7 +822,7 @@ function confirmDeleteRule(row, direction) {
   confirmType.value = 'danger'
   confirmAction = async () => {
     const basePath = direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
-    try { await apiDelete(basePath + '/delete', { name: row.name }); showToast('规则已删除: ' + row.name, 'success'); if (direction === 'outbound') loadOutbound(); else loadInbound() }
+    try { await apiDelete(basePath + '/' + encodeURIComponent(row.name)); showToast('规则已删除: ' + row.name, 'success'); if (direction === 'outbound') loadOutbound(); else loadInbound() }
     catch (e) { showToast('删除失败: ' + e.message, 'error') }
   }
   confirmVisible.value = true
@@ -833,7 +833,7 @@ async function batchAction(action) {
   for (const key of keys) {
     const rule = allRules.value.find(r => r._key === key); if (!rule) continue
     const basePath = rule._direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
-    try { await apiPut(basePath + '/update', { ...rule, action }); success++ } catch { failed++ }
+    try { await apiPut(basePath + '/' + encodeURIComponent(rule.name), { ...rule, action }); success++ } catch { failed++ }
   }
   showToast('批量设为 ' + action + ': 成功 ' + success + ' 条' + (failed ? ', 失败 ' + failed + ' 条' : ''), failed ? 'error' : 'success')
   selectedRules.value = []; loadInbound(); loadOutbound()
@@ -847,7 +847,7 @@ function confirmBatchDelete() {
     for (const key of keys) {
       const rule = allRules.value.find(r => r._key === key); if (!rule) continue
       const basePath = rule._direction === 'outbound' ? '/api/v1/outbound-rules' : '/api/v1/inbound-rules'
-      try { await apiDelete(basePath + '/delete', { name: rule.name }); success++ } catch { failed++ }
+      try { await apiDelete(basePath + '/' + encodeURIComponent(rule.name)); success++ } catch { failed++ }
     }
     showToast('批量删除: 成功 ' + success + ' 条' + (failed ? ', 失败 ' + failed + ' 条' : ''), failed ? 'error' : 'success')
     selectedRules.value = []; loadInbound(); loadOutbound()

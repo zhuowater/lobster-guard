@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -734,3 +736,33 @@ func (api *ManagementAPI) handleImportRules(w http.ResponseWriter, r *http.Reque
 }
 
 // handleRuleTemplateDetail GET /api/v1/rule-templates/detail?name=xxx — 获取模板详情（v30.0: 转发到入站模板）
+
+// ============================================================
+// RESTful 别名 handler（新风格：路径参数；旧路由保持兼容）
+// ============================================================
+
+// handleDeleteInboundRuleByPath DELETE /api/v1/inbound-rules/{name}
+func (api *ManagementAPI) handleDeleteInboundRuleByPath(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/inbound-rules/")
+	if name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "rule name required in path"})
+		return
+	}
+	b, _ := json.Marshal(map[string]string{"name": name})
+	r2 := r.Clone(r.Context())
+	r2.Body = io.NopCloser(bytes.NewReader(b))
+	api.handleDeleteInboundRule(w, r2)
+}
+
+// handleDeleteOutboundRuleByPath DELETE /api/v1/outbound-rules/{name}
+func (api *ManagementAPI) handleDeleteOutboundRuleByPath(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/outbound-rules/")
+	if name == "" {
+		jsonResponse(w, 400, map[string]string{"error": "rule name required in path"})
+		return
+	}
+	b, _ := json.Marshal(map[string]string{"name": name})
+	r2 := r.Clone(r.Context())
+	r2.Body = io.NopCloser(bytes.NewReader(b))
+	api.handleDeleteOutboundRule(w, r2)
+}

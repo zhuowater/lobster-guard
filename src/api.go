@@ -644,6 +644,21 @@ func (api *ManagementAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.handleInboundToggleShadow(w, r)
 	case path == "/api/v1/outbound-rules/toggle-shadow" && method == "POST":
 		api.handleOutboundToggleShadow(w, r)
+	// RESTful 别名 — 新风格路由，旧路由（/add /delete /update）保持兼容
+	case path == "/api/v1/ping" && method == "GET":
+		jsonResponse(w, 200, map[string]string{"status": "ok"})
+	case path == "/api/v1/inbound-rules" && method == "POST":
+		api.handleAddInboundRule(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-rules/") && method == "PUT":
+		api.handleUpdateInboundRule(w, r)
+	case strings.HasPrefix(path, "/api/v1/inbound-rules/") && method == "DELETE":
+		api.handleDeleteInboundRuleByPath(w, r)
+	case path == "/api/v1/outbound-rules" && method == "POST":
+		api.handleAddOutboundRule(w, r)
+	case strings.HasPrefix(path, "/api/v1/outbound-rules/") && method == "PUT":
+		api.handleUpdateOutboundRule(w, r)
+	case strings.HasPrefix(path, "/api/v1/outbound-rules/") && method == "DELETE":
+		api.handleDeleteOutboundRuleByPath(w, r)
 	case path == "/api/v1/rules/export" && method == "GET":
 		api.handleExportRules(w, r)
 	case path == "/api/v1/rules/import" && method == "POST":
