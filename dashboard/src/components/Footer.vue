@@ -1,6 +1,6 @@
 <template>
   <footer class="app-footer">
-    <span class="footer-left">© 2026 Lobster Guard {{ appState?.version || 'v36.5' }} | 龙虾卫士 — AI Agent 安全网关</span>
+    <span class="footer-left">© 2026 Lobster Guard {{ appState?.version || 'v36.6' }} | 龙虾卫士 — AI Agent 安全网关</span>
     <span class="footer-right">Dashboard by zhuowater</span>
   </footer>
 </template>
