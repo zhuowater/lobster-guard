@@ -576,17 +576,24 @@ func (e *SessionReplayEngine) ListSessions(from, to, senderID, riskLevel, q stri
 }
 
 // ListSessionsTenant v14.0: 租户感知的会话列表
-func (e *SessionReplayEngine) ListSessionsTenant(from, to, senderID, riskLevel, q, sourceCategory, tenantID string, limit, offset int) ([]SessionSummary, int, error) {
-	// 目前租户仍委托给通用查询；sourceCategory 在聚合后做过滤即可
+func (e *SessionReplayEngine) ListSessionsTenant(from, to, senderID, riskLevel, q, sourceCategory, sourceKey, tenantID string, limit, offset int) ([]SessionSummary, int, error) {
+	// 目前租户仍委托给通用查询；sourceCategory/sourceKey 在聚合后做过滤即可
 	sessions, total, err := e.ListSessions(from, to, senderID, riskLevel, q, limit, offset)
-	if err != nil || sourceCategory == "" {
+	if err != nil {
 		return sessions, total, err
+	}
+	if sourceCategory == "" && sourceKey == "" {
+		return sessions, total, nil
 	}
 	filtered := make([]SessionSummary, 0, len(sessions))
 	for _, s := range sessions {
-		if containsReplayString(s.SourceCategories, sourceCategory) {
-			filtered = append(filtered, s)
+		if sourceCategory != "" && !containsReplayString(s.SourceCategories, sourceCategory) {
+			continue
 		}
+		if sourceKey != "" && !containsReplayString(s.SourceKeys, sourceKey) {
+			continue
+		}
+		filtered = append(filtered, s)
 	}
 	return filtered, len(filtered), nil
 }

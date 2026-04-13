@@ -31,6 +31,7 @@
       <div v-if="showAdv" class="adv-filters">
         <div class="adv-row">
           <div class="adv-item"><label>用户ID</label><input v-model="f.sender_id" placeholder="sender_id..." @keyup.enter="fc" /></div>
+          <div class="adv-item"><label>来源键</label><input v-model="f.source_key" placeholder="docs.example.com" @keyup.enter="fc" /></div>
           <div class="adv-item"><label>状态</label><select v-model="f.status" @change="fc"><option value="">全部</option><option value="active">活跃</option><option value="ended">已结束</option><option value="blocked">已拦截</option></select></div>
           <div class="adv-item"><label>开始</label><input type="datetime-local" v-model="f.from" @change="fc" /></div>
           <div class="adv-item"><label>结束</label><input type="datetime-local" v-model="f.to" @change="fc" /></div>
@@ -116,7 +117,7 @@ const expId = ref(null)
 const pvLoading = ref(false)
 const pvMsgs = ref([])
 const sourceCategoryOptions = ['public_web','external_api','internal_api','metadata_service','unclassified']
-const f = reactive({ range:'7d', risk:'', source_category:'', q:'', sender_id:'', status:'', from:'', to:'' })
+const f = reactive({ range:'7d', risk:'', source_category:'', source_key:'', q:'', sender_id:'', status:'', from:'', to:'' })
 
 const activeSessions = computed(() => sessions.value.filter(s => !s.end_time || (Date.now()-new Date(s.end_time).getTime())<300000).length)
 const securityEvents = computed(() => sessions.value.filter(hasSec).length)
@@ -142,6 +143,7 @@ const filterTags = computed(() => {
   if(f.range) t.push({k:'range',l:{'24h':'24小时','7d':'7天','30d':'30天'}[f.range]||f.range})
   if(f.risk) t.push({k:'risk',l:rlabel(f.risk)})
   if(f.source_category) t.push({k:'source_category',l:'来源:'+f.source_category})
+  if(f.source_key) t.push({k:'source_key',l:'来源键:'+f.source_key})
   if(f.q) t.push({k:'q',l:'搜索:'+f.q})
   if(f.sender_id) t.push({k:'sender_id',l:'用户:'+f.sender_id})
   if(f.status) t.push({k:'status',l:{active:'活跃',ended:'已结束',blocked:'已拦截'}[f.status]})
@@ -152,7 +154,7 @@ const filterTags = computed(() => {
 const hasF = computed(() => filterTags.value.length>0)
 
 function rmF(k){ f[k]=''; fc() }
-function resetF(){ Object.assign(f,{range:'7d',risk:'',source_category:'',q:'',sender_id:'',status:'',from:'',to:''}); sortMode.value='newest'; fc() }
+function resetF(){ Object.assign(f,{range:'7d',risk:'',source_category:'',source_key:'',q:'',sender_id:'',status:'',from:'',to:''}); sortMode.value='newest'; fc() }
 function fmtTime(ts){ if(!ts)return'--'; const d=new Date(ts); return isNaN(d)?ts:d.toLocaleString('zh-CN',{hour12:false}) }
 function fmtTimeFull(ts){ if(!ts)return''; const d=new Date(ts); return isNaN(d)?ts:d.toLocaleTimeString('zh-CN',{hour12:false}) }
 function fmtDur(ms){ if(!ms||ms<=0)return'--'; if(ms<1000)return Math.round(ms)+'ms'; if(ms<60000)return(ms/1000).toFixed(1)+'s'; return Math.floor(ms/60000)+'m '+Math.floor((ms%60000)/1000)+'s' }
@@ -170,6 +172,7 @@ async function togExp(id){
 }
 
 function goToSourceAudit(category){ router.push({ path:'/audit', query:{ source_category: category } }) }
+function goToSourceKey(sourceKey){ if(!sourceKey) return; router.push({ path:'/audit', query:{ source_key: sourceKey } }) }
 
 function go(id){
   try{sessionStorage.setItem('lg_rf',JSON.stringify({...f,sortMode:sortMode.value,page:page.value}));sessionStorage.setItem('lg_nav_ids',JSON.stringify(sessions.value.map(s=>s.session_id||s.trace_id)))}catch{}
@@ -181,6 +184,7 @@ async function load(){
   if(f.from)p.push('from='+encodeURIComponent(f.from)); else if(f.range)p.push('from='+f.range)
   if(f.to)p.push('to='+encodeURIComponent(f.to))
   if(f.sender_id)p.push('sender_id='+encodeURIComponent(f.sender_id))
+  if(f.source_key)p.push('source_key='+encodeURIComponent(f.source_key))
   if(f.risk)p.push('risk='+f.risk)
   if(f.source_category)p.push('source_category='+encodeURIComponent(f.source_category))
   if(f.q)p.push('q='+encodeURIComponent(f.q))
@@ -199,6 +203,7 @@ function restoreF(){try{const s=JSON.parse(sessionStorage.getItem('lg_rf')||'nul
 function loadFiltersFromURL(){
   const q = route.query || {}
   if(q.source_category) f.source_category = String(q.source_category)
+  if(q.source_key) f.source_key = String(q.source_key)
   if(q.risk) f.risk = String(q.risk)
   if(q.sender_id) f.sender_id = String(q.sender_id)
   if(q.q) f.q = String(q.q)

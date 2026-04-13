@@ -219,7 +219,7 @@ func TestQueryLogsExTenant_WithSourceClassifierContext(t *testing.T) {
 		t.Fatalf("record tool call failed: %v", err)
 	}
 
-	logs, err := logger.QueryLogsExTenant("", "", "", "", "", traceID, "default", "", 20)
+	logs, err := logger.QueryLogsExTenant("", "", "", "", "", traceID, "default", "", "", 20)
 	if err != nil {
 		t.Fatalf("QueryLogsExTenant error: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestQueryLogsExTenant_WithSourceClassifierContext(t *testing.T) {
 		t.Fatalf("expected source_tool_call_count=1, got %v", got)
 	}
 
-	filtered, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "internal_api", 20)
+	filtered, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "internal_api", "", 20)
 	if err != nil {
 		t.Fatalf("QueryLogsExTenant filtered error: %v", err)
 	}
@@ -244,12 +244,20 @@ func TestQueryLogsExTenant_WithSourceClassifierContext(t *testing.T) {
 		t.Fatalf("expected 1 filtered log, got %d", len(filtered))
 	}
 
-	missing, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "metadata_service", 20)
+	missing, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "metadata_service", "", 20)
 	if err != nil {
 		t.Fatalf("QueryLogsExTenant missing filter error: %v", err)
 	}
 	if len(missing) != 0 {
 		t.Fatalf("expected 0 metadata_service logs, got %d", len(missing))
+	}
+
+	byKey, err := logger.QueryLogsExTenant("", "", "", "", "", "", "default", "", "docs.example.com", 20)
+	if err != nil {
+		t.Fatalf("QueryLogsExTenant source_key filter error: %v", err)
+	}
+	if len(byKey) != 1 {
+		t.Fatalf("expected 1 docs.example.com log, got %d", len(byKey))
 	}
 }
 

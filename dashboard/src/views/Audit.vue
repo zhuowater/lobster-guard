@@ -44,6 +44,7 @@
           <select v-model="filters.action" @change="applyFilters" class="filter-select"><option value="">全部动作</option><option value="block">🔴 阻断</option><option value="warn">🟡 告警</option><option value="log">⚪ 记录</option><option value="pass">🟢 放行</option><option value="allow">🟢 允许</option></select>
           <select v-model="filters.source_category" @change="applyFilters" class="filter-select"><option value="">全部来源</option><option v-for="opt in sourceCategoryOptions" :key="opt" :value="opt">{{ opt }}</option></select>
           <input v-model="filters.sender_id" placeholder="发送者 ID" class="filter-input" @keyup.enter="applyFilters"/>
+          <input v-model="filters.source_key" placeholder="来源键 / Host" class="filter-input filter-input-mono" @keyup.enter="applyFilters"/>
           <input v-model="filters.trace_id" placeholder="Trace ID" class="filter-input filter-input-mono" @keyup.enter="applyFilters"/>
           <button class="btn btn-sm" @click="applyFilters" :disabled="loading">筛选</button>
           <button v-if="hasActiveFilters" class="btn btn-ghost btn-sm" @click="clearAllFilters">清除</button>
@@ -74,7 +75,7 @@
 
         <template #cell-source_categories="{row}">
           <div v-if="sourceCategoryList(row).length" class="source-badge-list">
-            <span v-for="cat in sourceCategoryList(row)" :key="cat" class="source-chip">{{ cat }}</span>
+            <span v-for="cat in sourceCategoryList(row)" :key="cat" class="source-chip source-chip-clickable" @click.stop="goToSourceCategory(cat)">{{ cat }}</span>
           </div>
           <span v-else class="text-muted">--</span>
         </template>
@@ -100,8 +101,8 @@
                 <div class="detail-row" v-if="row.display_name||row.department"><span class="detail-label">姓名/部门</span><span>{{ row.display_name||'--' }} / {{ row.department||'--' }}</span></div>
                 <div class="detail-row"><span class="detail-label">App ID</span><span class="mono">{{ row.app_id||'--' }}</span></div>
                 <div class="detail-row"><span class="detail-label">Trace ID</span><a v-if="row.trace_id" class="link-primary mono" @click.stop="$router.push('/sessions/'+encodeURIComponent(row.trace_id))">{{ row.trace_id }} ▶</a><span v-else class="text-muted">--</span></div>
-                <div class="detail-row"><span class="detail-label">来源分类</span><div v-if="sourceCategoryList(row).length" class="source-badge-list"><span v-for="cat in sourceCategoryList(row)" :key="cat" class="source-chip">{{ cat }}</span></div><span v-else class="text-muted">--</span></div>
-                <div class="detail-row" v-if="row.source_keys"><span class="detail-label">来源键</span><span class="mono source-key">{{ row.source_keys }}</span></div>
+                <div class="detail-row"><span class="detail-label">来源分类</span><div v-if="sourceCategoryList(row).length" class="source-badge-list"><span v-for="cat in sourceCategoryList(row)" :key="cat" class="source-chip source-chip-clickable" @click.stop="goToSourceCategory(cat)">{{ cat }}</span></div><span v-else class="text-muted">--</span></div>
+                <div class="detail-row" v-if="row.source_keys"><span class="detail-label">来源键</span><span class="mono source-key source-key-clickable" @click.stop="goToSourceKey(firstSourceKey(row.source_keys))">{{ row.source_keys }}</span></div>
                 <div class="detail-row" v-if="row.source_tool_call_count"><span class="detail-label">关联 Tool Calls</span><span class="mono">{{ row.source_tool_call_count }}</span></div>
                 <div class="detail-row"><span class="detail-label">上游</span><span class="mono">{{ row.upstream_id||'--' }}</span></div>
               </div>
@@ -183,7 +184,7 @@ const confirmMessage = ref('')
 const confirmType = ref('warning')
 let confirmAction = null
 
-const filters = reactive({ direction:'', action:'', source_category:'', sender_id:'', app_id:'', trace_id:'', q:'', start_time:'', end_time:'' })
+const filters = reactive({ direction:'', action:'', source_category:'', source_key:'', sender_id:'', app_id:'', trace_id:'', q:'', start_time:'', end_time:'' })
 
 const timePresets = [{ label:'全部', value:'' },{ label:'今天', value:'today' },{ label:'7天', value:'7d' },{ label:'30天', value:'30d' },{ label:'自定义', value:'custom' }]
 
@@ -209,12 +210,13 @@ const columns = [
 
 const blockRate = computed(() => { const t=auditStats.value.total||0,b=auditStats.value.blocked||0; return t===0?'0%':((b/t)*100).toFixed(1)+'%' })
 const sourceCategoryCount = computed(() => new Set(logs.value.flatMap(row => sourceCategoryList(row))).size)
-const hasActiveFilters = computed(() => !!(filters.direction||filters.action||filters.source_category||filters.sender_id||filters.trace_id||filters.q||filters.start_time||filters.end_time))
+const hasActiveFilters = computed(() => !!(filters.direction||filters.action||filters.source_category||filters.source_key||filters.sender_id||filters.trace_id||filters.q||filters.start_time||filters.end_time))
 const activeFilterTags = computed(() => {
   const tags = []
   if (filters.direction) tags.push({ key:'direction', label:'方向', value:filters.direction==='inbound'?'入站':'出站' })
   if (filters.action) tags.push({ key:'action', label:'动作', value:filters.action })
   if (filters.source_category) tags.push({ key:'source_category', label:'来源', value:filters.source_category })
+  if (filters.source_key) tags.push({ key:'source_key', label:'来源键', value:filters.source_key })
   if (filters.sender_id) tags.push({ key:'sender_id', label:'发送者', value:filters.sender_id })
   if (filters.trace_id) tags.push({ key:'trace_id', label:'Trace', value:filters.trace_id.substring(0,12) })
   if (filters.q) tags.push({ key:'q', label:'搜索', value:filters.q })
@@ -238,6 +240,9 @@ function rowClass(row) { const a=(row.action||'').toLowerCase(); return a==='blo
 function latencyClass(row) { const ms=row.latency||row.latency_ms||0; return ms>1000?'latency-high':ms>300?'latency-mid':'' }
 function sourceCategoryList(row) { return String(row?.source_categories||'').split(',').map(s=>s.trim()).filter(Boolean) }
 function formatSourceDescriptor(raw) { if (!raw) return '--'; try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw } }
+function firstSourceKey(raw){ return String(raw||'').split(',').map(s=>s.trim()).filter(Boolean)[0] || '' }
+function goToSourceCategory(category){ filters.source_category = category; applyFilters() }
+function goToSourceKey(sourceKey){ if(!sourceKey) return; filters.source_key = sourceKey; applyFilters() }
 function formatSize(bytes) { if (!bytes) return '--'; const kb=Math.round(bytes/1024); return kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB' }
 
 function setTimePreset(val) {
@@ -254,12 +259,13 @@ function removeFilter(key) {
   else filters[key]=''
   applyFilters()
 }
-function clearAllFilters() { filters.direction='';filters.action='';filters.source_category='';filters.sender_id='';filters.trace_id='';filters.q='';filters.start_time='';filters.end_time='';activeTimePreset.value='';applyFilters() }
+function clearAllFilters() { filters.direction='';filters.action='';filters.source_category='';filters.source_key='';filters.sender_id='';filters.trace_id='';filters.q='';filters.start_time='';filters.end_time='';activeTimePreset.value='';applyFilters() }
 
 function syncFiltersToURL() {
   const q={}
   if (filters.direction) q.direction=filters.direction; if (filters.action) q.action=filters.action
   if (filters.source_category) q.source_category=filters.source_category
+  if (filters.source_key) q.source_key=filters.source_key
   if (filters.sender_id) q.sender_id=filters.sender_id; if (filters.trace_id) q.trace_id=filters.trace_id
   if (filters.q) q.q=filters.q; if (filters.start_time) q.from=filters.start_time; if (filters.end_time) q.to=filters.end_time
   if (activeTimePreset.value) q.preset=activeTimePreset.value
@@ -269,6 +275,7 @@ function loadFiltersFromURL() {
   const q=route.query
   if (q.direction) filters.direction=q.direction; if (q.action) filters.action=q.action
   if (q.source_category) filters.source_category=q.source_category
+  if (q.source_key) filters.source_key=q.source_key
   if (q.sender_id) filters.sender_id=q.sender_id; if (q.trace_id) filters.trace_id=q.trace_id
   if (q.q) filters.q=q.q; if (q.from) filters.start_time=q.from; if (q.to) filters.end_time=q.to
   if (q.preset) activeTimePreset.value=q.preset
@@ -282,6 +289,7 @@ async function loadLogs() {
   const p=[]; if (filters.direction) p.push('direction='+encodeURIComponent(filters.direction))
   if (filters.action) p.push('action='+encodeURIComponent(filters.action))
   if (filters.source_category) p.push('source_category='+encodeURIComponent(filters.source_category))
+  if (filters.source_key) p.push('source_key='+encodeURIComponent(filters.source_key))
   if (filters.sender_id) p.push('sender_id='+encodeURIComponent(filters.sender_id))
   if (filters.app_id) p.push('app_id='+encodeURIComponent(filters.app_id))
   if (filters.trace_id) p.push('trace_id='+encodeURIComponent(filters.trace_id))
@@ -316,6 +324,7 @@ async function exportAudit(fmt) {
   if (filters.direction) p.push('direction='+encodeURIComponent(filters.direction))
   if (filters.action) p.push('action='+encodeURIComponent(filters.action))
   if (filters.source_category) p.push('source_category='+encodeURIComponent(filters.source_category))
+  if (filters.source_key) p.push('source_key='+encodeURIComponent(filters.source_key))
   if (filters.sender_id) p.push('sender_id='+encodeURIComponent(filters.sender_id))
   if (filters.q) p.push('q='+encodeURIComponent(filters.q))
   if (filters.start_time) p.push('from='+encodeURIComponent(new Date(filters.start_time).toISOString()))
@@ -485,5 +494,7 @@ onUnmounted(() => clearInterval(refreshTimer))
 <style scoped>
 .source-badge-list { display:flex; gap:4px; flex-wrap:wrap; }
 .source-chip { display:inline-flex; align-items:center; padding:1px 8px; border-radius:999px; background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.25); color:#16a34a; font-size:11px; font-family:var(--font-mono); }
+.source-chip-clickable{cursor:pointer}.source-chip-clickable:hover{filter:brightness(1.08)}
 .source-key { word-break:break-all; }
+.source-key-clickable{cursor:pointer}.source-key-clickable:hover{color:var(--color-primary)}
 </style>

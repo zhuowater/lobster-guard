@@ -51,7 +51,7 @@
         <div v-if="(sm.source_categories||[]).length || (sm.source_keys||[]).length" class="sds-source">
           <span class="tag-label">来源:</span>
           <span class="src-chip" v-for="cat in (sm.source_categories||[])" :key="cat">{{ cat }}</span>
-          <span class="src-key" v-for="key in (sm.source_keys||[]).slice(0,4)" :key="key">{{ key }}</span>
+          <span class="src-key src-key-clickable" v-for="key in (sm.source_keys||[]).slice(0,4)" :key="key" @click="goToSourceKey(key)">{{ key }}</span>
         </div>
         <div class="sds-tags">
           <span class="tag-label">标签:</span>
@@ -165,7 +165,7 @@
                     <span class="tool-risk" :class="'tr-'+ev.risk_level">{{ ev.risk_level }}</span>
                     <span class="tool-flag" v-if="ev.flagged">⚠️ flagged</span>
                     <span class="src-chip" v-if="ev.source_category">{{ ev.source_category }}</span>
-                    <span class="src-key" v-if="ev.source_key">{{ ev.source_key }}</span>
+                    <span class="src-key src-key-clickable" v-if="ev.source_key" @click.stop="goToSourceKey(ev.source_key)">{{ ev.source_key }}</span>
                   </div>
                   <div class="se-code" v-if="ev.tool_input"><div class="code-lbl">Input:</div><pre class="code-blk">{{ ev.tool_input }}</pre></div>
                   <div class="se-code" v-if="ev.tool_result"><div class="code-lbl">Result:</div><pre class="code-blk">{{ ev.tool_result }}</pre></div>
@@ -265,6 +265,7 @@ function fmtN(n) { if (!n) return '0'; return n>=1000?(n/1000).toFixed(1)+'K':St
 function rl(l) { return {critical:'🔴 严重',high:'🟠 高危',medium:'🟡 中等',low:'🟢 低风险'}[l]||l||'未知' }
 function chatRowClass(ev) { const c=['cr-'+ev.type]; if(ev.flagged)c.push('cr-flagged'); if(ev.action==='block')c.push('cr-blocked'); if(ev.canary_leaked)c.push('cr-canary'); return c }
 function fmtJSON(raw){ if(!raw) return ''; try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw } }
+function goToSourceKey(sourceKey){ if(!sourceKey) return; router.push({ path:'/audit', query:{ source_key: sourceKey } }) }
 
 // API tag ops
 async function submitTag(ev) {

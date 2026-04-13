@@ -156,7 +156,7 @@
                       <div class="detail-label">来源分类</div>
                       <div class="risk-assessment source-meta">
                         <span v-if="rec.source_category" class="source-badge source-badge-clickable" @click.stop="goToSourceAudit(rec.source_category)">{{ rec.source_category }}</span>
-                        <span v-if="rec.source_key" class="source-key">{{ rec.source_key }}</span>
+                        <span v-if="rec.source_key" class="source-key source-key-clickable" @click.stop="goToSourceKey(rec.source_key)">{{ rec.source_key }}</span>
                       </div>
                       <JsonHighlight v-if="rec.source_descriptor_json" :content="formatSourceDescriptor(rec.source_descriptor_json)" />
                     </div>
@@ -341,7 +341,7 @@ onUnmounted(()=>clearInterval(timer))
 .budget-alert{background:rgba(234,88,12,.08);border:1px solid rgba(234,88,12,.25)}
 .source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.28);color:#86efac;font-size:11px;font-family:var(--font-mono)}.source-badge-clickable{cursor:pointer}.source-badge-clickable:hover{filter:brightness(1.08)}
 .source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.source-key{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);word-break:break-all}
+.source-key{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);word-break:break-all}.source-key-clickable{cursor:pointer}.source-key-clickable:hover{color:var(--color-primary)}
 .source-category-list{display:flex;flex-direction:column;gap:10px}
 .source-category-row{display:grid;grid-template-columns:160px 1fr 64px;gap:10px;align-items:center}.source-category-row-clickable{cursor:pointer;border-radius:8px;padding:4px 6px;transition:background .15s ease}.source-category-row-clickable:hover{background:rgba(34,197,94,.06)}
 .source-track{height:18px}

@@ -64,6 +64,7 @@ func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http
 	risk := r.URL.Query().Get("risk")
 	q := r.URL.Query().Get("q")
 	sourceCategory := r.URL.Query().Get("source_category")
+	sourceKey := r.URL.Query().Get("source_key")
 	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
 	// 支持 since 简写
 	if from != "" && !strings.Contains(from, "T") {
@@ -81,7 +82,7 @@ func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http
 			offset = n
 		}
 	}
-	sessions, total, err := api.sessionReplayEng.ListSessionsTenant(from, to, senderID, risk, q, sourceCategory, tenantID, limit, offset)
+	sessions, total, err := api.sessionReplayEng.ListSessionsTenant(from, to, senderID, risk, q, sourceCategory, sourceKey, tenantID, limit, offset)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -96,6 +97,7 @@ func (api *ManagementAPI) handleSessionReplayList(w http.ResponseWriter, r *http
 		"offset":          offset,
 		"tenant":          tenantID,
 		"source_category": sourceCategory,
+		"source_key":      sourceKey,
 	})
 }
 

@@ -560,23 +560,32 @@ func auditLLMSourceJoinClause() string {
 	) lsrc ON a.trace_id = lsrc.trace_id`
 }
 
-func appendAuditSourceCategoryFilter(query string, args []interface{}, sourceCategory string) (string, []interface{}) {
-	if sourceCategory == "" {
-		return query, args
+func appendAuditSourceFilters(query string, args []interface{}, sourceCategory, sourceKey string) (string, []interface{}) {
+	if sourceCategory != "" {
+		query += ` AND EXISTS (
+			SELECT 1
+			FROM llm_calls lc2
+			JOIN llm_tool_calls ltc2 ON ltc2.llm_call_id = lc2.id
+			WHERE lc2.trace_id = a.trace_id
+			AND COALESCE(NULLIF(ltc2.source_category,''), 'unclassified') = ?
+		)`
+		args = append(args, sourceCategory)
 	}
-	query += ` AND EXISTS (
-		SELECT 1
-		FROM llm_calls lc2
-		JOIN llm_tool_calls ltc2 ON ltc2.llm_call_id = lc2.id
-		WHERE lc2.trace_id = a.trace_id
-		AND COALESCE(NULLIF(ltc2.source_category,''), 'unclassified') = ?
-	)`
-	args = append(args, sourceCategory)
+	if sourceKey != "" {
+		query += ` AND EXISTS (
+			SELECT 1
+			FROM llm_calls lc3
+			JOIN llm_tool_calls ltc3 ON ltc3.llm_call_id = lc3.id
+			WHERE lc3.trace_id = a.trace_id
+			AND COALESCE(ltc3.source_key,'') = ?
+		)`
+		args = append(args, sourceKey)
+	}
 	return query, args
 }
 
 // QueryLogsExTenant 租户感知的审计日志查询
-func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, sourceCategory string, limit int) ([]map[string]interface{}, error) {
+func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, sourceCategory, sourceKey string, limit int) ([]map[string]interface{}, error) {
 	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,''), COALESCE(lsrc.source_categories,''), COALESCE(lsrc.source_keys,''), COALESCE(lsrc.source_descriptor_json,''), COALESCE(lsrc.source_tool_call_count,0) FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id` + auditLLMSourceJoinClause() + ` WHERE 1=1`
 	var args []interface{}
 
@@ -608,7 +617,7 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 		query += ` AND a.trace_id=?`
 		args = append(args, traceID)
 	}
-	query, args = appendAuditSourceCategoryFilter(query, args, sourceCategory)
+	query, args = appendAuditSourceFilters(query, args, sourceCategory, sourceKey)
 	query += ` ORDER BY a.id DESC`
 	if limit <= 0 {
 		limit = 50
@@ -651,7 +660,7 @@ func (al *AuditLogger) QueryLogsExTenant(direction, action, senderID, appID, q, 
 }
 
 // QueryLogsExFullTenant 完整查询（含时间范围+租户）
-func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, sourceCategory string, limit int) ([]map[string]interface{}, error) {
+func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, sourceCategory, sourceKey string, limit int) ([]map[string]interface{}, error) {
 	query := `SELECT a.id, a.timestamp, a.direction, a.sender_id, a.action, a.reason, a.content_preview, a.latency_ms, a.upstream_id, a.app_id, COALESCE(a.trace_id,''), COALESCE(ur.display_name,''), COALESCE(ur.department,''), COALESCE(lsrc.source_categories,''), COALESCE(lsrc.source_keys,''), COALESCE(lsrc.source_descriptor_json,''), COALESCE(lsrc.source_tool_call_count,0) FROM audit_log a LEFT JOIN (SELECT sender_id, MAX(display_name) as display_name, MAX(department) as department FROM user_routes GROUP BY sender_id) ur ON a.sender_id = ur.sender_id` + auditLLMSourceJoinClause() + ` WHERE 1=1`
 	var args []interface{}
 
@@ -691,7 +700,7 @@ func (al *AuditLogger) QueryLogsExFullTenant(direction, action, senderID, appID,
 		query += ` AND a.timestamp <= ?`
 		args = append(args, to)
 	}
-	query, args = appendAuditSourceCategoryFilter(query, args, sourceCategory)
+	query, args = appendAuditSourceFilters(query, args, sourceCategory, sourceKey)
 	query += ` ORDER BY a.id DESC`
 	if limit <= 0 {
 		limit = 50

@@ -19,6 +19,7 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	q := r.URL.Query().Get("q")
 	traceID := r.URL.Query().Get("trace_id")
 	sourceCategory := r.URL.Query().Get("source_category")
+	sourceKey := r.URL.Query().Get("source_key")
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
@@ -38,15 +39,15 @@ func (api *ManagementAPI) handleAuditLogs(w http.ResponseWriter, r *http.Request
 	var logs []map[string]interface{}
 	var err error
 	if from != "" || to != "" {
-		logs, err = api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, sourceCategory, limit)
+		logs, err = api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, traceID, from, to, tenantID, sourceCategory, sourceKey, limit)
 	} else {
-		logs, err = api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, sourceCategory, limit)
+		logs, err = api.logger.QueryLogsExTenant(direction, action, senderID, appID, q, traceID, tenantID, sourceCategory, sourceKey, limit)
 	}
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs), "tenant": tenantID, "source_category": sourceCategory})
+	jsonResponse(w, 200, map[string]interface{}{"logs": logs, "total": len(logs), "tenant": tenantID, "source_category": sourceCategory, "source_key": sourceKey})
 }
 
 // handleAuditExport GET /api/v1/audit/export — 导出审计日志为 CSV 或 JSON（v3.10）
@@ -62,6 +63,7 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 	appID := r.URL.Query().Get("app_id")
 	q := r.URL.Query().Get("q")
 	sourceCategory := r.URL.Query().Get("source_category")
+	sourceKey := r.URL.Query().Get("source_key")
 	from := r.URL.Query().Get("from") // v12.1: 时间范围起始 (RFC3339 或 since 格式)
 	to := r.URL.Query().Get("to")     // v12.1: 时间范围结束
 	tenantID := ParseTenantParam(r.URL.Query().Get("tenant"))
@@ -79,7 +81,7 @@ func (api *ManagementAPI) handleAuditExport(w http.ResponseWriter, r *http.Reque
 		limit = 10000
 	}
 
-	logs, err := api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, "", from, to, tenantID, sourceCategory, limit)
+	logs, err := api.logger.QueryLogsExFullTenant(direction, action, senderID, appID, q, "", from, to, tenantID, sourceCategory, sourceKey, limit)
 	if err != nil {
 		jsonResponse(w, 500, map[string]string{"error": err.Error()})
 		return
