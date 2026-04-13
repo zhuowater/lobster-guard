@@ -965,6 +965,7 @@ func initDB(dbPath string) (*sql.DB, error) {
 		error_message TEXT
 	)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_trace ON llm_calls(trace_id)`)
 
 	db.Exec(`CREATE TABLE IF NOT EXISTS llm_tool_calls (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -980,6 +981,7 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_ts ON llm_tool_calls(timestamp)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk ON llm_tool_calls(risk_level)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tool ON llm_tool_calls(tool_name)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_call_id ON llm_tool_calls(llm_call_id)`)
 
 	// v14.0: tenant_id 列 for LLM tables
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)

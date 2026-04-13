@@ -110,12 +110,14 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_im_trace ON llm_calls(im_trace_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls(session_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_tenant ON llm_calls(tenant_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_trace ON llm_calls(trace_id)`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_key TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_category TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_descriptor_json TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_source_category ON llm_tool_calls(source_category)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_call_id ON llm_tool_calls(llm_call_id)`)
 
 	// v18.0: 请求/响应预览列
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN request_preview TEXT DEFAULT ''`)
