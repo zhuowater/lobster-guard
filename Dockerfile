@@ -26,8 +26,8 @@ COPY src/go.mod src/go.sum ./
 ENV GOPROXY=https://goproxy.cn,direct
 RUN go mod download
 COPY src/ ./
-# go:embed dashboard/dist/* — 从 frontend 阶段拿构建产物
-COPY --from=frontend /app/src/dashboard/dist ./dashboard/dist/
+# go:embed dashboard/dist/* — 从 frontend 阶段拿构建产物（WORKDIR /app/dashboard，outDir=dist）
+COPY --from=frontend /app/dashboard/dist ./dashboard/dist/
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /lobster-guard .
 
 # ── Stage 3: Runtime ──
