@@ -5,6 +5,8 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,6 +213,97 @@ func TestToolPolicyQueryEventsIncludeSemanticMetadata(t *testing.T) {
 	if first["semantic_class"] == nil || first["semantic_class"] == "" {
 		t.Fatalf("expected semantic_class in event record, got %+v", first)
 	}
+}
+
+func TestToolPolicyQueryEventsSupportsAllFilters(t *testing.T) {
+	engine := newTestToolPolicyEngine(t)
+	traceID := "trace-events-filtered"
+	engine.Evaluate("read_file", `{"path":"/etc/passwd"}`, traceID, "tenant-1")
+	event := engine.Evaluate("http_request", `{"url":"https://example.com/upload"}`, traceID, "tenant-1")
+	if event.Decision != "block" {
+		t.Fatalf("expected block decision for context policy, got %s", event.Decision)
+	}
+
+	events, total, err := engine.QueryEvents("http_request", "block", "high", "url:external", "source:path:sensitive", 10, 0)
+	if err != nil {
+		t.Fatalf("QueryEvents failed: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected exactly one filtered event, got total=%d events=%d", total, len(events))
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one filtered event row, got %d", len(events))
+	}
+	if events[0]["tool_name"] != "http_request" {
+		t.Fatalf("expected filtered tool_name http_request, got %+v", events[0])
+	}
+	if events[0]["semantic_class"] != "url:external" {
+		t.Fatalf("expected semantic_class url:external, got %+v", events[0]["semantic_class"])
+	}
+	ctxSignals, _ := events[0]["context_signals"].([]interface{})
+	if len(ctxSignals) == 0 {
+		t.Fatalf("expected context signals in filtered event, got %+v", events[0])
+	}
+}
+
+func TestHandleToolPolicyRulesUpdatePreservesExistingRuleFieldsOnPartialUpdate(t *testing.T) {
+	engine := newTestToolPolicyEngine(t)
+	rule := ToolPolicyRule{
+		ID:          "tp-custom-partial",
+		Name:        "custom_sensitive_rule",
+		ToolPattern: "*command*",
+		ParamRules: []ParamRule{{
+			ParamName: "command",
+			Pattern:   `(?i)dangerous`,
+			Action:    "block",
+		}},
+		Action:   "warn",
+		Reason:   "dangerous command keyword",
+		Enabled:  true,
+		Priority: 9,
+	}
+	if err := engine.AddRule(rule); err != nil {
+		t.Fatalf("AddRule failed: %v", err)
+	}
+
+	api := &ManagementAPI{toolPolicy: engine}
+	body := strings.NewReader(`{"enabled":false}`)
+	req := httptest.NewRequest("PUT", "/api/v1/tools/rules/tp-custom-partial", body)
+	w := httptest.NewRecorder()
+
+	api.handleToolPolicyRulesUpdate(w, req)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 from partial update handler, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	updated := findRuleByID(engine.ListRules(), "tp-custom-partial")
+	if updated == nil {
+		t.Fatal("expected updated rule to remain present")
+	}
+	if updated.ToolPattern != "*command*" {
+		t.Fatalf("expected ToolPattern preserved, got %q", updated.ToolPattern)
+	}
+	if updated.Action != "warn" {
+		t.Fatalf("expected Action preserved, got %q", updated.Action)
+	}
+	if updated.Reason != "dangerous command keyword" {
+		t.Fatalf("expected Reason preserved, got %q", updated.Reason)
+	}
+	if len(updated.ParamRules) != 1 || updated.ParamRules[0].Pattern != `(?i)dangerous` {
+		t.Fatalf("expected ParamRules preserved, got %+v", updated.ParamRules)
+	}
+	if updated.Enabled {
+		t.Fatalf("expected Enabled toggled false, got %+v", updated)
+	}
+}
+
+func findRuleByID(rules []ToolPolicyRule, id string) *ToolPolicyRule {
+	for i := range rules {
+		if rules[i].ID == id {
+			return &rules[i]
+		}
+	}
+	return nil
 }
 
 func TestToolPolicyConfigurableSemanticRule(t *testing.T) {

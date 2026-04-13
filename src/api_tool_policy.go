@@ -4,10 +4,59 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 )
+
+func mergeToolPolicyRulePatch(existing ToolPolicyRule, patch map[string]json.RawMessage) (ToolPolicyRule, error) {
+	merged := existing
+	for key, raw := range patch {
+		switch key {
+		case "id":
+			// ignore path/body id overrides
+		case "name":
+			if err := json.Unmarshal(raw, &merged.Name); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid name: %w", err)
+			}
+		case "tool_pattern":
+			if err := json.Unmarshal(raw, &merged.ToolPattern); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid tool_pattern: %w", err)
+			}
+		case "param_rules":
+			if err := json.Unmarshal(raw, &merged.ParamRules); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid param_rules: %w", err)
+			}
+		case "action":
+			if err := json.Unmarshal(raw, &merged.Action); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid action: %w", err)
+			}
+		case "reason":
+			if err := json.Unmarshal(raw, &merged.Reason); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid reason: %w", err)
+			}
+		case "enabled":
+			if err := json.Unmarshal(raw, &merged.Enabled); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid enabled: %w", err)
+			}
+		case "priority":
+			if err := json.Unmarshal(raw, &merged.Priority); err != nil {
+				return ToolPolicyRule{}, fmt.Errorf("invalid priority: %w", err)
+			}
+		}
+	}
+	return merged, nil
+}
+
+func findToolPolicyRuleByID(rules []ToolPolicyRule, id string) (ToolPolicyRule, bool) {
+	for _, rule := range rules {
+		if rule.ID == id {
+			return rule, true
+		}
+	}
+	return ToolPolicyRule{}, false
+}
 
 // handleToolPolicyStats GET /api/v1/tools/stats
 func (api *ManagementAPI) handleToolPolicyStats(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +154,19 @@ func (api *ManagementAPI) handleToolPolicyRulesUpdate(w http.ResponseWriter, r *
 	}
 	ruleID := parts[len(parts)-1]
 
-	var rule ToolPolicyRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+	var patch map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		jsonResponse(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	existing, ok := findToolPolicyRuleByID(api.toolPolicy.ListRules(), ruleID)
+	if !ok {
+		jsonResponse(w, 404, map[string]string{"error": "rule not found"})
+		return
+	}
+	rule, err := mergeToolPolicyRulePatch(existing, patch)
+	if err != nil {
+		jsonResponse(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 	rule.ID = ruleID
