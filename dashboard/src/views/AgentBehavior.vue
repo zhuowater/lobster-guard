@@ -112,7 +112,7 @@
       <div class="card-header"><span class="card-icon"><Icon name="globe" :size="16" /></span><span class="card-title">来源分类分布</span></div>
       <EmptyState v-if="loaded && !sourceCategoryRows.length" :iconSvg="svgGlobeLarge" title="暂无来源分类数据" description="当 tool call 被来源分类后，这里会显示 public_web / internal_api / external_api 等分布" />
       <div v-else class="source-category-list">
-        <div v-for="row in sourceCategoryRows" :key="row.category" class="source-category-row">
+        <div v-for="row in sourceCategoryRows" :key="row.category" class="source-category-row source-category-row-clickable" @click="goToSourceSessions(row.category)">
           <span class="source-badge">{{ row.category }}</span>
           <div class="hbar-track source-track"><div class="hbar-fill hbar-fill-anim source-fill" :style="{ '--target-w': Math.max(6, row.pct) + '%' }">{{ row.count }}</div></div>
           <span class="source-pct">{{ row.pct.toFixed(1) }}%</span>
@@ -139,7 +139,7 @@
                 <td>{{ fmtTime(rec.timestamp) }}</td>
                 <td><code>{{ rec.tool_name }}</code></td>
                 <td>
-                  <span v-if="rec.source_category" class="source-badge">{{ rec.source_category }}</span>
+                  <span v-if="rec.source_category" class="source-badge source-badge-clickable" @click.stop="goToSourceAudit(rec.source_category)">{{ rec.source_category }}</span>
                   <span v-else class="text-muted">--</span>
                 </td>
                 <td><span class="risk-badge" :class="'risk-'+rec.risk_level">{{ rec.risk_level }}</span></td>
@@ -155,7 +155,7 @@
                     <div v-if="rec.source_category || rec.source_key || rec.source_descriptor_json" class="detail-section">
                       <div class="detail-label">来源分类</div>
                       <div class="risk-assessment source-meta">
-                        <span v-if="rec.source_category" class="source-badge">{{ rec.source_category }}</span>
+                        <span v-if="rec.source_category" class="source-badge source-badge-clickable" @click.stop="goToSourceAudit(rec.source_category)">{{ rec.source_category }}</span>
                         <span v-if="rec.source_key" class="source-key">{{ rec.source_key }}</span>
                       </div>
                       <JsonHighlight v-if="rec.source_descriptor_json" :content="formatSourceDescriptor(rec.source_descriptor_json)" />
@@ -339,11 +339,11 @@ onUnmounted(()=>clearInterval(timer))
 .alert-config-link:hover{text-decoration:underline}
 .canary-alert{background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.25)}
 .budget-alert{background:rgba(234,88,12,.08);border:1px solid rgba(234,88,12,.25)}
-.source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.28);color:#86efac;font-size:11px;font-family:var(--font-mono)}
+.source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.28);color:#86efac;font-size:11px;font-family:var(--font-mono)}.source-badge-clickable{cursor:pointer}.source-badge-clickable:hover{filter:brightness(1.08)}
 .source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .source-key{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);word-break:break-all}
 .source-category-list{display:flex;flex-direction:column;gap:10px}
-.source-category-row{display:grid;grid-template-columns:160px 1fr 64px;gap:10px;align-items:center}
+.source-category-row{display:grid;grid-template-columns:160px 1fr 64px;gap:10px;align-items:center}.source-category-row-clickable{cursor:pointer;border-radius:8px;padding:4px 6px;transition:background .15s ease}.source-category-row-clickable:hover{background:rgba(34,197,94,.06)}
 .source-track{height:18px}
 .source-fill{background:linear-gradient(90deg,#22c55e,#14b8a6);font-size:11px}
 .source-pct{font-size:12px;color:var(--text-secondary);text-align:right}

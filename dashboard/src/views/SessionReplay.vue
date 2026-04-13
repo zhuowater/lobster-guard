@@ -64,7 +64,7 @@
             <div class="sc-meta"><span v-if="s.sender_id" class="meta-item"><Icon name="users" :size="12" /> <span v-html="hl(s.display_name || s.sender_id)"></span><span v-if="s.display_name" class="meta-sub" :title="s.sender_id"> ({{ s.sender_id }})</span></span><span v-if="s.department" class="meta-item meta-dept">{{ s.department }}</span><span v-if="s.model" class="meta-item"><Icon name="brain" :size="12" /> {{ s.model }}</span></div>
             <div class="sc-stats"><span class="chip"><span class="chip-l">IM</span><span class="chip-v">{{ s.im_events }}</span></span><span class="chip"><span class="chip-l">LLM</span><span class="chip-v">{{ s.llm_calls }}</span></span><span class="chip"><span class="chip-l">Tools</span><span class="chip-v">{{ s.tool_calls }}</span></span><span class="chip"><span class="chip-l">Tokens</span><span class="chip-v">{{ fmtNum(s.total_tokens) }}</span></span></div>
             <div class="sc-flags" v-if="hasSec(s)"><span class="flag-danger" v-if="s.canary_leaked"><Icon name="alert-triangle" :size="12" /> Canary泄露</span><span class="flag-danger" v-if="s.blocked"><Icon name="shield" :size="12" /> 已拦截</span><span class="flag-warn" v-if="s.budget_exceeded"><Icon name="zap" :size="12" /> 预算超限</span><span class="flag-warn" v-if="s.flagged_tools>0"><Icon name="alert-triangle" :size="12" /> {{ s.flagged_tools }}可疑工具</span></div>
-            <div class="sc-source" v-if="(s.source_categories||[]).length"><span class="source-chip" v-for="cat in s.source_categories" :key="cat">{{ cat }}</span></div>
+            <div class="sc-source" v-if="(s.source_categories||[]).length"><span class="source-chip source-chip-clickable" v-for="cat in s.source_categories" :key="cat" @click.stop="goToSourceAudit(cat)">{{ cat }}</span></div>
             <div class="sc-tags" v-if="(s.tags||[]).length"><span class="tag-pill" v-for="t in (s.tags||[]).slice(0,5)" :key="t">{{ t }}</span></div>
           </div>
           <div class="sc-footer">
@@ -99,10 +99,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api.js'
 import Icon from '../components/Icon.vue'
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const sessions = ref([])
@@ -167,6 +168,9 @@ async function togExp(id){
   try{const d=await api('/api/v1/sessions/replay/'+encodeURIComponent(id));pvMsgs.value=(d.events||[]).filter(e=>e.type==='im_inbound'||e.type==='im_outbound')}catch{pvMsgs.value=[]}
   pvLoading.value=false
 }
+
+function goToSourceAudit(category){ router.push({ path:'/audit', query:{ source_category: category } }) }
+
 function go(id){
   try{sessionStorage.setItem('lg_rf',JSON.stringify({...f,sortMode:sortMode.value,page:page.value}));sessionStorage.setItem('lg_nav_ids',JSON.stringify(sessions.value.map(s=>s.session_id||s.trace_id)))}catch{}
   router.push('/sessions/'+encodeURIComponent(id))
@@ -192,8 +196,16 @@ async function load(){
   loading.value=false
 }
 function restoreF(){try{const s=JSON.parse(sessionStorage.getItem('lg_rf')||'null');if(s){Object.keys(f).forEach(k=>{if(s[k]!==undefined)f[k]=s[k]});if(s.sortMode)sortMode.value=s.sortMode;if(s.page)page.value=s.page}}catch{}}
+function loadFiltersFromURL(){
+  const q = route.query || {}
+  if(q.source_category) f.source_category = String(q.source_category)
+  if(q.risk) f.risk = String(q.risk)
+  if(q.sender_id) f.sender_id = String(q.sender_id)
+  if(q.q) f.q = String(q.q)
+}
+
 let timer=null
-onMounted(()=>{restoreF();load();timer=setInterval(load,60000)})
+onMounted(()=>{restoreF();loadFiltersFromURL();load();timer=setInterval(load,60000)})
 onUnmounted(()=>clearInterval(timer))
 </script>
 

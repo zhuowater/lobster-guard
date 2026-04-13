@@ -96,7 +96,7 @@
       <StatCard :iconSvg="svgAlertTriangle" :value="stats.warned" label="告警数" :badge="timeRange" color="yellow" :change="stats.warnedChange" :changeUp="false" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/audit', query: { action: 'warn', since: timeRange } })"/>
       <StatCard :iconSvg="svgPercent" :value="stats.rate" label="拦截率" :badge="timeRange" color="indigo" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/rules' })"/>
       <StatCard :iconSvg="svgUserDanger" :value="highRiskUserCount" label="高危用户" badge="30d" color="red" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/user-profiles')"/>
-      <StatCard :iconSvg="svgGlobe" :value="sourceCategoryCount" label="来源分类" badge="LLM" color="green" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/agent')"/>
+      <StatCard :iconSvg="svgGlobe" :value="sourceCategoryCount" label="来源分类" badge="LLM" color="green" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push({ path: '/sessions' })"/>
       <StatCard :iconSvg="svgIFC" :value="ifcStats ? ifcStats.total_violations : '--'" label="IFC 违规" badge="all" color="purple" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/ifc')"/>
       <StatCard :iconSvg="svgDeviation" :value="deviationStats ? deviationStats.total_deviations : '--'" label="计划偏差" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/deviations')"/>
       <StatCard :iconSvg="svgCapDeny" :value="capabilityStats ? capabilityStats.deny_count : '--'" label="能力拒绝" badge="all" color="orange" class="stat-clickable" :class="{ 'stat-flash': flashCards }" @click="router.push('/capability')"/>
@@ -162,7 +162,7 @@
         <Skeleton v-if="!loaded" type="chart"/><PieChart v-else :data="pieData" :size="180"/></div>
       <div class="card"><div class="card-header"><span class="card-icon"><Icon name="globe" :size="16" /></span><span class="card-title">来源分类分布</span><router-link to="/agent" class="card-more">查看工具审计 →</router-link></div>
         <Skeleton v-if="!loaded" type="text"/><EmptyState v-else-if="!sourceCategoryRows.length" :iconSvg="svgGlobe" title="暂无来源分类数据" description="LLM 工具调用产生来源分类后，这里会显示 public_web / internal_api / external_api 等分布"/>
-        <div v-else><TransitionGroup name="list-anim" tag="div"><div class="hbar-row" v-for="(r,i) in sourceCategoryRows" :key="r.category"><span class="hbar-rank">#{{i+1}}</span><span class="hbar-name" :title="r.category">{{r.category}}</span><div class="hbar-track"><div class="hbar-fill hbar-fill-anim" :style="{'--target-w':Math.max(5,r.pct)+'%',background:sourceBarColors[i%sourceBarColors.length]}">{{r.count}}</div></div></div></TransitionGroup></div></div>
+        <div v-else><TransitionGroup name="list-anim" tag="div"><div class="hbar-row hbar-row-clickable" v-for="(r,i) in sourceCategoryRows" :key="r.category" @click="goToSourceCategory(r.category)"><span class="hbar-rank">#{{i+1}}</span><span class="hbar-name" :title="r.category">{{r.category}}</span><div class="hbar-track"><div class="hbar-fill hbar-fill-anim" :style="{'--target-w':Math.max(5,r.pct)+'%',background:sourceBarColors[i%sourceBarColors.length]}">{{r.count}}</div></div></div></TransitionGroup></div></div>
     </div>
 
     <div class="ov-row">
@@ -351,6 +351,10 @@ const sourceCategoryCount = computed(() => sourceCategoryRows.value.length)
 function fmtTime(ts) { if (!ts) return '--'; const d = new Date(ts); return isNaN(d.getTime()) ? String(ts) : d.toLocaleString('zh-CN', { hour12: false }) }
 function fmtTimeShort(ts) { if (!ts) return '--'; const d = new Date(ts); return isNaN(d.getTime()) ? String(ts) : d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }) }
 
+
+function goToSourceCategory(category) {
+  router.push({ path: '/sessions', query: { source_category: category } })
+}
 function deductionLink(name) {
   const map = { 'IM拦截率': '/audit', 'IM 拦截率': '/audit', 'LLM异常率': '/agent', 'LLM 异常率': '/agent', 'Canary泄露': '/settings?section=canary', 'Canary 泄露': '/settings?section=canary', '高危用户': '/user-profiles', '规则命中': '/rules', '规则覆盖': '/rules', 'IFC 违规率': '/ifc', 'IFC违规率': '/ifc', 'Plan 偏差': '/deviations', 'Plan偏差': '/deviations' }
   for (const [k, v] of Object.entries(map)) { if (name.includes(k) || k.includes(name)) return v }
