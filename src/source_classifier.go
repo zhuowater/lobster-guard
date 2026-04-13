@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -52,10 +53,16 @@ type ToolSourceClassifier struct {
 	config ToolSourceClassifierConfig
 }
 
-var defaultToolSourceClassifierConfig ToolSourceClassifierConfig
+var (
+	defaultToolSourceClassifierMu     sync.RWMutex
+	defaultToolSourceClassifierConfig ToolSourceClassifierConfig
+)
 
 func NewToolSourceClassifier() *ToolSourceClassifier {
-	return &ToolSourceClassifier{config: defaultToolSourceClassifierConfig}
+	defaultToolSourceClassifierMu.RLock()
+	cfg := defaultToolSourceClassifierConfig
+	defaultToolSourceClassifierMu.RUnlock()
+	return &ToolSourceClassifier{config: cfg}
 }
 
 func NewToolSourceClassifierWithConfig(config ToolSourceClassifierConfig) *ToolSourceClassifier {
@@ -63,7 +70,9 @@ func NewToolSourceClassifierWithConfig(config ToolSourceClassifierConfig) *ToolS
 }
 
 func SetDefaultToolSourceClassifierConfig(config ToolSourceClassifierConfig) {
+	defaultToolSourceClassifierMu.Lock()
 	defaultToolSourceClassifierConfig = config
+	defaultToolSourceClassifierMu.Unlock()
 }
 
 func LoadToolSourceClassifierConfigYAML(raw string) (ToolSourceClassifierConfig, error) {

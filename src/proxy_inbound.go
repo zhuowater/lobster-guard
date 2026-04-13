@@ -135,7 +135,11 @@ func (ip *InboundProxy) handleConfirmReply(w http.ResponseWriter, senderID, msgT
 
 	pending := ip.confirmStore.Pop(senderID)
 	if pending == nil {
-		return false
+		// 已被超时处理（onTimeout 先于本函数抢到锁），静默 ACK 避免 Y/N 被再次转发上游
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+		return true
 	}
 
 	if isYes {
