@@ -948,6 +948,10 @@ func initDB(dbPath string) (*sql.DB, error) {
 	// v14.0: tenant_id 列（在 TenantManager.initSchema 中也会添加，这里确保测试也有）
 	db.Exec(`ALTER TABLE audit_log ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id)`)
+	// 复合索引 — 仪表盘/租户/行为分析高频查询
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_action_ts ON audit_log(tenant_id, action, timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_sender_ts ON audit_log(sender_id, timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_action_ts ON audit_log(action, timestamp)`)
 
 	// v9.0: LLM 审计表（LLMAuditor 会初始化，但确保表结构存在）
 	db.Exec(`CREATE TABLE IF NOT EXISTS llm_calls (
@@ -982,6 +986,8 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk ON llm_tool_calls(risk_level)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tool ON llm_tool_calls(tool_name)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_call_id ON llm_tool_calls(llm_call_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_flagged_ts ON llm_tool_calls(flagged, timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk_ts ON llm_tool_calls(risk_level, timestamp)`)
 
 	// v14.0: tenant_id 列 for LLM tables
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN tenant_id TEXT DEFAULT 'default'`)
@@ -993,6 +999,10 @@ func initDB(dbPath string) (*sql.DB, error) {
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_category TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE llm_tool_calls ADD COLUMN source_descriptor_json TEXT DEFAULT ''`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_source_category ON llm_tool_calls(source_category)`)
+	// llm_calls 补充索引 — prompt 追踪/模型分布/错误分布
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_prompt_hash ON llm_calls(prompt_hash)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_model ON llm_calls(model)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_error_type ON llm_calls(error_type)`)
 
 	// v3.8 user_routes schema migration
 	migrateUserRoutes(db)

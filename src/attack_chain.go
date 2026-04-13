@@ -101,6 +101,7 @@ func (ac *AttackChainEngine) initSchema() {
 	ac.db.Exec(`CREATE INDEX IF NOT EXISTS idx_attack_chains_tenant ON attack_chains(tenant_id)`)
 	ac.db.Exec(`CREATE INDEX IF NOT EXISTS idx_attack_chains_severity ON attack_chains(severity)`)
 	ac.db.Exec(`CREATE INDEX IF NOT EXISTS idx_attack_chains_status ON attack_chains(status)`)
+	ac.db.Exec(`CREATE INDEX IF NOT EXISTS idx_attack_chains_ts ON attack_chains(timestamp)`)
 	log.Println("[初始化] ✅ 攻击链引擎 schema 就绪")
 }
 

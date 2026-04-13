@@ -118,12 +118,19 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_tenant ON llm_tool_calls(tenant_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_source_category ON llm_tool_calls(source_category)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_call_id ON llm_tool_calls(llm_call_id)`)
+	// 复合索引 — 安全仪表盘/威胁检测高频查询
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_flagged_ts ON llm_tool_calls(flagged, timestamp)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_tool_calls_risk_ts ON llm_tool_calls(risk_level, timestamp)`)
 
 	// v18.0: 请求/响应预览列
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN request_preview TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN response_preview TEXT DEFAULT ''`)
 	// v35.1: 错误类型分类列（upstream_redirect/upstream_auth/upstream_not_found/upstream_rate_limited/upstream_error）
 	db.Exec(`ALTER TABLE llm_calls ADD COLUMN error_type TEXT DEFAULT ''`)
+	// 补充缺失索引 — prompt 版本追踪/模型分布/错误分布
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_prompt_hash ON llm_calls(prompt_hash)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_model ON llm_calls(model)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_calls_error_type ON llm_calls(error_type)`)
 
 	return &LLMAuditor{
 		db:       db,

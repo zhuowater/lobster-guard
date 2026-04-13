@@ -183,6 +183,8 @@ func (eb *EventBus) initTables() {
 		`CREATE INDEX IF NOT EXISTS idx_events_ts ON security_events(timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_type ON security_events(type)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_severity ON security_events(severity)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_trace_id ON security_events(trace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_tenant_id ON security_events(tenant_id)`,
 		`CREATE TABLE IF NOT EXISTS event_deliveries (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			event_id TEXT NOT NULL,

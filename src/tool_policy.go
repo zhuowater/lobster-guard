@@ -199,6 +199,8 @@ func (e *ToolPolicyEngine) initDB() {
 	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_events_ts ON tool_call_events(timestamp)`)
 	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_events_tool ON tool_call_events(tool_name)`)
 	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_events_decision ON tool_call_events(decision)`)
+	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_events_decision_ts ON tool_call_events(decision, timestamp)`)
+	e.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tool_events_tenant_id ON tool_call_events(tenant_id)`)
 	e.db.Exec(`CREATE TABLE IF NOT EXISTS tool_policy_rules (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,

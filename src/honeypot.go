@@ -113,6 +113,7 @@ func (hp *HoneypotEngine) initSchema() {
 	)`)
 	hp.db.Exec(`CREATE INDEX IF NOT EXISTS idx_honeypot_triggers_ts ON honeypot_triggers(timestamp)`)
 	hp.db.Exec(`CREATE INDEX IF NOT EXISTS idx_honeypot_triggers_watermark ON honeypot_triggers(watermark)`)
+	hp.db.Exec(`CREATE INDEX IF NOT EXISTS idx_honeypot_triggers_tenant_ts ON honeypot_triggers(tenant_id, timestamp)`)
 	log.Println("[初始化] ✅ 蜜罐引擎 schema 就绪")
 }
 
