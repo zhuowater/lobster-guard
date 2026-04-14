@@ -120,10 +120,12 @@ type ToolPolicyEngine struct {
 	regexCache      map[string]*regexp.Regexp
 }
 
-// defaultToolPolicyRules 内置默认规则（18 条）
+// defaultToolPolicyRules 内置默认规则（20 条）
 var defaultToolPolicyRules = []ToolPolicyRule{
 	{ID: "tp-001", Name: "block_shell_exec", ToolPattern: "*shell*", Action: "block", Reason: "Shell 执行类工具", Enabled: true, Priority: 1},
 	{ID: "tp-002", Name: "block_code_exec", ToolPattern: "*execute*code*", Action: "block", Reason: "代码执行类工具", Enabled: true, Priority: 1},
+	{ID: "tp-021", Name: "block_exec_tool", ToolPattern: "*exec*", Action: "block", Reason: "exec 执行类工具（bash/exec/run_exec 等）", Enabled: true, Priority: 1},
+	{ID: "tp-022", Name: "block_bash_tool", ToolPattern: "*bash*", Action: "block", Reason: "bash 执行类工具", Enabled: true, Priority: 1},
 	{ID: "tp-003", Name: "block_eval", ToolPattern: "*eval*", Action: "block", Reason: "Eval 类工具", Enabled: true, Priority: 1},
 	{ID: "tp-004", Name: "block_file_write", ToolPattern: "*write*file*", Action: "block", Reason: "文件写入工具", Enabled: true, Priority: 2},
 	{ID: "tp-005", Name: "block_db_drop", ToolPattern: "*database*", ParamRules: []ParamRule{{ParamName: "*", Pattern: `(?i)(DROP|TRUNCATE|DELETE\s+FROM)`, Action: "block"}}, Action: "warn", Reason: "数据库破坏性操作", Enabled: true, Priority: 1},
