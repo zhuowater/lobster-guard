@@ -157,21 +157,28 @@ func TestClassifyToolRisk(t *testing.T) {
 	auditor, db := setupTestLLMAuditor(t)
 	defer db.Close()
 
+	// 关联工具策略引擎，风险分类由策略规则驱动
+	tp := NewToolPolicyEngine(db, ToolPolicyConfig{Enabled: true, DefaultAction: "allow"})
+	auditor.SetToolPolicyEngine(tp)
+
 	tests := []struct {
 		tool string
 		risk string
 	}{
-		{"exec", "critical"},
-		{"shell", "critical"},
-		{"bash", "critical"},
-		{"run_command", "critical"},
-		{"write_file", "high"},
-		{"edit_file", "high"},
-		{"web_fetch", "high"},
-		{"send_email", "high"},
-		{"read_file", "medium"},
-		{"browser", "medium"},
-		{"web_search", "medium"},
+		// 工具名直接命中策略规则（无参数规则的 block/warn）
+		{"shell_run", "critical"},   // *shell* → block
+		{"write_file", "critical"},  // *write*file* → block
+		{"eval_code", "critical"},   // *eval* → block
+		{"send_email", "high"},      // *send*email* → warn
+		{"read_file", "high"},       // *read*file* → warn
+		{"http_client", "high"},     // *http* → warn
+		// *command* 规则均带 ParamRules，工具名阶段不评估 → low
+		{"run_command", "low"},
+		// 无规则命中 → low
+		{"exec", "low"},
+		{"bash", "low"},
+		{"browser", "low"},
+		{"web_search", "low"},
 		{"some_unknown_tool", "low"},
 		{"canvas", "low"},
 	}

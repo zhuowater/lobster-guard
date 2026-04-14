@@ -1011,6 +1011,37 @@ func (e *ToolPolicyEngine) GetConfig() ToolPolicyConfig {
 	defer e.mu.RUnlock()
 	return e.config
 }
+
+// ClassifyToolRiskByName 仅凭工具名返回风险等级（不写 DB、不评估参数）。
+// 只检查无参数条件的策略规则（block→critical, warn→high）；
+// 语义规则依赖参数内容，工具名阶段不参与评估。
+func (e *ToolPolicyEngine) ClassifyToolRiskByName(toolName string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	name := strings.ToLower(toolName)
+	levelRank := map[string]int{"low": 1, "medium": 2, "high": 3, "critical": 4}
+	best := "low"
+	promote := func(lvl string) {
+		if levelRank[lvl] > levelRank[best] {
+			best = lvl
+		}
+	}
+	for _, r := range e.rules {
+		if !r.Enabled || len(r.ParamRules) > 0 {
+			continue // 有参数条件的规则需要实际参数，工具名阶段跳过
+		}
+		if !wildcardMatch(r.ToolPattern, name) {
+			continue
+		}
+		switch r.Action {
+		case "block":
+			promote("critical")
+		case "warn":
+			promote("high")
+		}
+	}
+	return best
+}
 func (e *ToolPolicyEngine) UpdateConfig(cfg ToolPolicyConfig) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

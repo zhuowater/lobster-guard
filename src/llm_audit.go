@@ -16,10 +16,10 @@ import (
 type LLMAuditor struct {
 	db            *sql.DB
 	cfg           LLMAuditConfig
-	highRisk      map[string]string // tool_name → risk_level
 	proxyCfg      *LLMProxyConfig   // v9.1 引用代理配置（用于读取 cost_alert 等）
 	promptTracker *PromptTracker    // v13.1 Prompt 版本追踪器
 	tenantMgr     *TenantManager    // source-classifier tenant override support
+	toolPolicy    *ToolPolicyEngine // 工具策略引擎，用于风险分类
 }
 
 // v9.1 模型定价表（每百万 Token 美元）
@@ -136,26 +136,18 @@ func NewLLMAuditor(db *sql.DB, cfg LLMAuditConfig, proxyCfg *LLMProxyConfig) *LL
 		db:       db,
 		cfg:      cfg,
 		proxyCfg: proxyCfg,
-		highRisk: map[string]string{
-			// critical
-			"exec": "critical", "shell": "critical", "bash": "critical",
-			"run_command": "critical", "execute_command": "critical",
-			// high
-			"write_file": "high", "edit_file": "high", "delete_file": "high",
-			"http_request": "high", "curl": "high", "web_fetch": "high",
-			"send_email": "high", "send_message": "high",
-			// medium
-			"read_file": "medium", "read": "medium", "list_directory": "medium",
-			"web_search": "medium", "browser": "medium",
-		},
 	}
 }
 
-// ClassifyToolRisk 根据工具名返回风险等级
+// SetToolPolicyEngine 关联工具策略引擎，ClassifyToolRisk 将委托给它
+func (la *LLMAuditor) SetToolPolicyEngine(tp *ToolPolicyEngine) {
+	la.toolPolicy = tp
+}
+
+// ClassifyToolRisk 根据工具名返回风险等级，委托给工具策略引擎
 func (la *LLMAuditor) ClassifyToolRisk(toolName string) string {
-	name := strings.ToLower(toolName)
-	if level, ok := la.highRisk[name]; ok {
-		return level
+	if la.toolPolicy != nil {
+		return la.toolPolicy.ClassifyToolRiskByName(toolName)
 	}
 	return "low"
 }

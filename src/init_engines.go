@@ -415,6 +415,7 @@ func initAllEngines(cfg *Config, store *SQLiteStore, logger *AuditLogger, pool *
 	if llmProxy != nil {
 		llmProxy.toolPolicy = e.ToolPolicy
 		llmProxy.pathPolicyEngine = e.PathPolicyEngine
+		llmProxy.auditor.SetToolPolicyEngine(e.ToolPolicy)
 	}
 
 	// --- 污染追踪 ---
